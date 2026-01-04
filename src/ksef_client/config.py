@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from importlib import metadata
-from typing import Optional
 
 
 class KsefEnvironment(str, Enum):
@@ -32,10 +31,10 @@ def _default_user_agent() -> str:
 @dataclass(frozen=True)
 class KsefClientOptions:
     base_url: str
-    base_qr_url: Optional[str] = None
+    base_qr_url: str | None = None
     timeout_seconds: float = 30.0
-    proxy: Optional[str] = None
-    custom_headers: Optional[dict[str, str]] = None
+    proxy: str | None = None
+    custom_headers: dict[str, str] | None = None
     follow_redirects: bool = False
     verify_ssl: bool = True
     user_agent: str = field(default_factory=_default_user_agent)

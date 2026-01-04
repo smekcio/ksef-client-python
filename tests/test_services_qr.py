@@ -2,6 +2,7 @@ import builtins
 import sys
 import types
 import unittest
+from typing import Any, cast
 from unittest.mock import patch
 
 from ksef_client.services import qr
@@ -83,9 +84,8 @@ class QrServiceTests(unittest.TestCase):
                 raise ImportError("missing")
             return original_import(name, globals, locals, fromlist, level)
 
-        with patch("builtins.__import__", side_effect=fake_import):
-            with self.assertRaises(RuntimeError):
-                qr._require_qr()
+        with patch("builtins.__import__", side_effect=fake_import), self.assertRaises(RuntimeError):
+            qr._require_qr()
 
     def test_qr_helpers_with_stub(self):
         def stub_require():
@@ -106,18 +106,21 @@ class QrServiceTests(unittest.TestCase):
 
     def test_require_qr_success(self):
         qrcode_module = types.ModuleType("qrcode")
-        qrcode_module.QRCode = DummyQrCode
+        cast(Any, qrcode_module).QRCode = DummyQrCode
         pil_module = types.ModuleType("PIL")
         image_module = DummyImageModule
         draw_module = DummyImageDrawModule
         font_module = DummyImageFontModule
-        with patch.dict(sys.modules, {
-            "qrcode": qrcode_module,
-            "PIL": pil_module,
-            "PIL.Image": image_module,
-            "PIL.ImageDraw": draw_module,
-            "PIL.ImageFont": font_module,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "qrcode": qrcode_module,
+                "PIL": pil_module,
+                "PIL.Image": image_module,
+                "PIL.ImageDraw": draw_module,
+                "PIL.ImageFont": font_module,
+            },
+        ):
             qrcode, Image, ImageDraw, ImageFont = qr._require_qr()
         self.assertIs(qrcode, qrcode_module)
         self.assertIs(Image, image_module)

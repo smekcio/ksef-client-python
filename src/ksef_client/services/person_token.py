@@ -3,29 +3,29 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..utils.base64url import b64url_decode
 
 
 @dataclass(frozen=True)
 class PersonToken:
-    issuer: Optional[str]
-    audiences: List[str]
-    issued_at: Optional[datetime]
-    expires_at: Optional[datetime]
-    roles: List[str]
-    token_type: Optional[str]
-    context_id_type: Optional[str]
-    context_id_value: Optional[str]
-    auth_method: Optional[str]
-    auth_request_number: Optional[str]
-    subject_details: Optional[dict[str, Any]]
-    permissions: List[str]
-    permissions_excluded: List[str]
-    roles_raw: List[str]
-    permissions_effective: List[str]
-    ip_policy: Optional[dict[str, Any]]
+    issuer: str | None
+    audiences: list[str]
+    issued_at: datetime | None
+    expires_at: datetime | None
+    roles: list[str]
+    token_type: str | None
+    context_id_type: str | None
+    context_id_value: str | None
+    auth_method: str | None
+    auth_request_number: str | None
+    subject_details: dict[str, Any] | None
+    permissions: list[str]
+    permissions_excluded: list[str]
+    roles_raw: list[str]
+    permissions_effective: list[str]
+    ip_policy: dict[str, Any] | None
 
 
 class PersonTokenService:
@@ -42,14 +42,14 @@ class PersonTokenService:
         header, payload, _sig = _split_jwt(jwt_token)
         claims = json.loads(payload)
 
-        def get(name: str) -> Optional[str]:
+        def get(name: str) -> str | None:
             for k, v in claims.items():
                 if k.lower() == name.lower():
                     return v
             return None
 
-        def get_many(*names: str) -> List[str]:
-            values: List[str] = []
+        def get_many(*names: str) -> list[str]:
+            values: list[str] = []
             for k, v in claims.items():
                 if any(k.lower() == n.lower() for n in names):
                     if isinstance(v, list):
@@ -106,7 +106,7 @@ def _split_jwt(token: str) -> tuple[str, str, str]:
     return header_json, payload_json, parts[2]
 
 
-def _unix_to_datetime(value: Any) -> Optional[datetime]:
+def _unix_to_datetime(value: Any) -> datetime | None:
     try:
         if value is None:
             return None
@@ -119,7 +119,7 @@ def _unix_to_datetime(value: Any) -> Optional[datetime]:
     return None
 
 
-def _try_parse_json(value: Optional[str]) -> Optional[dict[str, Any]]:
+def _try_parse_json(value: str | None) -> dict[str, Any] | None:
     if not value:
         return None
     try:
@@ -129,7 +129,7 @@ def _try_parse_json(value: Optional[str]) -> Optional[dict[str, Any]]:
         return None
 
 
-def _parse_json_string_array(value: Optional[str]) -> List[str]:
+def _parse_json_string_array(value: str | None) -> list[str]:
     if not value:
         return []
     try:
@@ -153,7 +153,7 @@ def _unwrap_if_quoted_json(value: str) -> str:
     return value
 
 
-def _distinct(values: List[str]) -> List[str]:
+def _distinct(values: list[str]) -> list[str]:
     seen = set()
     result = []
     for v in values:
@@ -165,7 +165,7 @@ def _distinct(values: List[str]) -> List[str]:
     return result
 
 
-def _ensure_list(value: Any) -> List[str]:
+def _ensure_list(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, list):

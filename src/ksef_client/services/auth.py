@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from typing import Any, Optional
+from typing import Any
 
 from .crypto import encrypt_ksef_token_ec, encrypt_ksef_token_rsa
 
@@ -14,13 +14,13 @@ def build_auth_token_request_xml(
     context_identifier_type: str,
     context_identifier_value: str,
     subject_identifier_type: str = "certificateSubject",
-    authorization_policy_xml: Optional[str] = None,
+    authorization_policy_xml: str | None = None,
 ) -> str:
     context_tag = _context_tag(context_identifier_type)
     auth_policy = f"\n  {authorization_policy_xml}" if authorization_policy_xml else ""
     xml = (
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-        f"<AuthTokenRequest xmlns=\"{AUTH_NS}\">\n"
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<AuthTokenRequest xmlns="{AUTH_NS}">\n'
         f"  <Challenge>{challenge}</Challenge>\n"
         "  <ContextIdentifier>\n"
         f"    <{context_tag}>{context_identifier_value}</{context_tag}>\n"
@@ -38,7 +38,7 @@ def build_ksef_token_auth_request(
     context_identifier_type: str,
     context_identifier_value: str,
     encrypted_token_base64: str,
-    authorization_policy: Optional[dict[str, Any]] = None,
+    authorization_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     context_type = _normalize_context_identifier_type(context_identifier_type)
     payload: dict[str, Any] = {
@@ -66,7 +66,9 @@ def encrypt_ksef_token(
     if method.lower() == "rsa":
         encrypted = encrypt_ksef_token_rsa(public_certificate, token, timestamp_ms)
     elif method.lower() in {"ec", "ecdsa"}:
-        encrypted = encrypt_ksef_token_ec(public_certificate, token, timestamp_ms, output_format=ec_output_format)
+        encrypted = encrypt_ksef_token_ec(
+            public_certificate, token, timestamp_ms, output_format=ec_output_format
+        )
     else:
         raise ValueError("Unsupported method: use 'rsa' or 'ec'")
 

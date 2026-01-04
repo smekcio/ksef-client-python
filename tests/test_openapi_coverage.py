@@ -3,20 +3,19 @@ import json
 import re
 import unittest
 from pathlib import Path
-from typing import Optional
 
 
 def _normalize_path(path: str) -> str:
     return re.sub(r"\{[^}]+\}", "{}", path)
 
 
-def _const_str(node: ast.AST) -> Optional[str]:
+def _const_str(node: ast.AST) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     return None
 
 
-def _render_path(node: ast.AST) -> Optional[str]:
+def _render_path(node: ast.AST) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.JoinedStr):
@@ -64,7 +63,7 @@ def _extract_openapi_spec_operations(openapi_path: Path) -> set[tuple[str, str]]
     spec = json.loads(openapi_path.read_text(encoding="utf-8"))
     ops: set[tuple[str, str]] = set()
     for path, methods in spec["paths"].items():
-        for method in methods.keys():
+        for method in methods:
             method_upper = method.upper()
             if method_upper in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
                 ops.add((method_upper, _normalize_path(path)))
@@ -86,4 +85,3 @@ class OpenApiCoverageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

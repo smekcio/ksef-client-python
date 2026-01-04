@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from .base import BaseApiClient, AsyncBaseApiClient
-from ..models import InvoiceContent, BinaryContent
+from ..models import BinaryContent, InvoiceContent
+from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class InvoicesClient(BaseApiClient):
@@ -26,16 +26,18 @@ class InvoicesClient(BaseApiClient):
             headers={"Accept": "application/xml"},
             access_token=access_token,
         )
-        return BinaryContent(content=response.content, sha256_base64=response.headers.get("x-ms-meta-hash"))
+        return BinaryContent(
+            content=response.content, sha256_base64=response.headers.get("x-ms-meta-hash")
+        )
 
     def query_invoice_metadata(
         self,
         request_payload: dict[str, Any],
         *,
         access_token: str,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
-        sort_order: Optional[str] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
+        sort_order: str | None = None,
     ) -> Any:
         params: dict[str, Any] = {}
         if page_offset is not None:
@@ -80,7 +82,9 @@ class InvoicesClient(BaseApiClient):
 
     def download_export_part_with_hash(self, url: str) -> BinaryContent:
         response = self._request_raw("GET", url, skip_auth=True)
-        return BinaryContent(content=response.content, sha256_base64=response.headers.get("x-ms-meta-hash"))
+        return BinaryContent(
+            content=response.content, sha256_base64=response.headers.get("x-ms-meta-hash")
+        )
 
 
 class AsyncInvoicesClient(AsyncBaseApiClient):
@@ -102,16 +106,18 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             headers={"Accept": "application/xml"},
             access_token=access_token,
         )
-        return BinaryContent(content=response.content, sha256_base64=response.headers.get("x-ms-meta-hash"))
+        return BinaryContent(
+            content=response.content, sha256_base64=response.headers.get("x-ms-meta-hash")
+        )
 
     async def query_invoice_metadata(
         self,
         request_payload: dict[str, Any],
         *,
         access_token: str,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
-        sort_order: Optional[str] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
+        sort_order: str | None = None,
     ) -> Any:
         params: dict[str, Any] = {}
         if page_offset is not None:
@@ -156,4 +162,6 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
 
     async def download_export_part_with_hash(self, url: str) -> BinaryContent:
         response = await self._request_raw("GET", url, skip_auth=True)
-        return BinaryContent(content=response.content, sha256_base64=response.headers.get("x-ms-meta-hash"))
+        return BinaryContent(
+            content=response.content, sha256_base64=response.headers.get("x-ms-meta-hash")
+        )

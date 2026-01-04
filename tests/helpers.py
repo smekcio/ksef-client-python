@@ -3,23 +3,32 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Generic, TypeVar
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
 from cryptography.x509.oid import NameOID
 
+PrivateKeyT = TypeVar(
+    "PrivateKeyT",
+    rsa.RSAPrivateKey,
+    ec.EllipticCurvePrivateKey,
+)
+
 
 @dataclass(frozen=True)
-class GeneratedCert:
-    private_key: object
+class GeneratedCert(Generic[PrivateKeyT]):
+    private_key: PrivateKeyT
     certificate: x509.Certificate
     private_key_pem: str
     certificate_pem: str
     certificate_der_b64: str
 
 
-def _self_signed_cert(private_key: object) -> x509.Certificate:
+def _self_signed_cert(
+    private_key: PrivateKeyT,
+) -> x509.Certificate:
     subject = issuer = x509.Name(
         [
             x509.NameAttribute(NameOID.COMMON_NAME, "Test"),
@@ -39,7 +48,9 @@ def _self_signed_cert(private_key: object) -> x509.Certificate:
     )
 
 
-def _serialize_private_key(private_key: object) -> str:
+def _serialize_private_key(
+    private_key: PrivateKeyT,
+) -> str:
     return private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
@@ -51,7 +62,7 @@ def _serialize_cert_pem(cert: x509.Certificate) -> str:
     return cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
 
 
-def generate_rsa_cert() -> GeneratedCert:
+def generate_rsa_cert() -> GeneratedCert[rsa.RSAPrivateKey]:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     cert = _self_signed_cert(private_key)
     cert_der = cert.public_bytes(serialization.Encoding.DER)
@@ -64,7 +75,7 @@ def generate_rsa_cert() -> GeneratedCert:
     )
 
 
-def generate_ec_cert() -> GeneratedCert:
+def generate_ec_cert() -> GeneratedCert[ec.EllipticCurvePrivateKey]:
     private_key = ec.generate_private_key(ec.SECP256R1())
     cert = _self_signed_cert(private_key)
     cert_der = cert.public_bytes(serialization.Encoding.DER)

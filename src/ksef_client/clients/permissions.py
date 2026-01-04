@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from .base import BaseApiClient, AsyncBaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient
 
 
-def _page_params(page_offset: Optional[int], page_size: Optional[int]) -> dict[str, Any]:
+def _page_params(page_offset: int | None, page_size: int | None) -> dict[str, Any]:
     params: dict[str, Any] = {}
     if page_offset is not None:
         params["pageOffset"] = page_offset
@@ -112,8 +112,8 @@ class PermissionsClient(BaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -128,8 +128,8 @@ class PermissionsClient(BaseApiClient):
     def query_entities_roles(
         self,
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -144,8 +144,8 @@ class PermissionsClient(BaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -161,8 +161,8 @@ class PermissionsClient(BaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -178,8 +178,8 @@ class PermissionsClient(BaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -195,8 +195,8 @@ class PermissionsClient(BaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -212,8 +212,8 @@ class PermissionsClient(BaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -234,7 +234,9 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
             access_token=access_token,
         )
 
-    async def grant_authorization(self, request_payload: dict[str, Any], *, access_token: str) -> Any:
+    async def grant_authorization(
+        self, request_payload: dict[str, Any], *, access_token: str
+    ) -> Any:
         return await self._request_json(
             "POST",
             "/permissions/authorizations/grants",
@@ -277,7 +279,9 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
             expected_status={202},
         )
 
-    async def grant_eu_entity_admin(self, request_payload: dict[str, Any], *, access_token: str) -> Any:
+    async def grant_eu_entity_admin(
+        self, request_payload: dict[str, Any], *, access_token: str
+    ) -> Any:
         return await self._request_json(
             "POST",
             "/permissions/eu-entities/administration/grants",
@@ -324,8 +328,8 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -340,8 +344,8 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
     async def query_entities_roles(
         self,
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -356,8 +360,8 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -373,8 +377,8 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -390,8 +394,8 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -407,8 +411,8 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)
@@ -424,8 +428,8 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_offset: Optional[int] = None,
-        page_size: Optional[int] = None,
+        page_offset: int | None = None,
+        page_size: int | None = None,
         access_token: str,
     ) -> Any:
         params = _page_params(page_offset, page_size)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -19,23 +19,23 @@ class EncryptionInfo:
 @dataclass(frozen=True)
 class InvoiceContent:
     content: str
-    sha256_base64: Optional[str] = None
+    sha256_base64: str | None = None
 
 
 @dataclass(frozen=True)
 class BinaryContent:
     content: bytes
-    sha256_base64: Optional[str] = None
+    sha256_base64: str | None = None
 
 
 @dataclass(frozen=True)
 class StatusInfo:
     code: int
     description: str
-    details: Optional[List[str]] = None
+    details: list[str] | None = None
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "StatusInfo":
+    def from_dict(data: dict[str, Any]) -> StatusInfo:
         return StatusInfo(
             code=int(data.get("code", 0)),
             description=str(data.get("description", "")),
@@ -46,10 +46,10 @@ class StatusInfo:
 @dataclass(frozen=True)
 class TokenInfo:
     token: str
-    valid_until: Optional[str]
+    valid_until: str | None
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "TokenInfo":
+    def from_dict(data: dict[str, Any]) -> TokenInfo:
         return TokenInfo(
             token=str(data.get("token", "")),
             valid_until=data.get("validUntil"),
@@ -63,7 +63,7 @@ class AuthenticationChallengeResponse:
     timestamp_ms: int
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "AuthenticationChallengeResponse":
+    def from_dict(data: dict[str, Any]) -> AuthenticationChallengeResponse:
         return AuthenticationChallengeResponse(
             challenge=str(data.get("challenge", "")),
             timestamp=str(data.get("timestamp", "")),
@@ -77,7 +77,7 @@ class AuthenticationInitResponse:
     authentication_token: TokenInfo
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "AuthenticationInitResponse":
+    def from_dict(data: dict[str, Any]) -> AuthenticationInitResponse:
         return AuthenticationInitResponse(
             reference_number=str(data.get("referenceNumber", "")),
             authentication_token=TokenInfo.from_dict(data.get("authenticationToken", {})),
@@ -90,7 +90,7 @@ class AuthenticationTokensResponse:
     refresh_token: TokenInfo
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "AuthenticationTokensResponse":
+    def from_dict(data: dict[str, Any]) -> AuthenticationTokensResponse:
         return AuthenticationTokensResponse(
             access_token=TokenInfo.from_dict(data.get("accessToken", {})),
             refresh_token=TokenInfo.from_dict(data.get("refreshToken", {})),
@@ -102,7 +102,7 @@ class AuthenticationTokenRefreshResponse:
     access_token: TokenInfo
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "AuthenticationTokenRefreshResponse":
+    def from_dict(data: dict[str, Any]) -> AuthenticationTokenRefreshResponse:
         return AuthenticationTokenRefreshResponse(
             access_token=TokenInfo.from_dict(data.get("accessToken", {})),
         )
@@ -121,7 +121,7 @@ class InvoicePackagePart:
     expiration_date: str
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "InvoicePackagePart":
+    def from_dict(data: dict[str, Any]) -> InvoicePackagePart:
         return InvoicePackagePart(
             ordinal_number=int(data.get("ordinalNumber", 0)),
             part_name=str(data.get("partName", "")),
@@ -139,15 +139,15 @@ class InvoicePackagePart:
 class InvoicePackage:
     invoice_count: int
     size: int
-    parts: List[InvoicePackagePart]
+    parts: list[InvoicePackagePart]
     is_truncated: bool
-    last_issue_date: Optional[str] = None
-    last_invoicing_date: Optional[str] = None
-    last_permanent_storage_date: Optional[str] = None
-    permanent_storage_hwm_date: Optional[str] = None
+    last_issue_date: str | None = None
+    last_invoicing_date: str | None = None
+    last_permanent_storage_date: str | None = None
+    permanent_storage_hwm_date: str | None = None
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "InvoicePackage":
+    def from_dict(data: dict[str, Any]) -> InvoicePackage:
         return InvoicePackage(
             invoice_count=int(data.get("invoiceCount", 0)),
             size=int(data.get("size", 0)),
@@ -163,12 +163,12 @@ class InvoicePackage:
 @dataclass(frozen=True)
 class InvoiceExportStatusResponse:
     status: StatusInfo
-    completed_date: Optional[str] = None
-    package_expiration_date: Optional[str] = None
-    package: Optional[InvoicePackage] = None
+    completed_date: str | None = None
+    package_expiration_date: str | None = None
+    package: InvoicePackage | None = None
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "InvoiceExportStatusResponse":
+    def from_dict(data: dict[str, Any]) -> InvoiceExportStatusResponse:
         return InvoiceExportStatusResponse(
             status=StatusInfo.from_dict(data.get("status", {})),
             completed_date=data.get("completedDate"),
@@ -182,10 +182,10 @@ class PartUploadRequest:
     ordinal_number: int
     method: str
     url: str
-    headers: dict[str, Optional[str]]
+    headers: dict[str, str | None]
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "PartUploadRequest":
+    def from_dict(data: dict[str, Any]) -> PartUploadRequest:
         return PartUploadRequest(
             ordinal_number=int(data.get("ordinalNumber", 0)),
             method=str(data.get("method", "")),

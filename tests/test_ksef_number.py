@@ -2,7 +2,7 @@ import re
 import unittest
 from unittest.mock import patch
 
-from ksef_client.utils.ksef_number import _crc8, validate_ksef_number, is_valid_ksef_number
+from ksef_client.utils.ksef_number import _crc8, is_valid_ksef_number, validate_ksef_number
 
 
 class KsefNumberValidatorTests(unittest.TestCase):

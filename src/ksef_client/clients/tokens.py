@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from .base import BaseApiClient, AsyncBaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class TokensClient(BaseApiClient):
@@ -19,12 +19,12 @@ class TokensClient(BaseApiClient):
         self,
         *,
         access_token: str,
-        statuses: Optional[list[str]] = None,
-        description: Optional[str] = None,
-        author_identifier: Optional[str] = None,
-        author_identifier_type: Optional[str] = None,
-        page_size: Optional[int] = None,
-        continuation_token: Optional[str] = None,
+        statuses: list[str] | None = None,
+        description: str | None = None,
+        author_identifier: str | None = None,
+        author_identifier_type: str | None = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
     ) -> Any:
         params: dict[str, Any] = {}
         if statuses:
@@ -80,12 +80,12 @@ class AsyncTokensClient(AsyncBaseApiClient):
         self,
         *,
         access_token: str,
-        statuses: Optional[list[str]] = None,
-        description: Optional[str] = None,
-        author_identifier: Optional[str] = None,
-        author_identifier_type: Optional[str] = None,
-        page_size: Optional[int] = None,
-        continuation_token: Optional[str] = None,
+        statuses: list[str] | None = None,
+        description: str | None = None,
+        author_identifier: str | None = None,
+        author_identifier_type: str | None = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
     ) -> Any:
         params: dict[str, Any] = {}
         if statuses:

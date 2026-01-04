@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from .base import BaseApiClient, AsyncBaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class CertificatesClient(BaseApiClient):
@@ -10,7 +10,9 @@ class CertificatesClient(BaseApiClient):
         return self._request_json("GET", "/certificates/limits", access_token=access_token)
 
     def get_enrollment_data(self, access_token: str) -> Any:
-        return self._request_json("GET", "/certificates/enrollments/data", access_token=access_token)
+        return self._request_json(
+            "GET", "/certificates/enrollments/data", access_token=access_token
+        )
 
     def send_enrollment(self, request_payload: dict[str, Any], *, access_token: str) -> Any:
         return self._request_json(
@@ -32,8 +34,8 @@ class CertificatesClient(BaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_size: Optional[int] = None,
-        page_offset: Optional[int] = None,
+        page_size: int | None = None,
+        page_offset: int | None = None,
         access_token: str,
     ) -> Any:
         params: dict[str, Any] = {}
@@ -57,7 +59,9 @@ class CertificatesClient(BaseApiClient):
             access_token=access_token,
         )
 
-    def revoke_certificate(self, certificate_serial_number: str, request_payload: dict[str, Any], *, access_token: str) -> Any:
+    def revoke_certificate(
+        self, certificate_serial_number: str, request_payload: dict[str, Any], *, access_token: str
+    ) -> Any:
         return self._request_json(
             "POST",
             f"/certificates/{certificate_serial_number}/revoke",
@@ -71,7 +75,9 @@ class AsyncCertificatesClient(AsyncBaseApiClient):
         return await self._request_json("GET", "/certificates/limits", access_token=access_token)
 
     async def get_enrollment_data(self, access_token: str) -> Any:
-        return await self._request_json("GET", "/certificates/enrollments/data", access_token=access_token)
+        return await self._request_json(
+            "GET", "/certificates/enrollments/data", access_token=access_token
+        )
 
     async def send_enrollment(self, request_payload: dict[str, Any], *, access_token: str) -> Any:
         return await self._request_json(
@@ -93,8 +99,8 @@ class AsyncCertificatesClient(AsyncBaseApiClient):
         self,
         request_payload: dict[str, Any],
         *,
-        page_size: Optional[int] = None,
-        page_offset: Optional[int] = None,
+        page_size: int | None = None,
+        page_offset: int | None = None,
         access_token: str,
     ) -> Any:
         params: dict[str, Any] = {}
@@ -110,7 +116,9 @@ class AsyncCertificatesClient(AsyncBaseApiClient):
             access_token=access_token,
         )
 
-    async def retrieve_certificate(self, request_payload: dict[str, Any], *, access_token: str) -> Any:
+    async def retrieve_certificate(
+        self, request_payload: dict[str, Any], *, access_token: str
+    ) -> Any:
         return await self._request_json(
             "POST",
             "/certificates/retrieve",
@@ -118,7 +126,9 @@ class AsyncCertificatesClient(AsyncBaseApiClient):
             access_token=access_token,
         )
 
-    async def revoke_certificate(self, certificate_serial_number: str, request_payload: dict[str, Any], *, access_token: str) -> Any:
+    async def revoke_certificate(
+        self, certificate_serial_number: str, request_payload: dict[str, Any], *, access_token: str
+    ) -> Any:
         return await self._request_json(
             "POST",
             f"/certificates/{certificate_serial_number}/revoke",

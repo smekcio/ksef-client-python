@@ -1,6 +1,6 @@
 import base64
-from datetime import date
 import unittest
+from datetime import date
 from unittest.mock import patch
 
 from ksef_client.config import KsefClientOptions, KsefEnvironment
@@ -9,7 +9,6 @@ from ksef_client.services.verification_link import (
     _decode_base64_or_url,
     _sign_path,
 )
-
 from tests.helpers import generate_ec_cert, generate_ed25519_key_pem, generate_rsa_cert
 
 

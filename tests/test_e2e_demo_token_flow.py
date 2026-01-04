@@ -41,14 +41,18 @@ def test_e2e_token_send_and_list_session_invoices() -> None:
         token_cert = _select_cert(certs, "KsefTokenEncryption")
         symmetric_cert = _select_cert(certs, "SymmetricKeyEncryption")
 
-        access_token = AuthCoordinator(client.auth).authenticate_with_ksef_token(
-            token=token,
-            public_certificate=token_cert,
-            context_identifier_type=context_type,
-            context_identifier_value=context_value,
-            max_attempts=90,
-            poll_interval_seconds=2.0,
-        ).tokens.access_token.token
+        access_token = (
+            AuthCoordinator(client.auth)
+            .authenticate_with_ksef_token(
+                token=token,
+                public_certificate=token_cert,
+                context_identifier_type=context_type,
+                context_identifier_value=context_value,
+                max_attempts=90,
+                poll_interval_seconds=2.0,
+            )
+            .tokens.access_token.token
+        )
 
         workflow = OnlineSessionWorkflow(client.sessions)
         session = workflow.open_session(
@@ -59,12 +63,13 @@ def test_e2e_token_send_and_list_session_invoices() -> None:
 
         now = datetime.now(timezone.utc).replace(microsecond=0)
         invoice_xml = (
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-            "<Faktura xmlns:etd=\"http://crd.gov.pl/xml/schematy/dziedzinowe/mf/2022/01/05/eD/DefinicjeTypy/\" "
-            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
-            "xmlns=\"http://crd.gov.pl/wzor/2025/06/25/13775/\">"
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Faktura xmlns:etd="http://crd.gov.pl/xml/schematy/dziedzinowe/mf/2022/01/05/eD/'
+            'DefinicjeTypy/" '
+            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+            'xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">'
             "<Naglowek>"
-            "<KodFormularza kodSystemowy=\"FA (3)\" wersjaSchemy=\"1-0E\">FA</KodFormularza>"
+            '<KodFormularza kodSystemowy="FA (3)" wersjaSchemy="1-0E">FA</KodFormularza>'
             "<WariantFormularza>3</WariantFormularza>"
             f"<DataWytworzeniaFa>{now.strftime('%Y-%m-%dT%H:%M:%SZ')}</DataWytworzeniaFa>"
             "<SystemInfo>pytest</SystemInfo>"
@@ -74,7 +79,8 @@ def test_e2e_token_send_and_list_session_invoices() -> None:
             "</DaneIdentyfikacyjne><Adres><KodKraju>PL</KodKraju><AdresL1>x</AdresL1><AdresL2>x</AdresL2></Adres>"
             "</Podmiot1>"
             "<Podmiot2>"
-            "<DaneIdentyfikacyjne><NIP>1111111111</NIP><Nazwa>pytest buyer</Nazwa></DaneIdentyfikacyjne>"
+            "<DaneIdentyfikacyjne><NIP>1111111111</NIP>"
+            "<Nazwa>pytest buyer</Nazwa></DaneIdentyfikacyjne>"
             "<Adres><KodKraju>PL</KodKraju><AdresL1>x</AdresL1><AdresL2>x</AdresL2></Adres>"
             "<DaneKontaktowe><Email>buyer@example.com</Email><Telefon>555777999</Telefon></DaneKontaktowe>"
             "<NrKlienta>99999999</NrKlienta><JST>2</JST><GV>2</GV>"
@@ -85,7 +91,7 @@ def test_e2e_token_send_and_list_session_invoices() -> None:
             f"<P_2>FA/PYTEST/{now:%m}/{now:%Y}</P_2>"
             "<OkresFa>"
             f"<P_6_Od>{now.date().replace(day=1).isoformat()}</P_6_Od>"
-            f"<P_6_Do>{(now.date()+timedelta(days=14)).isoformat()}</P_6_Do>"
+            f"<P_6_Do>{(now.date() + timedelta(days=14)).isoformat()}</P_6_Do>"
             "</OkresFa>"
             "<P_13_1>1.00</P_13_1><P_14_1>0.23</P_14_1><P_15>1.23</P_15>"
             "<Adnotacje><P_16>2</P_16><P_17>2</P_17><P_18>2</P_18><P_18A>2</P_18A>"
@@ -98,13 +104,13 @@ def test_e2e_token_send_and_list_session_invoices() -> None:
             "<Odliczenia><Kwota>0.00</Kwota><Powod>x</Powod></Odliczenia><SumaOdliczen>0.00</SumaOdliczen>"
             "<DoZaplaty>1.23</DoZaplaty></Rozliczenie>"
             "<Platnosc><TerminPlatnosci><Termin>"
-            f"{(now.date()+timedelta(days=14)).isoformat()}"
+            f"{(now.date() + timedelta(days=14)).isoformat()}"
             "</Termin></TerminPlatnosci><FormaPlatnosci>6</FormaPlatnosci>"
             "<RachunekBankowy><NrRB>73111111111111111111111111</NrRB><NazwaBanku>x</NazwaBanku><OpisRachunku>PLN</OpisRachunku></RachunekBankowy>"
             "</Platnosc>"
             "</Fa>"
             "</Faktura>"
-        ).encode("utf-8")
+        ).encode()
 
         send_result = workflow.send_invoice(
             session_reference_number=session.session_reference_number,

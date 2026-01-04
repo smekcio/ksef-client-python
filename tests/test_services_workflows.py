@@ -1,22 +1,26 @@
-import asyncio
 import json
 import unittest
 from dataclasses import dataclass
-from unittest.mock import patch
+from typing import Any, cast
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
+from ksef_client.clients.invoices import AsyncInvoicesClient, InvoicesClient
 from ksef_client.http import HttpResponse
 from ksef_client.services import workflows
-from ksef_client.services.crypto import decrypt_aes_cbc_pkcs7, encrypt_aes_cbc_pkcs7, generate_iv, generate_symmetric_key
+from ksef_client.services.crypto import (
+    encrypt_aes_cbc_pkcs7,
+    generate_iv,
+    generate_symmetric_key,
+)
 from ksef_client.utils.zip_utils import build_zip
-
 from tests.helpers import generate_rsa_cert
 
 
 class RecordingHttp:
     def __init__(self, content: bytes = b"ok", headers: dict | None = None) -> None:
-        self.calls = []
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self.response = HttpResponse(200, httpx.Headers(headers or {}), content)
 
     def request(self, *args, **kwargs) -> HttpResponse:
@@ -26,7 +30,7 @@ class RecordingHttp:
 
 class RecordingAsyncHttp:
     def __init__(self, content: bytes = b"ok", headers: dict | None = None) -> None:
-        self.calls = []
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self.response = HttpResponse(200, httpx.Headers(headers or {}), content)
 
     async def request(self, *args, **kwargs) -> HttpResponse:
@@ -96,7 +100,12 @@ class StubSessionsClient:
         return {
             "referenceNumber": "ref",
             "partUploadRequests": [
-                {"ordinalNumber": 1, "url": "https://upload", "method": "PUT", "headers": {"x": "y"}},
+                {
+                    "ordinalNumber": 1,
+                    "url": "https://upload",
+                    "method": "PUT",
+                    "headers": {"x": "y"},
+                },
             ],
         }
 
@@ -124,7 +133,12 @@ class StubAsyncSessionsClient:
         return {
             "referenceNumber": "ref",
             "partUploadRequests": [
-                {"ordinalNumber": 1, "url": "https://upload", "method": "PUT", "headers": {"x": "y"}},
+                {
+                    "ordinalNumber": 1,
+                    "url": "https://upload",
+                    "method": "PUT",
+                    "headers": {"x": "y"},
+                },
             ],
         }
 
@@ -190,9 +204,8 @@ class WorkflowsTests(unittest.TestCase):
 
         auth_timeout = StubAuthClient([100, 100])
         coord_timeout = workflows.AuthCoordinator(auth_timeout)
-        with patch("time.sleep", return_value=None):
-            with self.assertRaises(TimeoutError):
-                coord_timeout._poll_auth_status("ref", "auth", 0, 2)
+        with patch("time.sleep", return_value=None), self.assertRaises(TimeoutError):
+            coord_timeout._poll_auth_status("ref", "auth", 0, 2)
 
     def test_auth_coordinator_ksef_token(self):
         auth = StubAuthClient([200])
@@ -249,7 +262,10 @@ class WorkflowsTests(unittest.TestCase):
     def test_export_workflow(self):
         key = generate_symmetric_key()
         iv = generate_iv()
-        files = {"_metadata.json": json.dumps({"invoices": [{"ksefNumber": "1"}]}).encode("utf-8"), "inv.xml": b"<xml/>"}
+        files = {
+            "_metadata.json": json.dumps({"invoices": [{"ksefNumber": "1"}]}).encode("utf-8"),
+            "inv.xml": b"<xml/>",
+        }
         archive = build_zip(files)
         encrypted = encrypt_aes_cbc_pkcs7(archive, key, iv)
         encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)  # type: ignore[arg-type]
@@ -257,9 +273,9 @@ class WorkflowsTests(unittest.TestCase):
         class DummyInvoices:
             pass
 
-        workflow = workflows.ExportWorkflow(DummyInvoices(), RecordingHttp())
-        workflow._download_helper.download_parts = lambda parts: [encrypted]
-        result = workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
+        workflow = workflows.ExportWorkflow(cast(InvoicesClient, DummyInvoices()), RecordingHttp())
+        with patch.object(workflow._download_helper, "download_parts", return_value=[encrypted]):
+            result = workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
         self.assertIn("inv.xml", result.invoice_xml_files)
 
@@ -320,9 +336,8 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
 
         auth_timeout = StubAsyncAuthClient([100, 100])
         coord_timeout = workflows.AsyncAuthCoordinator(auth_timeout)
-        with patch("asyncio.sleep", return_value=None):
-            with self.assertRaises(TimeoutError):
-                await coord_timeout._poll_auth_status("ref", "auth", 0, 2)
+        with patch("asyncio.sleep", return_value=None), self.assertRaises(TimeoutError):
+            await coord_timeout._poll_auth_status("ref", "auth", 0, 2)
 
     async def test_async_online_and_batch(self):
         sessions = StubAsyncSessionsClient()
@@ -357,7 +372,10 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_export_workflow(self):
         key = generate_symmetric_key()
         iv = generate_iv()
-        files = {"_metadata.json": json.dumps({"invoiceList": [{"ksefNumber": "1"}]}).encode("utf-8"), "inv.xml": b"<xml/>"}
+        files = {
+            "_metadata.json": json.dumps({"invoiceList": [{"ksefNumber": "1"}]}).encode("utf-8"),
+            "inv.xml": b"<xml/>",
+        }
         archive = build_zip(files)
         encrypted = encrypt_aes_cbc_pkcs7(archive, key, iv)
         encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)  # type: ignore[arg-type]
@@ -365,9 +383,18 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
         class DummyInvoices:
             pass
 
-        workflow = workflows.AsyncExportWorkflow(DummyInvoices(), RecordingAsyncHttp())
-        workflow._download_helper.download_parts = lambda parts: asyncio.sleep(0, result=[encrypted])
-        result = await workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
+        workflow = workflows.AsyncExportWorkflow(
+            cast(AsyncInvoicesClient, DummyInvoices()),
+            RecordingAsyncHttp(),
+        )
+        with patch.object(
+            workflow._download_helper,
+            "download_parts",
+            AsyncMock(return_value=[encrypted]),
+        ):
+            result = await workflow.download_and_process_package(
+                {"parts": [{"url": "u"}]}, encryption
+            )
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import BaseApiClient, AsyncBaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class RateLimitsClient(BaseApiClient):

@@ -1,17 +1,17 @@
 import base64
 import io
 import unittest
+from typing import BinaryIO, cast
 from unittest.mock import patch
 
 from ksef_client.services import crypto
 from ksef_client.services.crypto import (
+    build_send_invoice_request,
     decrypt_aes_cbc_pkcs7,
     encrypt_aes_cbc_pkcs7,
     generate_iv,
     generate_symmetric_key,
-    build_send_invoice_request,
 )
-
 from tests.helpers import generate_ec_cert, generate_rsa_cert
 
 
@@ -58,7 +58,7 @@ class CryptoTests(unittest.TestCase):
                 return False
 
         non_seek = NonSeekable(data)
-        non_seek_meta = crypto.get_stream_metadata(non_seek)
+        non_seek_meta = crypto.get_stream_metadata(cast(BinaryIO, non_seek))
         self.assertEqual(non_seek_meta.file_size, 4)
 
         class SeekError:
@@ -72,7 +72,7 @@ class CryptoTests(unittest.TestCase):
                 raise OSError("nope")
 
         seek_error = SeekError(data)
-        seek_error_meta = crypto.get_stream_metadata(seek_error)
+        seek_error_meta = crypto.get_stream_metadata(cast(BinaryIO, seek_error))
         self.assertEqual(seek_error_meta.file_size, 4)
 
     def test_certificate_loading(self):
@@ -84,9 +84,17 @@ class CryptoTests(unittest.TestCase):
         self.assertEqual(cert_from_der.serial_number, rsa_cert.certificate.serial_number)
         self.assertEqual(cert_from_bytes.serial_number, rsa_cert.certificate.serial_number)
 
-        with patch("ksef_client.services.crypto.x509.load_der_x509_certificate", side_effect=ValueError):
-            with patch("ksef_client.services.crypto.x509.load_pem_x509_certificate", return_value=rsa_cert.certificate):
-                cert_fallback = crypto._load_certificate(rsa_cert.certificate_der_b64)
+        with (
+            patch(
+                "ksef_client.services.crypto.x509.load_der_x509_certificate",
+                side_effect=ValueError,
+            ),
+            patch(
+                "ksef_client.services.crypto.x509.load_pem_x509_certificate",
+                return_value=rsa_cert.certificate,
+            ),
+        ):
+            cert_fallback = crypto._load_certificate(rsa_cert.certificate_der_b64)
         self.assertEqual(cert_fallback.serial_number, rsa_cert.certificate.serial_number)
 
     def test_private_key_loading(self):
@@ -122,14 +130,20 @@ class CryptoTests(unittest.TestCase):
         self.assertTrue(encrypted)
 
         ec_cert = generate_ec_cert()
-        encrypted_java = crypto.encrypt_ksef_token_ec(ec_cert.certificate_pem, "token", 1, output_format="java")
-        encrypted_csharp = crypto.encrypt_ksef_token_ec(ec_cert.certificate_pem, "token", 1, output_format="csharp")
+        encrypted_java = crypto.encrypt_ksef_token_ec(
+            ec_cert.certificate_pem, "token", 1, output_format="java"
+        )
+        encrypted_csharp = crypto.encrypt_ksef_token_ec(
+            ec_cert.certificate_pem, "token", 1, output_format="csharp"
+        )
         self.assertNotEqual(encrypted_java, encrypted_csharp)
 
         with self.assertRaises(ValueError):
             crypto.encrypt_ksef_token_ec(rsa_cert.certificate_pem, "token", 1)
         with self.assertRaises(ValueError):
-            crypto.encrypt_ksef_token_ec(ec_cert.certificate_pem, "token", 1, output_format="unknown")
+            crypto.encrypt_ksef_token_ec(
+                ec_cert.certificate_pem, "token", 1, output_format="unknown"
+            )
 
     def test_build_send_invoice_optional_fields(self):
         key = generate_symmetric_key()

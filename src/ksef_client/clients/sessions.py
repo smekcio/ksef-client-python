@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from .base import BaseApiClient, AsyncBaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class SessionsClient(BaseApiClient):
@@ -10,17 +10,17 @@ class SessionsClient(BaseApiClient):
         self,
         *,
         session_type: str,
-        page_size: Optional[int] = None,
-        continuation_token: Optional[str] = None,
-        reference_number: Optional[str] = None,
-        date_created_from: Optional[str] = None,
-        date_created_to: Optional[str] = None,
-        date_closed_from: Optional[str] = None,
-        date_closed_to: Optional[str] = None,
-        date_modified_from: Optional[str] = None,
-        date_modified_to: Optional[str] = None,
-        statuses: Optional[list[str]] = None,
-        access_token: Optional[str] = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
+        reference_number: str | None = None,
+        date_created_from: str | None = None,
+        date_created_to: str | None = None,
+        date_closed_from: str | None = None,
+        date_closed_to: str | None = None,
+        date_modified_from: str | None = None,
+        date_modified_to: str | None = None,
+        statuses: list[str] | None = None,
+        access_token: str | None = None,
     ) -> Any:
         params: dict[str, Any] = {"sessionType": session_type}
         if page_size is not None:
@@ -134,8 +134,8 @@ class SessionsClient(BaseApiClient):
         self,
         reference_number: str,
         *,
-        page_size: Optional[int] = None,
-        continuation_token: Optional[str] = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
         access_token: str,
     ) -> Any:
         headers = {}
@@ -156,8 +156,8 @@ class SessionsClient(BaseApiClient):
         self,
         reference_number: str,
         *,
-        page_size: Optional[int] = None,
-        continuation_token: Optional[str] = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
         access_token: str,
     ) -> Any:
         headers = {}
@@ -232,17 +232,17 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         self,
         *,
         session_type: str,
-        page_size: Optional[int] = None,
-        continuation_token: Optional[str] = None,
-        reference_number: Optional[str] = None,
-        date_created_from: Optional[str] = None,
-        date_created_to: Optional[str] = None,
-        date_closed_from: Optional[str] = None,
-        date_closed_to: Optional[str] = None,
-        date_modified_from: Optional[str] = None,
-        date_modified_to: Optional[str] = None,
-        statuses: Optional[list[str]] = None,
-        access_token: Optional[str] = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
+        reference_number: str | None = None,
+        date_created_from: str | None = None,
+        date_created_to: str | None = None,
+        date_closed_from: str | None = None,
+        date_closed_to: str | None = None,
+        date_modified_from: str | None = None,
+        date_modified_to: str | None = None,
+        statuses: list[str] | None = None,
+        access_token: str | None = None,
     ) -> Any:
         params: dict[str, Any] = {"sessionType": session_type}
         if page_size is not None:
@@ -356,8 +356,8 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         self,
         reference_number: str,
         *,
-        page_size: Optional[int] = None,
-        continuation_token: Optional[str] = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
         access_token: str,
     ) -> Any:
         headers = {}
@@ -378,8 +378,8 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         self,
         reference_number: str,
         *,
-        page_size: Optional[int] = None,
-        continuation_token: Optional[str] = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
         access_token: str,
     ) -> Any:
         headers = {}
