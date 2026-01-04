@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import os
 from dataclasses import dataclass
-from typing import BinaryIO, Optional, Tuple
+from typing import BinaryIO
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.padding import PKCS7
 
-from ..models import FileMetadata, EncryptionInfo
+from ..models import EncryptionInfo, FileMetadata
 
 
 @dataclass(frozen=True)
@@ -23,10 +23,7 @@ class EncryptionData:
 
 
 def _load_certificate(cert_data: str | bytes) -> x509.Certificate:
-    if isinstance(cert_data, bytes):
-        data = cert_data
-    else:
-        data = cert_data.encode("ascii")
+    data = cert_data if isinstance(cert_data, bytes) else cert_data.encode("ascii")
     if b"BEGIN CERTIFICATE" in data:
         return x509.load_pem_x509_certificate(data)
     try:
@@ -41,7 +38,7 @@ def _load_public_key_from_cert(cert_data: str | bytes):
     return cert.public_key()
 
 
-def _load_private_key(key_data: str | bytes, password: Optional[bytes] = None):
+def _load_private_key(key_data: str | bytes, password: bytes | None = None):
     if isinstance(key_data, str):
         key_data = key_data.encode("ascii")
     if b"BEGIN" in key_data:
@@ -105,7 +102,9 @@ def get_stream_metadata(stream: BinaryIO) -> FileMetadata:
     if position is not None:
         stream.seek(position)
 
-    return FileMetadata(file_size=size, sha256_base64=base64.b64encode(digest.finalize()).decode("ascii"))
+    return FileMetadata(
+        file_size=size, sha256_base64=base64.b64encode(digest.finalize()).decode("ascii")
+    )
 
 
 def build_encryption_data(public_certificate: str | bytes) -> EncryptionData:
@@ -125,12 +124,14 @@ def encrypt_rsa_oaep(public_certificate: str | bytes, data: bytes) -> bytes:
         raise ValueError("RSA public key required")
     return public_key.encrypt(
         data,
-        padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None
+        ),
     )
 
 
 def encrypt_ksef_token_rsa(public_certificate: str | bytes, token: str, timestamp_ms: int) -> bytes:
-    payload = f"{token}|{timestamp_ms}".encode("utf-8")
+    payload = f"{token}|{timestamp_ms}".encode()
     return encrypt_rsa_oaep(public_certificate, payload)
 
 
@@ -141,7 +142,7 @@ def encrypt_ksef_token_ec(
     *,
     output_format: str = "java",
 ) -> bytes:
-    payload = f"{token}|{timestamp_ms}".encode("utf-8")
+    payload = f"{token}|{timestamp_ms}".encode()
     public_key = _load_public_key_from_cert(public_certificate)
     if not isinstance(public_key, ec.EllipticCurvePublicKey):
         raise ValueError("ECDSA public key required")
@@ -176,8 +177,8 @@ def build_send_invoice_request(
     key: bytes,
     iv: bytes,
     *,
-    offline_mode: Optional[bool] = None,
-    hash_of_corrected_invoice: Optional[str] = None,
+    offline_mode: bool | None = None,
+    hash_of_corrected_invoice: str | None = None,
 ) -> dict[str, object]:
     invoice_hash = sha256_base64(invoice_xml)
     encrypted_content = encrypt_aes_cbc_pkcs7(invoice_xml, key, iv)
@@ -204,7 +205,9 @@ def sign_path_rsa_pss(private_key: rsa.RSAPrivateKey, data: bytes) -> bytes:
     )
 
 
-def sign_path_ecdsa(private_key: ec.EllipticCurvePrivateKey, data: bytes, *, format: str = "p1363") -> bytes:
+def sign_path_ecdsa(
+    private_key: ec.EllipticCurvePrivateKey, data: bytes, *, format: str = "p1363"
+) -> bytes:
     signature_der = private_key.sign(data, ec.ECDSA(hashes.SHA256()))
     if format.lower() == "der":
         return signature_der
@@ -217,5 +220,5 @@ def sign_path_ecdsa(private_key: ec.EllipticCurvePrivateKey, data: bytes, *, for
     return r.to_bytes(size, "big") + s.to_bytes(size, "big")
 
 
-def load_private_key(private_key_data: str | bytes, password: Optional[bytes] = None):
+def load_private_key(private_key_data: str | bytes, password: bytes | None = None):
     return _load_private_key(private_key_data, password=password)

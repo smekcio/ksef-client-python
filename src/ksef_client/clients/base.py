@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Protocol
 
-from ..http import BaseHttpClient, AsyncBaseHttpClient
+from ..http import HttpResponse
+
+
+class _RequestClient(Protocol):
+    def request(self, *args: Any, **kwargs: Any) -> HttpResponse: ...
+
+
+class _AsyncRequestClient(Protocol):
+    async def request(self, *args: Any, **kwargs: Any) -> HttpResponse: ...
 
 
 class BaseApiClient:
-    def __init__(self, http_client: BaseHttpClient) -> None:
+    def __init__(self, http_client: _RequestClient) -> None:
         self._http = http_client
 
     def _request_json(
@@ -14,13 +22,13 @@ class BaseApiClient:
         method: str,
         path: str,
         *,
-        params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
-        json: Optional[dict[str, Any]] = None,
-        access_token: Optional[str] = None,
-        refresh_token: Optional[str] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
         skip_auth: bool = False,
-        expected_status: Optional[set[int]] = None,
+        expected_status: set[int] | None = None,
     ) -> Any:
         response = self._http.request(
             method,
@@ -42,13 +50,13 @@ class BaseApiClient:
         method: str,
         path: str,
         *,
-        params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
-        json: Optional[dict[str, Any]] = None,
-        data: Optional[bytes] = None,
-        access_token: Optional[str] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: bytes | None = None,
+        access_token: str | None = None,
         skip_auth: bool = False,
-        expected_status: Optional[set[int]] = None,
+        expected_status: set[int] | None = None,
     ) -> bytes:
         response = self._http.request(
             method,
@@ -68,13 +76,13 @@ class BaseApiClient:
         method: str,
         path: str,
         *,
-        params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
-        json: Optional[dict[str, Any]] = None,
-        data: Optional[bytes] = None,
-        access_token: Optional[str] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: bytes | None = None,
+        access_token: str | None = None,
         skip_auth: bool = False,
-        expected_status: Optional[set[int]] = None,
+        expected_status: set[int] | None = None,
     ):
         return self._http.request(
             method,
@@ -90,7 +98,7 @@ class BaseApiClient:
 
 
 class AsyncBaseApiClient:
-    def __init__(self, http_client: AsyncBaseHttpClient) -> None:
+    def __init__(self, http_client: _AsyncRequestClient) -> None:
         self._http = http_client
 
     async def _request_json(
@@ -98,13 +106,13 @@ class AsyncBaseApiClient:
         method: str,
         path: str,
         *,
-        params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
-        json: Optional[dict[str, Any]] = None,
-        access_token: Optional[str] = None,
-        refresh_token: Optional[str] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
         skip_auth: bool = False,
-        expected_status: Optional[set[int]] = None,
+        expected_status: set[int] | None = None,
     ) -> Any:
         response = await self._http.request(
             method,
@@ -126,13 +134,13 @@ class AsyncBaseApiClient:
         method: str,
         path: str,
         *,
-        params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
-        json: Optional[dict[str, Any]] = None,
-        data: Optional[bytes] = None,
-        access_token: Optional[str] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: bytes | None = None,
+        access_token: str | None = None,
         skip_auth: bool = False,
-        expected_status: Optional[set[int]] = None,
+        expected_status: set[int] | None = None,
     ) -> bytes:
         response = await self._http.request(
             method,
@@ -152,13 +160,13 @@ class AsyncBaseApiClient:
         method: str,
         path: str,
         *,
-        params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
-        json: Optional[dict[str, Any]] = None,
-        data: Optional[bytes] = None,
-        access_token: Optional[str] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: bytes | None = None,
+        access_token: str | None = None,
         skip_auth: bool = False,
-        expected_status: Optional[set[int]] = None,
+        expected_status: set[int] | None = None,
     ):
         return await self._http.request(
             method,

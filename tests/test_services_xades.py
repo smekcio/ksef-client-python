@@ -8,7 +8,6 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives import serialization
 
 from ksef_client.services import xades
-
 from tests.helpers import generate_ec_cert, generate_rsa_cert
 
 
@@ -97,9 +96,8 @@ class XadesTests(unittest.TestCase):
                 raise ImportError("missing")
             return original_import(name, globals, locals, fromlist, level)
 
-        with patch("builtins.__import__", side_effect=fake_import):
-            with self.assertRaises(RuntimeError):
-                xades.sign_xades_enveloped("<xml/>", "cert", "key")
+        with patch("builtins.__import__", side_effect=fake_import), self.assertRaises(RuntimeError):
+            xades.sign_xades_enveloped("<xml/>", "cert", "key")
 
     def test_helpers(self):
         rsa_cert = generate_rsa_cert()
@@ -118,8 +116,17 @@ class XadesTests(unittest.TestCase):
         rsa_cert = generate_rsa_cert()
         stub_etree = DummyEtree()
         stub_xmlsec = DummyXmlSec()
-        with patch.dict(sys.modules, {"lxml": types.SimpleNamespace(etree=stub_etree), "lxml.etree": stub_etree, "xmlsec": stub_xmlsec}):
-            signed = xades.sign_xades_enveloped("<xml/>", rsa_cert.certificate_pem, rsa_cert.private_key_pem)
+        with patch.dict(
+            sys.modules,
+            {
+                "lxml": types.SimpleNamespace(etree=stub_etree),
+                "lxml.etree": stub_etree,
+                "xmlsec": stub_xmlsec,
+            },
+        ):
+            signed = xades.sign_xades_enveloped(
+                "<xml/>", rsa_cert.certificate_pem, rsa_cert.private_key_pem
+            )
         self.assertIn("<signed", signed)
 
 

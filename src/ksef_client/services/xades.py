@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
-from typing import Optional
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
@@ -10,8 +9,8 @@ from cryptography.hazmat.primitives import hashes
 
 def sign_xades_enveloped(xml_string: str, certificate_pem: str, private_key_pem: str) -> str:
     try:
-        from lxml import etree
         import xmlsec
+        from lxml import etree
     except Exception as exc:  # pragma: no cover
         raise RuntimeError("XAdES signing requires 'lxml' and 'xmlsec' extras") from exc
 
@@ -49,7 +48,9 @@ def sign_xades_enveloped(xml_string: str, certificate_pem: str, private_key_pem:
     obj = xmlsec.template.add_object(signature_node)
     xades_ns = "http://uri.etsi.org/01903/v1.3.2#"
     ds_ns = xmlsec.constants.DSigNs
-    qual_props = etree.SubElement(obj, f"{{{xades_ns}}}QualifyingProperties", nsmap={"xades": xades_ns, "ds": ds_ns})
+    qual_props = etree.SubElement(
+        obj, f"{{{xades_ns}}}QualifyingProperties", nsmap={"xades": xades_ns, "ds": ds_ns}
+    )
     qual_props.set("Target", f"#{signature_id}")
 
     signed_props = etree.SubElement(qual_props, f"{{{xades_ns}}}SignedProperties")
@@ -62,15 +63,23 @@ def sign_xades_enveloped(xml_string: str, certificate_pem: str, private_key_pem:
     signing_cert = etree.SubElement(signed_sig_props, f"{{{xades_ns}}}SigningCertificate")
     cert_node = etree.SubElement(signing_cert, f"{{{xades_ns}}}Cert")
     cert_digest_node = etree.SubElement(cert_node, f"{{{xades_ns}}}CertDigest")
-    digest_method = etree.SubElement(cert_digest_node, "{http://www.w3.org/2000/09/xmldsig#}DigestMethod")
+    digest_method = etree.SubElement(
+        cert_digest_node, "{http://www.w3.org/2000/09/xmldsig#}DigestMethod"
+    )
     digest_method.set("Algorithm", xmlsec.Transform.SHA256)
-    digest_value = etree.SubElement(cert_digest_node, "{http://www.w3.org/2000/09/xmldsig#}DigestValue")
+    digest_value = etree.SubElement(
+        cert_digest_node, "{http://www.w3.org/2000/09/xmldsig#}DigestValue"
+    )
     digest_value.text = cert_digest
 
     issuer_serial = etree.SubElement(cert_node, f"{{{xades_ns}}}IssuerSerial")
-    issuer_name = etree.SubElement(issuer_serial, "{http://www.w3.org/2000/09/xmldsig#}X509IssuerName")
+    issuer_name = etree.SubElement(
+        issuer_serial, "{http://www.w3.org/2000/09/xmldsig#}X509IssuerName"
+    )
     issuer_name.text = cert.issuer.rfc4514_string()
-    serial_number = etree.SubElement(issuer_serial, "{http://www.w3.org/2000/09/xmldsig#}X509SerialNumber")
+    serial_number = etree.SubElement(
+        issuer_serial, "{http://www.w3.org/2000/09/xmldsig#}X509SerialNumber"
+    )
     serial_number.text = str(cert.serial_number)
 
     # Reference to SignedProperties

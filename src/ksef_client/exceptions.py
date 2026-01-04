@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
 class KsefHttpError(Exception):
     status_code: int
     message: str
-    response_body: Optional[Any] = None
+    response_body: Any | None = None
 
     def __str__(self) -> str:
         return f"HTTP {self.status_code}: {self.message}"
@@ -16,9 +16,9 @@ class KsefHttpError(Exception):
 
 @dataclass
 class KsefRateLimitError(KsefHttpError):
-    retry_after: Optional[str] = None
+    retry_after: str | None = None
 
 
 @dataclass
 class KsefApiError(KsefHttpError):
-    exception_response: Optional[dict[str, Any]] = None
+    exception_response: dict[str, Any] | None = None

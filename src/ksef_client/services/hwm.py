@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 def update_continuation_point(
-    continuation_points: Dict[str, Optional[str]],
+    continuation_points: dict[str, str | None],
     subject_type: str,
     package: dict[str, Any],
 ) -> None:
@@ -21,7 +21,7 @@ def update_continuation_point(
 
 
 def get_effective_start_date(
-    continuation_points: Dict[str, Optional[str]],
+    continuation_points: dict[str, str | None],
     subject_type: str,
     window_from: str,
 ) -> str:
@@ -31,8 +31,8 @@ def get_effective_start_date(
     return window_from
 
 
-def dedupe_by_ksef_number(metadata_summaries: list[dict[str, Any]]) -> Dict[str, dict[str, Any]]:
-    unique: Dict[str, dict[str, Any]] = {}
+def dedupe_by_ksef_number(metadata_summaries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    unique: dict[str, dict[str, Any]] = {}
     seen: set[str] = set()
     for summary in metadata_summaries:
         ksef_number = summary.get("ksefNumber") or summary.get("KsefNumber")

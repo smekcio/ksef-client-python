@@ -62,6 +62,8 @@ class ModelsTests(unittest.TestCase):
         }
         parsed = models.InvoiceExportStatusResponse.from_dict(data)
         self.assertEqual(parsed.status.code, 200)
+        self.assertIsNotNone(parsed.package)
+        assert parsed.package is not None
         self.assertEqual(parsed.package.parts[0].part_name, "p1")
 
     def test_part_upload_request(self):

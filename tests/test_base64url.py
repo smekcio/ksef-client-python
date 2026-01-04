@@ -1,6 +1,6 @@
 import unittest
 
-from ksef_client.utils.base64url import b64decode, b64encode, b64url_encode, b64url_decode
+from ksef_client.utils.base64url import b64decode, b64encode, b64url_decode, b64url_encode
 
 
 class Base64UrlTests(unittest.TestCase):

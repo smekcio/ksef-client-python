@@ -60,3 +60,7 @@ warn_unused_configs = true
 disallow_untyped_defs = false
 no_implicit_optional = true
 check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["qrcode", "qrcode.*", "PIL", "PIL.*", "xmlsec", "lxml", "lxml.*"]
+ignore_missing_imports = true

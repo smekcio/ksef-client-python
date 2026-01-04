@@ -1,24 +1,22 @@
 from __future__ import annotations
 
-from typing import Optional
-
+from .clients.auth import AsyncAuthClient, AuthClient
+from .clients.certificates import AsyncCertificatesClient, CertificatesClient
+from .clients.invoices import AsyncInvoicesClient, InvoicesClient
+from .clients.limits import AsyncLimitsClient, LimitsClient
+from .clients.peppol import AsyncPeppolClient, PeppolClient
+from .clients.permissions import AsyncPermissionsClient, PermissionsClient
+from .clients.rate_limits import AsyncRateLimitsClient, RateLimitsClient
+from .clients.security import AsyncSecurityClient, SecurityClient
+from .clients.sessions import AsyncSessionsClient, SessionsClient
+from .clients.testdata import AsyncTestDataClient, TestDataClient
+from .clients.tokens import AsyncTokensClient, TokensClient
 from .config import KsefClientOptions
-from .http import BaseHttpClient, AsyncBaseHttpClient
-from .clients.auth import AuthClient, AsyncAuthClient
-from .clients.sessions import SessionsClient, AsyncSessionsClient
-from .clients.invoices import InvoicesClient, AsyncInvoicesClient
-from .clients.permissions import PermissionsClient, AsyncPermissionsClient
-from .clients.certificates import CertificatesClient, AsyncCertificatesClient
-from .clients.tokens import TokensClient, AsyncTokensClient
-from .clients.limits import LimitsClient, AsyncLimitsClient
-from .clients.rate_limits import RateLimitsClient, AsyncRateLimitsClient
-from .clients.security import SecurityClient, AsyncSecurityClient
-from .clients.testdata import TestDataClient, AsyncTestDataClient
-from .clients.peppol import PeppolClient, AsyncPeppolClient
+from .http import AsyncBaseHttpClient, BaseHttpClient
 
 
 class KsefClient:
-    def __init__(self, options: KsefClientOptions, access_token: Optional[str] = None) -> None:
+    def __init__(self, options: KsefClientOptions, access_token: str | None = None) -> None:
         self._http = BaseHttpClient(options, access_token=access_token)
         self.auth = AuthClient(self._http)
         self.sessions = SessionsClient(self._http)
@@ -39,7 +37,7 @@ class KsefClient:
     def http_client(self) -> BaseHttpClient:
         return self._http
 
-    def __enter__(self) -> "KsefClient":
+    def __enter__(self) -> KsefClient:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -47,7 +45,7 @@ class KsefClient:
 
 
 class AsyncKsefClient:
-    def __init__(self, options: KsefClientOptions, access_token: Optional[str] = None) -> None:
+    def __init__(self, options: KsefClientOptions, access_token: str | None = None) -> None:
         self._http = AsyncBaseHttpClient(options, access_token=access_token)
         self.auth = AsyncAuthClient(self._http)
         self.sessions = AsyncSessionsClient(self._http)
@@ -68,7 +66,7 @@ class AsyncKsefClient:
     def http_client(self) -> AsyncBaseHttpClient:
         return self._http
 
-    async def __aenter__(self) -> "AsyncKsefClient":
+    async def __aenter__(self) -> AsyncKsefClient:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:

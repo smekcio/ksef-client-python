@@ -1,4 +1,3 @@
-import base64
 import json
 import unittest
 
@@ -25,7 +24,7 @@ class PersonTokenTests(unittest.TestCase):
             "per": json.dumps(["p1", "p2"]),
             "pec": json.dumps(["x1"]),
             "rol": json.dumps(["r1"]),
-            "pep": "\"[\\\"e1\\\"]\"",
+            "pep": '"[\\"e1\\"]"',
             "role": ["legacy"],
             "roles": "single",
             "sud": json.dumps({"sub": "1"}),
@@ -36,6 +35,8 @@ class PersonTokenTests(unittest.TestCase):
         self.assertEqual(parsed.issuer, "issuer")
         self.assertIn("p1", parsed.permissions)
         self.assertIn("legacy", parsed.roles)
+        self.assertIsNotNone(parsed.ip_policy)
+        assert parsed.ip_policy is not None
         self.assertEqual(parsed.ip_policy["ip"], "1")
 
     def test_split_jwt_invalid(self):
@@ -51,7 +52,10 @@ class PersonTokenTests(unittest.TestCase):
         self.assertIsNone(_unix_to_datetime(10**20))
 
     def test_try_parse_json(self):
-        self.assertEqual(_try_parse_json(json.dumps({"a": 1}))["a"], 1)
+        parsed = _try_parse_json(json.dumps({"a": 1}))
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed["a"], 1)
         self.assertIsNone(_try_parse_json("{bad"))
         self.assertIsNone(_try_parse_json(None))
 
@@ -62,10 +66,10 @@ class PersonTokenTests(unittest.TestCase):
         self.assertEqual(_parse_json_string_array(None), [])
 
     def test_unwrap_if_quoted_json(self):
-        value = _unwrap_if_quoted_json("\"[1]\"")
+        value = _unwrap_if_quoted_json('"[1]"')
         self.assertEqual(value, "[1]")
-        invalid = _unwrap_if_quoted_json("\"\\x\"")
-        self.assertEqual(invalid, "\"\\x\"")
+        invalid = _unwrap_if_quoted_json('"\\x"')
+        self.assertEqual(invalid, '"\\x"')
 
     def test_distinct_and_list(self):
         self.assertEqual(_distinct(["a", "A", "b"]), ["a", "b"])

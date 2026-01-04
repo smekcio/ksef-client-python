@@ -98,7 +98,7 @@ def _generate_enum(name: str, schema: dict) -> list[str]:
     for value in schema.get("enum", []):
         value_str = str(value)
         member = _enum_member_name(value_str, used)
-        lines.append(f"    {member} = \"{value_str}\"")
+        lines.append(f'    {member} = "{value_str}"')
     if len(lines) == 1:
         lines.append("    pass")
     return lines
@@ -107,7 +107,7 @@ def _generate_enum(name: str, schema: dict) -> list[str]:
 def _generate_object(name: str, schema: dict) -> list[str]:
     required = set(schema.get("required", []))
     props = schema.get("properties") or {}
-    lines = [f"@dataclass(frozen=True)", f"class {name}(OpenApiModel):"]
+    lines = ["@dataclass(frozen=True)", f"class {name}(OpenApiModel):"]
     used_names: set[str] = set()
     if not props:
         lines.append("    pass")
@@ -122,7 +122,7 @@ def _generate_object(name: str, schema: dict) -> list[str]:
             type_name = _optional_type(type_name)
         metadata = None
         if field_name != prop_name:
-            metadata = f"metadata={{\"json_key\": \"{prop_name}\"}}"
+            metadata = f'metadata={{"json_key": "{prop_name}"}}'
         prepared.append((is_required, field_name, type_name, metadata))
     prepared.sort(key=lambda item: (not item[0], item[1]))
     for is_required, field_name, type_name, metadata in prepared:
@@ -162,11 +162,12 @@ def generate_models(input_path: Path, output_path: Path) -> None:
         "from dataclasses import MISSING, dataclass, field, fields",
         "from enum import Enum",
         "import sys",
-        "from typing import Any, Optional, TypeAlias, TypeVar, get_args, get_origin, get_type_hints",
+        "from typing import Any, Optional, TypeAlias, TypeVar",
+        "from typing import get_args, get_origin, get_type_hints",
         "",
         "JsonValue: TypeAlias = Any",
         "",
-        "T = TypeVar(\"T\", bound=\"OpenApiModel\")",
+        'T = TypeVar("T", bound="OpenApiModel")',
         "_TYPE_CACHE: dict[type, dict[str, Any]] = {}",
         "",
         "def _get_type_map(cls: type) -> dict[str, Any]:",
@@ -217,11 +218,11 @@ def generate_models(input_path: Path, output_path: Path) -> None:
         "    @classmethod",
         "    def from_dict(cls: type[T], data: dict[str, Any]) -> T:",
         "        if data is None:",
-        "            raise ValueError(\"data is None\")",
+        '            raise ValueError("data is None")',
         "        type_map = _get_type_map(cls)",
         "        kwargs: dict[str, Any] = {}",
         "        for model_field in fields(cls):",
-        "            json_key = model_field.metadata.get(\"json_key\", model_field.name)",
+        '            json_key = model_field.metadata.get("json_key", model_field.name)',
         "            if json_key in data:",
         "                type_hint = type_map.get(model_field.name, Any)",
         "                kwargs[model_field.name] = _convert_value(type_hint, data[json_key])",
@@ -230,7 +231,7 @@ def generate_models(input_path: Path, output_path: Path) -> None:
         "    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:",
         "        result: dict[str, Any] = {}",
         "        for model_field in fields(self):",
-        "            json_key = model_field.metadata.get(\"json_key\", model_field.name)",
+        '            json_key = model_field.metadata.get("json_key", model_field.name)',
         "            value = getattr(self, model_field.name)",
         "            if omit_none and value is None:",
         "                continue",

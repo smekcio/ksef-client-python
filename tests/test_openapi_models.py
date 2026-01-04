@@ -52,6 +52,8 @@ class OpenApiModelsTests(unittest.TestCase):
             "extensions": {"x": None, "y": "1"},
         }
         info = m.InvoiceStatusInfo.from_dict(payload)
+        self.assertIsNotNone(info.extensions)
+        assert info.extensions is not None
         self.assertEqual(info.extensions["y"], "1")
         serialized = info.to_dict()
         self.assertIn("extensions", serialized)

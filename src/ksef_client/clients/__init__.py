@@ -1,14 +1,14 @@
-from .auth import AuthClient, AsyncAuthClient
-from .sessions import SessionsClient, AsyncSessionsClient
-from .invoices import InvoicesClient, AsyncInvoicesClient
-from .permissions import PermissionsClient, AsyncPermissionsClient
-from .certificates import CertificatesClient, AsyncCertificatesClient
-from .tokens import TokensClient, AsyncTokensClient
-from .limits import LimitsClient, AsyncLimitsClient
-from .rate_limits import RateLimitsClient, AsyncRateLimitsClient
-from .security import SecurityClient, AsyncSecurityClient
-from .testdata import TestDataClient, AsyncTestDataClient
-from .peppol import PeppolClient, AsyncPeppolClient
+from .auth import AsyncAuthClient, AuthClient
+from .certificates import AsyncCertificatesClient, CertificatesClient
+from .invoices import AsyncInvoicesClient, InvoicesClient
+from .limits import AsyncLimitsClient, LimitsClient
+from .peppol import AsyncPeppolClient, PeppolClient
+from .permissions import AsyncPermissionsClient, PermissionsClient
+from .rate_limits import AsyncRateLimitsClient, RateLimitsClient
+from .security import AsyncSecurityClient, SecurityClient
+from .sessions import AsyncSessionsClient, SessionsClient
+from .testdata import AsyncTestDataClient, TestDataClient
+from .tokens import AsyncTokensClient, TokensClient
 
 __all__ = [
     "AuthClient",

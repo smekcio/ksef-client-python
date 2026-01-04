@@ -8,7 +8,6 @@ from ksef_client.services.auth import (
     build_ksef_token_auth_request,
     encrypt_ksef_token,
 )
-
 from tests.helpers import generate_ec_cert, generate_rsa_cert
 
 

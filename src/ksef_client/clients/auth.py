@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from .base import BaseApiClient, AsyncBaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class AuthClient(BaseApiClient):
     def get_active_sessions(
         self,
         *,
-        page_size: Optional[int] = None,
-        continuation_token: Optional[str] = None,
-        access_token: Optional[str] = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
+        access_token: str | None = None,
     ) -> Any:
         headers = {}
         if continuation_token:
@@ -50,7 +50,7 @@ class AuthClient(BaseApiClient):
         self,
         signed_xml: str,
         *,
-        verify_certificate_chain: Optional[bool] = None,
+        verify_certificate_chain: bool | None = None,
     ) -> Any:
         params = {}
         if verify_certificate_chain is not None:
@@ -72,6 +72,7 @@ class AuthClient(BaseApiClient):
             return None
         # Response is JSON.
         import json as _json
+
         return _json.loads(response_bytes.decode("utf-8"))
 
     def submit_ksef_token_auth(self, request_payload: dict[str, Any]) -> Any:
@@ -109,9 +110,9 @@ class AsyncAuthClient(AsyncBaseApiClient):
     async def get_active_sessions(
         self,
         *,
-        page_size: Optional[int] = None,
-        continuation_token: Optional[str] = None,
-        access_token: Optional[str] = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
+        access_token: str | None = None,
     ) -> Any:
         headers = {}
         if continuation_token:
@@ -150,7 +151,7 @@ class AsyncAuthClient(AsyncBaseApiClient):
         self,
         signed_xml: str,
         *,
-        verify_certificate_chain: Optional[bool] = None,
+        verify_certificate_chain: bool | None = None,
     ) -> Any:
         params = {}
         if verify_certificate_chain is not None:
@@ -171,6 +172,7 @@ class AsyncAuthClient(AsyncBaseApiClient):
         if not response_bytes:
             return None
         import json as _json
+
         return _json.loads(response_bytes.decode("utf-8"))
 
     async def submit_ksef_token_auth(self, request_payload: dict[str, Any]) -> Any:

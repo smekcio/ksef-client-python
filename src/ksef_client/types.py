@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional, Sequence
+from collections.abc import Mapping
+from typing import Any
 
-JsonDict = Dict[str, Any]
+JsonDict = dict[str, Any]
 JsonMapping = Mapping[str, Any]
 Headers = Mapping[str, str]
 QueryParams = Mapping[str, Any]

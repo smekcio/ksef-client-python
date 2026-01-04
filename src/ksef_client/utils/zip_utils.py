@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import io
 import zipfile
-from typing import Dict, Iterable, Optional, Tuple
 
 MAX_BATCH_PART_SIZE_BYTES = 100 * 1024 * 1024
 
 
-def build_zip(files: Dict[str, bytes]) -> bytes:
+def build_zip(files: dict[str, bytes]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for name, content in files.items():
@@ -32,8 +31,8 @@ def unzip_bytes(
     max_files: int = 10_000,
     max_total_uncompressed_size: int = 2_000_000_000,
     max_file_uncompressed_size: int = 500_000_000,
-    max_compression_ratio: Optional[float] = 200.0,
-) -> Dict[str, bytes]:
+    max_compression_ratio: float | None = 200.0,
+) -> dict[str, bytes]:
     return unzip_bytes_safe(
         data,
         max_files=max_files,
@@ -49,8 +48,8 @@ def unzip_bytes_safe(
     max_files: int = 10_000,
     max_total_uncompressed_size: int = 2_000_000_000,
     max_file_uncompressed_size: int = 500_000_000,
-    max_compression_ratio: Optional[float] = 200.0,
-) -> Dict[str, bytes]:
+    max_compression_ratio: float | None = 200.0,
+) -> dict[str, bytes]:
     if max_files <= 0:
         raise ValueError("max_files must be positive")
     if max_total_uncompressed_size <= 0:
@@ -60,7 +59,7 @@ def unzip_bytes_safe(
     if max_compression_ratio is not None and max_compression_ratio <= 0:
         raise ValueError("max_compression_ratio must be positive or None")
 
-    result: Dict[str, bytes] = {}
+    result: dict[str, bytes] = {}
     total_uncompressed = 0
     with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
         for info in zf.infolist():

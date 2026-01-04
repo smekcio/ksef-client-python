@@ -66,14 +66,18 @@ def main() -> None:
         symmetric_cert = next(
             c for c in certs if "SymmetricKeyEncryption" in (c.get("usage") or [])
         )["certificate"]
-        access_token = AuthCoordinator(client.auth).authenticate_with_ksef_token(
-            token=token,
-            public_certificate=token_cert,
-            context_identifier_type=context_type,
-            context_identifier_value=context_value,
-            max_attempts=90,
-            poll_interval_seconds=2.0,
-        ).tokens.access_token.token
+        access_token = (
+            AuthCoordinator(client.auth)
+            .authenticate_with_ksef_token(
+                token=token,
+                public_certificate=token_cert,
+                context_identifier_type=context_type,
+                context_identifier_value=context_value,
+                max_attempts=90,
+                poll_interval_seconds=2.0,
+            )
+            .tokens.access_token.token
+        )
         session = OnlineSessionWorkflow(client.sessions).open_session(
             form_code={"systemCode": "FA (3)", "schemaVersion": "1-0E", "value": "FA"},
             public_certificate=symmetric_cert,

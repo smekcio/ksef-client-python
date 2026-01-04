@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -25,19 +25,25 @@ def _build_subject(info: dict[str, Any]) -> x509.Name:
     if info.get("countryName"):
         attributes.append(x509.NameAttribute(NameOID.COUNTRY_NAME, info["countryName"]))
     if info.get("organizationIdentifier"):
-        attributes.append(x509.NameAttribute(NameOID.ORGANIZATION_IDENTIFIER, info["organizationIdentifier"]))
+        attributes.append(
+            x509.NameAttribute(NameOID.ORGANIZATION_IDENTIFIER, info["organizationIdentifier"])
+        )
     if info.get("serialNumber"):
         attributes.append(x509.NameAttribute(NameOID.SERIAL_NUMBER, info["serialNumber"]))
     if info.get("uniqueIdentifier"):
-        attributes.append(x509.NameAttribute(NameOID.X500_UNIQUE_IDENTIFIER, info["uniqueIdentifier"]))
+        attributes.append(
+            x509.NameAttribute(NameOID.X500_UNIQUE_IDENTIFIER, info["uniqueIdentifier"])
+        )
     return x509.Name(attributes)
 
 
 def generate_csr_rsa(info: dict[str, Any], key_size: int = 2048) -> CsrResult:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=key_size)
     subject = _build_subject(info)
-    csr = x509.CertificateSigningRequestBuilder().subject_name(subject).sign(
-        private_key, hashes.SHA256()
+    csr = (
+        x509.CertificateSigningRequestBuilder()
+        .subject_name(subject)
+        .sign(private_key, hashes.SHA256())
     )
     csr_bytes = csr.public_bytes(serialization.Encoding.DER)
     key_bytes = private_key.private_bytes(
@@ -54,8 +60,10 @@ def generate_csr_rsa(info: dict[str, Any], key_size: int = 2048) -> CsrResult:
 def generate_csr_ec(info: dict[str, Any]) -> CsrResult:
     private_key = ec.generate_private_key(ec.SECP256R1())
     subject = _build_subject(info)
-    csr = x509.CertificateSigningRequestBuilder().subject_name(subject).sign(
-        private_key, hashes.SHA256()
+    csr = (
+        x509.CertificateSigningRequestBuilder()
+        .subject_name(subject)
+        .sign(private_key, hashes.SHA256())
     )
     csr_bytes = csr.public_bytes(serialization.Encoding.DER)
     key_bytes = private_key.private_bytes(

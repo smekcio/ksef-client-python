@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import Optional
-
 
 def _require_qr():
     try:
         import qrcode
         from PIL import Image, ImageDraw, ImageFont
+
         return qrcode, Image, ImageDraw, ImageFont
     except Exception as exc:
         raise RuntimeError("QR support requires 'qrcode' and 'pillow' extras") from exc
@@ -56,6 +55,7 @@ def add_label_to_qr(png_bytes: bytes, label: str, *, font_size: int = 14) -> byt
         return out.getvalue()
 
 
-def _bytes_io(initial: Optional[bytes] = None):
+def _bytes_io(initial: bytes | None = None):
     import io
+
     return io.BytesIO(initial if initial is not None else b"")

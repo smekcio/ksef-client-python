@@ -2,29 +2,141 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Protocol, cast, overload
 
-from ..clients.auth import AuthClient, AsyncAuthClient
-from ..clients.sessions import SessionsClient, AsyncSessionsClient
-from ..clients.invoices import InvoicesClient, AsyncInvoicesClient
-from ..http import BaseHttpClient, AsyncBaseHttpClient
+from ..clients.invoices import AsyncInvoicesClient, InvoicesClient
+from ..http import HttpResponse
 from ..models import AuthenticationInitResponse, AuthenticationTokensResponse, StatusInfo
-from .auth import build_auth_token_request_xml, build_ksef_token_auth_request, encrypt_ksef_token
-from .crypto import EncryptionData, build_encryption_data, build_send_invoice_request, decrypt_aes_cbc_pkcs7
-from .batch import encrypt_batch_parts
 from ..utils.zip_utils import unzip_bytes_safe
+from .auth import build_auth_token_request_xml, build_ksef_token_auth_request, encrypt_ksef_token
+from .batch import encrypt_batch_parts
+from .crypto import (
+    EncryptionData,
+    build_encryption_data,
+    build_send_invoice_request,
+    decrypt_aes_cbc_pkcs7,
+)
+
+
+class _RequestHttpClient(Protocol):
+    def request(self, *args: Any, **kwargs: Any) -> HttpResponse: ...
+
+
+class _AsyncRequestHttpClient(Protocol):
+    async def request(self, *args: Any, **kwargs: Any) -> HttpResponse: ...
+
+
+class _SessionsClient(Protocol):
+    def open_online_session(
+        self,
+        request_payload: dict[str, Any],
+        *,
+        access_token: str,
+        upo_v43: bool = False,
+    ) -> Any: ...
+
+    def send_online_invoice(
+        self,
+        reference_number: str,
+        request_payload: dict[str, Any],
+        *,
+        access_token: str,
+    ) -> dict[str, Any] | None: ...
+
+    def close_online_session(self, reference_number: str, access_token: str) -> None: ...
+
+    def open_batch_session(
+        self,
+        request_payload: dict[str, Any],
+        *,
+        access_token: str,
+        upo_v43: bool = False,
+    ) -> Any: ...
+
+    def close_batch_session(self, reference_number: str, access_token: str) -> None: ...
+
+
+class _AsyncSessionsClient(Protocol):
+    async def open_online_session(
+        self,
+        request_payload: dict[str, Any],
+        *,
+        access_token: str,
+        upo_v43: bool = False,
+    ) -> Any: ...
+
+    async def send_online_invoice(
+        self,
+        reference_number: str,
+        request_payload: dict[str, Any],
+        *,
+        access_token: str,
+    ) -> dict[str, Any] | None: ...
+
+    async def close_online_session(self, reference_number: str, access_token: str) -> None: ...
+
+    async def open_batch_session(
+        self,
+        request_payload: dict[str, Any],
+        *,
+        access_token: str,
+        upo_v43: bool = False,
+    ) -> Any: ...
+
+    async def close_batch_session(self, reference_number: str, access_token: str) -> None: ...
+
+
+class _AuthClient(Protocol):
+    def get_challenge(self) -> dict[str, Any]: ...
+
+    def submit_xades_auth_request(
+        self,
+        signed_xml: str,
+        *,
+        verify_certificate_chain: bool | None = None,
+    ) -> dict[str, Any] | None: ...
+
+    def submit_ksef_token_auth(self, request_payload: dict[str, Any]) -> dict[str, Any] | None: ...
+
+    def get_auth_status(
+        self, reference_number: str, authentication_token: str
+    ) -> dict[str, Any]: ...
+
+    def redeem_token(self, authentication_token: str) -> dict[str, Any]: ...
+
+
+class _AsyncAuthClient(Protocol):
+    async def get_challenge(self) -> dict[str, Any]: ...
+
+    async def submit_xades_auth_request(
+        self,
+        signed_xml: str,
+        *,
+        verify_certificate_chain: bool | None = None,
+    ) -> dict[str, Any] | None: ...
+
+    async def submit_ksef_token_auth(
+        self, request_payload: dict[str, Any]
+    ) -> dict[str, Any] | None: ...
+
+    async def get_auth_status(
+        self, reference_number: str, authentication_token: str
+    ) -> dict[str, Any]: ...
+
+    async def redeem_token(self, authentication_token: str) -> dict[str, Any]: ...
 
 
 class BatchUploadHelper:
-    def __init__(self, http_client: BaseHttpClient) -> None:
+    def __init__(self, http_client: _RequestHttpClient) -> None:
         self._http = http_client
 
     def upload_parts(
         self,
         part_upload_requests: list[dict[str, Any]],
-        parts: Sequence[bytes] | Sequence[Tuple[int, bytes]],
+        parts: Sequence[bytes] | Sequence[tuple[int, bytes]],
         *,
         parallelism: int = 1,
     ) -> None:
@@ -58,13 +170,13 @@ class BatchUploadHelper:
 
 
 class AsyncBatchUploadHelper:
-    def __init__(self, http_client: AsyncBaseHttpClient) -> None:
+    def __init__(self, http_client: _AsyncRequestHttpClient) -> None:
         self._http = http_client
 
     async def upload_parts(
         self,
         part_upload_requests: list[dict[str, Any]],
-        parts: Sequence[bytes] | Sequence[Tuple[int, bytes]],
+        parts: Sequence[bytes] | Sequence[tuple[int, bytes]],
     ) -> None:
         if len(part_upload_requests) != len(parts):
             raise ValueError("parts length must match part_upload_requests length")
@@ -89,7 +201,7 @@ class AsyncBatchUploadHelper:
 
 
 class ExportDownloadHelper:
-    def __init__(self, http_client: BaseHttpClient) -> None:
+    def __init__(self, http_client: _RequestHttpClient) -> None:
         self._http = http_client
 
     def download_parts(self, parts: list[dict[str, Any]]) -> list[bytes]:
@@ -101,8 +213,10 @@ class ExportDownloadHelper:
             results.append(content)
         return results
 
-    def download_parts_with_hash(self, parts: list[dict[str, Any]]) -> list[tuple[bytes, Optional[str]]]:
-        results: list[tuple[bytes, Optional[str]]] = []
+    def download_parts_with_hash(
+        self, parts: list[dict[str, Any]]
+    ) -> list[tuple[bytes, str | None]]:
+        results: list[tuple[bytes, str | None]] = []
         for part in parts:
             url = part["url"]
             method = part.get("method", "GET")
@@ -112,7 +226,7 @@ class ExportDownloadHelper:
 
 
 class AsyncExportDownloadHelper:
-    def __init__(self, http_client: AsyncBaseHttpClient) -> None:
+    def __init__(self, http_client: _AsyncRequestHttpClient) -> None:
         self._http = http_client
 
     async def download_parts(self, parts: list[dict[str, Any]]) -> list[bytes]:
@@ -124,8 +238,10 @@ class AsyncExportDownloadHelper:
             results.append(content)
         return results
 
-    async def download_parts_with_hash(self, parts: list[dict[str, Any]]) -> list[tuple[bytes, Optional[str]]]:
-        results: list[tuple[bytes, Optional[str]]] = []
+    async def download_parts_with_hash(
+        self, parts: list[dict[str, Any]]
+    ) -> list[tuple[bytes, str | None]]:
+        results: list[tuple[bytes, str | None]] = []
         for part in parts:
             url = part["url"]
             method = part.get("method", "GET")
@@ -134,16 +250,34 @@ class AsyncExportDownloadHelper:
         return results
 
 
+@overload
 def _pair_requests_with_parts(
     part_upload_requests: list[dict[str, Any]],
-    parts: Sequence[bytes] | Sequence[Tuple[int, bytes]],
+    parts: Sequence[bytes],
+) -> list[tuple[dict[str, Any], bytes]]: ...
+
+
+@overload
+def _pair_requests_with_parts(
+    part_upload_requests: list[dict[str, Any]],
+    parts: Sequence[tuple[int, bytes]],
+) -> list[tuple[dict[str, Any], bytes]]: ...
+
+
+def _pair_requests_with_parts(
+    part_upload_requests: list[dict[str, Any]],
+    parts: Sequence[bytes] | Sequence[tuple[int, bytes]],
 ) -> list[tuple[dict[str, Any], bytes]]:
     if parts and isinstance(parts[0], tuple):
-        part_map = {int(ordinal): data for ordinal, data in parts}  # type: ignore[assignment]
-        ordered_requests = sorted(part_upload_requests, key=lambda r: int(r.get("ordinalNumber", 0)))
+        indexed_parts = cast(Sequence[tuple[int, bytes]], parts)
+        part_map: dict[int, bytes] = {int(ordinal): data for ordinal, data in indexed_parts}
+        ordered_requests = sorted(
+            part_upload_requests, key=lambda r: int(r.get("ordinalNumber", 0))
+        )
         return [(req, part_map[int(req.get("ordinalNumber", 0))]) for req in ordered_requests]
     ordered_requests = sorted(part_upload_requests, key=lambda r: int(r.get("ordinalNumber", 0)))
-    return list(zip(ordered_requests, parts))  # type: ignore[arg-type]
+    byte_parts = cast(Sequence[bytes], parts)
+    return list(zip(ordered_requests, byte_parts, strict=True))
 
 
 @dataclass(frozen=True)
@@ -154,7 +288,7 @@ class AuthResult:
 
 
 class AuthCoordinator:
-    def __init__(self, auth_client: AuthClient) -> None:
+    def __init__(self, auth_client: _AuthClient) -> None:
         self._auth = auth_client
 
     def authenticate_with_xades(
@@ -165,8 +299,8 @@ class AuthCoordinator:
         subject_identifier_type: str,
         certificate_pem: str,
         private_key_pem: str,
-        verify_certificate_chain: Optional[bool] = None,
-        authorization_policy_xml: Optional[str] = None,
+        verify_certificate_chain: bool | None = None,
+        authorization_policy_xml: str | None = None,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -184,9 +318,13 @@ class AuthCoordinator:
         init = self._auth.submit_xades_auth_request(
             signed_xml, verify_certificate_chain=verify_certificate_chain
         )
+        if init is None:
+            raise RuntimeError("submit_xades_auth_request returned empty response")
         init_response = AuthenticationInitResponse.from_dict(init)
         auth_token = init_response.authentication_token.token
-        self._poll_auth_status(init_response.reference_number, auth_token, poll_interval_seconds, max_attempts)
+        self._poll_auth_status(
+            init_response.reference_number, auth_token, poll_interval_seconds, max_attempts
+        )
         tokens = AuthenticationTokensResponse.from_dict(self._auth.redeem_token(auth_token))
         return AuthResult(
             reference_number=init_response.reference_number,
@@ -203,7 +341,7 @@ class AuthCoordinator:
         context_identifier_value: str,
         method: str = "rsa",
         ec_output_format: str = "java",
-        authorization_policy: Optional[dict[str, Any]] = None,
+        authorization_policy: dict[str, Any] | None = None,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -223,9 +361,13 @@ class AuthCoordinator:
             authorization_policy=authorization_policy,
         )
         init = self._auth.submit_ksef_token_auth(request_payload)
+        if init is None:
+            raise RuntimeError("submit_ksef_token_auth returned empty response")
         init_response = AuthenticationInitResponse.from_dict(init)
         auth_token = init_response.authentication_token.token
-        self._poll_auth_status(init_response.reference_number, auth_token, poll_interval_seconds, max_attempts)
+        self._poll_auth_status(
+            init_response.reference_number, auth_token, poll_interval_seconds, max_attempts
+        )
         tokens = AuthenticationTokensResponse.from_dict(self._auth.redeem_token(auth_token))
         return AuthResult(
             reference_number=init_response.reference_number,
@@ -257,7 +399,7 @@ class AuthCoordinator:
 
 
 class AsyncAuthCoordinator:
-    def __init__(self, auth_client: AsyncAuthClient) -> None:
+    def __init__(self, auth_client: _AsyncAuthClient) -> None:
         self._auth = auth_client
 
     async def authenticate_with_xades(
@@ -268,8 +410,8 @@ class AsyncAuthCoordinator:
         subject_identifier_type: str,
         certificate_pem: str,
         private_key_pem: str,
-        verify_certificate_chain: Optional[bool] = None,
-        authorization_policy_xml: Optional[str] = None,
+        verify_certificate_chain: bool | None = None,
+        authorization_policy_xml: str | None = None,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -287,9 +429,13 @@ class AsyncAuthCoordinator:
         init = await self._auth.submit_xades_auth_request(
             signed_xml, verify_certificate_chain=verify_certificate_chain
         )
+        if init is None:
+            raise RuntimeError("submit_xades_auth_request returned empty response")
         init_response = AuthenticationInitResponse.from_dict(init)
         auth_token = init_response.authentication_token.token
-        await self._poll_auth_status(init_response.reference_number, auth_token, poll_interval_seconds, max_attempts)
+        await self._poll_auth_status(
+            init_response.reference_number, auth_token, poll_interval_seconds, max_attempts
+        )
         tokens = AuthenticationTokensResponse.from_dict(await self._auth.redeem_token(auth_token))
         return AuthResult(
             reference_number=init_response.reference_number,
@@ -306,7 +452,7 @@ class AsyncAuthCoordinator:
         context_identifier_value: str,
         method: str = "rsa",
         ec_output_format: str = "java",
-        authorization_policy: Optional[dict[str, Any]] = None,
+        authorization_policy: dict[str, Any] | None = None,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -326,9 +472,13 @@ class AsyncAuthCoordinator:
             authorization_policy=authorization_policy,
         )
         init = await self._auth.submit_ksef_token_auth(request_payload)
+        if init is None:
+            raise RuntimeError("submit_ksef_token_auth returned empty response")
         init_response = AuthenticationInitResponse.from_dict(init)
         auth_token = init_response.authentication_token.token
-        await self._poll_auth_status(init_response.reference_number, auth_token, poll_interval_seconds, max_attempts)
+        await self._poll_auth_status(
+            init_response.reference_number, auth_token, poll_interval_seconds, max_attempts
+        )
         tokens = AuthenticationTokensResponse.from_dict(await self._auth.redeem_token(auth_token))
         return AuthResult(
             reference_number=init_response.reference_number,
@@ -366,7 +516,7 @@ class OnlineSessionResult:
 
 
 class OnlineSessionWorkflow:
-    def __init__(self, sessions_client: SessionsClient) -> None:
+    def __init__(self, sessions_client: _SessionsClient) -> None:
         self._sessions = sessions_client
 
     def open_session(
@@ -400,8 +550,8 @@ class OnlineSessionWorkflow:
         invoice_xml: bytes,
         encryption_data: EncryptionData,
         access_token: str,
-        offline_mode: Optional[bool] = None,
-        hash_of_corrected_invoice: Optional[str] = None,
+        offline_mode: bool | None = None,
+        hash_of_corrected_invoice: str | None = None,
     ) -> Any:
         request_payload = build_send_invoice_request(
             invoice_xml,
@@ -421,7 +571,7 @@ class OnlineSessionWorkflow:
 
 
 class AsyncOnlineSessionWorkflow:
-    def __init__(self, sessions_client: AsyncSessionsClient) -> None:
+    def __init__(self, sessions_client: _AsyncSessionsClient) -> None:
         self._sessions = sessions_client
 
     async def open_session(
@@ -455,8 +605,8 @@ class AsyncOnlineSessionWorkflow:
         invoice_xml: bytes,
         encryption_data: EncryptionData,
         access_token: str,
-        offline_mode: Optional[bool] = None,
-        hash_of_corrected_invoice: Optional[str] = None,
+        offline_mode: bool | None = None,
+        hash_of_corrected_invoice: str | None = None,
     ) -> Any:
         request_payload = build_send_invoice_request(
             invoice_xml,
@@ -476,7 +626,7 @@ class AsyncOnlineSessionWorkflow:
 
 
 class BatchSessionWorkflow:
-    def __init__(self, sessions_client: SessionsClient, http_client: BaseHttpClient) -> None:
+    def __init__(self, sessions_client: _SessionsClient, http_client: _RequestHttpClient) -> None:
         self._sessions = sessions_client
         self._upload_helper = BatchUploadHelper(http_client)
 
@@ -487,13 +637,15 @@ class BatchSessionWorkflow:
         zip_bytes: bytes,
         public_certificate: str,
         access_token: str,
-        offline_mode: Optional[bool] = None,
+        offline_mode: bool | None = None,
         upo_v43: bool = False,
         parallelism: int = 1,
     ) -> str:
         encryption = build_encryption_data(public_certificate)
-        encrypted_parts, batch_file_info = encrypt_batch_parts(zip_bytes, encryption.key, encryption.iv)
-        request_payload = {
+        encrypted_parts, batch_file_info = encrypt_batch_parts(
+            zip_bytes, encryption.key, encryption.iv
+        )
+        request_payload: dict[str, Any] = {
             "formCode": form_code,
             "batchFile": batch_file_info,
             "encryption": {
@@ -507,14 +659,18 @@ class BatchSessionWorkflow:
             request_payload, access_token=access_token, upo_v43=upo_v43
         )
         part_upload_requests = response["partUploadRequests"]
-        self._upload_helper.upload_parts(part_upload_requests, encrypted_parts, parallelism=parallelism)
+        self._upload_helper.upload_parts(
+            part_upload_requests, encrypted_parts, parallelism=parallelism
+        )
         reference_number = response["referenceNumber"]
         self._sessions.close_batch_session(reference_number, access_token=access_token)
         return reference_number
 
 
 class AsyncBatchSessionWorkflow:
-    def __init__(self, sessions_client: AsyncSessionsClient, http_client: AsyncBaseHttpClient) -> None:
+    def __init__(
+        self, sessions_client: _AsyncSessionsClient, http_client: _AsyncRequestHttpClient
+    ) -> None:
         self._sessions = sessions_client
         self._upload_helper = AsyncBatchUploadHelper(http_client)
 
@@ -525,13 +681,15 @@ class AsyncBatchSessionWorkflow:
         zip_bytes: bytes,
         public_certificate: str,
         access_token: str,
-        offline_mode: Optional[bool] = None,
+        offline_mode: bool | None = None,
         upo_v43: bool = False,
         parallelism: int = 1,
     ) -> str:
         encryption = build_encryption_data(public_certificate)
-        encrypted_parts, batch_file_info = encrypt_batch_parts(zip_bytes, encryption.key, encryption.iv)
-        request_payload = {
+        encrypted_parts, batch_file_info = encrypt_batch_parts(
+            zip_bytes, encryption.key, encryption.iv
+        )
+        request_payload: dict[str, Any] = {
             "formCode": form_code,
             "batchFile": batch_file_info,
             "encryption": {
@@ -558,7 +716,7 @@ class PackageProcessingResult:
 
 
 class ExportWorkflow:
-    def __init__(self, invoices_client: InvoicesClient, http_client: BaseHttpClient) -> None:
+    def __init__(self, invoices_client: InvoicesClient, http_client: _RequestHttpClient) -> None:
         self._invoices = invoices_client
         self._download_helper = ExportDownloadHelper(http_client)
 
@@ -570,7 +728,8 @@ class ExportWorkflow:
         parts = package.get("parts") or []
         encrypted_parts = self._download_helper.download_parts(parts)
         decrypted_parts = [
-            decrypt_aes_cbc_pkcs7(part, encryption_data.key, encryption_data.iv) for part in encrypted_parts
+            decrypt_aes_cbc_pkcs7(part, encryption_data.key, encryption_data.iv)
+            for part in encrypted_parts
         ]
         archive_bytes = b"".join(decrypted_parts)
         unzipped = unzip_bytes_safe(archive_bytes)
@@ -592,7 +751,11 @@ class ExportWorkflow:
 
 
 class AsyncExportWorkflow:
-    def __init__(self, invoices_client: AsyncInvoicesClient, http_client: AsyncBaseHttpClient) -> None:
+    def __init__(
+        self,
+        invoices_client: AsyncInvoicesClient,
+        http_client: _AsyncRequestHttpClient,
+    ) -> None:
         self._invoices = invoices_client
         self._download_helper = AsyncExportDownloadHelper(http_client)
 
@@ -604,7 +767,8 @@ class AsyncExportWorkflow:
         parts = package.get("parts") or []
         encrypted_parts = await self._download_helper.download_parts(parts)
         decrypted_parts = [
-            decrypt_aes_cbc_pkcs7(part, encryption_data.key, encryption_data.iv) for part in encrypted_parts
+            decrypt_aes_cbc_pkcs7(part, encryption_data.key, encryption_data.iv)
+            for part in encrypted_parts
         ]
         archive_bytes = b"".join(decrypted_parts)
         unzipped = unzip_bytes_safe(archive_bytes)

@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import base64
-from typing import Union
 
 
 def b64encode(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
-def b64decode(data: Union[str, bytes]) -> bytes:
+def b64decode(data: str | bytes) -> bytes:
     if isinstance(data, str):
         data = data.encode("ascii")
     return base64.b64decode(data)

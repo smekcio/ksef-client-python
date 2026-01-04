@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from .base import BaseApiClient, AsyncBaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class TestDataClient(BaseApiClient):
     __test__ = False
 
-    def create_subject(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    def create_subject(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         self._request_json(
             "POST",
             "/testdata/subject",
@@ -17,7 +19,9 @@ class TestDataClient(BaseApiClient):
             expected_status={200, 204},
         )
 
-    def remove_subject(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    def remove_subject(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         self._request_json(
             "POST",
             "/testdata/subject/remove",
@@ -26,7 +30,9 @@ class TestDataClient(BaseApiClient):
             expected_status={200, 204},
         )
 
-    def create_person(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    def create_person(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         self._request_json(
             "POST",
             "/testdata/person",
@@ -35,7 +41,9 @@ class TestDataClient(BaseApiClient):
             expected_status={200, 204},
         )
 
-    def remove_person(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    def remove_person(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         self._request_json(
             "POST",
             "/testdata/person/remove",
@@ -44,7 +52,9 @@ class TestDataClient(BaseApiClient):
             expected_status={200, 204},
         )
 
-    def grant_permissions(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    def grant_permissions(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         self._request_json(
             "POST",
             "/testdata/permissions",
@@ -53,7 +63,9 @@ class TestDataClient(BaseApiClient):
             expected_status={200, 204},
         )
 
-    def revoke_permissions(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    def revoke_permissions(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         self._request_json(
             "POST",
             "/testdata/permissions/revoke",
@@ -62,7 +74,9 @@ class TestDataClient(BaseApiClient):
             expected_status={200, 204},
         )
 
-    def enable_attachment(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    def enable_attachment(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         self._request_json(
             "POST",
             "/testdata/attachment",
@@ -71,7 +85,9 @@ class TestDataClient(BaseApiClient):
             expected_status={200, 204},
         )
 
-    def disable_attachment(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    def disable_attachment(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         self._request_json(
             "POST",
             "/testdata/attachment/revoke",
@@ -95,7 +111,9 @@ class TestDataClient(BaseApiClient):
             access_token=access_token,
         )
 
-    def change_certificate_limits(self, request_payload: dict[str, Any], *, access_token: str) -> Any:
+    def change_certificate_limits(
+        self, request_payload: dict[str, Any], *, access_token: str
+    ) -> Any:
         return self._request_json(
             "POST",
             "/testdata/limits/subject/certificate",
@@ -134,7 +152,9 @@ class TestDataClient(BaseApiClient):
 
 
 class AsyncTestDataClient(AsyncBaseApiClient):
-    async def create_subject(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    async def create_subject(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         await self._request_json(
             "POST",
             "/testdata/subject",
@@ -143,7 +163,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             expected_status={200, 204},
         )
 
-    async def remove_subject(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    async def remove_subject(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         await self._request_json(
             "POST",
             "/testdata/subject/remove",
@@ -152,7 +174,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             expected_status={200, 204},
         )
 
-    async def create_person(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    async def create_person(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         await self._request_json(
             "POST",
             "/testdata/person",
@@ -161,7 +185,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             expected_status={200, 204},
         )
 
-    async def remove_person(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    async def remove_person(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         await self._request_json(
             "POST",
             "/testdata/person/remove",
@@ -170,7 +196,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             expected_status={200, 204},
         )
 
-    async def grant_permissions(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    async def grant_permissions(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         await self._request_json(
             "POST",
             "/testdata/permissions",
@@ -179,7 +207,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             expected_status={200, 204},
         )
 
-    async def revoke_permissions(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    async def revoke_permissions(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         await self._request_json(
             "POST",
             "/testdata/permissions/revoke",
@@ -188,7 +218,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             expected_status={200, 204},
         )
 
-    async def enable_attachment(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    async def enable_attachment(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         await self._request_json(
             "POST",
             "/testdata/attachment",
@@ -197,7 +229,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             expected_status={200, 204},
         )
 
-    async def disable_attachment(self, request_payload: dict[str, Any], *, access_token: Optional[str] = None) -> None:
+    async def disable_attachment(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
         await self._request_json(
             "POST",
             "/testdata/attachment/revoke",
@@ -206,7 +240,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             expected_status={200, 204},
         )
 
-    async def change_session_limits(self, request_payload: dict[str, Any], *, access_token: str) -> Any:
+    async def change_session_limits(
+        self, request_payload: dict[str, Any], *, access_token: str
+    ) -> Any:
         return await self._request_json(
             "POST",
             "/testdata/limits/context/session",
@@ -221,7 +257,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             access_token=access_token,
         )
 
-    async def change_certificate_limits(self, request_payload: dict[str, Any], *, access_token: str) -> Any:
+    async def change_certificate_limits(
+        self, request_payload: dict[str, Any], *, access_token: str
+    ) -> Any:
         return await self._request_json(
             "POST",
             "/testdata/limits/subject/certificate",

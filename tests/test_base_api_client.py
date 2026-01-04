@@ -1,16 +1,16 @@
 import unittest
-from unittest.mock import AsyncMock
+from typing import Any
 
 import httpx
 
-from ksef_client.clients.base import BaseApiClient, AsyncBaseApiClient
+from ksef_client.clients.base import AsyncBaseApiClient, BaseApiClient
 from ksef_client.http import HttpResponse
 
 
 class DummyHttp:
     def __init__(self, response: HttpResponse) -> None:
         self.response = response
-        self.calls = []
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
     def request(self, *args, **kwargs) -> HttpResponse:
         self.calls.append((args, kwargs))
@@ -20,7 +20,7 @@ class DummyHttp:
 class DummyAsyncHttp:
     def __init__(self, response: HttpResponse) -> None:
         self.response = response
-        self.calls = []
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
     async def request(self, *args, **kwargs) -> HttpResponse:
         self.calls.append((args, kwargs))
@@ -29,7 +29,9 @@ class DummyAsyncHttp:
 
 class BaseApiClientTests(unittest.TestCase):
     def test_request_json_with_content(self):
-        response = HttpResponse(200, httpx.Headers({"Content-Type": "application/json"}), b"{\"ok\": true}")
+        response = HttpResponse(
+            200, httpx.Headers({"Content-Type": "application/json"}), b'{"ok": true}'
+        )
         client = BaseApiClient(DummyHttp(response))
         result = client._request_json("GET", "/path")
         self.assertEqual(result, {"ok": True})
@@ -49,7 +51,9 @@ class BaseApiClientTests(unittest.TestCase):
 
 class AsyncBaseApiClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_request_json(self):
-        response = HttpResponse(200, httpx.Headers({"Content-Type": "application/json"}), b"{\"ok\": true}")
+        response = HttpResponse(
+            200, httpx.Headers({"Content-Type": "application/json"}), b'{"ok": true}'
+        )
         client = AsyncBaseApiClient(DummyAsyncHttp(response))
         result = await client._request_json("GET", "/path")
         self.assertEqual(result, {"ok": True})

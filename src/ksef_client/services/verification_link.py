@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Optional
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
 from ..config import KsefClientOptions
-from ..utils.base64url import b64url_encode, b64decode, b64url_decode
+from ..utils.base64url import b64decode, b64url_decode, b64url_encode
 from .crypto import load_private_key, sign_path_ecdsa, sign_path_rsa_pss
 
 
@@ -17,7 +16,9 @@ from .crypto import load_private_key, sign_path_ecdsa, sign_path_rsa_pss
 class VerificationLinkService:
     options: KsefClientOptions
 
-    def build_invoice_verification_url(self, nip: str, issue_date: date | datetime | str, invoice_hash: str) -> str:
+    def build_invoice_verification_url(
+        self, nip: str, issue_date: date | datetime | str, invoice_hash: str
+    ) -> str:
         if isinstance(issue_date, (date, datetime)):
             date_str = issue_date.strftime("%d-%m-%Y")
         else:
@@ -35,17 +36,29 @@ class VerificationLinkService:
         context_identifier_value: str,
         certificate_serial: str,
         invoice_hash: str,
-        signing_certificate_pem: Optional[str] = None,
-        private_key_pem: Optional[str] = None,
+        signing_certificate_pem: str | None = None,
+        private_key_pem: str | None = None,
         signature_format: str = "p1363",
     ) -> str:
         hash_bytes = _decode_base64_or_url(invoice_hash)
         hash_url = b64url_encode(hash_bytes)
         base_url = self.options.resolve_qr_base_url().rstrip("/")
-        path = f"{base_url}/certificate/{context_identifier_type}/{context_identifier_value}/{seller_nip}/{certificate_serial}/{hash_url}"
+        path = "/".join(
+            [
+                base_url,
+                "certificate",
+                context_identifier_type,
+                context_identifier_value,
+                seller_nip,
+                certificate_serial,
+                hash_url,
+            ]
+        )
         path_to_sign = path.replace("https://", "").replace("http://", "")
 
-        signature = _sign_path(path_to_sign, signing_certificate_pem, private_key_pem, signature_format)
+        signature = _sign_path(
+            path_to_sign, signing_certificate_pem, private_key_pem, signature_format
+        )
         signature_url = b64url_encode(signature)
         return f"{path}/{signature_url}"
 
@@ -59,8 +72,8 @@ def _decode_base64_or_url(value: str) -> bytes:
 
 def _sign_path(
     path_to_sign: str,
-    certificate_pem: Optional[str],
-    private_key_pem: Optional[str],
+    certificate_pem: str | None,
+    private_key_pem: str | None,
     signature_format: str,
 ) -> bytes:
     if not private_key_pem:

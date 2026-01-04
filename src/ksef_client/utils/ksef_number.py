@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Tuple
 
 KSEF_NUMBER_PATTERN = re.compile(
     r"^([1-9](\d[1-9]|[1-9]\d)\d{7})-"
@@ -25,10 +24,7 @@ def _crc8(data: bytes) -> int:
     for b in data:
         crc ^= b
         for _ in range(8):
-            if crc & 0x80:
-                crc = ((crc << 1) ^ poly) & 0xFF
-            else:
-                crc = (crc << 1) & 0xFF
+            crc = ((crc << 1) ^ poly) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
     return crc
 
 

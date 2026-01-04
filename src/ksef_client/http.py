@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -9,7 +9,7 @@ from .config import KsefClientOptions
 from .exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 
 
-def _merge_headers(base: dict[str, str], extra: Optional[dict[str, str]]) -> dict[str, str]:
+def _merge_headers(base: dict[str, str], extra: dict[str, str] | None) -> dict[str, str]:
     if not extra:
         return base
     merged = dict(base)
@@ -31,7 +31,7 @@ class BaseHttpClient:
     def __init__(
         self,
         options: KsefClientOptions,
-        access_token: Optional[str] = None,
+        access_token: str | None = None,
     ) -> None:
         self._options = options
         self._access_token = access_token
@@ -50,14 +50,14 @@ class BaseHttpClient:
         method: str,
         path: str,
         *,
-        params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
-        json: Optional[dict[str, Any]] = None,
-        data: Optional[bytes] = None,
-        access_token: Optional[str] = None,
-        refresh_token: Optional[str] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: bytes | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
         skip_auth: bool = False,
-        expected_status: Optional[set[int]] = None,
+        expected_status: set[int] | None = None,
     ) -> HttpResponse:
         url = path
         if not url.startswith("http://") and not url.startswith("https://"):
@@ -90,9 +90,12 @@ class BaseHttpClient:
             content=data,
         )
 
-        if expected_status and response.status_code not in expected_status:
-            self._raise_for_status(response)
-        elif not expected_status and response.status_code >= 400:
+        if (
+            expected_status
+            and response.status_code not in expected_status
+            or not expected_status
+            and response.status_code >= 400
+        ):
             self._raise_for_status(response)
 
         return HttpResponse(response.status_code, response.headers, response.content)
@@ -134,7 +137,7 @@ class AsyncBaseHttpClient:
     def __init__(
         self,
         options: KsefClientOptions,
-        access_token: Optional[str] = None,
+        access_token: str | None = None,
     ) -> None:
         self._options = options
         self._access_token = access_token
@@ -153,14 +156,14 @@ class AsyncBaseHttpClient:
         method: str,
         path: str,
         *,
-        params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
-        json: Optional[dict[str, Any]] = None,
-        data: Optional[bytes] = None,
-        access_token: Optional[str] = None,
-        refresh_token: Optional[str] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: bytes | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
         skip_auth: bool = False,
-        expected_status: Optional[set[int]] = None,
+        expected_status: set[int] | None = None,
     ) -> HttpResponse:
         url = path
         if not url.startswith("http://") and not url.startswith("https://"):
@@ -193,9 +196,12 @@ class AsyncBaseHttpClient:
             content=data,
         )
 
-        if expected_status and response.status_code not in expected_status:
-            self._raise_for_status(response)
-        elif not expected_status and response.status_code >= 400:
+        if (
+            expected_status
+            and response.status_code not in expected_status
+            or not expected_status
+            and response.status_code >= 400
+        ):
             self._raise_for_status(response)
 
         return HttpResponse(response.status_code, response.headers, response.content)
