@@ -1,0 +1,9 @@
+{
+  "sellerNip": "7831906994",
+  "invoiceNumber": "FA/TEST-0001/01/2026",
+  "issueDate": "2026-01-02",
+  "issueDateTime": "2026-01-02T10:00:00Z",
+  "periodFrom": "2026-01-01",
+  "periodTo": "2026-01-31",
+  "paymentDue": "2026-01-16"
+}

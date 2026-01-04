@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Faktura xmlns:etd="http://crd.gov.pl/xml/schematy/dziedzinowe/mf/2022/01/05/eD/DefinicjeTypy/"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
+  <Naglowek>
+    <KodFormularza kodSystemowy="FA (3)" wersjaSchemy="1-0E">FA</KodFormularza>
+    <WariantFormularza>3</WariantFormularza>
+    <DataWytworzeniaFa>{{ISSUE_DATETIME}}</DataWytworzeniaFa>
+    <SystemInfo>SampleInvoice</SystemInfo>
+  </Naglowek>
+  <Podmiot1>
+    <DaneIdentyfikacyjne>
+      <NIP>{{SELLER_NIP}}</NIP>
+      <Nazwa>Sample Seller S.A.</Nazwa>
+    </DaneIdentyfikacyjne>
+    <Adres>
+      <KodKraju>PL</KodKraju>
+      <AdresL1>Sample Street 1</AdresL1>
+      <AdresL2>00-001 Warsaw</AdresL2>
+    </Adres>
+    <DaneKontaktowe>
+      <Email>seller@example.com</Email>
+      <Telefon>667444555</Telefon>
+    </DaneKontaktowe>
+  </Podmiot1>
+  <Podmiot2>
+    <DaneIdentyfikacyjne>
+      <NIP>1111111111</NIP>
+      <Nazwa>Sample Buyer</Nazwa>
+    </DaneIdentyfikacyjne>
+    <Adres>
+      <KodKraju>PL</KodKraju>
+      <AdresL1>Buyer Street 1</AdresL1>
+      <AdresL2>00-001 Warsaw</AdresL2>
+    </Adres>
+    <DaneKontaktowe>
+      <Email>buyer@example.com</Email>
+      <Telefon>555777999</Telefon>
+    </DaneKontaktowe>
+    <NrKlienta>99999999</NrKlienta>
+    <JST>2</JST>
+    <GV>2</GV>
+  </Podmiot2>
+  <Fa>
+    <KodWaluty>PLN</KodWaluty>
+    <P_1>{{ISSUE_DATE}}</P_1>
+    <P_1M>Warsaw</P_1M>
+    <P_2>{{INVOICE_NUMBER}}</P_2>
+    <OkresFa>
+      <P_6_Od>{{PERIOD_FROM}}</P_6_Od>
+      <P_6_Do>{{PERIOD_TO}}</P_6_Do>
+    </OkresFa>
+    <P_13_1>100.00</P_13_1>
+    <P_14_1>23.00</P_14_1>
+    <P_15>123.00</P_15>
+    <Adnotacje>
+      <P_16>2</P_16>
+      <P_17>2</P_17>
+      <P_18>2</P_18>
+      <P_18A>2</P_18A>
+      <Zwolnienie>
+        <P_19N>1</P_19N>
+      </Zwolnienie>
+      <NoweSrodkiTransportu>
+        <P_22N>1</P_22N>
+      </NoweSrodkiTransportu>
+      <P_23>2</P_23>
+      <PMarzy>
+        <P_PMarzyN>1</P_PMarzyN>
+      </PMarzy>
+    </Adnotacje>
+    <RodzajFaktury>VAT</RodzajFaktury>
+    <DodatkowyOpis>
+      <Klucz>Info</Klucz>
+      <Wartosc>Sample invoice</Wartosc>
+    </DodatkowyOpis>
+    <FaWiersz>
+      <NrWierszaFa>1</NrWierszaFa>
+      <P_7>Sample service</P_7>
+      <P_8A>szt</P_8A>
+      <P_8B>1.00</P_8B>
+      <P_9A>100.00</P_9A>
+      <P_11>100.00</P_11>
+      <P_12>23</P_12>
+    </FaWiersz>
+    <Rozliczenie>
+      <Obciazenia>
+        <Kwota>0.00</Kwota>
+        <Powod>Interest</Powod>
+      </Obciazenia>
+      <SumaObciazen>0.00</SumaObciazen>
+      <Odliczenia>
+        <Kwota>0.00</Kwota>
+        <Powod>Overpayment</Powod>
+      </Odliczenia>
+      <SumaOdliczen>0.00</SumaOdliczen>
+      <DoZaplaty>123.00</DoZaplaty>
+    </Rozliczenie>
+    <Platnosc>
+      <TerminPlatnosci>
+        <Termin>{{PAYMENT_DUE}}</Termin>
+      </TerminPlatnosci>
+      <FormaPlatnosci>6</FormaPlatnosci>
+      <RachunekBankowy>
+        <NrRB>73111111111111111111111111</NrRB>
+        <NazwaBanku>Sample Bank</NazwaBanku>
+        <OpisRachunku>PLN</OpisRachunku>
+      </RachunekBankowy>
+    </Platnosc>
+  </Fa>
+  <Stopka>
+    <Informacje>
+      <StopkaFaktury>Sample footer</StopkaFaktury>
+    </Informacje>
+    <Rejestry>
+      <KRS>0000099999</KRS>
+      <REGON>999999999</REGON>
+      <BDO>000099999</BDO>
+    </Rejestry>
+  </Stopka>
+</Faktura>
