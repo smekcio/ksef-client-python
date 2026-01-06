@@ -1,19 +1,19 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ksef-client-python"
-version = "0.1.0"
-description = "KSeF API client for Python"
+name = "ksef-client"
+version = "0.2.0"
+description = "Client SDK for KSeF API v2"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
-authors = [{name = "KSeF Python SDK Contributors"}]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Mateusz Smektała (smekcio)", email = "mateusz@smkc.dev"}]
 keywords = ["ksef", "e-invoice", "poland", "api"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
 
@@ -31,6 +31,11 @@ qr = [
   "qrcode[pil]>=7.4.2",
   "pillow>=10.0.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/smekcio/ksef-client-python"
+Documentation = "https://github.com/smekcio/ksef-client-python/blob/main/docs/README.md"
+Issues = "https://github.com/smekcio/ksef-client-python/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -19,13 +19,16 @@ class KsefQrEnvironment(str, Enum):
 
 def _package_version() -> str:
     try:
-        return metadata.version("ksef-client-python")
+        return metadata.version("ksef-client")
     except Exception:
-        return "0.0.0"
+        try:
+            return metadata.version("ksef-client-python")
+        except Exception:
+            return "0.0.0"
 
 
 def _default_user_agent() -> str:
-    return f"ksef-client-python/{_package_version()}"
+    return f"ksef-client/{_package_version()}"
 
 
 @dataclass(frozen=True)

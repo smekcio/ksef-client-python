@@ -1,8 +1,8 @@
 # KSeF Client Python
 
-`ksef-client-python` jest biblioteką (SDK) dla **KSeF API 2.0 (v2)**.
+`ksef-client-python` jest repozytorium biblioteki (SDK) publikowanej na PyPI jako: **`ksef-client`**.
 
-Dokumentacja SDK: [`docs/README.md`](docs/README.md)
+Dokumentacja SDK (kanonicznie w repozytorium): `https://github.com/smekcio/ksef-client-python/blob/main/docs/README.md`
 
 ## Zakres
 
@@ -17,34 +17,40 @@ Zachowania protokołu (m.in. pre-signed URL bez nagłówka `Authorization`, obs�
 
 - Python `>= 3.10`
 
-## Instalacja (lokalnie)
+## Instalacja (PyPI)
 
 ```bash
-pip install -e .
+pip install ksef-client
 ```
 
-## Opcjonalne dodatki (extras)
+Opcjonalne dodatki (extras):
 
 ```bash
-pip install -e .[xml,qr]
+pip install "ksef-client[xml,qr]"
 ```
 
 - `xml` – podpis XAdES (`lxml`, `xmlsec`)
 - `qr` – generowanie PNG z kodami QR (`qrcode`, `pillow`)
 
+## Instalacja (developerska, lokalnie)
+
+```bash
+pip install -e .
+```
+
 ## Dokumentacja
 
 Dokumentacja pakietu znajduje się w katalogu `docs/`:
 
-- Indeks: [`docs/README.md`](docs/README.md)
-- Start: [`docs/getting-started.md`](docs/getting-started.md)
-- Konfiguracja: [`docs/configuration.md`](docs/configuration.md)
-- Błędy i retry: [`docs/errors.md`](docs/errors.md)
-- API (endpointy): [`docs/api/README.md`](docs/api/README.md)
-- Workflows: [`docs/workflows/README.md`](docs/workflows/README.md)
-- Usługi: [`docs/services/README.md`](docs/services/README.md)
-- Utils: [`docs/utils/README.md`](docs/utils/README.md)
-- Przykłady (skrypty): [`docs/examples/README.md`](docs/examples/README.md)
+- Indeks: `https://github.com/smekcio/ksef-client-python/blob/main/docs/README.md`
+- Start: `https://github.com/smekcio/ksef-client-python/blob/main/docs/getting-started.md`
+- Konfiguracja: `https://github.com/smekcio/ksef-client-python/blob/main/docs/configuration.md`
+- Błędy i retry: `https://github.com/smekcio/ksef-client-python/blob/main/docs/errors.md`
+- API (endpointy): `https://github.com/smekcio/ksef-client-python/blob/main/docs/api/README.md`
+- Workflows: `https://github.com/smekcio/ksef-client-python/blob/main/docs/workflows/README.md`
+- Usługi: `https://github.com/smekcio/ksef-client-python/blob/main/docs/services/README.md`
+- Utils: `https://github.com/smekcio/ksef-client-python/blob/main/docs/utils/README.md`
+- Przykłady (skrypty): `https://github.com/smekcio/ksef-client-python/blob/main/docs/examples/README.md`
 
 ## Narzędzia developerskie
 
