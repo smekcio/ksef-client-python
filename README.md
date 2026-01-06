@@ -1,13 +1,21 @@
 # KSeF Client Python
 
-`ksef-client-python` jest biblioteką (SDK) dla **KSeF API 2.0 (v2)**. Zakres obejmuje:
+`ksef-client-python` jest biblioteką (SDK) dla **KSeF API 2.0 (v2)**.
 
-- klientów API (`KsefClient`, `AsyncKsefClient`) mapujących wywołania na endpointy,
-- warstwę workflow (`ksef_client.services.workflows`) porządkującą typowe scenariusze integracyjne (uwierzytelnianie, sesje, eksport),
-- kryptografię i narzędzia pomocnicze (AES/ZIP/Base64Url, linki weryfikacyjne, QR),
-- uwierzytelnianie tokenem KSeF oraz podpisem XAdES (w tym `XadesKeyPair` dla PKCS#12 / PEM+hasło).
+Dokumentacja SDK: [`docs/README.md`](docs/README.md)
 
-Zachowania protokołu (np. pre-signed URL bez nagłówka `Authorization`, `Retry-After` dla `429`) są opisane w dokumentacji i odwzorowane w modelach wyjątków.
+## Zakres
+
+- Klienci API (`KsefClient`, `AsyncKsefClient`) mapujący wywołania na endpointy KSeF.
+- Warstwa workflow (`ksef_client.services.workflows`) porządkująca scenariusze (uwierzytelnianie, sesje online/batch, eksport).
+- Narzędzia kryptograficzne i pomocnicze (AES/ZIP/Base64Url, linki weryfikacyjne, QR).
+- Uwierzytelnianie tokenem KSeF oraz podpisem XAdES (w tym `XadesKeyPair` dla PKCS#12 lub zestawu PEM+hasło).
+
+Zachowania protokołu (m.in. pre-signed URL bez nagłówka `Authorization`, obsługa `Retry-After` dla `429`) są opisane w dokumentacji i odwzorowane w modelach wyjątków.
+
+## Wymagania
+
+- Python `>= 3.10`
 
 ## Instalacja (lokalnie)
 
@@ -28,15 +36,15 @@ pip install -e .[xml,qr]
 
 Dokumentacja pakietu znajduje się w katalogu `docs/`:
 
-- Indeks: `docs/README.md`
-- Start: `docs/getting-started.md`
-- Konfiguracja: `docs/configuration.md`
-- Błędy i retry: `docs/errors.md`
-- API (endpointy): `docs/api/README.md`
-- Workflows: `docs/workflows/README.md`
-- Usługi: `docs/services/README.md`
-- Utils: `docs/utils/README.md`
-- Przykłady (skrypty): `docs/examples/README.md`
+- Indeks: [`docs/README.md`](docs/README.md)
+- Start: [`docs/getting-started.md`](docs/getting-started.md)
+- Konfiguracja: [`docs/configuration.md`](docs/configuration.md)
+- Błędy i retry: [`docs/errors.md`](docs/errors.md)
+- API (endpointy): [`docs/api/README.md`](docs/api/README.md)
+- Workflows: [`docs/workflows/README.md`](docs/workflows/README.md)
+- Usługi: [`docs/services/README.md`](docs/services/README.md)
+- Utils: [`docs/utils/README.md`](docs/utils/README.md)
+- Przykłady (skrypty): [`docs/examples/README.md`](docs/examples/README.md)
 
 ## Narzędzia developerskie
 
@@ -48,4 +56,3 @@ Dokumentacja pakietu znajduje się w katalogu `docs/`:
 ```bash
 pytest
 ```
-
