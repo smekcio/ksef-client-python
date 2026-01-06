@@ -41,15 +41,15 @@ pip install "ksef-client[xml,qr]"
 
 Dokumentacja SDK znajduje się w katalogu `docs/`:
 
-- Indeks: `docs/README.md`
-- Start: `docs/getting-started.md`
-- Konfiguracja: `docs/configuration.md`
-- Błędy i retry: `docs/errors.md`
-- API (endpointy): `docs/api/README.md`
-- Workflows: `docs/workflows/README.md`
-- Usługi: `docs/services/README.md`
-- Utils: `docs/utils/README.md`
-- Przykłady (skrypty): `docs/examples/README.md`
+- Indeks: [`docs/README.md`](docs/README.md)
+- Start: [`docs/getting-started.md`](docs/getting-started.md)
+- Konfiguracja: [`docs/configuration.md`](docs/configuration.md)
+- Błędy i retry: [`docs/errors.md`](docs/errors.md)
+- API (endpointy): [`docs/api/README.md`](docs/api/README.md)
+- Workflows: [`docs/workflows/README.md`](docs/workflows/README.md)
+- Usługi: [`docs/services/README.md`](docs/services/README.md)
+- Utils: [`docs/utils/README.md`](docs/utils/README.md)
+- Przykłady (skrypty): [`docs/examples/README.md`](docs/examples/README.md)
 
 ## 🚀 Quick start
 
