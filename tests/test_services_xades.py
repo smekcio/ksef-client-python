@@ -55,7 +55,11 @@ class DummySignatureContext:
 
 
 class DummyTemplate:
+    def __init__(self):
+        self.last_transform = None
+
     def create(self, doc, c14n, transform, ns="ds"):
+        self.last_transform = transform
         return DummyNode("Signature")
 
     def add_reference(self, node, transform, uri="", type=None):
@@ -75,7 +79,13 @@ class DummyTemplate:
 
 
 class DummyXmlSec(types.SimpleNamespace):
-    Transform = types.SimpleNamespace(EXCL_C14N="c14n", SHA256="sha", ENVELOPED="env")
+    Transform = types.SimpleNamespace(
+        EXCL_C14N="c14n",
+        SHA256=types.SimpleNamespace(href="sha"),
+        ENVELOPED="env",
+        RSA_SHA256="rsa-sha256",
+        ECDSA_SHA256="ecdsa-sha256",
+    )
     KeyFormat = types.SimpleNamespace(PEM="pem")
     constants = types.SimpleNamespace(DSigNs="ds")
     template = DummyTemplate()
@@ -101,10 +111,6 @@ class XadesTests(unittest.TestCase):
 
     def test_helpers(self):
         rsa_cert = generate_rsa_cert()
-        ec_cert = generate_ec_cert()
-        self.assertIn("rsa", xades._select_signature_transform(rsa_cert.certificate))
-        self.assertIn("ecdsa", xades._select_signature_transform(ec_cert.certificate))
-
         pem = xades._ensure_pem_certificate(rsa_cert.certificate_pem)
         self.assertIn("BEGIN CERTIFICATE", pem)
         der = rsa_cert.certificate.public_bytes(serialization.Encoding.DER)
@@ -114,6 +120,7 @@ class XadesTests(unittest.TestCase):
 
     def test_sign_xades_with_stubs(self):
         rsa_cert = generate_rsa_cert()
+        ec_cert = generate_ec_cert()
         stub_etree = DummyEtree()
         stub_xmlsec = DummyXmlSec()
         with patch.dict(
@@ -128,6 +135,18 @@ class XadesTests(unittest.TestCase):
                 "<xml/>", rsa_cert.certificate_pem, rsa_cert.private_key_pem
             )
         self.assertIn("<signed", signed)
+        self.assertEqual(stub_xmlsec.template.last_transform, stub_xmlsec.Transform.RSA_SHA256)
+
+        with patch.dict(
+            sys.modules,
+            {
+                "lxml": types.SimpleNamespace(etree=stub_etree),
+                "lxml.etree": stub_etree,
+                "xmlsec": stub_xmlsec,
+            },
+        ):
+            xades.sign_xades_enveloped("<xml/>", ec_cert.certificate_pem, ec_cert.private_key_pem)
+        self.assertEqual(stub_xmlsec.template.last_transform, stub_xmlsec.Transform.ECDSA_SHA256)
 
 
 if __name__ == "__main__":
