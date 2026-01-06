@@ -4,6 +4,7 @@ __pycache__/
 *.pyd
 .Python
 .venv/
+venv/
 .pytest_cache/
 .coverage
 .coverage.*
