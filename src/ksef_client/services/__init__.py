@@ -35,7 +35,7 @@ from .workflows import (
     OnlineSessionWorkflow,
     PackageProcessingResult,
 )
-from .xades import sign_xades_enveloped
+from .xades import XadesKeyPair, sign_xades_enveloped
 
 __all__ = [
     "EncryptionData",
@@ -57,6 +57,7 @@ __all__ = [
     "resize_png",
     "add_label_to_qr",
     "sign_xades_enveloped",
+    "XadesKeyPair",
     "BatchUploadHelper",
     "AsyncBatchUploadHelper",
     "ExportDownloadHelper",

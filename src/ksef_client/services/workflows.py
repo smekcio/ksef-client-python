@@ -19,6 +19,7 @@ from .crypto import (
     build_send_invoice_request,
     decrypt_aes_cbc_pkcs7,
 )
+from .xades import XadesKeyPair, sign_xades_enveloped
 
 
 class _RequestHttpClient(Protocol):
@@ -291,6 +292,30 @@ class AuthCoordinator:
     def __init__(self, auth_client: _AuthClient) -> None:
         self._auth = auth_client
 
+    def authenticate_with_xades_key_pair(
+        self,
+        *,
+        key_pair: XadesKeyPair,
+        context_identifier_type: str,
+        context_identifier_value: str,
+        subject_identifier_type: str,
+        verify_certificate_chain: bool | None = None,
+        authorization_policy_xml: str | None = None,
+        poll_interval_seconds: float = 2.0,
+        max_attempts: int = 30,
+    ) -> AuthResult:
+        return self.authenticate_with_xades(
+            context_identifier_type=context_identifier_type,
+            context_identifier_value=context_identifier_value,
+            subject_identifier_type=subject_identifier_type,
+            certificate_pem=key_pair.certificate_pem,
+            private_key_pem=key_pair.private_key_pem,
+            verify_certificate_chain=verify_certificate_chain,
+            authorization_policy_xml=authorization_policy_xml,
+            poll_interval_seconds=poll_interval_seconds,
+            max_attempts=max_attempts,
+        )
+
     def authenticate_with_xades(
         self,
         *,
@@ -312,8 +337,6 @@ class AuthCoordinator:
             subject_identifier_type=subject_identifier_type,
             authorization_policy_xml=authorization_policy_xml,
         )
-        from .xades import sign_xades_enveloped
-
         signed_xml = sign_xades_enveloped(xml, certificate_pem, private_key_pem)
         init = self._auth.submit_xades_auth_request(
             signed_xml, verify_certificate_chain=verify_certificate_chain
@@ -402,6 +425,30 @@ class AsyncAuthCoordinator:
     def __init__(self, auth_client: _AsyncAuthClient) -> None:
         self._auth = auth_client
 
+    async def authenticate_with_xades_key_pair(
+        self,
+        *,
+        key_pair: XadesKeyPair,
+        context_identifier_type: str,
+        context_identifier_value: str,
+        subject_identifier_type: str,
+        verify_certificate_chain: bool | None = None,
+        authorization_policy_xml: str | None = None,
+        poll_interval_seconds: float = 2.0,
+        max_attempts: int = 30,
+    ) -> AuthResult:
+        return await self.authenticate_with_xades(
+            context_identifier_type=context_identifier_type,
+            context_identifier_value=context_identifier_value,
+            subject_identifier_type=subject_identifier_type,
+            certificate_pem=key_pair.certificate_pem,
+            private_key_pem=key_pair.private_key_pem,
+            verify_certificate_chain=verify_certificate_chain,
+            authorization_policy_xml=authorization_policy_xml,
+            poll_interval_seconds=poll_interval_seconds,
+            max_attempts=max_attempts,
+        )
+
     async def authenticate_with_xades(
         self,
         *,
@@ -423,8 +470,6 @@ class AsyncAuthCoordinator:
             subject_identifier_type=subject_identifier_type,
             authorization_policy_xml=authorization_policy_xml,
         )
-        from .xades import sign_xades_enveloped
-
         signed_xml = sign_xades_enveloped(xml, certificate_pem, private_key_pem)
         init = await self._auth.submit_xades_auth_request(
             signed_xml, verify_certificate_chain=verify_certificate_chain
