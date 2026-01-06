@@ -19,7 +19,7 @@ from .crypto import (
     build_send_invoice_request,
     decrypt_aes_cbc_pkcs7,
 )
-from .xades import XadesKeyPair, sign_xades_enveloped
+from .xades import XadesKeyPair
 
 
 class _RequestHttpClient(Protocol):
@@ -337,6 +337,8 @@ class AuthCoordinator:
             subject_identifier_type=subject_identifier_type,
             authorization_policy_xml=authorization_policy_xml,
         )
+        from .xades import sign_xades_enveloped
+
         signed_xml = sign_xades_enveloped(xml, certificate_pem, private_key_pem)
         init = self._auth.submit_xades_auth_request(
             signed_xml, verify_certificate_chain=verify_certificate_chain
@@ -470,6 +472,8 @@ class AsyncAuthCoordinator:
             subject_identifier_type=subject_identifier_type,
             authorization_policy_xml=authorization_policy_xml,
         )
+        from .xades import sign_xades_enveloped
+
         signed_xml = sign_xades_enveloped(xml, certificate_pem, private_key_pem)
         init = await self._auth.submit_xades_auth_request(
             signed_xml, verify_certificate_chain=verify_certificate_chain
