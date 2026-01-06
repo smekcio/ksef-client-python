@@ -33,6 +33,25 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m pip install build twine
 
+      - name: Verify version matches tag
+        run: |
+          python - << 'PY'
+          import tomllib
+          from pathlib import Path
+
+          tag = "${{ github.ref_name }}"
+          if tag.startswith("v"):
+              tag = tag[1:]
+
+          data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          version = data["project"]["version"]
+          if version != tag:
+              raise SystemExit(
+                  f"pyproject.toml version ({version}) does not match tag ({tag})"
+              )
+          print(f"OK: {version} == {tag}")
+          PY
+
       - name: Lint and typecheck
         run: |
           python tools/lint.py --strict
