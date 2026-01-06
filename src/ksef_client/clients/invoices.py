@@ -60,7 +60,7 @@ class InvoicesClient(BaseApiClient):
             "/invoices/exports",
             json=request_payload,
             access_token=access_token,
-            expected_status={202},
+            expected_status={201, 202},
         )
 
     def get_export_status(self, reference_number: str, *, access_token: str) -> Any:
@@ -140,7 +140,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             "/invoices/exports",
             json=request_payload,
             access_token=access_token,
-            expected_status={202},
+            expected_status={201, 202},
         )
 
     async def get_export_status(self, reference_number: str, *, access_token: str) -> Any:
