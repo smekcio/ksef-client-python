@@ -1,8 +1,9 @@
 import unittest
 import zipfile
 from io import BytesIO
+from unittest.mock import patch
 
-from ksef_client.utils.zip_utils import build_zip, split_bytes, unzip_bytes
+from ksef_client.utils.zip_utils import build_zip, split_bytes, unzip_bytes, unzip_bytes_safe
 
 
 class ZipUtilsTests(unittest.TestCase):
@@ -35,6 +36,45 @@ class ZipUtilsTests(unittest.TestCase):
             ratio = info.file_size / max(info.compress_size, 1)
         with self.assertRaises(ValueError):
             unzip_bytes(zip_bytes, max_compression_ratio=ratio - 0.001)
+
+    def test_unzip_safe_rejects_invalid_limits(self):
+        zip_bytes = build_zip({"a.txt": b"hello"})
+        with self.assertRaises(ValueError):
+            unzip_bytes_safe(zip_bytes, max_files=0)
+        with self.assertRaises(ValueError):
+            unzip_bytes_safe(zip_bytes, max_total_uncompressed_size=0)
+        with self.assertRaises(ValueError):
+            unzip_bytes_safe(zip_bytes, max_file_uncompressed_size=0)
+        with self.assertRaises(ValueError):
+            unzip_bytes_safe(zip_bytes, max_compression_ratio=0)
+
+    def test_unzip_safe_skips_directories(self):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("dir/", b"")
+            zf.writestr("dir/a.txt", b"hello")
+        unzipped = unzip_bytes_safe(buffer.getvalue())
+        self.assertEqual(unzipped["dir/a.txt"], b"hello")
+
+    def test_unzip_safe_limits_max_file_uncompressed_size(self):
+        zip_bytes = build_zip({"a.txt": b"a" * 10})
+        with self.assertRaises(ValueError):
+            unzip_bytes_safe(zip_bytes, max_file_uncompressed_size=5)
+
+    def test_unzip_safe_suspicious_zero_compressed_size(self):
+        zip_bytes = build_zip({"a.txt": b"a"})
+        original_infolist = zipfile.ZipFile.infolist
+
+        def infolist_with_bad_metadata(self):
+            infos = original_infolist(self)
+            infos[0].compress_size = 0
+            infos[0].file_size = 1
+            return infos
+
+        with patch.object(
+            zipfile.ZipFile, "infolist", infolist_with_bad_metadata
+        ), self.assertRaises(ValueError):
+            unzip_bytes_safe(zip_bytes)
 
     def test_split_bytes(self):
         data = b"a" * 10

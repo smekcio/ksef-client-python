@@ -28,6 +28,7 @@ class AuthServiceTests(unittest.TestCase):
         self.assertEqual(_context_tag("NIP"), "Nip")
         self.assertEqual(_context_tag("internalId"), "InternalId")
         self.assertEqual(_context_tag("nipVatUe"), "NipVatUe")
+        self.assertEqual(_context_tag("peppolId"), "PeppolId")
         with self.assertRaises(ValueError):
             _context_tag("other")
 
