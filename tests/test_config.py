@@ -1,9 +1,14 @@
 import unittest
+from unittest.mock import patch
 
-from ksef_client.config import KsefClientOptions, KsefEnvironment
+from ksef_client.config import KsefClientOptions, KsefEnvironment, _package_version
 
 
 class ConfigTests(unittest.TestCase):
+    def test_package_version_fallback(self):
+        with patch("ksef_client.config.metadata.version", side_effect=Exception("boom")):
+            self.assertEqual(_package_version(), "0.0.0")
+
     def test_normalized_base_url(self):
         options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
         self.assertEqual(options.normalized_base_url(), "https://api-test.ksef.mf.gov.pl/v2")

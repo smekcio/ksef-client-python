@@ -9,11 +9,8 @@ import httpx
 from ksef_client.clients.invoices import AsyncInvoicesClient, InvoicesClient
 from ksef_client.http import HttpResponse
 from ksef_client.services import workflows
-from ksef_client.services.crypto import (
-    encrypt_aes_cbc_pkcs7,
-    generate_iv,
-    generate_symmetric_key,
-)
+from ksef_client.services.crypto import encrypt_aes_cbc_pkcs7, generate_iv, generate_symmetric_key
+from ksef_client.services.xades import XadesKeyPair
 from ksef_client.utils.zip_utils import build_zip
 from tests.helpers import generate_rsa_cert
 
@@ -197,10 +194,34 @@ class WorkflowsTests(unittest.TestCase):
             )
         self.assertEqual(result.authentication_token, "auth")
 
+        with patch("ksef_client.services.xades.sign_xades_enveloped", return_value="signed"):
+            coord_pair = workflows.AuthCoordinator(StubAuthClient([100, 200]))
+            result_pair = coord_pair.authenticate_with_xades_key_pair(
+                key_pair=XadesKeyPair(
+                    certificate_pem=rsa_cert.certificate_pem,
+                    private_key_pem=rsa_cert.private_key_pem,
+                ),
+                context_identifier_type="nip",
+                context_identifier_value="123",
+                subject_identifier_type="certificateSubject",
+                poll_interval_seconds=0,
+                max_attempts=2,
+            )
+        self.assertEqual(result_pair.authentication_token, "auth")
+
         auth_error = StubAuthClient([400])
         coord_error = workflows.AuthCoordinator(auth_error)
         with self.assertRaises(RuntimeError):
             coord_error._poll_auth_status("ref", "auth", 0, 1)
+
+        class StubAuthClientWithDetails(StubAuthClient):
+            def get_auth_status(self, reference_number, authentication_token):
+                return {"status": {"code": 400, "description": "desc", "details": ["d1", "d2"]}}
+
+        coord_details = workflows.AuthCoordinator(StubAuthClientWithDetails([400]))
+        with self.assertRaises(RuntimeError) as exc:
+            coord_details._poll_auth_status("ref", "auth", 0, 1)
+        self.assertIn("Details: d1, d2", str(exc.exception))
 
         auth_timeout = StubAuthClient([100, 100])
         coord_timeout = workflows.AuthCoordinator(auth_timeout)
@@ -220,6 +241,44 @@ class WorkflowsTests(unittest.TestCase):
                 max_attempts=1,
             )
         self.assertEqual(result.tokens.access_token.token, "acc")
+
+        class StubAuthClientNoneXades(StubAuthClient):
+            def submit_xades_auth_request(self, signed_xml: str, verify_certificate_chain=None):
+                return None
+
+        rsa_cert = generate_rsa_cert()
+        coord_none_xades = workflows.AuthCoordinator(StubAuthClientNoneXades([200]))
+        with (
+            patch("ksef_client.services.xades.sign_xades_enveloped", return_value="signed"),
+            self.assertRaises(RuntimeError),
+        ):
+            coord_none_xades.authenticate_with_xades(
+                context_identifier_type="nip",
+                context_identifier_value="123",
+                subject_identifier_type="certificateSubject",
+                certificate_pem=rsa_cert.certificate_pem,
+                private_key_pem=rsa_cert.private_key_pem,
+                poll_interval_seconds=0,
+                max_attempts=1,
+            )
+
+        class StubAuthClientNoneToken(StubAuthClient):
+            def submit_ksef_token_auth(self, payload):
+                return None
+
+        coord_none_token = workflows.AuthCoordinator(StubAuthClientNoneToken([200]))
+        with (
+            patch("ksef_client.services.workflows.encrypt_ksef_token", return_value="enc"),
+            self.assertRaises(RuntimeError),
+        ):
+            coord_none_token.authenticate_with_ksef_token(
+                token="token",
+                public_certificate="cert",
+                context_identifier_type="nip",
+                context_identifier_value="123",
+                poll_interval_seconds=0,
+                max_attempts=1,
+            )
 
     def test_online_session_workflow(self):
         sessions = StubSessionsClient()
@@ -329,15 +388,78 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(result_xades.authentication_token, "auth")
 
+        with patch("ksef_client.services.xades.sign_xades_enveloped", return_value="signed"):
+            coord_xades_pair = workflows.AsyncAuthCoordinator(StubAsyncAuthClient([200]))
+            result_xades_pair = await coord_xades_pair.authenticate_with_xades_key_pair(
+                key_pair=XadesKeyPair(
+                    certificate_pem=rsa_cert.certificate_pem,
+                    private_key_pem=rsa_cert.private_key_pem,
+                ),
+                context_identifier_type="nip",
+                context_identifier_value="123",
+                subject_identifier_type="certificateSubject",
+                poll_interval_seconds=0,
+                max_attempts=1,
+            )
+        self.assertEqual(result_xades_pair.authentication_token, "auth")
+
         auth_error = StubAsyncAuthClient([400])
         coord_error = workflows.AsyncAuthCoordinator(auth_error)
         with self.assertRaises(RuntimeError):
-            await coord_error._poll_auth_status("ref", "auth", 0, 1)
+            await coord_error._poll_auth_status("ref", "auth", 0, 1)      
+
+        class StubAsyncAuthClientWithDetails(StubAsyncAuthClient):
+            async def get_auth_status(self, reference_number, authentication_token):
+                return {"status": {"code": 400, "description": "desc", "details": ["d1", "d2"]}}
+
+        coord_details = workflows.AsyncAuthCoordinator(StubAsyncAuthClientWithDetails([400]))
+        with self.assertRaises(RuntimeError) as exc:
+            await coord_details._poll_auth_status("ref", "auth", 0, 1)
+        self.assertIn("Details: d1, d2", str(exc.exception))
 
         auth_timeout = StubAsyncAuthClient([100, 100])
-        coord_timeout = workflows.AsyncAuthCoordinator(auth_timeout)
+        coord_timeout = workflows.AsyncAuthCoordinator(auth_timeout)      
         with patch("asyncio.sleep", return_value=None), self.assertRaises(TimeoutError):
-            await coord_timeout._poll_auth_status("ref", "auth", 0, 2)
+            await coord_timeout._poll_auth_status("ref", "auth", 0, 2)    
+
+        class StubAsyncAuthClientNoneXades(StubAsyncAuthClient):
+            async def submit_xades_auth_request(
+                self, signed_xml: str, verify_certificate_chain=None
+            ):
+                return None
+
+        coord_none_xades = workflows.AsyncAuthCoordinator(StubAsyncAuthClientNoneXades([200]))
+        with (
+            patch("ksef_client.services.xades.sign_xades_enveloped", return_value="signed"),
+            self.assertRaises(RuntimeError),
+        ):
+            await coord_none_xades.authenticate_with_xades(
+                context_identifier_type="nip",
+                context_identifier_value="123",
+                subject_identifier_type="certificateSubject",
+                certificate_pem=rsa_cert.certificate_pem,
+                private_key_pem=rsa_cert.private_key_pem,
+                poll_interval_seconds=0,
+                max_attempts=1,
+            )
+
+        class StubAsyncAuthClientNoneToken(StubAsyncAuthClient):
+            async def submit_ksef_token_auth(self, payload):
+                return None
+
+        coord_none_token = workflows.AsyncAuthCoordinator(StubAsyncAuthClientNoneToken([200]))
+        with (
+            patch("ksef_client.services.workflows.encrypt_ksef_token", return_value="enc"),
+            self.assertRaises(RuntimeError),
+        ):
+            await coord_none_token.authenticate_with_ksef_token(
+                token="token",
+                public_certificate="cert",
+                context_identifier_type="nip",
+                context_identifier_value="123",
+                poll_interval_seconds=0,
+                max_attempts=1,
+            )
 
     async def test_async_online_and_batch(self):
         sessions = StubAsyncSessionsClient()
