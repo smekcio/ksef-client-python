@@ -1,8 +1,8 @@
 # KSeF Client (Python)
 
 [![CI](https://github.com/smekcio/ksef-client-python/actions/workflows/python-application.yml/badge.svg)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-application.yml)
-![PyPI - License](https://img.shields.io/pypi/l/ksef-client)
-![PyPI - Version](https://img.shields.io/pypi/v/ksef-client)
+[![PyPI - License](https://img.shields.io/pypi/l/ksef-client)](https://github.com/smekcio/ksef-client-python/blob/main/LICENSE)
+[![PyPI - Version](https://img.shields.io/pypi/v/ksef-client)](https://pypi.org/project/ksef-client/)
 
 
 
