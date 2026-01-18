@@ -33,6 +33,7 @@ jobs:
           python -m pip install build twine
 
       - name: Verify version matches tag
+        if: github.event_name != 'workflow_dispatch'
         run: |
           python - << 'PY'
           import tomllib
