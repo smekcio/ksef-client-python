@@ -1,0 +1,51 @@
+name: Validate API Compliance
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-models:
+    runs-on: ubuntu-latest
+
+    env:
+      OPENAPI_URL: https://raw.githubusercontent.com/CIRFMF/ksef-docs/main/open-api.json
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download official open-api.json
+        run: |
+          curl -L -o open-api.json "${{ env.OPENAPI_URL }}"
+
+      - name: Generate models
+        run: |
+          # Use the downloaded open-api.json as input
+          python tools/generate_openapi_models.py --input open-api.json --output src/ksef_client/openapi_models.py
+
+      - name: Verify no changes in models
+        run: |
+          # Check if the generated file differs from the committed file
+          if ! git diff --exit-code src/ksef_client/openapi_models.py; then
+            echo "::group::Diff"
+            git diff src/ksef_client/openapi_models.py
+            echo "::endgroup::"
+            echo "::error::Generated models do not match the official open-api.json from ${{ env.OPENAPI_URL }}. Please run generation locally with the latest spec and commit changes."
+            exit 1
+          fi
+
+      - name: Check API Coverage
+        run: |
+          # Verify that all OpenAPI endpoints are implemented in the client code
+          python tools/check_coverage.py --openapi open-api.json --src src/ksef_client/clients
