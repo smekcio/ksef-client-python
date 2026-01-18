@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-
 def normalize_path(path: str) -> str:
     # Replace {param} with {} to compare structure
     return re.sub(r"{[^}]+}", "{}", path)
