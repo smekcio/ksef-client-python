@@ -156,6 +156,7 @@ def generate_models(input_path: Path, output_path: Path) -> None:
             alias_names.append(name)
 
     lines: list[str] = [
+        "# ruff: noqa",
         "# Generated from ksef-docs/open-api.json. Do not edit manually.",
         "from __future__ import annotations",
         "",
@@ -221,7 +222,7 @@ def generate_models(input_path: Path, output_path: Path) -> None:
         '            raise ValueError("data is None")',
         "        type_map = _get_type_map(cls)",
         "        kwargs: dict[str, Any] = {}",
-        "        for model_field in fields(cls):",
+        "        for model_field in fields(cls):  # type: ignore",
         '            json_key = model_field.metadata.get("json_key", model_field.name)',
         "            if json_key in data:",
         "                type_hint = type_map.get(model_field.name, Any)",
@@ -230,7 +231,7 @@ def generate_models(input_path: Path, output_path: Path) -> None:
         "",
         "    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:",
         "        result: dict[str, Any] = {}",
-        "        for model_field in fields(self):",
+        "        for model_field in fields(self):  # type: ignore",
         '            json_key = model_field.metadata.get("json_key", model_field.name)',
         "            value = getattr(self, model_field.name)",
         "            if omit_none and value is None:",
