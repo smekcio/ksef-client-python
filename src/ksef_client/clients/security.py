@@ -9,5 +9,7 @@ class SecurityClient(BaseApiClient):
     def get_public_key_certificates(self) -> Any:
         return self._request_json("GET", "/security/public-key-certificates", skip_auth=True)
 
+
+class AsyncSecurityClient(AsyncBaseApiClient):
     async def get_public_key_certificates(self) -> Any:
         return await self._request_json("GET", "/security/public-key-certificates", skip_auth=True)

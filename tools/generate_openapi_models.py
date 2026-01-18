@@ -252,7 +252,8 @@ def generate_models(input_path: Path, output_path: Path) -> None:
         lines.extend(_generate_object(name, schemas[name]))
         lines.append("")
 
-    output_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    with output_path.open("w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines).rstrip() + "\n")
 
 
 def main() -> None:
