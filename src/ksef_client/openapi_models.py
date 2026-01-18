@@ -1,5 +1,5 @@
-# Generated from ksef-docs/open-api.json. Do not edit manually.
 # ruff: noqa
+# Generated from ksef-docs/open-api.json. Do not edit manually.
 from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, field, fields
@@ -64,7 +64,7 @@ class OpenApiModel:
             raise ValueError("data is None")
         type_map = _get_type_map(cls)
         kwargs: dict[str, Any] = {}
-        for model_field in fields(cls):  # type: ignore[arg-type]
+        for model_field in fields(cls):  # type: ignore
             json_key = model_field.metadata.get("json_key", model_field.name)
             if json_key in data:
                 type_hint = type_map.get(model_field.name, Any)
@@ -73,7 +73,7 @@ class OpenApiModel:
 
     def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
         result: dict[str, Any] = {}
-        for model_field in fields(self):  # type: ignore[arg-type]
+        for model_field in fields(self):  # type: ignore
             json_key = model_field.metadata.get("json_key", model_field.name)
             value = getattr(self, model_field.name)
             if omit_none and value is None:
