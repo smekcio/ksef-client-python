@@ -67,6 +67,7 @@ class CertificatesClient(BaseApiClient):
             f"/certificates/{certificate_serial_number}/revoke",
             json=request_payload,
             access_token=access_token,
+            expected_status={204},
         )
 
 
@@ -134,4 +135,5 @@ class AsyncCertificatesClient(AsyncBaseApiClient):
             f"/certificates/{certificate_serial_number}/revoke",
             json=request_payload,
             access_token=access_token,
+            expected_status={204},
         )

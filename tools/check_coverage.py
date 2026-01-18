@@ -24,6 +24,8 @@ class EndpointSpec:
     normalized_path: str
     path_params: set[str]
     query_params: set[str]
+    deprecated: bool
+    success_codes: set[int]
 
 
 @dataclass
@@ -35,6 +37,7 @@ class ImplementedEndpoint:
     detected_path_vars: set[str]
     # Parameters passed to params={} argument
     detected_query_vars: set[str]
+    expected_status: set[int]
     file_path: str
     line_no: int
 
@@ -59,12 +62,20 @@ def get_openapi_specs(openapi_path: Path) -> dict[tuple[str, str], EndpointSpec]
                 if param.get("in") == "query":
                     query_params.add(param["name"])
 
+            deprecated = details.get("deprecated", False)
+            success_codes = set()
+            for code_str in details.get("responses", {}):
+                if code_str.startswith("2") and code_str.isdigit():
+                    success_codes.add(int(code_str))
+
             spec = EndpointSpec(
                 method=method,
                 path=path,
                 normalized_path=norm_path,
                 path_params=path_params,
                 query_params=query_params,
+                deprecated=deprecated,
+                success_codes=success_codes,
             )
             specs[(method, norm_path)] = spec
     return specs
@@ -107,6 +118,7 @@ class AdvancedClientVisitor(ast.NodeVisitor):
 
         # Extract Query Params
         detected_query_vars = self._extract_query_params(node)
+        expected_status = self._extract_expected_status(node)
 
         self.found_endpoints.append(
             ImplementedEndpoint(
@@ -115,6 +127,7 @@ class AdvancedClientVisitor(ast.NodeVisitor):
                 normalized_path=normalized_path,
                 detected_path_vars=detected_path_vars,
                 detected_query_vars=detected_query_vars,
+                expected_status=expected_status,
                 file_path=self.filename,
                 line_no=node.lineno,
             )
@@ -167,6 +180,45 @@ class AdvancedClientVisitor(ast.NodeVisitor):
         # If params passed as variable (e.g. params=page_params), we assume best effort or specific variable name tracking
         # For now, we only statically analyze inline dict definitions or assume manual review if dynamic
         return found_keys
+
+    def _extract_expected_status(self, node: ast.Call) -> set[int]:
+        # Default is {200} if not specified
+        default_status = {200}
+        
+        status_keywords = [kw for kw in node.keywords if kw.arg == "expected_status"]
+        if not status_keywords:
+            return default_status
+
+        val = status_keywords[0].value
+        
+        # Parse set: {200, 201}
+        if isinstance(val, ast.Set):
+            result = set()
+            for el in val.elts:
+                if isinstance(el, ast.Constant) and isinstance(el.value, int):
+                    result.add(el.value)
+            return result
+        
+        # Parse list/tuple: [200, 202]
+        if isinstance(val, (ast.List, ast.Tuple)):
+            result = set()
+            for el in val.elts:
+                if isinstance(el, ast.Constant) and isinstance(el.value, int):
+                    result.add(el.value)
+            return result
+            
+        # Parse constant: 200 (if passed as single int, though type hint says set)
+        if isinstance(val, ast.Constant) and isinstance(val.value, int):
+            return {val.value}
+
+        # If passed as None, treat as default check (usually 200)
+        if isinstance(val, ast.Constant) and val.value is None:
+            return default_status
+            
+        # If dynamic variable, we can't infer easily -> return empty set or default?
+        # Let's return default to avoid noise, or empty to skip check.
+        # Returning empty set effectively disables the check for this call.
+        return set()
 
 
 def get_implemented_endpoints_deep(source_dir: Path) -> list[ImplementedEndpoint]:
@@ -267,6 +319,23 @@ def main():
                     f"  [WARN] Unknown query param '{query_key}' used in code for {impl.method} {spec.path}"
                 )
                 print(f"     Allowed: {spec.query_params} at {impl.file_path}:{impl.line_no}")
+
+        # Check Deprecated
+        if spec.deprecated:
+             print(f"  [WARN] Endpoint is DEPRECATED: {impl.method} {spec.path} at {impl.file_path}:{impl.line_no}")
+
+        # Check Status Codes
+        # We warn if OpenAPI declares success codes that are NOT covered by expect_status
+        # Example: API returns 201, code expects {200} -> Mismatch
+        if impl.expected_status and spec.success_codes:
+            # We want expected_status to match success_codes exactly? Or be a superset?
+            # Usually: expected_status should contain ALL success_codes returned by API.
+            # If API returns 201 and we only handle 200, client might throw error.
+            missing_codes = spec.success_codes - impl.expected_status
+            if missing_codes:
+                 print(f"  [WARN] Status code mismatch for {impl.method} {spec.path}")
+                 print(f"     OpenAPI returns: {spec.success_codes}")
+                 print(f"     Code expects:    {impl.expected_status}")
 
     if issues_found:
         print("\nCoverage check FAILED.")
