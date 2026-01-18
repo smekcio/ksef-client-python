@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/smekcio/ksef-client-python/compare/v0.3.0...v0.3.1) (2026-01-18)
+
+
+### Bug Fixes
+
+* **ci:** Trigger PyPI publish on release published event ([9d0223d](https://github.com/smekcio/ksef-client-python/commit/9d0223da78bbb6a2678d12d7762ccf0e3dfded76))
+* **ci:** Trigger PyPI publish on release published event ([1c843a1](https://github.com/smekcio/ksef-client-python/commit/1c843a14fc8356b25a2e62c53786759797537e1c))
+
 ## [0.3.0](https://github.com/smekcio/ksef-client-python/compare/v0.2.0...v0.3.0) (2026-01-18)
 
 
