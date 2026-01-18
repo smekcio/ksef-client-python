@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/smekcio/ksef-client-python/compare/v0.3.1...v0.3.2) (2026-01-18)
+
+
+### Bug Fixes
+
+* **ci:** Allow manual PyPI publish from main branch without tag verif… ([4d74384](https://github.com/smekcio/ksef-client-python/commit/4d7438467aa5124842be69eda694eb76b0329826))
+* **ci:** Allow manual PyPI publish from main branch without tag verification ([2f179c5](https://github.com/smekcio/ksef-client-python/commit/2f179c53c372a1747415cc5707df70497cdab902))
+
 ## [0.3.1](https://github.com/smekcio/ksef-client-python/compare/v0.3.0...v0.3.1) (2026-01-18)
 
 
