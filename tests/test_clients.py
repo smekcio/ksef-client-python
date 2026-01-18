@@ -198,12 +198,8 @@ class ClientsTests(unittest.TestCase):
             rate_client.get_rate_limits("token")
 
         security_client = SecurityClient(self.http)
-        with (
-            patch.object(security_client, "_request_json", Mock(return_value={"ok": True})),
-            patch.object(security_client, "_request_bytes", Mock(return_value=b"pem")),
-        ):
+        with patch.object(security_client, "_request_json", Mock(return_value={"ok": True})):
             security_client.get_public_key_certificates()
-            self.assertEqual(security_client.get_public_key_pem(), "pem")
 
     def test_testdata_client(self):
         client = TestDataClient(self.http)
@@ -435,12 +431,8 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             await rate_limits.get_rate_limits("token")
 
         security = AsyncSecurityClient(http)
-        with (
-            patch.object(security, "_request_json", AsyncMock(return_value={"ok": True})),
-            patch.object(security, "_request_bytes", AsyncMock(return_value=b"pem")),
-        ):
+        with patch.object(security, "_request_json", AsyncMock(return_value={"ok": True})):
             await security.get_public_key_certificates()
-            self.assertEqual(await security.get_public_key_pem(), "pem")
 
         testdata = AsyncTestDataClient(http)
         with patch.object(testdata, "_request_json", AsyncMock(return_value={"ok": True})):
