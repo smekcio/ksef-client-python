@@ -153,7 +153,12 @@ session_reference_number = BatchSessionWorkflow(client.sessions, client.http_cli
 
 ## 🧪 Testy
 
-Testy uruchamiane są przez `pytest`. W CI wykonywane są również statyczne kontrole jakości (`ruff`, `mypy`) oraz weryfikacja pokrycia kodu.
+[![E2E TEST token](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg?branch=main)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=branch%3Amain+job%3A%22E2E+TEST+%28token%29%22)
+[![E2E TEST cert](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg?branch=main)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=branch%3Amain+job%3A%22E2E+TEST+%28xades%29%22)
+[![E2E DEMO token](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg?branch=main)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=branch%3Amain+job%3A%22E2E+DEMO+%28token%29%22)
+[![E2E DEMO cert](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg?branch=main)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=branch%3Amain+job%3A%22E2E+DEMO+%28xades%29%22)
+
+Testy uruchamiane są przez `pytest`.
 
 Instalacja zależności testowych:
 
@@ -214,40 +219,6 @@ KSEF_TEST_XADES_PRIVATE_KEY_PEM="$(cat key.pem)" \
 KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD=... \
 pytest tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_xades
 ```
-
-W GitHub Actions testy E2E uruchamia workflow:
-- `.github/workflows/python-e2e.yml`
-
-Workflow uruchamia się:
-- na `push` (dowolny branch),
-- na `pull_request` do `main`,
-- ręcznie przez `workflow_dispatch`.
-
-Repozytoryjne sekrety do ustawienia:
-- `KSEF_TEST_TOKEN`, `KSEF_TEST_CONTEXT_TYPE`, `KSEF_TEST_CONTEXT_VALUE` (token TEST)
-- `KSEF_DEMO_TOKEN`, `KSEF_DEMO_CONTEXT_TYPE`, `KSEF_DEMO_CONTEXT_VALUE` (token DEMO)
-- `KSEF_TEST_XADES_CERT_CRT` albo `KSEF_TEST_XADES_CERT_CRT_B64` (XAdES TEST)
-- `KSEF_TEST_XADES_CERT_PEM` albo `KSEF_TEST_XADES_CERT_PEM_B64` (XAdES TEST, kompatybilność wsteczna)
-- `KSEF_TEST_XADES_PRIVATE_KEY_PEM` albo `KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64` (XAdES TEST)
-- `KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD` opcjonalnie, wymagany dla klucza zaszyfrowanego
-- `KSEF_TEST_XADES_SUBJECT_IDENTIFIER_TYPE` opcjonalnie, domyślnie `certificateSubject`
-- `KSEF_DEMO_XADES_CERT_CRT` albo `KSEF_DEMO_XADES_CERT_CRT_B64` (XAdES DEMO)
-- `KSEF_DEMO_XADES_CERT_PEM` albo `KSEF_DEMO_XADES_CERT_PEM_B64` (XAdES DEMO, kompatybilność wsteczna)
-- `KSEF_DEMO_XADES_PRIVATE_KEY_PEM` albo `KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64` (XAdES DEMO)
-- `KSEF_DEMO_XADES_PRIVATE_KEY_PASSWORD` opcjonalnie, wymagany dla klucza zaszyfrowanego
-- `KSEF_DEMO_XADES_SUBJECT_IDENTIFIER_TYPE` opcjonalnie, domyślnie `certificateSubject`
-
-Przygotowanie sekretów CRT/PEM w wariancie Base64 (jedna linia):
-
-```bash
-base64 < cert.crt | tr -d '\n'
-base64 < key.pem | tr -d '\n'
-```
-
-Anonimizacja w CI:
-- dane uwierzytelniające są pobierane wyłącznie z `GitHub Secrets`,
-- wartości sekretów są maskowane w logach (`::add-mask::`),
-- testy nie logują tokenów, certyfikatów ani identyfikatorów kontekstu.
 
 ## 🤝 Kontrybucja
 
