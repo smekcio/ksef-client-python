@@ -1,0 +1,335 @@
+name: Python E2E
+
+on:
+  push:
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-test-token:
+    name: E2E TEST (token)
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Validate required secrets
+        shell: bash
+        env:
+          KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
+          KSEF_TEST_CONTEXT_TYPE: ${{ secrets.KSEF_TEST_CONTEXT_TYPE }}
+          KSEF_TEST_CONTEXT_VALUE: ${{ secrets.KSEF_TEST_CONTEXT_VALUE }}
+        run: |
+          set +x
+          missing=0
+          for name in KSEF_TEST_TOKEN KSEF_TEST_CONTEXT_TYPE KSEF_TEST_CONTEXT_VALUE; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret: ${name}"
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Mask sensitive values
+        shell: bash
+        env:
+          KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
+          KSEF_TEST_CONTEXT_TYPE: ${{ secrets.KSEF_TEST_CONTEXT_TYPE }}
+          KSEF_TEST_CONTEXT_VALUE: ${{ secrets.KSEF_TEST_CONTEXT_VALUE }}
+        run: |
+          set +x
+          for value in "${KSEF_TEST_TOKEN}" "${KSEF_TEST_CONTEXT_TYPE}" "${KSEF_TEST_CONTEXT_VALUE}"; do
+            if [ -n "${value}" ]; then
+              echo "::add-mask::${value}"
+            fi
+          done
+
+      - name: Run E2E TEST (token)
+        env:
+          KSEF_E2E: "1"
+          KSEF_TEST_BASE_URL: https://api-test.ksef.mf.gov.pl
+          KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
+          KSEF_TEST_CONTEXT_TYPE: ${{ secrets.KSEF_TEST_CONTEXT_TYPE }}
+          KSEF_TEST_CONTEXT_VALUE: ${{ secrets.KSEF_TEST_CONTEXT_VALUE }}
+          KSEF_TEST_SUBJECT_TYPE: Subject1
+        run: |
+          python -m pytest -q --maxfail=1 --disable-warnings \
+            tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_token
+
+  e2e-test-xades:
+    name: E2E TEST (xades)
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e ".[xml]"
+
+      - name: Validate required secrets
+        shell: bash
+        env:
+          KSEF_TEST_CONTEXT_TYPE: ${{ secrets.KSEF_TEST_CONTEXT_TYPE }}
+          KSEF_TEST_CONTEXT_VALUE: ${{ secrets.KSEF_TEST_CONTEXT_VALUE }}
+          KSEF_TEST_XADES_CERT_CRT: ${{ secrets.KSEF_TEST_XADES_CERT_CRT }}
+          KSEF_TEST_XADES_CERT_CRT_B64: ${{ secrets.KSEF_TEST_XADES_CERT_CRT_B64 }}
+          KSEF_TEST_XADES_PRIVATE_KEY_PEM: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM }}
+          KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64 }}
+          KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set +x
+          missing=0
+          for name in KSEF_TEST_CONTEXT_TYPE KSEF_TEST_CONTEXT_VALUE; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret: ${name}"
+              missing=1
+            fi
+          done
+          if [ -z "${KSEF_TEST_XADES_CERT_CRT}" ] && [ -z "${KSEF_TEST_XADES_CERT_CRT_B64}" ]; then
+            echo "::error::Missing required secret: KSEF_TEST_XADES_CERT_CRT or KSEF_TEST_XADES_CERT_CRT_B64"
+            missing=1
+          fi
+          if [ -z "${KSEF_TEST_XADES_PRIVATE_KEY_PEM}" ] && [ -z "${KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64}" ]; then
+            echo "::error::Missing required secret: KSEF_TEST_XADES_PRIVATE_KEY_PEM or KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64"
+            missing=1
+          fi
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Mask sensitive values
+        shell: bash
+        env:
+          KSEF_TEST_CONTEXT_TYPE: ${{ secrets.KSEF_TEST_CONTEXT_TYPE }}
+          KSEF_TEST_CONTEXT_VALUE: ${{ secrets.KSEF_TEST_CONTEXT_VALUE }}
+          KSEF_TEST_XADES_CERT_CRT: ${{ secrets.KSEF_TEST_XADES_CERT_CRT }}
+          KSEF_TEST_XADES_CERT_CRT_B64: ${{ secrets.KSEF_TEST_XADES_CERT_CRT_B64 }}
+          KSEF_TEST_XADES_PRIVATE_KEY_PEM: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM }}
+          KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64 }}
+          KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set +x
+          for value in "${KSEF_TEST_CONTEXT_TYPE}" "${KSEF_TEST_CONTEXT_VALUE}" "${KSEF_TEST_XADES_CERT_CRT}" "${KSEF_TEST_XADES_CERT_CRT_B64}" "${KSEF_TEST_XADES_PRIVATE_KEY_PEM}" "${KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64}" "${KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD}"; do
+            if [ -n "${value}" ]; then
+              echo "::add-mask::${value}"
+            fi
+          done
+
+      - name: Run E2E TEST (xades)
+        env:
+          KSEF_E2E: "1"
+          KSEF_TEST_BASE_URL: https://api-test.ksef.mf.gov.pl
+          KSEF_TEST_CONTEXT_TYPE: ${{ secrets.KSEF_TEST_CONTEXT_TYPE }}
+          KSEF_TEST_CONTEXT_VALUE: ${{ secrets.KSEF_TEST_CONTEXT_VALUE }}
+          KSEF_TEST_SUBJECT_TYPE: Subject1
+          KSEF_TEST_XADES_CERT_CRT: ${{ secrets.KSEF_TEST_XADES_CERT_CRT }}
+          KSEF_TEST_XADES_CERT_CRT_B64: ${{ secrets.KSEF_TEST_XADES_CERT_CRT_B64 }}
+          KSEF_TEST_XADES_PRIVATE_KEY_PEM: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM }}
+          KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64 }}
+          KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD }}
+          KSEF_TEST_XADES_SUBJECT_IDENTIFIER_TYPE: certificateSubject
+        run: |
+          python -m pytest -q --maxfail=1 --disable-warnings \
+            tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_xades
+
+  e2e-demo-token:
+    name: E2E DEMO (token)
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Validate required secrets
+        shell: bash
+        env:
+          KSEF_DEMO_TOKEN: ${{ secrets.KSEF_DEMO_TOKEN }}
+          KSEF_DEMO_CONTEXT_TYPE: ${{ secrets.KSEF_DEMO_CONTEXT_TYPE }}
+          KSEF_DEMO_CONTEXT_VALUE: ${{ secrets.KSEF_DEMO_CONTEXT_VALUE }}
+        run: |
+          set +x
+          missing=0
+          for name in KSEF_DEMO_TOKEN KSEF_DEMO_CONTEXT_TYPE KSEF_DEMO_CONTEXT_VALUE; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret: ${name}"
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Mask sensitive values
+        shell: bash
+        env:
+          KSEF_DEMO_TOKEN: ${{ secrets.KSEF_DEMO_TOKEN }}
+          KSEF_DEMO_CONTEXT_TYPE: ${{ secrets.KSEF_DEMO_CONTEXT_TYPE }}
+          KSEF_DEMO_CONTEXT_VALUE: ${{ secrets.KSEF_DEMO_CONTEXT_VALUE }}
+        run: |
+          set +x
+          for value in "${KSEF_DEMO_TOKEN}" "${KSEF_DEMO_CONTEXT_TYPE}" "${KSEF_DEMO_CONTEXT_VALUE}"; do
+            if [ -n "${value}" ]; then
+              echo "::add-mask::${value}"
+            fi
+          done
+
+      - name: Run E2E DEMO (token)
+        env:
+          KSEF_E2E: "1"
+          KSEF_DEMO_BASE_URL: https://api-demo.ksef.mf.gov.pl
+          KSEF_DEMO_TOKEN: ${{ secrets.KSEF_DEMO_TOKEN }}
+          KSEF_DEMO_CONTEXT_TYPE: ${{ secrets.KSEF_DEMO_CONTEXT_TYPE }}
+          KSEF_DEMO_CONTEXT_VALUE: ${{ secrets.KSEF_DEMO_CONTEXT_VALUE }}
+          KSEF_DEMO_SUBJECT_TYPE: Subject1
+        run: |
+          python -m pytest -q --maxfail=1 --disable-warnings \
+            tests/test_e2e_token_flows.py::test_e2e_demo_environment_full_flow_token
+
+  e2e-demo-xades:
+    name: E2E DEMO (xades)
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e ".[xml]"
+
+      - name: Validate required secrets
+        shell: bash
+        env:
+          KSEF_DEMO_CONTEXT_TYPE: ${{ secrets.KSEF_DEMO_CONTEXT_TYPE }}
+          KSEF_DEMO_CONTEXT_VALUE: ${{ secrets.KSEF_DEMO_CONTEXT_VALUE }}
+          KSEF_DEMO_XADES_CERT_CRT: ${{ secrets.KSEF_DEMO_XADES_CERT_CRT }}
+          KSEF_DEMO_XADES_CERT_CRT_B64: ${{ secrets.KSEF_DEMO_XADES_CERT_CRT_B64 }}
+          KSEF_DEMO_XADES_PRIVATE_KEY_PEM: ${{ secrets.KSEF_DEMO_XADES_PRIVATE_KEY_PEM }}
+          KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64: ${{ secrets.KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64 }}
+          KSEF_DEMO_XADES_PRIVATE_KEY_PASSWORD: ${{ secrets.KSEF_DEMO_XADES_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set +x
+          missing=0
+          for name in KSEF_DEMO_CONTEXT_TYPE KSEF_DEMO_CONTEXT_VALUE; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret: ${name}"
+              missing=1
+            fi
+          done
+          if [ -z "${KSEF_DEMO_XADES_CERT_CRT}" ] && [ -z "${KSEF_DEMO_XADES_CERT_CRT_B64}" ]; then
+            echo "::error::Missing required secret: KSEF_DEMO_XADES_CERT_CRT or KSEF_DEMO_XADES_CERT_CRT_B64"
+            missing=1
+          fi
+          if [ -z "${KSEF_DEMO_XADES_PRIVATE_KEY_PEM}" ] && [ -z "${KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64}" ]; then
+            echo "::error::Missing required secret: KSEF_DEMO_XADES_PRIVATE_KEY_PEM or KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64"
+            missing=1
+          fi
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Mask sensitive values
+        shell: bash
+        env:
+          KSEF_DEMO_CONTEXT_TYPE: ${{ secrets.KSEF_DEMO_CONTEXT_TYPE }}
+          KSEF_DEMO_CONTEXT_VALUE: ${{ secrets.KSEF_DEMO_CONTEXT_VALUE }}
+          KSEF_DEMO_XADES_CERT_CRT: ${{ secrets.KSEF_DEMO_XADES_CERT_CRT }}
+          KSEF_DEMO_XADES_CERT_CRT_B64: ${{ secrets.KSEF_DEMO_XADES_CERT_CRT_B64 }}
+          KSEF_DEMO_XADES_PRIVATE_KEY_PEM: ${{ secrets.KSEF_DEMO_XADES_PRIVATE_KEY_PEM }}
+          KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64: ${{ secrets.KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64 }}
+          KSEF_DEMO_XADES_PRIVATE_KEY_PASSWORD: ${{ secrets.KSEF_DEMO_XADES_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set +x
+          for value in "${KSEF_DEMO_CONTEXT_TYPE}" "${KSEF_DEMO_CONTEXT_VALUE}" "${KSEF_DEMO_XADES_CERT_CRT}" "${KSEF_DEMO_XADES_CERT_CRT_B64}" "${KSEF_DEMO_XADES_PRIVATE_KEY_PEM}" "${KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64}" "${KSEF_DEMO_XADES_PRIVATE_KEY_PASSWORD}"; do
+            if [ -n "${value}" ]; then
+              echo "::add-mask::${value}"
+            fi
+          done
+
+      - name: Run E2E DEMO (xades)
+        env:
+          KSEF_E2E: "1"
+          KSEF_DEMO_BASE_URL: https://api-demo.ksef.mf.gov.pl
+          KSEF_DEMO_CONTEXT_TYPE: ${{ secrets.KSEF_DEMO_CONTEXT_TYPE }}
+          KSEF_DEMO_CONTEXT_VALUE: ${{ secrets.KSEF_DEMO_CONTEXT_VALUE }}
+          KSEF_DEMO_SUBJECT_TYPE: Subject1
+          KSEF_DEMO_XADES_CERT_CRT: ${{ secrets.KSEF_DEMO_XADES_CERT_CRT }}
+          KSEF_DEMO_XADES_CERT_CRT_B64: ${{ secrets.KSEF_DEMO_XADES_CERT_CRT_B64 }}
+          KSEF_DEMO_XADES_PRIVATE_KEY_PEM: ${{ secrets.KSEF_DEMO_XADES_PRIVATE_KEY_PEM }}
+          KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64: ${{ secrets.KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64 }}
+          KSEF_DEMO_XADES_PRIVATE_KEY_PASSWORD: ${{ secrets.KSEF_DEMO_XADES_PRIVATE_KEY_PASSWORD }}
+          KSEF_DEMO_XADES_SUBJECT_IDENTIFIER_TYPE: certificateSubject
+        run: |
+          python -m pytest -q --maxfail=1 --disable-warnings \
+            tests/test_e2e_token_flows.py::test_e2e_demo_environment_full_flow_xades
