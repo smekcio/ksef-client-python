@@ -153,7 +153,10 @@ session_reference_number = BatchSessionWorkflow(client.sessions, client.http_cli
 
 ## 🧪 Testy
 
-[![Python E2E](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml)
+[![Python E2E TEST token](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=job%3A%22E2E+TEST+%28token%29%22)
+[![Python E2E TEST cert](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=job%3A%22E2E+TEST+%28xades%29%22)
+[![Python E2E DEMO token](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=job%3A%22E2E+DEMO+%28token%29%22)
+[![Python E2E DEMO cert](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=job%3A%22E2E+DEMO+%28xades%29%22)
 
 Testy uruchamiane są przez `pytest`.
 
