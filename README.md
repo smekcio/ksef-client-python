@@ -209,8 +209,9 @@ Lokalne uruchomienie (XAdES, TEST):
 KSEF_E2E=1 \
 KSEF_TEST_CONTEXT_TYPE=nip \
 KSEF_TEST_CONTEXT_VALUE=... \
-KSEF_TEST_XADES_CERT_PEM="$(cat cert.pem)" \
+KSEF_TEST_XADES_CERT_CRT="$(cat cert.crt)" \
 KSEF_TEST_XADES_PRIVATE_KEY_PEM="$(cat key.pem)" \
+KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD=... \
 pytest tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_xades
 ```
 
@@ -225,17 +226,21 @@ Workflow uruchamia się:
 Repozytoryjne sekrety do ustawienia:
 - `KSEF_TEST_TOKEN`, `KSEF_TEST_CONTEXT_TYPE`, `KSEF_TEST_CONTEXT_VALUE` (token TEST)
 - `KSEF_DEMO_TOKEN`, `KSEF_DEMO_CONTEXT_TYPE`, `KSEF_DEMO_CONTEXT_VALUE` (token DEMO)
-- `KSEF_TEST_XADES_CERT_PEM` albo `KSEF_TEST_XADES_CERT_PEM_B64` (XAdES TEST)
+- `KSEF_TEST_XADES_CERT_CRT` albo `KSEF_TEST_XADES_CERT_CRT_B64` (XAdES TEST)
+- `KSEF_TEST_XADES_CERT_PEM` albo `KSEF_TEST_XADES_CERT_PEM_B64` (XAdES TEST, kompatybilność wsteczna)
 - `KSEF_TEST_XADES_PRIVATE_KEY_PEM` albo `KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64` (XAdES TEST)
+- `KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD` opcjonalnie, wymagany dla klucza zaszyfrowanego
 - `KSEF_TEST_XADES_SUBJECT_IDENTIFIER_TYPE` opcjonalnie, domyślnie `certificateSubject`
-- `KSEF_DEMO_XADES_CERT_PEM` albo `KSEF_DEMO_XADES_CERT_PEM_B64` (XAdES DEMO)
+- `KSEF_DEMO_XADES_CERT_CRT` albo `KSEF_DEMO_XADES_CERT_CRT_B64` (XAdES DEMO)
+- `KSEF_DEMO_XADES_CERT_PEM` albo `KSEF_DEMO_XADES_CERT_PEM_B64` (XAdES DEMO, kompatybilność wsteczna)
 - `KSEF_DEMO_XADES_PRIVATE_KEY_PEM` albo `KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64` (XAdES DEMO)
+- `KSEF_DEMO_XADES_PRIVATE_KEY_PASSWORD` opcjonalnie, wymagany dla klucza zaszyfrowanego
 - `KSEF_DEMO_XADES_SUBJECT_IDENTIFIER_TYPE` opcjonalnie, domyślnie `certificateSubject`
 
-Przygotowanie sekretów PEM w wariancie Base64 (jedna linia):
+Przygotowanie sekretów CRT/PEM w wariancie Base64 (jedna linia):
 
 ```bash
-base64 < cert.pem | tr -d '\n'
+base64 < cert.crt | tr -d '\n'
 base64 < key.pem | tr -d '\n'
 ```
 
