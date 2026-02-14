@@ -58,6 +58,20 @@ Endpoint: `POST /testdata/attachment/revoke`
 
 Wyłącza obsługę załączników w konfiguracji testowej.
 
+## Blokada uwierzytelnienia kontekstu
+
+### `block_context_authentication(request_payload, access_token=None)`
+
+Endpoint: `POST /testdata/context/block`
+
+Blokuje możliwość uwierzytelniania dla wskazanego kontekstu (auth kończy się kodem `480`).
+
+### `unblock_context_authentication(request_payload, access_token=None)`
+
+Endpoint: `POST /testdata/context/unblock`
+
+Odblokowuje możliwość uwierzytelniania dla wskazanego kontekstu.
+
 ## Limity i rate limits (test)
 
 ### `change_session_limits(request_payload, access_token)`

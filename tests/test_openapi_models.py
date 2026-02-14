@@ -10,8 +10,14 @@ class OpenApiModelsTests(unittest.TestCase):
 
     def test_enum_and_simple_model(self):
         method_value = list(m.AuthenticationMethod)[0].value
+        category_value = list(m.AuthenticationMethodCategory)[0].value
         data = {
             "authenticationMethod": method_value,
+            "authenticationMethodInfo": {
+                "category": category_value,
+                "code": "auth.method.code",
+                "displayName": "Auth method display name",
+            },
             "referenceNumber": "ref-1",
             "startDate": "2024-01-01",
             "status": {"code": 200, "description": "ok"},

@@ -96,6 +96,28 @@ class TestDataClient(BaseApiClient):
             expected_status={200, 204},
         )
 
+    def block_context_authentication(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
+        self._request_json(
+            "POST",
+            "/testdata/context/block",
+            json=request_payload,
+            access_token=access_token,
+            expected_status={200},
+        )
+
+    def unblock_context_authentication(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
+        self._request_json(
+            "POST",
+            "/testdata/context/unblock",
+            json=request_payload,
+            access_token=access_token,
+            expected_status={200},
+        )
+
     def change_session_limits(self, request_payload: dict[str, Any], *, access_token: str) -> Any:
         return self._request_json(
             "POST",
@@ -238,6 +260,28 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             json=request_payload,
             access_token=access_token,
             expected_status={200, 204},
+        )
+
+    async def block_context_authentication(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
+        await self._request_json(
+            "POST",
+            "/testdata/context/block",
+            json=request_payload,
+            access_token=access_token,
+            expected_status={200},
+        )
+
+    async def unblock_context_authentication(
+        self, request_payload: dict[str, Any], *, access_token: str | None = None
+    ) -> None:
+        await self._request_json(
+            "POST",
+            "/testdata/context/unblock",
+            json=request_payload,
+            access_token=access_token,
+            expected_status={200},
         )
 
     async def change_session_limits(

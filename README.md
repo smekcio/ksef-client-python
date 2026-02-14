@@ -10,6 +10,10 @@
 
 SDK zostało zaprojektowane w oparciu o oficjalne biblioteki referencyjne KSeF dla ekosystemów **Java** oraz **C#/.NET**, z naciskiem na zachowanie spójności pojęć oraz przepływów (workflow).
 
+## 🔄 Kompatybilność API KSeF
+
+Aktualna kompatybilność: **KSeF API `v2.1.1`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.1.1/api-changelog.md)).
+
 ## ✅ Funkcjonalności
 
 - Klienci API (`KsefClient`, `AsyncKsefClient`) mapujący wywołania na endpointy KSeF.
@@ -104,6 +108,7 @@ tokens = AuthCoordinator(client.auth).authenticate_with_xades_key_pair(
     context_identifier_type="nip",
     context_identifier_value="5265877635",
     subject_identifier_type="certificateSubject",
+    enforce_xades_compliance=False,  # ustaw True, aby dodać X-KSeF-Feature: enforce-xades-compliance
 ).tokens
 ```
 
@@ -168,7 +173,76 @@ Uruchomienie testów z kontrolą pokrycia:
 pytest --cov=ksef_client --cov-report=term-missing --cov-fail-under=100
 ```
 
-Testy E2E (marker `e2e`) są wyłączone w standardowym przebiegu i wymagają osobnej konfiguracji środowiska oraz danych dostępowych.
+Testy E2E (marker `e2e`) są wyłączone w standardowym przebiegu i wymagają osobnej konfiguracji
+środowiska oraz danych dostępowych.
+
+Scenariusz E2E obejmuje:
+- logowanie tokenem KSeF,
+- logowanie certyfikatem (XAdES),
+- wystawienie faktury,
+- pobranie UPO,
+- listowanie faktur,
+- pobranie ostatniej faktury.
+
+Plik testów E2E:
+- `tests/test_e2e_token_flows.py`
+
+Dostępne testy:
+- `test_e2e_test_environment_full_flow_token`
+- `test_e2e_test_environment_full_flow_xades`
+- `test_e2e_demo_environment_full_flow_token`
+- `test_e2e_demo_environment_full_flow_xades`
+
+Lokalne uruchomienie (token, TEST):
+
+```bash
+KSEF_E2E=1 \
+KSEF_TEST_TOKEN=... \
+KSEF_TEST_CONTEXT_TYPE=nip \
+KSEF_TEST_CONTEXT_VALUE=... \
+pytest tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_token
+```
+
+Lokalne uruchomienie (XAdES, TEST):
+
+```bash
+KSEF_E2E=1 \
+KSEF_TEST_CONTEXT_TYPE=nip \
+KSEF_TEST_CONTEXT_VALUE=... \
+KSEF_TEST_XADES_CERT_PEM="$(cat cert.pem)" \
+KSEF_TEST_XADES_PRIVATE_KEY_PEM="$(cat key.pem)" \
+pytest tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_xades
+```
+
+W GitHub Actions testy E2E uruchamia workflow:
+- `.github/workflows/python-e2e.yml`
+
+Workflow uruchamia się:
+- na `push` (dowolny branch),
+- na `pull_request` do `main`,
+- ręcznie przez `workflow_dispatch`.
+
+Repozytoryjne sekrety do ustawienia:
+- `KSEF_TEST_TOKEN`, `KSEF_TEST_CONTEXT_TYPE`, `KSEF_TEST_CONTEXT_VALUE` (token TEST)
+- `KSEF_DEMO_TOKEN`, `KSEF_DEMO_CONTEXT_TYPE`, `KSEF_DEMO_CONTEXT_VALUE` (token DEMO)
+- `KSEF_TEST_XADES_CERT_PEM` albo `KSEF_TEST_XADES_CERT_PEM_B64` (XAdES TEST)
+- `KSEF_TEST_XADES_PRIVATE_KEY_PEM` albo `KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64` (XAdES TEST)
+- `KSEF_TEST_XADES_SUBJECT_IDENTIFIER_TYPE` opcjonalnie, domyślnie `certificateSubject`
+- `KSEF_DEMO_XADES_CERT_PEM` albo `KSEF_DEMO_XADES_CERT_PEM_B64` (XAdES DEMO)
+- `KSEF_DEMO_XADES_PRIVATE_KEY_PEM` albo `KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64` (XAdES DEMO)
+- `KSEF_DEMO_XADES_SUBJECT_IDENTIFIER_TYPE` opcjonalnie, domyślnie `certificateSubject`
+
+Przygotowanie sekretów PEM w wariancie Base64 (jedna linia):
+
+```bash
+base64 < cert.pem | tr -d '\n'
+base64 < key.pem | tr -d '\n'
+```
+
+Anonimizacja w CI:
+- dane uwierzytelniające są pobierane wyłącznie z `GitHub Secrets`,
+- wartości sekretów są maskowane w logach (`::add-mask::`),
+- testy nie logują tokenów, certyfikatów ani identyfikatorów kontekstu.
 
 ## 🤝 Kontrybucja
 

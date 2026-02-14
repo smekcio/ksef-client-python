@@ -101,6 +101,12 @@ class AuthenticationMethod(Enum):
     PERSONALSIGNATURE = "PersonalSignature"
     PEPPOLSIGNATURE = "PeppolSignature"
 
+class AuthenticationMethodCategory(Enum):
+    XADESSIGNATURE = "XadesSignature"
+    NATIONALNODE = "NationalNode"
+    TOKEN = "Token"
+    OTHER = "Other"
+
 class AuthenticationTokenStatus(Enum):
     PENDING = "Pending"
     ACTIVE = "Active"
@@ -617,6 +623,12 @@ class SubunitPermissionsSubunitIdentifierType(Enum):
     INTERNALID = "InternalId"
     NIP = "Nip"
 
+class TestDataAuthenticationContextIdentifierType(Enum):
+    NIP = "Nip"
+    INTERNALID = "InternalId"
+    NIPVATUE = "NipVatUe"
+    PEPPOLID = "PeppolId"
+
 class TestDataAuthorizedIdentifierType(Enum):
     NIP = "Nip"
     PESEL = "Pesel"
@@ -737,6 +749,7 @@ class AuthenticationInitResponse(OpenApiModel):
 @dataclass(frozen=True)
 class AuthenticationListItem(OpenApiModel):
     authenticationMethod: AuthenticationMethod
+    authenticationMethodInfo: AuthenticationMethodInfo
     referenceNumber: ReferenceNumber
     startDate: str
     status: StatusInfo
@@ -751,8 +764,15 @@ class AuthenticationListResponse(OpenApiModel):
     continuationToken: Optional[str] = None
 
 @dataclass(frozen=True)
+class AuthenticationMethodInfo(OpenApiModel):
+    category: AuthenticationMethodCategory
+    code: str
+    displayName: str
+
+@dataclass(frozen=True)
 class AuthenticationOperationStatusResponse(OpenApiModel):
     authenticationMethod: AuthenticationMethod
+    authenticationMethodInfo: AuthenticationMethodInfo
     startDate: str
     status: StatusInfo
     isTokenRedeemed: Optional[bool] = None
@@ -795,6 +815,10 @@ class BatchSessionEffectiveContextLimits(OpenApiModel):
     maxInvoiceSizeInMB: int
     maxInvoiceWithAttachmentSizeInMB: int
     maxInvoices: int
+
+@dataclass(frozen=True)
+class BlockContextAuthenticationRequest(OpenApiModel):
+    contextIdentifier: Optional[TestDataAuthenticationContextIdentifier] = None
 
 @dataclass(frozen=True)
 class CertificateEffectiveSubjectLimits(OpenApiModel):
@@ -1769,6 +1793,11 @@ class SubunitPermissionsSubunitIdentifier(OpenApiModel):
     value: str
 
 @dataclass(frozen=True)
+class TestDataAuthenticationContextIdentifier(OpenApiModel):
+    type: TestDataAuthenticationContextIdentifierType
+    value: str
+
+@dataclass(frozen=True)
 class TestDataAuthorizedIdentifier(OpenApiModel):
     type: TestDataAuthorizedIdentifierType
     value: str
@@ -1824,6 +1853,10 @@ class TokenStatusResponse(OpenApiModel):
 @dataclass(frozen=True)
 class TooManyRequestsResponse(OpenApiModel):
     status: dict[str, Any]
+
+@dataclass(frozen=True)
+class UnblockContextAuthenticationRequest(OpenApiModel):
+    contextIdentifier: Optional[TestDataAuthenticationContextIdentifier] = None
 
 @dataclass(frozen=True)
 class UpoPageResponse(OpenApiModel):
