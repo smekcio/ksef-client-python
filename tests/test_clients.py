@@ -47,7 +47,7 @@ class ClientsTests(unittest.TestCase):
                 client,
                 "_request_bytes",
                 Mock(side_effect=[b'{"status": "ok"}', b""]),
-            ),
+            ) as request_bytes_mock,
         ):
             client.get_active_sessions(
                 page_size=10, continuation_token="cont", access_token="token"
@@ -55,7 +55,15 @@ class ClientsTests(unittest.TestCase):
             client.revoke_current_session("token")
             client.revoke_session("ref", "token")
             client.get_challenge()
-            result = client.submit_xades_auth_request("<xml/>", verify_certificate_chain=True)
+            result = client.submit_xades_auth_request(
+                "<xml/>",
+                verify_certificate_chain=True,
+                enforce_xades_compliance=True,
+            )
+            self.assertEqual(
+                request_bytes_mock.call_args_list[0].kwargs["headers"].get("X-KSeF-Feature"),
+                "enforce-xades-compliance",
+            )
             self.assertEqual(result["status"], "ok")
             self.assertIsNone(client.submit_xades_auth_request("<xml/>"))
             client.submit_ksef_token_auth({"a": 1})
@@ -213,6 +221,8 @@ class ClientsTests(unittest.TestCase):
             client.revoke_permissions(payload)
             client.enable_attachment(payload)
             client.disable_attachment(payload)
+            client.block_context_authentication(payload)
+            client.unblock_context_authentication(payload)
             client.change_session_limits(payload, access_token="token")
             client.reset_session_limits(access_token="token")
             client.change_certificate_limits(payload, access_token="token")
@@ -239,7 +249,7 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
                 auth,
                 "_request_bytes",
                 AsyncMock(side_effect=[b'{"status": "ok"}', b""]),
-            ),
+            ) as request_bytes_mock,
         ):
             await auth.get_active_sessions(
                 page_size=10,
@@ -249,7 +259,15 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             await auth.revoke_current_session("token")
             await auth.revoke_session("ref", "token")
             await auth.get_challenge()
-            result = await auth.submit_xades_auth_request("<xml/>", verify_certificate_chain=True)
+            result = await auth.submit_xades_auth_request(
+                "<xml/>",
+                verify_certificate_chain=True,
+                enforce_xades_compliance=True,
+            )
+            self.assertEqual(
+                request_bytes_mock.call_args_list[0].kwargs["headers"].get("X-KSeF-Feature"),
+                "enforce-xades-compliance",
+            )
             self.assertEqual(result["status"], "ok")
             self.assertIsNone(
                 await auth.submit_xades_auth_request(
@@ -444,6 +462,8 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             await testdata.revoke_permissions(payload)
             await testdata.enable_attachment(payload)
             await testdata.disable_attachment(payload)
+            await testdata.block_context_authentication(payload)
+            await testdata.unblock_context_authentication(payload)
             await testdata.change_session_limits(payload, access_token="token")
             await testdata.reset_session_limits(access_token="token")
             await testdata.change_certificate_limits(payload, access_token="token")

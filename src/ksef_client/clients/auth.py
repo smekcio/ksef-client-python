@@ -4,6 +4,9 @@ from typing import Any
 
 from .base import AsyncBaseApiClient, BaseApiClient
 
+_KSEF_FEATURE_HEADER = "X-KSeF-Feature"
+_ENFORCE_XADES_COMPLIANCE_FEATURE = "enforce-xades-compliance"
+
 
 class AuthClient(BaseApiClient):
     def get_active_sessions(
@@ -51,6 +54,7 @@ class AuthClient(BaseApiClient):
         signed_xml: str,
         *,
         verify_certificate_chain: bool | None = None,
+        enforce_xades_compliance: bool = False,
     ) -> Any:
         params = {}
         if verify_certificate_chain is not None:
@@ -59,6 +63,8 @@ class AuthClient(BaseApiClient):
             "Content-Type": "application/xml",
             "Accept": "application/json",
         }
+        if enforce_xades_compliance:
+            headers[_KSEF_FEATURE_HEADER] = _ENFORCE_XADES_COMPLIANCE_FEATURE
         response_bytes = self._request_bytes(
             "POST",
             "/auth/xades-signature",
@@ -152,6 +158,7 @@ class AsyncAuthClient(AsyncBaseApiClient):
         signed_xml: str,
         *,
         verify_certificate_chain: bool | None = None,
+        enforce_xades_compliance: bool = False,
     ) -> Any:
         params = {}
         if verify_certificate_chain is not None:
@@ -160,6 +167,8 @@ class AsyncAuthClient(AsyncBaseApiClient):
             "Content-Type": "application/xml",
             "Accept": "application/json",
         }
+        if enforce_xades_compliance:
+            headers[_KSEF_FEATURE_HEADER] = _ENFORCE_XADES_COMPLIANCE_FEATURE
         response_bytes = await self._request_bytes(
             "POST",
             "/auth/xades-signature",

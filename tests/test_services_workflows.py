@@ -38,11 +38,18 @@ class RecordingAsyncHttp:
 @dataclass
 class StubAuthClient:
     codes: list[int]
+    last_enforce_xades_compliance: bool = False
 
     def get_challenge(self):
         return {"challenge": "c", "timestampMs": 123}
 
-    def submit_xades_auth_request(self, signed_xml: str, verify_certificate_chain=None):
+    def submit_xades_auth_request(
+        self,
+        signed_xml: str,
+        verify_certificate_chain=None,
+        enforce_xades_compliance: bool = False,
+    ):
+        self.last_enforce_xades_compliance = enforce_xades_compliance
         return {"referenceNumber": "ref", "authenticationToken": {"token": "auth"}}
 
     def submit_ksef_token_auth(self, payload):
@@ -59,11 +66,18 @@ class StubAuthClient:
 @dataclass
 class StubAsyncAuthClient:
     codes: list[int]
+    last_enforce_xades_compliance: bool = False
 
     async def get_challenge(self):
         return {"challenge": "c", "timestampMs": 123}
 
-    async def submit_xades_auth_request(self, signed_xml: str, verify_certificate_chain=None):
+    async def submit_xades_auth_request(
+        self,
+        signed_xml: str,
+        verify_certificate_chain=None,
+        enforce_xades_compliance: bool = False,
+    ):
+        self.last_enforce_xades_compliance = enforce_xades_compliance
         return {"referenceNumber": "ref", "authenticationToken": {"token": "auth"}}
 
     async def submit_ksef_token_auth(self, payload):
@@ -193,6 +207,22 @@ class WorkflowsTests(unittest.TestCase):
                 max_attempts=2,
             )
         self.assertEqual(result.authentication_token, "auth")
+        self.assertFalse(auth.last_enforce_xades_compliance)
+
+        auth_with_feature = StubAuthClient([200])
+        coord_with_feature = workflows.AuthCoordinator(auth_with_feature)
+        with patch("ksef_client.services.xades.sign_xades_enveloped", return_value="signed"):
+            coord_with_feature.authenticate_with_xades(
+                context_identifier_type="nip",
+                context_identifier_value="123",
+                subject_identifier_type="certificateSubject",
+                certificate_pem=rsa_cert.certificate_pem,
+                private_key_pem=rsa_cert.private_key_pem,
+                enforce_xades_compliance=True,
+                poll_interval_seconds=0,
+                max_attempts=1,
+            )
+        self.assertTrue(auth_with_feature.last_enforce_xades_compliance)
 
         with patch("ksef_client.services.xades.sign_xades_enveloped", return_value="signed"):
             coord_pair = workflows.AuthCoordinator(StubAuthClient([100, 200]))
@@ -243,7 +273,12 @@ class WorkflowsTests(unittest.TestCase):
         self.assertEqual(result.tokens.access_token.token, "acc")
 
         class StubAuthClientNoneXades(StubAuthClient):
-            def submit_xades_auth_request(self, signed_xml: str, verify_certificate_chain=None):
+            def submit_xades_auth_request(
+                self,
+                signed_xml: str,
+                verify_certificate_chain=None,
+                enforce_xades_compliance: bool = False,
+            ):
                 return None
 
         rsa_cert = generate_rsa_cert()
@@ -387,6 +422,22 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
                 max_attempts=1,
             )
         self.assertEqual(result_xades.authentication_token, "auth")
+        self.assertFalse(auth_xades.last_enforce_xades_compliance)
+
+        auth_xades_feature = StubAsyncAuthClient([200])
+        coord_xades_feature = workflows.AsyncAuthCoordinator(auth_xades_feature)
+        with patch("ksef_client.services.xades.sign_xades_enveloped", return_value="signed"):
+            await coord_xades_feature.authenticate_with_xades(
+                context_identifier_type="nip",
+                context_identifier_value="123",
+                subject_identifier_type="certificateSubject",
+                certificate_pem=rsa_cert.certificate_pem,
+                private_key_pem=rsa_cert.private_key_pem,
+                enforce_xades_compliance=True,
+                poll_interval_seconds=0,
+                max_attempts=1,
+            )
+        self.assertTrue(auth_xades_feature.last_enforce_xades_compliance)
 
         with patch("ksef_client.services.xades.sign_xades_enveloped", return_value="signed"):
             coord_xades_pair = workflows.AsyncAuthCoordinator(StubAsyncAuthClient([200]))
@@ -424,7 +475,10 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
 
         class StubAsyncAuthClientNoneXades(StubAsyncAuthClient):
             async def submit_xades_auth_request(
-                self, signed_xml: str, verify_certificate_chain=None
+                self,
+                signed_xml: str,
+                verify_certificate_chain=None,
+                enforce_xades_compliance: bool = False,
             ):
                 return None
 

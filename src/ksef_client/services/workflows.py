@@ -98,6 +98,7 @@ class _AuthClient(Protocol):
         signed_xml: str,
         *,
         verify_certificate_chain: bool | None = None,
+        enforce_xades_compliance: bool = False,
     ) -> dict[str, Any] | None: ...
 
     def submit_ksef_token_auth(self, request_payload: dict[str, Any]) -> dict[str, Any] | None: ...
@@ -117,6 +118,7 @@ class _AsyncAuthClient(Protocol):
         signed_xml: str,
         *,
         verify_certificate_chain: bool | None = None,
+        enforce_xades_compliance: bool = False,
     ) -> dict[str, Any] | None: ...
 
     async def submit_ksef_token_auth(
@@ -300,6 +302,7 @@ class AuthCoordinator:
         context_identifier_value: str,
         subject_identifier_type: str,
         verify_certificate_chain: bool | None = None,
+        enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
@@ -311,6 +314,7 @@ class AuthCoordinator:
             certificate_pem=key_pair.certificate_pem,
             private_key_pem=key_pair.private_key_pem,
             verify_certificate_chain=verify_certificate_chain,
+            enforce_xades_compliance=enforce_xades_compliance,
             authorization_policy_xml=authorization_policy_xml,
             poll_interval_seconds=poll_interval_seconds,
             max_attempts=max_attempts,
@@ -325,6 +329,7 @@ class AuthCoordinator:
         certificate_pem: str,
         private_key_pem: str,
         verify_certificate_chain: bool | None = None,
+        enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
@@ -341,7 +346,9 @@ class AuthCoordinator:
 
         signed_xml = sign_xades_enveloped(xml, certificate_pem, private_key_pem)
         init = self._auth.submit_xades_auth_request(
-            signed_xml, verify_certificate_chain=verify_certificate_chain
+            signed_xml,
+            verify_certificate_chain=verify_certificate_chain,
+            enforce_xades_compliance=enforce_xades_compliance,
         )
         if init is None:
             raise RuntimeError("submit_xades_auth_request returned empty response")
@@ -435,6 +442,7 @@ class AsyncAuthCoordinator:
         context_identifier_value: str,
         subject_identifier_type: str,
         verify_certificate_chain: bool | None = None,
+        enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
@@ -446,6 +454,7 @@ class AsyncAuthCoordinator:
             certificate_pem=key_pair.certificate_pem,
             private_key_pem=key_pair.private_key_pem,
             verify_certificate_chain=verify_certificate_chain,
+            enforce_xades_compliance=enforce_xades_compliance,
             authorization_policy_xml=authorization_policy_xml,
             poll_interval_seconds=poll_interval_seconds,
             max_attempts=max_attempts,
@@ -460,6 +469,7 @@ class AsyncAuthCoordinator:
         certificate_pem: str,
         private_key_pem: str,
         verify_certificate_chain: bool | None = None,
+        enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
@@ -476,7 +486,9 @@ class AsyncAuthCoordinator:
 
         signed_xml = sign_xades_enveloped(xml, certificate_pem, private_key_pem)
         init = await self._auth.submit_xades_auth_request(
-            signed_xml, verify_certificate_chain=verify_certificate_chain
+            signed_xml,
+            verify_certificate_chain=verify_certificate_chain,
+            enforce_xades_compliance=enforce_xades_compliance,
         )
         if init is None:
             raise RuntimeError("submit_xades_auth_request returned empty response")
