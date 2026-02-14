@@ -49,6 +49,7 @@ Najczęściej używane parametry:
 - `context_identifier_value`: np. NIP
 - `subject_identifier_type`: np. `"certificateSubject"` (lub `"certificateFingerprint"`)
 - `verify_certificate_chain`: przydatne w TE
+- `enforce_xades_compliance`: gdy `True`, ustawia nagłówek `X-KSeF-Feature: enforce-xades-compliance`
 - `poll_interval_seconds`, `max_attempts`: parametry pollingu
 
 ### `AuthCoordinator.authenticate_with_ksef_token(...) -> AuthResult`

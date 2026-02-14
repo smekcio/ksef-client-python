@@ -37,12 +37,13 @@ Zwraca JSON z polami m.in.:
 
 Challenge jest ważny **10 minut**. W przypadku dłuższego procesu podpisu (np. HSM) należy pobrać nowe wyzwanie.
 
-## `submit_xades_auth_request(signed_xml, verify_certificate_chain=None)`
+## `submit_xades_auth_request(signed_xml, verify_certificate_chain=None, enforce_xades_compliance=False)`
 
 Endpoint: `POST /auth/xades-signature` (bez `accessToken`).
 
 - `signed_xml` – podpisany XML `AuthTokenRequest`
 - `verify_certificate_chain` – opcjonalna weryfikacja łańcucha certyfikatów (przydatne w TE)
+- `enforce_xades_compliance` – gdy `True`, dodaje nagłówek `X-KSeF-Feature: enforce-xades-compliance` (przydatne do wcześniejszej walidacji reguł XAdES na DEMO/PROD)
 
 Zwraca (202) obiekt inicjujący auth, m.in. `referenceNumber` i `authenticationToken`.
 

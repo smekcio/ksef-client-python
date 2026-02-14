@@ -65,11 +65,14 @@ result = AuthCoordinator(client.auth).authenticate_with_xades_key_pair(
     context_identifier_value="5265877635",
     subject_identifier_type="certificateSubject",
     verify_certificate_chain=None,
+    enforce_xades_compliance=False,
     max_attempts=90,
     poll_interval_seconds=2.0,
 )
 access_token = result.tokens.access_token.token
 ```
+
+`enforce_xades_compliance=True` wymusza dodanie nagłówka `X-KSeF-Feature: enforce-xades-compliance` podczas `POST /auth/xades-signature`.
 
 W przypadku posiadania certyfikatu i klucza jako osobnych plików dostępne jest również wczytanie przez `XadesKeyPair.from_pem_files(...)`.
 
