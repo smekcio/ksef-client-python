@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.4.0](https://github.com/smekcio/ksef-client-python/compare/v0.3.1...v0.4.0) (2026-02-14)
+
+
+### Features
+
+* align SDK with KSeF API v2.1.1 ([0355fe4](https://github.com/smekcio/ksef-client-python/commit/0355fe44d2d6ac0aa0bb4146f9b67331c62b6b92))
+* align SDK with KSeF API v2.1.1 ([0355fe4](https://github.com/smekcio/ksef-client-python/commit/0355fe44d2d6ac0aa0bb4146f9b67331c62b6b92))
+* align SDK with KSeF API v2.1.1 ([01fd0ae](https://github.com/smekcio/ksef-client-python/commit/01fd0aeda7287dca945ca481b004cdbb09089806))
+* **ci:** add end-to-end KSeF workflows for TEST and DEMO (token + XAdES) ([d420d58](https://github.com/smekcio/ksef-client-python/commit/d420d5814a749e464ebcea108857aee138fff3fb))
+* **ci:** add end-to-end KSeF workflows for TEST and DEMO (token + XAdES) ([d420d58](https://github.com/smekcio/ksef-client-python/commit/d420d5814a749e464ebcea108857aee138fff3fb))
+
+
+### Bug Fixes
+
+* **ci:** Allow manual PyPI publish from main branch without tag verif… ([4d74384](https://github.com/smekcio/ksef-client-python/commit/4d7438467aa5124842be69eda694eb76b0329826))
+* **ci:** Allow manual PyPI publish from main branch without tag verification ([2f179c5](https://github.com/smekcio/ksef-client-python/commit/2f179c53c372a1747415cc5707df70497cdab902))
+* **ci:** dodać E2E KSeF i poprawić release-please ([c0df915](https://github.com/smekcio/ksef-client-python/commit/c0df915f8d7db808367ef5c31ba2a13ec70be772))
+* **ci:** use PAT secret for release-please action ([8891024](https://github.com/smekcio/ksef-client-python/commit/8891024cb84d59bdf170a44fe6b1f649cf9b5e48))
+
+
+### Documentation
+
+* **readme:** add GitHub Actions badges for E2E test jobs ([e04a6bb](https://github.com/smekcio/ksef-client-python/commit/e04a6bb277b0d685d675f86445d1b743c7d452d9))
+* **readme:** split Python E2E badge links by job ([91ffef2](https://github.com/smekcio/ksef-client-python/commit/91ffef258879df1734384e1102ed3beea4396701))
+* **readme:** use single Python E2E workflow badge ([accbbec](https://github.com/smekcio/ksef-client-python/commit/accbbec87e923ce291988d54c4288ce9b92dddb3))
+
 ## [0.3.1](https://github.com/smekcio/ksef-client-python/compare/v0.3.0...v0.3.1) (2026-01-18)
 
 
