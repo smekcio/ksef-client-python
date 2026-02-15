@@ -4,10 +4,14 @@ on:
   push:
   pull_request:
     branches: ["main"]
+  schedule:
+    # Daily run at 05:15 UTC
+    - cron: "15 5 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: python-e2e-${{ github.ref }}
@@ -333,3 +337,70 @@ jobs:
         run: |
           python -m pytest -q --maxfail=1 --disable-warnings \
             tests/test_e2e_token_flows.py::test_e2e_demo_environment_full_flow_xades
+
+  notify-scheduled-failure:
+    name: Notify Scheduled E2E Failure
+    runs-on: ubuntu-latest
+    needs:
+      - e2e-test-token
+      - e2e-test-xades
+      - e2e-demo-token
+      - e2e-demo-xades
+    if: ${{ always() && github.event_name == 'schedule' && (needs.e2e-test-token.result == 'failure' || needs.e2e-test-xades.result == 'failure' || needs.e2e-demo-token.result == 'failure' || needs.e2e-demo-xades.result == 'failure') }}
+
+    steps:
+      - name: Create or update GitHub issue
+        uses: actions/github-script@v7
+        env:
+          RESULT_TEST_TOKEN: ${{ needs.e2e-test-token.result }}
+          RESULT_TEST_XADES: ${{ needs.e2e-test-xades.result }}
+          RESULT_DEMO_TOKEN: ${{ needs.e2e-demo-token.result }}
+          RESULT_DEMO_XADES: ${{ needs.e2e-demo-xades.result }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const assignee = "smekcio";
+            const title = "[CI] Scheduled Python E2E failed";
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const now = new Date().toISOString();
+            const body = [
+              "Automatyczny dzienny run E2E zakończył się błędem.",
+              "",
+              `- workflow: \`${context.workflow}\``,
+              `- run: ${runUrl}`,
+              `- event: \`${context.eventName}\``,
+              `- timestamp (UTC): \`${now}\``,
+              "",
+              "Wyniki jobów:",
+              `- E2E TEST (token): \`${process.env.RESULT_TEST_TOKEN}\``,
+              `- E2E TEST (xades): \`${process.env.RESULT_TEST_XADES}\``,
+              `- E2E DEMO (token): \`${process.env.RESULT_DEMO_TOKEN}\``,
+              `- E2E DEMO (xades): \`${process.env.RESULT_DEMO_XADES}\``,
+            ].join("\n");
+
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              per_page: 100,
+            });
+
+            const existing = openIssues.find((issue) => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                assignees: [assignee],
+              });
+            }
