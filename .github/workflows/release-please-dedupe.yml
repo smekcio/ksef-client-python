@@ -1,0 +1,61 @@
+name: Release Please Dedupe
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  dedupe-changelog:
+    if: startsWith(github.event.pull_request.head.ref, 'release-please--')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dedupe repeated changelog bullets
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const originalBody = pr.body || "";
+            if (!originalBody.includes("### ")) {
+              return;
+            }
+
+            const lines = originalBody.split(/\r?\n/);
+            const seen = new Set();
+            const deduped = [];
+
+            const normalizeBullet = (line) =>
+              line
+                .replace(
+                  /\(\[[0-9a-f]{7}\]\(https:\/\/github\.com\/[^)]+\/commit\/[0-9a-f]{40}\)\)/gi,
+                  ""
+                )
+                .replace(/\s+/g, " ")
+                .trim()
+                .toLowerCase();
+
+            for (const line of lines) {
+              if (line.trim().startsWith("* ")) {
+                const key = normalizeBullet(line);
+                if (seen.has(key)) {
+                  continue;
+                }
+                seen.add(key);
+              }
+              deduped.push(line);
+            }
+
+            const updatedBody = deduped.join("\n");
+            if (updatedBody === originalBody) {
+              return;
+            }
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              body: updatedBody,
+            });
