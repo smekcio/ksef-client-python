@@ -12,7 +12,7 @@ SDK zostało zaprojektowane w oparciu o oficjalne biblioteki referencyjne KSeF d
 
 ## 🔄 Kompatybilność API KSeF
 
-Aktualna kompatybilność: **KSeF API `v2.1.1`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.1.1/api-changelog.md)).
+Aktualna kompatybilność: **KSeF API `v2.1.2`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.1.2/api-changelog.md)).
 
 ## ✅ Funkcjonalności
 
