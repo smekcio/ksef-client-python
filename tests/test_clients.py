@@ -6,7 +6,11 @@ import httpx
 
 from ksef_client.clients.auth import AsyncAuthClient, AuthClient
 from ksef_client.clients.certificates import AsyncCertificatesClient, CertificatesClient
-from ksef_client.clients.invoices import AsyncInvoicesClient, InvoicesClient
+from ksef_client.clients.invoices import (
+    AsyncInvoicesClient,
+    InvoicesClient,
+    _normalize_datetime_without_offset,
+)
 from ksef_client.clients.limits import AsyncLimitsClient, LimitsClient
 from ksef_client.clients.peppol import AsyncPeppolClient, PeppolClient
 from ksef_client.clients.permissions import AsyncPermissionsClient, PermissionsClient
@@ -169,6 +173,17 @@ class ClientsTests(unittest.TestCase):
                 request_json_mock.call_args_list[1].kwargs["json"]["filters"]["dateRange"]["to"],
                 "2025-07-02T11:15:00+02:00",
             )
+
+    def test_normalize_datetime_without_offset_passthrough_branches(self):
+        self.assertEqual(_normalize_datetime_without_offset("2025-01-02"), "2025-01-02")
+
+        invalid_value = "not-a-dateT10:15:00"
+        self.assertEqual(_normalize_datetime_without_offset(invalid_value), invalid_value)
+
+        tz_aware_short_offset = "2025-01-02T10:15:00+01"
+        self.assertEqual(
+            _normalize_datetime_without_offset(tz_aware_short_offset), tz_aware_short_offset
+        )
 
     def test_permissions_client(self):
         client = PermissionsClient(self.http)
