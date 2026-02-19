@@ -63,7 +63,7 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pytest --cov=ksef_client --cov-report=term-missing --cov-report=xml --cov-report=html
+          python -m pytest --cov=ksef_client --cov-fail-under=100 --cov-report=term-missing --cov-report=xml --cov-report=html
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
