@@ -1,4 +1,6 @@
+import json
 import unittest
+from pathlib import Path
 
 from ksef_client import openapi_models as m
 
@@ -55,14 +57,18 @@ class OpenApiModelsTests(unittest.TestCase):
         payload = {
             "code": 200,
             "description": "ok",
-            "extensions": {"x": None, "y": "1"},
+            "extensions": {"x": None, "y": "1", "nested": {"a": 1}, "flag": True},
         }
         info = m.InvoiceStatusInfo.from_dict(payload)
         self.assertIsNotNone(info.extensions)
         assert info.extensions is not None
         self.assertEqual(info.extensions["y"], "1")
+        self.assertEqual(info.extensions["nested"], {"a": 1})
+        self.assertTrue(info.extensions["flag"])
         serialized = info.to_dict()
         self.assertIn("extensions", serialized)
+        self.assertEqual(serialized["extensions"]["nested"], {"a": 1})
+        self.assertTrue(serialized["extensions"]["flag"])
         serialized_all = info.to_dict(omit_none=False)
         self.assertIn("details", serialized_all)
 
@@ -73,6 +79,42 @@ class OpenApiModelsTests(unittest.TestCase):
         self.assertEqual(parsed.from_, 10.0)
         self.assertEqual(parsed.to, 20.0)
         self.assertIn("from", parsed.to_dict())
+
+    def test_token_permission_type_contains_introspection(self):
+        values = {item.value for item in m.TokenPermissionType}
+        self.assertIn("Introspection", values)
+
+    def test_token_permission_type_matches_openapi_when_available(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        openapi_path = repo_root / "ksef-docs" / "open-api.json"
+        if not openapi_path.exists():
+            self.skipTest(
+                "open-api.json not found; enum compatibility test requires monorepo layout"
+            )
+
+        spec = json.loads(openapi_path.read_text(encoding="utf-8"))
+        expected = set(spec["components"]["schemas"]["TokenPermissionType"]["enum"])
+        actual = {item.value for item in m.TokenPermissionType}
+        self.assertSetEqual(actual, expected)
+
+    def test_part_upload_request_headers_keep_non_string_values(self):
+        payload = {
+            "headers": {
+                "X-Request-Id": "abc",
+                "X-Retry-After": 2,
+                "X-Meta": {"source": "ksef"},
+                "X-Enabled": True,
+            },
+            "method": "PUT",
+            "ordinalNumber": 1,
+            "url": "https://example",
+        }
+        parsed = m.PartUploadRequest.from_dict(payload)
+        self.assertEqual(parsed.headers["X-Request-Id"], "abc")
+        self.assertEqual(parsed.headers["X-Retry-After"], 2)
+        self.assertEqual(parsed.headers["X-Meta"], {"source": "ksef"})
+        self.assertTrue(parsed.headers["X-Enabled"])
+        self.assertEqual(parsed.to_dict()["headers"], payload["headers"])
 
 
 if __name__ == "__main__":

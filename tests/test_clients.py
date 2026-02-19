@@ -110,9 +110,30 @@ class ClientsTests(unittest.TestCase):
 
     def test_invoices_client(self):
         client = InvoicesClient(self.http)
+        query_payload = {
+            "subjectType": "Subject1",
+            "dateRange": {
+                "dateType": "Issue",
+                "from": "2025-01-02T10:15:00",
+                "to": "2025-01-02T11:15:00",
+            },
+        }
+        export_payload = {
+            "encryption": {"encryptedSymmetricKey": "abc", "initializationVector": "def"},
+            "filters": {
+                "subjectType": "Subject1",
+                "dateRange": {
+                    "dateType": "Issue",
+                    "from": "2025-07-02T10:15:00",
+                    "to": "2025-07-02T11:15:00",
+                },
+            },
+        }
         with (
             patch.object(client, "_request_raw", Mock(return_value=self.response)),
-            patch.object(client, "_request_json", Mock(return_value={"ok": True})),
+            patch.object(
+                client, "_request_json", Mock(return_value={"ok": True})
+            ) as request_json_mock,
             patch.object(client, "_request_bytes", Mock(return_value=b"bytes")),
         ):
             invoice = client.get_invoice("ksef", access_token="token")
@@ -120,18 +141,34 @@ class ClientsTests(unittest.TestCase):
             invoice_bytes = client.get_invoice_bytes("ksef", access_token="token")
             self.assertEqual(invoice_bytes.sha256_base64, "hash")
             client.query_invoice_metadata(
-                {"a": 1},
+                query_payload,
                 access_token="token",
                 page_offset=0,
                 page_size=10,
                 sort_order="asc",
             )
-            client.export_invoices({"a": 1}, access_token="token")
+            client.export_invoices(export_payload, access_token="token")
             client.get_export_status("ref", access_token="token")
             client.download_export_part("https://example.com")
             client.download_package_part("https://example.com")
             with_hash = client.download_export_part_with_hash("https://example.com")
             self.assertEqual(with_hash.sha256_base64, "hash")
+            self.assertEqual(
+                request_json_mock.call_args_list[0].kwargs["json"]["dateRange"]["from"],
+                "2025-01-02T10:15:00+01:00",
+            )
+            self.assertEqual(
+                request_json_mock.call_args_list[0].kwargs["json"]["dateRange"]["to"],
+                "2025-01-02T11:15:00+01:00",
+            )
+            self.assertEqual(
+                request_json_mock.call_args_list[1].kwargs["json"]["filters"]["dateRange"]["from"],
+                "2025-07-02T10:15:00+02:00",
+            )
+            self.assertEqual(
+                request_json_mock.call_args_list[1].kwargs["json"]["filters"]["dateRange"]["to"],
+                "2025-07-02T11:15:00+02:00",
+            )
 
     def test_permissions_client(self):
         client = PermissionsClient(self.http)
@@ -333,25 +370,54 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             await sessions.get_session_upo("ref", "upo", access_token="token")
 
         invoices = AsyncInvoicesClient(http)
+        query_payload = {
+            "subjectType": "Subject1",
+            "dateRange": {
+                "dateType": "Issue",
+                "from": "2025-01-02T10:15:00",
+                "to": "2025-01-02T11:15:00",
+            },
+        }
+        export_payload = {
+            "encryption": {"encryptedSymmetricKey": "abc", "initializationVector": "def"},
+            "filters": {
+                "subjectType": "Subject1",
+                "dateRange": {
+                    "dateType": "Issue",
+                    "from": "2025-07-02T10:15:00",
+                    "to": "2025-07-02T11:15:00",
+                },
+            },
+        }
         with (
             patch.object(invoices, "_request_raw", AsyncMock(return_value=response)),
-            patch.object(invoices, "_request_json", AsyncMock(return_value={"ok": True})),
+            patch.object(
+                invoices, "_request_json", AsyncMock(return_value={"ok": True})
+            ) as request_json_mock,
             patch.object(invoices, "_request_bytes", AsyncMock(return_value=b"bytes")),
         ):
             await invoices.get_invoice("ksef", access_token="token")
             await invoices.get_invoice_bytes("ksef", access_token="token")
             await invoices.query_invoice_metadata(
-                {"a": 1},
+                query_payload,
                 access_token="token",
                 page_offset=0,
                 page_size=10,
                 sort_order="asc",
             )
-            await invoices.export_invoices({"a": 1}, access_token="token")
+            await invoices.export_invoices(export_payload, access_token="token")
             await invoices.get_export_status("ref", access_token="token")
             await invoices.download_export_part("https://example.com")
             await invoices.download_package_part("https://example.com")
             await invoices.download_export_part_with_hash("https://example.com")
+            self.assertEqual(
+                request_json_mock.call_args_list[0].kwargs["json"]["dateRange"]["from"],
+                "2025-01-02T10:15:00+01:00",
+            )
+            self.assertEqual(
+                request_json_mock.call_args_list[1].kwargs["json"]["filters"]["dateRange"]["from"],
+                "2025-07-02T10:15:00+02:00",
+            )
 
         permissions = AsyncPermissionsClient(http)
         with patch.object(permissions, "_request_json", AsyncMock(return_value={"ok": True})):
