@@ -4,7 +4,7 @@ Dokumentacja opisuje **publiczne API** biblioteki `ksef-client-python` (import: 
 
 Opis kontraktu API (OpenAPI) oraz dokumenty procesowe i ograniczenia systemu znajdują się w `ksef-docs/`.
 
-Kompatybilność SDK: **KSeF API `v2.1.1`**.
+Kompatybilność SDK: **KSeF API `v2.1.2`**.
 
 ## Wymagania
 

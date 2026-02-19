@@ -671,6 +671,7 @@ class TokenPermissionType(Enum):
     CREDENTIALSMANAGE = "CredentialsManage"
     SUBUNITMANAGE = "SubunitManage"
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
+    INTROSPECTION = "Introspection"
 
 Challenge: TypeAlias = str
 
@@ -1291,7 +1292,7 @@ class InvoiceStatusInfo(OpenApiModel):
     code: int
     description: str
     details: Optional[list[str]] = None
-    extensions: Optional[dict[str, Optional[str]]] = None
+    extensions: Optional[dict[str, Any]] = None
 
 @dataclass(frozen=True)
 class OnlineSessionContextLimitsOverride(OpenApiModel):
@@ -1329,7 +1330,7 @@ class OpenOnlineSessionResponse(OpenApiModel):
 
 @dataclass(frozen=True)
 class PartUploadRequest(OpenApiModel):
-    headers: dict[str, Optional[str]]
+    headers: dict[str, Any]
     method: str
     ordinalNumber: int
     url: str
