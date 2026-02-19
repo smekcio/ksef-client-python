@@ -22,6 +22,10 @@ Endpoint służy do wyszukiwania metadanych faktur. `request_payload` zależy od
 
 Typowe zastosowanie: synchronizacja historii metadanych i późniejsze pobieranie treści XML po `ksefNumber`.
 
+Uwaga dla `dateRange`:
+- jeśli `dateRange.from` / `dateRange.to` jest podane jako ISO date-time bez offsetu (`YYYY-MM-DDTHH:MM[:SS]`),
+  SDK normalizuje je do strefy `Europe/Warsaw` i wysyła z jawnie dopisanym offsetem (`+01:00`/`+02:00`).
+
 ## `export_invoices(request_payload, access_token)`
 
 Endpoint: `POST /invoices/exports`
@@ -32,6 +36,9 @@ Wymagane minimum w `request_payload`:
 - `encryption.encryptedSymmetricKey`
 - `encryption.initializationVector`
 - `filters` (np. `subjectType` + `dateRange`)
+
+Uwaga dla `filters.dateRange`:
+- ISO date-time bez offsetu jest normalizowany do `Europe/Warsaw` przed wysyłką requestu.
 
 ## `get_export_status(reference_number, access_token)`
 
