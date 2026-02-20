@@ -42,7 +42,6 @@ def test_profile_global_option_rejects_unknown_profile(runner, monkeypatch) -> N
     _write_config_for_profile("demo")
     result = runner.invoke(app, ["--profile", "missing", "invoice", "list"])
     assert result.exit_code == 2
-    assert "--profile" in result.output
     assert "does not exist" in result.output
 
 

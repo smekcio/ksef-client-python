@@ -239,6 +239,45 @@ def test_keyring_store_file_fallback_waits_for_existing_lock(monkeypatch, tmp_pa
     assert keyring_store.get_tokens("demo") == ("acc", "ref")
 
 
+def test_keyring_store_fallback_lock_timeout(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(keyring_store, "_FALLBACK_LOCK_TIMEOUT_SECONDS", 0.0)
+    monkeypatch.setattr(keyring_store, "_FALLBACK_LOCK_POLL_INTERVAL_SECONDS", 0.0)
+
+    lock_path = tmp_path / "tokens.json.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_handle = keyring_store.os.open(
+        lock_path, keyring_store.os.O_CREAT | keyring_store.os.O_EXCL | keyring_store.os.O_RDWR
+    )
+    try:
+        with pytest.raises(OSError), keyring_store._fallback_tokens_lock():
+            pass
+    finally:
+        keyring_store.os.close(lock_handle)
+        lock_path.unlink()
+
+
+def test_keyring_store_update_fallback_tokens_delete_missing_profile_is_noop(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+    tokens_path = tmp_path / "tokens.json"
+    tokens_path.write_text(
+        json.dumps({"demo": {"access_token": "a", "refresh_token": "r"}}),
+        encoding="utf-8",
+    )
+
+    save_called = {"value": False}
+
+    def _save(payload: dict[str, dict[str, str]]) -> None:
+        _ = payload
+        save_called["value"] = True
+
+    monkeypatch.setattr(keyring_store, "_save_fallback_tokens", _save)
+    keyring_store._update_fallback_tokens("missing", None)
+    assert save_called["value"] is False
+
+
 def test_keyring_store_file_fallback_posix_chmod_error_is_suppressed(monkeypatch, tmp_path) -> None:
     chmod_called = {"value": False}
 

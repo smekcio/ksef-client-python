@@ -1083,7 +1083,13 @@ def test_resolve_output_path_uses_default_name_when_path_has_trailing_separator(
     assert path.as_posix().endswith("artifacts/out.xml")
 
     win_path = adapters._resolve_output_path("artifacts\\", default_filename="out.xml")
-    assert str(win_path).endswith("artifacts\\out.xml")
+    assert win_path.as_posix().endswith("artifacts/out.xml")
+
+
+def test_safe_child_path_rejects_traversal(tmp_path) -> None:
+    with pytest.raises(CliError) as exc:
+        adapters._safe_child_path(tmp_path, "../outside.xml")
+    assert exc.value.code == ExitCode.IO_ERROR
 
 
 def test_build_form_code_validation() -> None:
@@ -1425,6 +1431,11 @@ def test_wait_for_upo_non_transient_errors_are_raised(monkeypatch) -> None:
             _ = (session_ref, upo_ref, access_token)
             raise KsefHttpError(status_code=500, message="fatal")
 
+    class _SessionsInvoiceStatus:
+        def get_session_invoice_status(self, session_ref, invoice_ref, access_token):
+            _ = (session_ref, invoice_ref, access_token)
+            raise KsefHttpError(status_code=500, message="fatal")
+
     class _SessionsStatus:
         def get_session_status(self, session_ref, access_token):
             _ = (session_ref, access_token)
@@ -1432,6 +1443,25 @@ def test_wait_for_upo_non_transient_errors_are_raised(monkeypatch) -> None:
 
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
     monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_SessionsInvoiceStatus()),
+    )
+    with pytest.raises(KsefHttpError):
+        adapters.wait_for_upo(
+            profile="demo",
+            base_url="https://example.invalid",
+            session_ref="SES-1",
+            invoice_ref="INV-1",
+            upo_ref=None,
+            batch_auto=False,
+            poll_interval=0.01,
+            max_attempts=1,
+            out=None,
+            overwrite=False,
+        )
 
     monkeypatch.setattr(
         adapters,
