@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import zipfile
+from pathlib import PurePosixPath
 
 MAX_BATCH_PART_SIZE_BYTES = 100 * 1024 * 1024
 
@@ -60,6 +61,18 @@ def unzip_bytes_safe(
         raise ValueError("max_compression_ratio must be positive or None")
 
     result: dict[str, bytes] = {}
+
+    def _sanitize_zip_entry_name(raw_name: str) -> str:
+        normalized = raw_name.replace("\\", "/")
+        path = PurePosixPath(normalized)
+        if path.is_absolute():
+            raise ValueError("zip entry path must be relative")
+        if any(part in {"", ".", ".."} for part in path.parts):
+            raise ValueError("zip entry path contains unsafe segments")
+        if ":" in normalized:
+            raise ValueError("zip entry path contains drive separator")
+        return path.as_posix()
+
     total_uncompressed = 0
     with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
         for info in zf.infolist():
@@ -86,5 +99,6 @@ def unzip_bytes_safe(
                     if ratio > max_compression_ratio:
                         raise ValueError("zip entry exceeds max_compression_ratio")
 
-            result[info.filename] = zf.read(info.filename)
+            safe_name = _sanitize_zip_entry_name(info.filename)
+            result[safe_name] = zf.read(info.filename)
     return result

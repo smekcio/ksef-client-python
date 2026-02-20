@@ -4,6 +4,7 @@ import base64
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -76,10 +77,11 @@ class XadesKeyPair:
 
 def sign_xades_enveloped(xml_string: str, certificate_pem: str, private_key_pem: str) -> str:
     try:
-        import xmlsec
+        import xmlsec as _xmlsec
         from lxml import etree
     except Exception as exc:  # pragma: no cover
         raise RuntimeError("XAdES signing requires 'lxml' and 'xmlsec' extras") from exc
+    xmlsec: Any = _xmlsec
 
     parser = etree.XMLParser(
         remove_blank_text=False,

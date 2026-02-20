@@ -76,6 +76,27 @@ class ZipUtilsTests(unittest.TestCase):
         ), self.assertRaises(ValueError):
             unzip_bytes_safe(zip_bytes)
 
+    def test_unzip_safe_rejects_absolute_entry_path(self):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("/abs/a.txt", b"hello")
+        with self.assertRaises(ValueError):
+            unzip_bytes_safe(buffer.getvalue())
+
+    def test_unzip_safe_rejects_dotdot_entry_path(self):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("../a.txt", b"hello")
+        with self.assertRaises(ValueError):
+            unzip_bytes_safe(buffer.getvalue())
+
+    def test_unzip_safe_rejects_drive_separator_in_entry_path(self):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("C:/temp/a.txt", b"hello")
+        with self.assertRaises(ValueError):
+            unzip_bytes_safe(buffer.getvalue())
+
     def test_split_bytes(self):
         data = b"a" * 10
         parts = split_bytes(data, max_part_size=4)

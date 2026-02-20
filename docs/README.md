@@ -63,6 +63,10 @@ Biblioteka udostępnia dwa poziomy użycia:
 - [Sesja wsadowa (batch)](workflows/batch-session.md)
 - [Eksport (pobieranie paczek)](workflows/export.md)
 
+**CLI (DX-first):**
+
+- [Specyfikacja `ksef` CLI](cli/README.md)
+
 **Usługi / utils (zaawansowane, ale publiczne):**
 
 - [Usługi (`ksef_client.services`)](services/README.md)

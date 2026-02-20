@@ -1,0 +1,1 @@
+"""SDK adapters for CLI."""
