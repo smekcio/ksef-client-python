@@ -47,3 +47,27 @@ def test_run_preflight_pass_when_profile_and_tokens_available(monkeypatch) -> No
     assert result["status"] == "PASS"
     assert result["profile"] == "demo"
     assert all(item["status"] == "PASS" for item in result["checks"])
+
+
+def test_run_preflight_uses_explicit_profile_override(monkeypatch) -> None:
+    monkeypatch.setattr(
+        checks,
+        "load_config",
+        lambda: CliConfig(
+            active_profile="other",
+            profiles={
+                "demo": ProfileConfig(
+                    name="demo",
+                    env="DEMO",
+                    base_url="https://profile.example",
+                    context_type="nip",
+                    context_value="123",
+                )
+            },
+        ),
+    )
+    monkeypatch.setattr(checks, "get_tokens", lambda profile: ("acc", "ref"))
+
+    result = checks.run_preflight("  demo  ")
+    assert result["status"] == "PASS"
+    assert result["profile"] == "demo"

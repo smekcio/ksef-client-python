@@ -107,8 +107,9 @@ def _resolve_output_path(
     path = Path(out)
     if path.exists() and path.is_dir():
         return path / default_filename
-    if out.endswith(("/", "\\")):
-        return path / default_filename
+    normalized_out = out.replace("\\", "/")
+    if normalized_out.endswith("/"):
+        return Path(normalized_out) / default_filename
     return path
 
 
