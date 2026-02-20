@@ -24,7 +24,19 @@ def main() -> int:
     rc = 0
 
     rc |= _run([sys.executable, "-m", "compileall", "src", "tests"])
-    rc |= _run([sys.executable, "-m", "pip", "check"])
+    pip_check_rc = _run([sys.executable, "-m", "pip", "check"])
+    if pip_check_rc != 0:
+        print(
+            "Warning: `pip check` reported dependency conflicts in the current environment.",
+            file=sys.stderr,
+        )
+        print(
+            "This often comes from global/site packages outside this project. "
+            "Use `--strict` to treat it as an error.",
+            file=sys.stderr,
+        )
+        if args.strict:
+            rc |= pip_check_rc
 
     missing: list[str] = []
 
