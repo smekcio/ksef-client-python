@@ -2,7 +2,7 @@
 
 ## Status ogolny
 
-CLI jest funkcjonalnie domkniete dla glownego flow DX:
+CLI jest funkcjonalnie domkniete dla glownego flow:
 
 1. `init` i profile,
 2. `auth` (token + XAdES),
@@ -50,7 +50,7 @@ Status: `completed`
 
 Status: `completed`
 
-## Etap 5 - hardening DX
+## Etap 5 - hardening
 
 Status: `completed`
 
