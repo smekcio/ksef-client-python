@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ksef-client"
-version = "0.5.0"
+version = "0.6.0"
 description = "Client SDK for KSeF API v2"
 readme = "README.md"
 requires-python = ">=3.10"

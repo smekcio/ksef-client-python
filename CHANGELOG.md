@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.0](https://github.com/smekcio/ksef-client-python/compare/v0.5.0...v0.6.0) (2026-02-21)
+
+
+### Features
+
+* **cli:** implement DX-first KSeF CLI with docs and tests ([8e1b59d](https://github.com/smekcio/ksef-client-python/commit/8e1b59d38fd663bb43d2b2e69aedf6157e655076))
+* **cli:** KSeF CLI with docs and tests ([#15](https://github.com/smekcio/ksef-client-python/issues/15)) ([b3cd722](https://github.com/smekcio/ksef-client-python/commit/b3cd72272c33888768a4c08470219854d844c39b))
+
+
+### Bug Fixes
+
+* **ci:** stabilize CLI tests and restore 100% coverage ([52bb71a](https://github.com/smekcio/ksef-client-python/commit/52bb71af251699c44aab2f4993a142916c126b20))
+
+
+### Documentation
+
+* **readme:** refresh README copy and table of contents ([d677909](https://github.com/smekcio/ksef-client-python/commit/d677909c67d34a819de789e65be62350168db823))
+* remove DX-first wording from documentation ([2410189](https://github.com/smekcio/ksef-client-python/commit/24101899bd773aebd16a0caa0ed90144af03c640))
+
 ## [0.5.0](https://github.com/smekcio/ksef-client-python/compare/v0.4.0...v0.5.0) (2026-02-19)
 
 
