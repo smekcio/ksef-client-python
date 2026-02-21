@@ -1,4 +1,4 @@
-# KSeF Python CLI (`ksef`) - DX-first
+# KSeF Python CLI (`ksef`)
 
 Ten dokument opisuje aktualne CLI 1:1 wobec implementacji w `src/ksef_client/cli`.
 

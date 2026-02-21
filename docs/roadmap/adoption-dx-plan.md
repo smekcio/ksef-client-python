@@ -1,7 +1,7 @@
-# Plan Rozwoju SDK pod Adopcje i DX (`ksef-client-python`)
+# Plan Rozwoju SDK pod Adopcje (`ksef-client-python`)
 
 ## Podsumowanie
-Ten dokument jest celowo przebudowany pod cele uzgodnione wczesniej: najpierw Quick Wins zwiekszajace adopcje i DX, a potem inicjatywy 2-3 kwartaly budujace przewage produktu. Priorytet: skracanie czasu startu integracji, mniejsza liczba bledow produkcyjnych i lepsza operacyjnosc.
+Ten dokument jest celowo przebudowany pod cele uzgodnione wczesniej: najpierw Quick Wins zwiekszajace adopcje, a potem inicjatywy 2-3 kwartaly budujace przewage produktu. Priorytet: skracanie czasu startu integracji, mniejsza liczba bledow produkcyjnych i lepsza operacyjnosc.
 
 ## Cele glowne (zgodne z ustaleniami)
 
@@ -169,7 +169,7 @@ Definition of Done:
 ## Zalozenia domyslne
 - Wszystkie zmiany additive-first, bez breaking changes dla istniejacego API.
 - Security by default: redaction danych wrazliwych.
-- Dokumentacja i DX sa traktowane jako czesc produktu, nie dodatek.
+- Dokumentacja i ergonomia integracji sa traktowane jako czesc produktu, nie dodatek.
 
 ## Checklista Sprint 1
 - [ ] RFC dla `ksef-cli` i zestawu komend.
