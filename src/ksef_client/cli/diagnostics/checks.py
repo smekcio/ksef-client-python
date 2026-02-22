@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..auth.keyring_store import get_tokens
+from ..auth.keyring_store import get_token_store_mode, get_tokens
 from ..config.loader import load_config
 
 
@@ -19,6 +19,7 @@ def run_preflight(profile: str | None = None) -> dict[str, Any]:
     context_type = selected_cfg.context_type if selected_cfg else ""
     context_value = selected_cfg.context_value if selected_cfg else ""
     has_tokens = bool(get_tokens(selected_profile)) if selected_profile else False
+    token_store_mode = get_token_store_mode()
 
     if selected_profile is None:
         profile_status = "WARN"
@@ -74,6 +75,11 @@ def run_preflight(profile: str | None = None) -> dict[str, Any]:
                     else "Profile is not selected."
                 )
             ),
+        },
+        {
+            "name": "token_store",
+            "status": "PASS",
+            "message": token_store_mode,
         },
     ]
 

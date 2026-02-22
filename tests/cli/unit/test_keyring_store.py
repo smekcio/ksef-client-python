@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 import types
+import warnings
 
 import pytest
 
@@ -471,3 +472,57 @@ def test_keyring_store_import_branch_with_fake_keyring_module(monkeypatch) -> No
         assert reloaded._KEYRING_AVAILABLE is True
     finally:
         importlib.reload(original_module)
+
+
+@pytest.mark.parametrize(
+    ("keyring_available", "keyring_backend", "store_key", "allow_insecure", "os_name", "expected"),
+    [
+        (True, object(), "", "", "posix", "keyring"),
+        (False, None, "my-secret-passphrase", "", "posix", "encrypted-fallback"),
+        (False, None, "", "1", "posix", "plaintext-fallback"),
+        (False, None, "", "1", "nt", "unavailable"),
+        (False, None, "", "", "posix", "unavailable"),
+    ],
+)
+def test_keyring_store_mode_detection(
+    monkeypatch,
+    keyring_available: bool,
+    keyring_backend: object | None,
+    store_key: str,
+    allow_insecure: str,
+    os_name: str,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", keyring_available)
+    monkeypatch.setattr(keyring_store, "_keyring", keyring_backend)
+    monkeypatch.setattr(keyring_store.os, "name", os_name, raising=False)
+
+    if store_key:
+        monkeypatch.setenv(keyring_store._TOKEN_STORE_KEY_ENV, store_key)
+    else:
+        monkeypatch.delenv(keyring_store._TOKEN_STORE_KEY_ENV, raising=False)
+
+    if allow_insecure:
+        monkeypatch.setenv(keyring_store._ALLOW_INSECURE_FALLBACK_ENV, allow_insecure)
+    else:
+        monkeypatch.delenv(keyring_store._ALLOW_INSECURE_FALLBACK_ENV, raising=False)
+
+    assert keyring_store.get_token_store_mode() == expected
+
+
+def test_keyring_store_plaintext_fallback_warns_once_on_use(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", False)
+    monkeypatch.setattr(keyring_store, "_keyring", None)
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(keyring_store.os, "name", "posix", raising=False)
+    monkeypatch.setenv(keyring_store._ALLOW_INSECURE_FALLBACK_ENV, "1")
+    monkeypatch.delenv(keyring_store._TOKEN_STORE_KEY_ENV, raising=False)
+    monkeypatch.setattr(keyring_store, "_PLAINTEXT_WARNING_EMITTED", False)
+
+    with pytest.warns(UserWarning, match="plaintext token fallback"):
+        keyring_store.save_tokens("demo", "acc", "ref")
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        keyring_store.get_tokens("demo")
+    assert len(recorded) == 0
