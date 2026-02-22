@@ -41,6 +41,9 @@ class KsefClientOptions:
     follow_redirects: bool = False
     verify_ssl: bool = True
     require_export_part_hash: bool = True
+    strict_presigned_url_validation: bool = True
+    allowed_presigned_hosts: list[str] | None = None
+    allow_private_network_presigned_urls: bool = False
     user_agent: str = field(default_factory=_default_user_agent)
 
     def normalized_base_url(self) -> str:
