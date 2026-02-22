@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 import typer
 from click import Command
+from click.core import ParameterSource
 
 from ksef_client.cli.commands import (
     auth_cmd,
@@ -103,3 +106,60 @@ def test_render_error_cli_error_for_init_and_profile(module) -> None:
     with pytest.raises(typer.Exit) as exc:
         module._render_error(_ctx(), "cmd.test", CliError("bad", ExitCode.VALIDATION_ERROR, "fix"))
     assert exc.value.exit_code == int(ExitCode.VALIDATION_ERROR)
+
+
+class _RecordingRenderer:
+    def __init__(self) -> None:
+        self.messages: list[tuple[str, str]] = []
+
+    def info(self, message: str, *, command: str) -> None:
+        self.messages.append((message, command))
+
+
+def test_auth_warn_if_secret_from_cli_ignores_parameter_source_errors() -> None:
+    class _FailingSourceContext:
+        @staticmethod
+        def get_parameter_source(_name: str):
+            raise RuntimeError("missing")
+
+    renderer = _RecordingRenderer()
+    auth_cmd._warn_if_secret_from_cli(
+        ctx=cast(typer.Context, _FailingSourceContext()),
+        renderer=renderer,
+        command="auth.login-token",
+        parameter_name="ksef_token",
+        option_name="--ksef-token",
+        value="secret",
+    )
+    assert renderer.messages == []
+
+
+def test_auth_warn_if_secret_from_cli_warns_only_for_commandline() -> None:
+    class _Context:
+        def __init__(self, source: ParameterSource) -> None:
+            self.source = source
+
+        def get_parameter_source(self, _name: str) -> ParameterSource:
+            return self.source
+
+    renderer = _RecordingRenderer()
+    auth_cmd._warn_if_secret_from_cli(
+        ctx=cast(typer.Context, _Context(ParameterSource.DEFAULT)),
+        renderer=renderer,
+        command="auth.login-token",
+        parameter_name="ksef_token",
+        option_name="--ksef-token",
+        value="secret",
+    )
+    assert renderer.messages == []
+
+    auth_cmd._warn_if_secret_from_cli(
+        ctx=cast(typer.Context, _Context(ParameterSource.COMMANDLINE)),
+        renderer=renderer,
+        command="auth.login-token",
+        parameter_name="ksef_token",
+        option_name="--ksef-token",
+        value="secret",
+    )
+    assert len(renderer.messages) == 1
+    assert "--ksef-token" in renderer.messages[0][0]
