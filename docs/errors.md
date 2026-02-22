@@ -4,6 +4,10 @@ Obsługa błędów jest oparta o kody HTTP (>= 400). Biblioteka nie interpretuje
 
 ## Typy wyjątków
 
+### `ValueError` (walidacja pre-signed URL)
+
+Dla żądań z `skip_auth=True` i absolutnym URL biblioteka wykonuje walidację bezpieczeństwa. W przypadku niespełnienia reguł (np. host `localhost`, loopback/private IP bez opt-in, host poza allowlistą, albo `http` przy `strict_presigned_url_validation=True`) rzucany jest `ValueError` z komunikatem bezpieczeństwa.
+
 ### `KsefHttpError`
 
 Bazowy błąd HTTP.
