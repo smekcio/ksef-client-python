@@ -50,7 +50,8 @@ def _validate_presigned_url_security(options: KsefClientOptions, url: str) -> No
     normalized_host = host.lower().rstrip(".")
     if normalized_host == "localhost" or normalized_host.endswith(".localhost"):
         raise ValueError(
-            "Rejected insecure presigned URL: localhost hosts are not allowed for skip_auth requests."
+            "Rejected insecure presigned URL: localhost hosts are not allowed "
+            "for skip_auth requests."
         )
 
     if options.strict_presigned_url_validation and parsed.scheme != "https":
@@ -66,21 +67,24 @@ def _validate_presigned_url_security(options: KsefClientOptions, url: str) -> No
     if host_ip is not None:
         if host_ip.is_loopback:
             raise ValueError(
-                "Rejected insecure presigned URL: loopback addresses are not allowed for skip_auth requests."
+                "Rejected insecure presigned URL: loopback addresses are not allowed "
+                "for skip_auth requests."
             )
         if (
             not options.allow_private_network_presigned_urls
             and (host_ip.is_private or host_ip.is_link_local or host_ip.is_reserved)
         ):
             raise ValueError(
-                "Rejected insecure presigned URL: private, link-local, and reserved IP hosts are blocked for skip_auth requests."
+                "Rejected insecure presigned URL: private, link-local, and reserved "
+                "IP hosts are blocked for skip_auth requests."
             )
 
     if options.allowed_presigned_hosts and not _host_allowed(
         normalized_host, options.allowed_presigned_hosts
     ):
         raise ValueError(
-            "Rejected insecure presigned URL: host is not in allowed_presigned_hosts for skip_auth requests."
+            "Rejected insecure presigned URL: host is not in allowed_presigned_hosts "
+            "for skip_auth requests."
         )
 
 

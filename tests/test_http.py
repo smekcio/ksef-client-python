@@ -5,7 +5,14 @@ import httpx
 
 from ksef_client.config import KsefClientOptions
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
-from ksef_client.http import AsyncBaseHttpClient, BaseHttpClient, HttpResponse, _merge_headers
+from ksef_client.http import (
+    AsyncBaseHttpClient,
+    BaseHttpClient,
+    HttpResponse,
+    _host_allowed,
+    _merge_headers,
+    _validate_presigned_url_security,
+)
 
 
 class HttpTests(unittest.TestCase):
@@ -192,6 +199,19 @@ class HttpTests(unittest.TestCase):
         client = BaseHttpClient(options)
         with self.assertRaisesRegex(ValueError, "allowed_presigned_hosts"):
             client.request("GET", "https://other.example.com/path", skip_auth=True)
+
+    def test_host_allowed_skips_empty_and_ip_allowlist_entries(self):
+        self.assertTrue(
+            _host_allowed(
+                "sub.uploads.example.com",
+                ["", "10.0.0.1", "uploads.example.com"],
+            )
+        )
+
+    def test_validate_presigned_url_security_rejects_missing_host(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        with self.assertRaisesRegex(ValueError, "host is missing"):
+            _validate_presigned_url_security(options, "https:///no-host")
 
 
 class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
