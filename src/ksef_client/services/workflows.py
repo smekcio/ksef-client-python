@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -777,9 +779,18 @@ class PackageProcessingResult:
 
 
 class ExportWorkflow:
-    def __init__(self, invoices_client: InvoicesClient, http_client: _RequestHttpClient) -> None:
+    def __init__(
+        self,
+        invoices_client: InvoicesClient,
+        http_client: _RequestHttpClient,
+        require_export_part_hash: bool | None = None,
+    ) -> None:
         self._invoices = invoices_client
         self._download_helper = ExportDownloadHelper(http_client)
+        self._require_export_part_hash = _resolve_export_part_hash_requirement(
+            http_client=http_client,
+            explicit_value=require_export_part_hash,
+        )
 
     def download_and_process_package(
         self,
@@ -787,7 +798,15 @@ class ExportWorkflow:
         encryption_data: EncryptionData,
     ) -> PackageProcessingResult:
         parts = package.get("parts") or []
-        encrypted_parts = self._download_helper.download_parts(parts)
+        encrypted_parts_with_hash = self._download_helper.download_parts_with_hash(parts)
+        for index, (part_bytes, part_hash) in enumerate(encrypted_parts_with_hash, start=1):
+            _validate_export_part_hash(
+                part_bytes,
+                part_hash,
+                require_export_part_hash=self._require_export_part_hash,
+                part_index=index,
+            )
+        encrypted_parts = [part_bytes for part_bytes, _ in encrypted_parts_with_hash]
         decrypted_parts = [
             decrypt_aes_cbc_pkcs7(part, encryption_data.key, encryption_data.iv)
             for part in encrypted_parts
@@ -816,9 +835,14 @@ class AsyncExportWorkflow:
         self,
         invoices_client: AsyncInvoicesClient,
         http_client: _AsyncRequestHttpClient,
+        require_export_part_hash: bool | None = None,
     ) -> None:
         self._invoices = invoices_client
         self._download_helper = AsyncExportDownloadHelper(http_client)
+        self._require_export_part_hash = _resolve_export_part_hash_requirement(
+            http_client=http_client,
+            explicit_value=require_export_part_hash,
+        )
 
     async def download_and_process_package(
         self,
@@ -826,7 +850,15 @@ class AsyncExportWorkflow:
         encryption_data: EncryptionData,
     ) -> PackageProcessingResult:
         parts = package.get("parts") or []
-        encrypted_parts = await self._download_helper.download_parts(parts)
+        encrypted_parts_with_hash = await self._download_helper.download_parts_with_hash(parts)
+        for index, (part_bytes, part_hash) in enumerate(encrypted_parts_with_hash, start=1):
+            _validate_export_part_hash(
+                part_bytes,
+                part_hash,
+                require_export_part_hash=self._require_export_part_hash,
+                part_index=index,
+            )
+        encrypted_parts = [part_bytes for part_bytes, _ in encrypted_parts_with_hash]
         decrypted_parts = [
             decrypt_aes_cbc_pkcs7(part, encryption_data.key, encryption_data.iv)
             for part in encrypted_parts
@@ -848,3 +880,33 @@ class AsyncExportWorkflow:
                 invoice_xml_files[name] = content.decode("utf-8")
 
         return PackageProcessingResult(metadata_summaries, invoice_xml_files)
+
+
+def _resolve_export_part_hash_requirement(
+    *, http_client: _RequestHttpClient | _AsyncRequestHttpClient, explicit_value: bool | None
+) -> bool:
+    if explicit_value is not None:
+        return explicit_value
+    options = getattr(http_client, "_options", None)
+    if options is None:
+        return True
+    return bool(getattr(options, "require_export_part_hash", True))
+
+
+def _validate_export_part_hash(
+    part_bytes: bytes,
+    expected_hash: str | None,
+    *,
+    require_export_part_hash: bool,
+    part_index: int,
+) -> None:
+    if expected_hash is None:
+        if require_export_part_hash:
+            raise ValueError(f"Missing export part hash for part #{part_index}.")
+        return
+    actual_hash = base64.b64encode(hashlib.sha256(part_bytes).digest()).decode("ascii")
+    if expected_hash != actual_hash:
+        raise ValueError(
+            f"Export part hash mismatch for part #{part_index}: "
+            f"expected '{expected_hash}', got '{actual_hash}'."
+        )
