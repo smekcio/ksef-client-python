@@ -7,6 +7,7 @@ import json
 import os
 import time
 import uuid
+import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
@@ -54,6 +55,10 @@ _FALLBACK_LOCK_POLL_INTERVAL_SECONDS = 0.05
 _ALLOW_INSECURE_FALLBACK_ENV = "KSEF_CLI_ALLOW_INSECURE_TOKEN_STORE"
 _TOKEN_STORE_KEY_ENV = "KSEF_CLI_TOKEN_STORE_KEY"
 _ENCRYPTION_MODE = "fernet-v1"
+_PLAINTEXT_FALLBACK_WARNING = (
+    "Using plaintext token fallback storage. Tokens are stored unencrypted in tokens.json."
+)
+_PLAINTEXT_WARNING_EMITTED = False
 
 
 class _KeyringBackend(Protocol):
@@ -104,6 +109,24 @@ def _fallback_mode() -> str | None:
     if _plaintext_fallback_allowed():
         return "insecure-plaintext"
     return None
+
+
+def get_token_store_mode() -> str:
+    if _KEYRING_AVAILABLE and _keyring is not None:
+        return "keyring"
+    if _encrypted_fallback_enabled():
+        return "encrypted-fallback"
+    if _plaintext_fallback_allowed():
+        return "plaintext-fallback"
+    return "unavailable"
+
+
+def _warn_plaintext_fallback_used(mode: str | None) -> None:
+    global _PLAINTEXT_WARNING_EMITTED
+    if mode != "insecure-plaintext" or _PLAINTEXT_WARNING_EMITTED:
+        return
+    warnings.warn(_PLAINTEXT_FALLBACK_WARNING, UserWarning, stacklevel=3)
+    _PLAINTEXT_WARNING_EMITTED = True
 
 
 def _fallback_cipher() -> Any:
@@ -271,6 +294,7 @@ def save_tokens(profile: str, access_token: str, refresh_token: str) -> None:
     mode = _fallback_mode()
     if mode is None:
         _raise_no_secure_store()
+    _warn_plaintext_fallback_used(mode)
     encoded_tokens = _encode_tokens(
         access_token=access_token, refresh_token=refresh_token, mode=mode
     )
@@ -315,7 +339,9 @@ def get_tokens(profile: str) -> tuple[str, str] | None:
         if _fallback_mode() is None:
             return None
 
-    if _fallback_mode() is not None:
+    mode = _fallback_mode()
+    if mode is not None:
+        _warn_plaintext_fallback_used(mode)
         payload = _load_fallback_tokens()
         profile_data = payload.get(profile)
         if not isinstance(profile_data, dict):

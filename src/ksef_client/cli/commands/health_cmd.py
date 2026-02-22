@@ -6,6 +6,7 @@ import typer
 
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 
+from ..auth.keyring_store import get_token_store_mode
 from ..auth.manager import resolve_base_url
 from ..context import profile_label, require_context, require_profile
 from ..errors import CliError
@@ -14,6 +15,27 @@ from ..output import get_renderer
 from ..sdk.adapters import run_health_check
 
 app = typer.Typer(help="Run connectivity and diagnostics checks.")
+
+
+def _append_token_store_check(result: dict[str, object]) -> None:
+    checks_obj = result.get("checks")
+    if not isinstance(checks_obj, list):
+        checks_obj = []
+        result["checks"] = checks_obj
+
+    checks = checks_obj
+    for item in checks:
+        if isinstance(item, dict) and item.get("name") == "token_store":
+            return
+
+    mode = get_token_store_mode()
+    checks.append(
+        {
+            "name": "token_store",
+            "status": "WARN" if mode in {"plaintext-fallback", "unavailable"} else "PASS",
+            "message": mode,
+        }
+    )
 
 
 def _render_error(ctx: typer.Context, command: str, exc: Exception) -> None:
@@ -89,6 +111,7 @@ def health_check(
             check_auth=check_auth,
             check_certs=check_certs,
         )
+        _append_token_store_check(result)
     except Exception as exc:
         _render_error(ctx, "health.check", exc)
     renderer.success(command="health.check", profile=profile, data=result)

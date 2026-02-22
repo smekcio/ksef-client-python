@@ -454,8 +454,14 @@ KSEF_CLI_TOKEN_STORE_KEY=<TWOJ_KLUCZ>
 KSEF_CLI_ALLOW_INSECURE_TOKEN_STORE=1
 ```
 
+- Gdy CLI faktycznie uzyje plaintext fallback, wypisuje jawne ostrzezenie o niezabezpieczonym zapisie tokenow.
 - Na Windows plaintext fallback jest zablokowany nawet po ustawieniu tej zmiennej; uzyj keyringa albo fallbacku szyfrowanego.
 - Gdy keyring jest obecny, ale backend zwraca blad, CLI automatycznie przechodzi na dostepny fallback (`KSEF_CLI_TOKEN_STORE_KEY` lub awaryjny plaintext poza Windows).
+- `ksef health check` oraz diagnostyka preflight pokazuja aktualny tryb polityki token-store jako jedno z:
+  - `keyring`
+  - `encrypted-fallback`
+  - `plaintext-fallback`
+  - `unavailable`
 
 Lokalizacja token fallback:
 - Windows: `%LOCALAPPDATA%/ksef-cli/tokens.json`
