@@ -11,9 +11,13 @@ options = KsefClientOptions(
     base_url="https://api-test.ksef.mf.gov.pl",
     timeout_seconds=30.0,
     verify_ssl=True,
+    require_export_part_hash=True,
     proxy=None,
     custom_headers={"X-Custom-Header": "value"},
     follow_redirects=False,
+    strict_presigned_url_validation=True,
+    allowed_presigned_hosts=None,
+    allow_private_network_presigned_urls=False,
     base_qr_url=None,
 )
 ```
@@ -61,6 +65,27 @@ Opcja zwykle nie jest potrzebna. Włączenie ma uzasadnienie wyłącznie w środ
 ### `verify_ssl`
 
 Domyślnie `True`. Wyłączenie ma uzasadnienie wyłącznie w specyficznych środowiskach testowych (np. z własnym MITM/proxy).
+
+### `require_export_part_hash`
+
+Domyślnie `True`. Dotyczy pobierania partów eksportu (`ExportWorkflow`, `AsyncExportWorkflow`):
+
+- dla każdego pobranego, zaszyfrowanego partu biblioteka liczy `SHA-256` i porównuje z nagłówkiem `x-ms-meta-hash` (base64), jeśli nagłówek jest obecny;
+- jeśli `x-ms-meta-hash` nie ma i opcja jest `True`, biblioteka zgłasza `ValueError`;
+- jeśli hash się nie zgadza, biblioteka zgłasza `ValueError`;
+- ustawienie `False` pozwala przejść dalej, gdy nagłówek hash nie został zwrócony (nadal występuje walidacja, gdy hash jest obecny).
+
+### `strict_presigned_url_validation`
+
+Domyślnie `True`. Dla absolutnych URL używanych z `skip_auth=True` wymusza `https`. Przy wyłączeniu możliwe są URL `http`, ale nadal działa walidacja hosta/IP.
+
+### `allowed_presigned_hosts`
+
+Domyślnie `None` (brak allowlisty). Jeśli ustawione, host pre-signed URL musi pasować dokładnie albo jako subdomena (np. `a.uploads.example.com` pasuje do `uploads.example.com`).
+
+### `allow_private_network_presigned_urls`
+
+Domyślnie `False`. Gdy `False`, blokowane są hosty IP prywatne/link-local/reserved dla żądań `skip_auth=True`. Ustaw `True` wyłącznie w kontrolowanym środowisku.
 
 ## Przekazywanie `access_token`
 
