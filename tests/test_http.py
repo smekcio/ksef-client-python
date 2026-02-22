@@ -119,6 +119,80 @@ class HttpTests(unittest.TestCase):
         ):
             client.request("GET", "/path")
 
+    def test_skip_auth_presigned_url_accepts_valid_https(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        response = httpx.Response(200, json={"ok": True})
+        with patch.object(client._client, "request", Mock(return_value=response)) as request_mock:
+            client.request("GET", "https://files.example.com/upload", skip_auth=True)
+            _, kwargs = request_mock.call_args
+            self.assertEqual(kwargs["url"], "https://files.example.com/upload")
+            self.assertNotIn("Authorization", kwargs["headers"])
+
+    def test_skip_auth_presigned_url_rejects_http_when_strict(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        with self.assertRaisesRegex(ValueError, "https is required"):
+            client.request("GET", "http://files.example.com/upload", skip_auth=True)
+
+    def test_skip_auth_presigned_url_allows_http_when_not_strict(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl",
+            strict_presigned_url_validation=False,
+        )
+        client = BaseHttpClient(options)
+        response = httpx.Response(200, json={"ok": True})
+        with patch.object(client._client, "request", Mock(return_value=response)) as request_mock:
+            client.request("GET", "http://files.example.com/upload", skip_auth=True)
+            _, kwargs = request_mock.call_args
+            self.assertEqual(kwargs["url"], "http://files.example.com/upload")
+
+    def test_skip_auth_presigned_url_rejects_localhost_and_loopback(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        with self.assertRaisesRegex(ValueError, "localhost"):
+            client.request("GET", "https://localhost/upload", skip_auth=True)
+        with self.assertRaisesRegex(ValueError, "loopback"):
+            client.request("GET", "https://127.0.0.1/upload", skip_auth=True)
+
+    def test_skip_auth_presigned_url_rejects_private_ip_by_default(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        with self.assertRaisesRegex(ValueError, "private, link-local, and reserved IP"):
+            client.request("GET", "https://10.1.2.3/upload", skip_auth=True)
+
+    def test_skip_auth_presigned_url_allows_private_ip_when_opted_in(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl",
+            allow_private_network_presigned_urls=True,
+        )
+        client = BaseHttpClient(options)
+        response = httpx.Response(200, json={"ok": True})
+        with patch.object(client._client, "request", Mock(return_value=response)) as request_mock:
+            client.request("GET", "https://10.1.2.3/upload", skip_auth=True)
+            _, kwargs = request_mock.call_args
+            self.assertEqual(kwargs["url"], "https://10.1.2.3/upload")
+
+    def test_skip_auth_presigned_url_allowlist_exact_and_subdomain(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl",
+            allowed_presigned_hosts=["uploads.example.com"],
+        )
+        client = BaseHttpClient(options)
+        response = httpx.Response(200, json={"ok": True})
+        with patch.object(client._client, "request", Mock(return_value=response)):
+            client.request("GET", "https://uploads.example.com/path", skip_auth=True)
+            client.request("GET", "https://sub.uploads.example.com/path", skip_auth=True)
+
+    def test_skip_auth_presigned_url_allowlist_rejects_other_hosts(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl",
+            allowed_presigned_hosts=["uploads.example.com"],
+        )
+        client = BaseHttpClient(options)
+        with self.assertRaisesRegex(ValueError, "allowed_presigned_hosts"):
+            client.request("GET", "https://other.example.com/path", skip_auth=True)
+
 
 class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_request(self):
@@ -192,6 +266,12 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
         response_http = httpx.Response(500, content=b"boom", headers={"Content-Type": "text/plain"})
         with self.assertRaises(KsefHttpError):
             client._raise_for_status(response_http)
+
+    async def test_async_skip_auth_presigned_validation_rejects_localhost(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = AsyncBaseHttpClient(options)
+        with self.assertRaisesRegex(ValueError, "localhost"):
+            await client.request("GET", "https://localhost/upload", skip_auth=True)
 
 
 if __name__ == "__main__":

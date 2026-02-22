@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -15,6 +17,71 @@ def _merge_headers(base: dict[str, str], extra: dict[str, str] | None) -> dict[s
     merged = dict(base)
     merged.update(extra)
     return merged
+
+
+def _is_absolute_http_url(url: str) -> bool:
+    return url.startswith("http://") or url.startswith("https://")
+
+
+def _host_allowed(host: str, allowed_hosts: list[str]) -> bool:
+    normalized_host = host.lower().rstrip(".")
+    for allowed in allowed_hosts:
+        normalized_allowed = allowed.lower().strip().rstrip(".")
+        if not normalized_allowed:
+            continue
+        if normalized_host == normalized_allowed:
+            return True
+        try:
+            ipaddress.ip_address(normalized_allowed)
+            continue
+        except ValueError:
+            pass
+        if normalized_host.endswith("." + normalized_allowed):
+            return True
+    return False
+
+
+def _validate_presigned_url_security(options: KsefClientOptions, url: str) -> None:
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        raise ValueError("Rejected insecure presigned URL: host is missing.")
+
+    normalized_host = host.lower().rstrip(".")
+    if normalized_host == "localhost" or normalized_host.endswith(".localhost"):
+        raise ValueError(
+            "Rejected insecure presigned URL: localhost hosts are not allowed for skip_auth requests."
+        )
+
+    if options.strict_presigned_url_validation and parsed.scheme != "https":
+        raise ValueError(
+            "Rejected insecure presigned URL: https is required for skip_auth requests."
+        )
+
+    try:
+        host_ip = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        host_ip = None
+
+    if host_ip is not None:
+        if host_ip.is_loopback:
+            raise ValueError(
+                "Rejected insecure presigned URL: loopback addresses are not allowed for skip_auth requests."
+            )
+        if (
+            not options.allow_private_network_presigned_urls
+            and (host_ip.is_private or host_ip.is_link_local or host_ip.is_reserved)
+        ):
+            raise ValueError(
+                "Rejected insecure presigned URL: private, link-local, and reserved IP hosts are blocked for skip_auth requests."
+            )
+
+    if options.allowed_presigned_hosts and not _host_allowed(
+        normalized_host, options.allowed_presigned_hosts
+    ):
+        raise ValueError(
+            "Rejected insecure presigned URL: host is not in allowed_presigned_hosts for skip_auth requests."
+        )
 
 
 @dataclass
@@ -60,8 +127,10 @@ class BaseHttpClient:
         expected_status: set[int] | None = None,
     ) -> HttpResponse:
         url = path
-        if not url.startswith("http://") and not url.startswith("https://"):
+        if not _is_absolute_http_url(url):
             url = self._options.normalized_base_url().rstrip("/") + "/" + path.lstrip("/")
+        elif skip_auth:
+            _validate_presigned_url_security(self._options, url)
 
         base_headers = {
             "User-Agent": self._options.user_agent,
@@ -166,8 +235,10 @@ class AsyncBaseHttpClient:
         expected_status: set[int] | None = None,
     ) -> HttpResponse:
         url = path
-        if not url.startswith("http://") and not url.startswith("https://"):
+        if not _is_absolute_http_url(url):
             url = self._options.normalized_base_url().rstrip("/") + "/" + path.lstrip("/")
+        elif skip_auth:
+            _validate_presigned_url_security(self._options, url)
 
         base_headers = {
             "User-Agent": self._options.user_agent,
