@@ -11,6 +11,7 @@ options = KsefClientOptions(
     base_url="https://api-test.ksef.mf.gov.pl",
     timeout_seconds=30.0,
     verify_ssl=True,
+    require_export_part_hash=True,
     proxy=None,
     custom_headers={"X-Custom-Header": "value"},
     follow_redirects=False,
@@ -64,6 +65,15 @@ Opcja zwykle nie jest potrzebna. Włączenie ma uzasadnienie wyłącznie w środ
 ### `verify_ssl`
 
 Domyślnie `True`. Wyłączenie ma uzasadnienie wyłącznie w specyficznych środowiskach testowych (np. z własnym MITM/proxy).
+
+### `require_export_part_hash`
+
+Domyślnie `True`. Dotyczy pobierania partów eksportu (`ExportWorkflow`, `AsyncExportWorkflow`):
+
+- dla każdego pobranego, zaszyfrowanego partu biblioteka liczy `SHA-256` i porównuje z nagłówkiem `x-ms-meta-hash` (base64), jeśli nagłówek jest obecny;
+- jeśli `x-ms-meta-hash` nie ma i opcja jest `True`, biblioteka zgłasza `ValueError`;
+- jeśli hash się nie zgadza, biblioteka zgłasza `ValueError`;
+- ustawienie `False` pozwala przejść dalej, gdy nagłówek hash nie został zwrócony (nadal występuje walidacja, gdy hash jest obecny).
 
 ### `strict_presigned_url_validation`
 

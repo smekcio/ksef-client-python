@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import unittest
 from dataclasses import dataclass
@@ -7,12 +9,17 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from ksef_client.clients.invoices import AsyncInvoicesClient, InvoicesClient
+from ksef_client.config import KsefClientOptions
 from ksef_client.http import HttpResponse
 from ksef_client.services import workflows
 from ksef_client.services.crypto import encrypt_aes_cbc_pkcs7, generate_iv, generate_symmetric_key
 from ksef_client.services.xades import XadesKeyPair
 from ksef_client.utils.zip_utils import build_zip
 from tests.helpers import generate_rsa_cert
+
+
+def _sha256_b64(payload: bytes) -> str:
+    return base64.b64encode(hashlib.sha256(payload).digest()).decode("ascii")
 
 
 class RecordingHttp:
@@ -368,9 +375,104 @@ class WorkflowsTests(unittest.TestCase):
             pass
 
         workflow = workflows.ExportWorkflow(cast(InvoicesClient, DummyInvoices()), RecordingHttp())
-        with patch.object(workflow._download_helper, "download_parts", return_value=[encrypted]):
+        with patch.object(
+            workflow._download_helper,
+            "download_parts_with_hash",
+            return_value=[(encrypted, _sha256_b64(encrypted))],
+        ):
             result = workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
+        self.assertIn("inv.xml", result.invoice_xml_files)
+
+    def test_export_workflow_rejects_missing_hash_by_default(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        encrypted = encrypt_aes_cbc_pkcs7(build_zip({"inv.xml": b"<xml/>"}), key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)  # type: ignore[arg-type]
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.ExportWorkflow(cast(InvoicesClient, DummyInvoices()), RecordingHttp())
+        with (
+            patch.object(
+                workflow._download_helper,
+                "download_parts_with_hash",
+                return_value=[(encrypted, None)],
+            ),
+            self.assertRaises(ValueError) as exc,
+        ):
+            workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
+        self.assertIn("Missing export part hash", str(exc.exception))
+
+    def test_export_workflow_allows_missing_hash_when_disabled(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        encrypted = encrypt_aes_cbc_pkcs7(build_zip({"inv.xml": b"<xml/>"}), key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)  # type: ignore[arg-type]
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.ExportWorkflow(
+            cast(InvoicesClient, DummyInvoices()),
+            RecordingHttp(),
+            require_export_part_hash=False,
+        )
+        with patch.object(
+            workflow._download_helper,
+            "download_parts_with_hash",
+            return_value=[(encrypted, None)],
+        ):
+            result = workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
+        self.assertIn("inv.xml", result.invoice_xml_files)
+
+    def test_export_workflow_rejects_hash_mismatch(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        encrypted = encrypt_aes_cbc_pkcs7(build_zip({"inv.xml": b"<xml/>"}), key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)  # type: ignore[arg-type]
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.ExportWorkflow(cast(InvoicesClient, DummyInvoices()), RecordingHttp())
+        with (
+            patch.object(
+                workflow._download_helper,
+                "download_parts_with_hash",
+                return_value=[(encrypted, "bad-hash")],
+            ),
+            self.assertRaises(ValueError) as exc,
+        ):
+            workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
+        self.assertIn("Export part hash mismatch", str(exc.exception))
+
+    def test_export_workflow_reads_hash_requirement_from_client_options(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        encrypted = encrypt_aes_cbc_pkcs7(build_zip({"inv.xml": b"<xml/>"}), key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)  # type: ignore[arg-type]
+
+        class DummyInvoices:
+            pass
+
+        class RecordingHttpWithOptions(RecordingHttp):
+            def __init__(self) -> None:
+                super().__init__()
+                self._options = KsefClientOptions(
+                    base_url="https://api-test.ksef.mf.gov.pl",
+                    require_export_part_hash=False,
+                )
+
+        http = RecordingHttpWithOptions()
+        workflow = workflows.ExportWorkflow(cast(InvoicesClient, DummyInvoices()), http)
+        with patch.object(
+            workflow._download_helper,
+            "download_parts_with_hash",
+            return_value=[(encrypted, None)],
+        ):
+            result = workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
         self.assertIn("inv.xml", result.invoice_xml_files)
 
 
@@ -565,13 +667,86 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch.object(
             workflow._download_helper,
-            "download_parts",
-            AsyncMock(return_value=[encrypted]),
+            "download_parts_with_hash",
+            AsyncMock(return_value=[(encrypted, _sha256_b64(encrypted))]),
         ):
             result = await workflow.download_and_process_package(
                 {"parts": [{"url": "u"}]}, encryption
             )
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
+
+    async def test_async_export_workflow_rejects_missing_hash_by_default(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        encrypted = encrypt_aes_cbc_pkcs7(build_zip({"inv.xml": b"<xml/>"}), key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)  # type: ignore[arg-type]
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.AsyncExportWorkflow(
+            cast(AsyncInvoicesClient, DummyInvoices()),
+            RecordingAsyncHttp(),
+        )
+        with (
+            patch.object(
+                workflow._download_helper,
+                "download_parts_with_hash",
+                AsyncMock(return_value=[(encrypted, None)]),
+            ),
+            self.assertRaises(ValueError) as exc,
+        ):
+            await workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
+        self.assertIn("Missing export part hash", str(exc.exception))
+
+    async def test_async_export_workflow_allows_missing_hash_when_disabled(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        encrypted = encrypt_aes_cbc_pkcs7(build_zip({"inv.xml": b"<xml/>"}), key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)  # type: ignore[arg-type]
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.AsyncExportWorkflow(
+            cast(AsyncInvoicesClient, DummyInvoices()),
+            RecordingAsyncHttp(),
+            require_export_part_hash=False,
+        )
+        with patch.object(
+            workflow._download_helper,
+            "download_parts_with_hash",
+            AsyncMock(return_value=[(encrypted, None)]),
+        ):
+            result = await workflow.download_and_process_package(
+                {"parts": [{"url": "u"}]},
+                encryption,
+            )
+        self.assertIn("inv.xml", result.invoice_xml_files)
+
+    async def test_async_export_workflow_rejects_hash_mismatch(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        encrypted = encrypt_aes_cbc_pkcs7(build_zip({"inv.xml": b"<xml/>"}), key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)  # type: ignore[arg-type]
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.AsyncExportWorkflow(
+            cast(AsyncInvoicesClient, DummyInvoices()),
+            RecordingAsyncHttp(),
+        )
+        with (
+            patch.object(
+                workflow._download_helper,
+                "download_parts_with_hash",
+                AsyncMock(return_value=[(encrypted, "bad-hash")]),
+            ),
+            self.assertRaises(ValueError) as exc,
+        ):
+            await workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
+        self.assertIn("Export part hash mismatch", str(exc.exception))
 
 
 if __name__ == "__main__":

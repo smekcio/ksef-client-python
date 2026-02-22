@@ -70,6 +70,10 @@ print(len(result.metadata_summaries), len(result.invoice_xml_files))
 ## Uwagi
 
 - Części paczki są dostępne pod `package.parts[].url` i są pobierane **bez Bearer tokena** (pre-signed URL).
+- Dla każdego pobranego (zaszyfrowanego) partu workflow liczy hash `SHA-256` (base64) i porównuje z `x-ms-meta-hash`, jeśli nagłówek jest obecny.
+- Domyślnie (`KsefClientOptions.require_export_part_hash=True`) brak `x-ms-meta-hash` powoduje `ValueError`.
+- Niezgodność hash (`x-ms-meta-hash` vs. wyliczony hash) zawsze powoduje `ValueError`.
+- Jeśli integracja wymaga tolerowania braku nagłówka, ustaw `require_export_part_hash=False` w `KsefClientOptions` lub podczas tworzenia workflow.
 - Linki do partów wygasają; pobranie powinno nastąpić bez zbędnej zwłoki.
 - Paczka eksportu zawiera `_metadata.json` (dla deduplikacji i synchronizacji przyrostowej).
 
