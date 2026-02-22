@@ -31,6 +31,7 @@ def test_auth_login_token_success(runner, monkeypatch) -> None:
     )
     assert result.exit_code == 0
     assert "Authentication successful." in result.stdout
+    assert "WARNING: Secret provided via --ksef-token." in result.stdout
 
 
 def test_auth_login_token_uses_env_vars_without_flags(runner, monkeypatch) -> None:
@@ -52,6 +53,36 @@ def test_auth_login_token_uses_env_vars_without_flags(runner, monkeypatch) -> No
     assert seen["context_type"] == "nip"
     assert seen["context_value"] == "5265877635"
     assert "Authentication successful." in result.stdout
+
+
+def test_auth_login_token_prompts_hidden_when_missing_and_interactive(runner, monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_login(**kwargs):
+        seen.update(kwargs)
+        return {"reference_number": "r-prompt", "saved": True}
+
+    monkeypatch.setattr(auth_cmd, "login_with_token", _fake_login)
+    monkeypatch.setattr(auth_cmd, "_is_interactive_terminal", lambda: True)
+
+    result = runner.invoke(
+        app,
+        [
+            "auth",
+            "login-token",
+            "--context-type",
+            "nip",
+            "--context-value",
+            "5265877635",
+        ],
+        input="prompt-token\n",
+    )
+
+    assert result.exit_code == 0
+    assert seen["token"] == "prompt-token"
+    assert "WARNING: Secret provided via --ksef-token." not in result.stdout
+    assert "prompt-token" not in result.stdout
+    assert "KSeF token:" in result.stdout
 
 
 def test_auth_login_token_validation_error(runner, monkeypatch) -> None:
