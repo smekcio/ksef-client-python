@@ -81,3 +81,19 @@ def test_health_check_does_not_duplicate_existing_token_store_check(runner, monk
     payload = _json_output(result.stdout)
     token_store_checks = [c for c in payload["data"]["checks"] if c["name"] == "token_store"]
     assert token_store_checks == [{"name": "token_store", "status": "PASS", "message": "keyring"}]
+
+
+def test_health_check_replaces_non_list_checks_with_token_store_check(runner, monkeypatch) -> None:
+    monkeypatch.setattr(
+        health_cmd,
+        "run_health_check",
+        lambda **kwargs: {"overall": "PASS", "checks": {"name": "base_url", "status": "PASS"}},
+    )
+    monkeypatch.setattr(health_cmd, "get_token_store_mode", lambda: "keyring")
+
+    result = runner.invoke(app, ["--json", "health", "check"])
+    assert result.exit_code == 0
+    payload = _json_output(result.stdout)
+    assert payload["data"]["checks"] == [
+        {"name": "token_store", "status": "PASS", "message": "keyring"}
+    ]
