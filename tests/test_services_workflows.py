@@ -1,6 +1,6 @@
-import json
 import base64
 import hashlib
+import json
 import unittest
 from dataclasses import dataclass
 from typing import Any, cast
@@ -457,8 +457,15 @@ class WorkflowsTests(unittest.TestCase):
         class DummyInvoices:
             pass
 
-        http = RecordingHttp()
-        setattr(http, "_options", KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl", require_export_part_hash=False))
+        class RecordingHttpWithOptions(RecordingHttp):
+            def __init__(self) -> None:
+                super().__init__()
+                self._options = KsefClientOptions(
+                    base_url="https://api-test.ksef.mf.gov.pl",
+                    require_export_part_hash=False,
+                )
+
+        http = RecordingHttpWithOptions()
         workflow = workflows.ExportWorkflow(cast(InvoicesClient, DummyInvoices()), http)
         with patch.object(
             workflow._download_helper,
@@ -711,7 +718,10 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
             "download_parts_with_hash",
             AsyncMock(return_value=[(encrypted, None)]),
         ):
-            result = await workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
+            result = await workflow.download_and_process_package(
+                {"parts": [{"url": "u"}]},
+                encryption,
+            )
         self.assertIn("inv.xml", result.invoice_xml_files)
 
     async def test_async_export_workflow_rejects_hash_mismatch(self):
