@@ -47,7 +47,7 @@ ksef init --non-interactive --name demo --env DEMO --context-type nip --context-
 3. Logowanie tokenem + szybka weryfikacja sesji:
 
 ```bash
-ksef auth login-token --ksef-token <KSEF_TOKEN>
+ksef auth login-token
 ksef auth status
 ksef profile show
 ```
@@ -216,6 +216,8 @@ Options:
 Zrodlo tokenu:
 - `--ksef-token` ma najwyzszy priorytet,
 - gdy `--ksef-token` nie jest podany, CLI czyta `KSEF_TOKEN`.
+- gdy `--ksef-token` nie jest podany i brak `KSEF_TOKEN`, CLI pyta o token ukrytym promptem (tryb interaktywny).
+- podanie sekretu bezposrednio w `--ksef-token <wartosc>` powoduje ostrzezenie runtime (bez ujawniania sekretu).
 
 Fallback kontekstu:
 - `context_type` i `context_value` sa brane kolejno z: CLI option -> env (`KSEF_CONTEXT_*`) -> aktywny profil.
@@ -244,6 +246,8 @@ Walidacja:
 - uzyj dokladnie jednego zrodla certyfikatu:
   - `--pkcs12-path`, albo
   - para `--cert-pem` + `--key-pem`.
+- gdy hasla (`--pkcs12-password`, `--key-password`) nie sa podane, CLI moze zapytac o nie ukrytym promptem (tryb interaktywny; puste wejscie = brak hasla).
+- podanie hasla bezposrednio w opcji (`--pkcs12-password <wartosc>`, `--key-password <wartosc>`) powoduje ostrzezenie runtime (bez ujawniania sekretu).
 
 Fallback kontekstu:
 - `context_type` i `context_value` sa brane kolejno z: CLI option -> env (`KSEF_CONTEXT_*`) -> aktywny profil.
@@ -439,6 +443,10 @@ Options:
 - `8` blad I/O
 
 ## Bezpieczenstwo tokenow
+
+- Rekomendacja dla sekretow auth: nie podawaj ich bezposrednio w argumentach CLI.
+  - interaktywnie: pomin opcje sekretu i wpisz wartosc w ukrytym prompcie,
+  - automatyzacja: uzyj zmiennych srodowiskowych (np. `KSEF_TOKEN`) albo managera sekretow.
 
 - Domyslnie CLI wymaga systemowego keyringu do zapisu tokenow.
 - Gdy keyring jest niedostepny, mozliwy jest fallback szyfrowany przez klucz z env:

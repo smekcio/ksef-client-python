@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import sys
 
+from click.core import ParameterSource
 import typer
 
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
@@ -20,6 +22,59 @@ from ..exit_codes import ExitCode
 from ..output import get_renderer
 
 app = typer.Typer(help="Authenticate and manage tokens.")
+
+
+def _is_interactive_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _warn_if_secret_from_cli(
+    *,
+    ctx: typer.Context,
+    renderer,
+    command: str,
+    parameter_name: str,
+    option_name: str,
+    value: str | None,
+) -> None:
+    if value is None:
+        return
+    try:
+        source = ctx.get_parameter_source(parameter_name)
+    except Exception:
+        return
+    if source != ParameterSource.COMMANDLINE:
+        return
+    renderer.info(
+        (
+            f"WARNING: Secret provided via {option_name}. "
+            "This may be visible in shell history/process lists. "
+            f"Prefer omitting {option_name} for hidden prompt input."
+        ),
+        command=command,
+    )
+
+
+def _prompt_required_secret(secret: str | None, *, prompt: str) -> str | None:
+    if secret is not None:
+        return secret
+    if not _is_interactive_terminal():
+        return None
+    return typer.prompt(prompt, hide_input=True)
+
+
+def _prompt_optional_secret(secret: str | None, *, prompt: str) -> str | None:
+    if secret is not None:
+        return secret
+    if not _is_interactive_terminal():
+        return None
+    value = typer.prompt(
+        f"{prompt} (leave empty if not set)",
+        hide_input=True,
+        default="",
+        show_default=False,
+    )
+    return value or None
 
 
 def _render_error(ctx: typer.Context, command: str, exc: Exception) -> None:
@@ -83,7 +138,10 @@ def login_token(
     ksef_token: str | None = typer.Option(
         None,
         "--ksef-token",
-        help="KSeF system token. Fallback: KSEF_TOKEN env var.",
+        help=(
+            "KSeF system token. If omitted, uses KSEF_TOKEN env var "
+            "or hidden prompt input in interactive mode."
+        ),
     ),
     context_type: str | None = typer.Option(
         None,
@@ -109,12 +167,22 @@ def login_token(
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
     profile = profile_label(cli_ctx)
+    token = ksef_token if ksef_token is not None else os.getenv("KSEF_TOKEN")
+    token = _prompt_required_secret(token, prompt="KSeF token")
+    _warn_if_secret_from_cli(
+        ctx=ctx,
+        renderer=renderer,
+        command="auth.login-token",
+        parameter_name="ksef_token",
+        option_name="--ksef-token",
+        value=ksef_token,
+    )
     try:
         profile = require_profile(cli_ctx)
         result = login_with_token(
             profile=profile,
             base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
-            token=ksef_token or os.getenv("KSEF_TOKEN", ""),
+            token=token,
             context_type=context_type or os.getenv("KSEF_CONTEXT_TYPE", ""),
             context_value=context_value or os.getenv("KSEF_CONTEXT_VALUE", ""),
             poll_interval=poll_interval,
@@ -140,12 +208,16 @@ def login_xades(
         help="Path to PKCS#12 file for XAdES authentication.",
     ),
     pkcs12_password: str | None = typer.Option(
-        None, "--pkcs12-password", help="Password for PKCS#12 file."
+        None,
+        "--pkcs12-password",
+        help="Password for PKCS#12 file. Omit to enter securely via hidden prompt.",
     ),
     cert_pem: str | None = typer.Option(None, "--cert-pem", help="Path to certificate PEM file."),
     key_pem: str | None = typer.Option(None, "--key-pem", help="Path to private key PEM file."),
     key_password: str | None = typer.Option(
-        None, "--key-password", help="Password for private key PEM."
+        None,
+        "--key-password",
+        help="Password for private key PEM. Omit to enter securely via hidden prompt.",
     ),
     context_type: str | None = typer.Option(
         None,
@@ -176,6 +248,32 @@ def login_xades(
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
     profile = profile_label(cli_ctx)
+    use_pkcs12 = bool(pkcs12_path and pkcs12_path.strip())
+    use_pem_pair = bool((cert_pem and cert_pem.strip()) or (key_pem and key_pem.strip()))
+    resolved_pkcs12_password = pkcs12_password
+    resolved_key_password = key_password
+    if use_pkcs12:
+        resolved_pkcs12_password = _prompt_optional_secret(
+            pkcs12_password, prompt="PKCS#12 password"
+        )
+    if use_pem_pair:
+        resolved_key_password = _prompt_optional_secret(key_password, prompt="Private key password")
+    _warn_if_secret_from_cli(
+        ctx=ctx,
+        renderer=renderer,
+        command="auth.login-xades",
+        parameter_name="pkcs12_password",
+        option_name="--pkcs12-password",
+        value=pkcs12_password,
+    )
+    _warn_if_secret_from_cli(
+        ctx=ctx,
+        renderer=renderer,
+        command="auth.login-xades",
+        parameter_name="key_password",
+        option_name="--key-password",
+        value=key_password,
+    )
     try:
         profile = require_profile(cli_ctx)
         result = login_with_xades(
@@ -184,10 +282,10 @@ def login_xades(
             context_type=context_type or os.getenv("KSEF_CONTEXT_TYPE", ""),
             context_value=context_value or os.getenv("KSEF_CONTEXT_VALUE", ""),
             pkcs12_path=pkcs12_path,
-            pkcs12_password=pkcs12_password,
+            pkcs12_password=resolved_pkcs12_password,
             cert_pem=cert_pem,
             key_pem=key_pem,
-            key_password=key_password,
+            key_password=resolved_key_password,
             subject_identifier_type=subject_identifier_type,
             poll_interval=poll_interval,
             max_attempts=max_attempts,
