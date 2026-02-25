@@ -1,7 +1,7 @@
 """KSeF Python SDK."""
 
 from .client import AsyncKsefClient, KsefClient
-from .config import KsefClientOptions, KsefEnvironment
+from .config import KsefClientOptions, KsefEnvironment, KsefLighthouseEnvironment
 from .exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 from .models import (
     AuthenticationChallengeResponse,
@@ -11,6 +11,11 @@ from .models import (
     InvoiceExportStatusResponse,
     InvoicePackage,
     InvoicePackagePart,
+    LighthouseKsefStatus,
+    LighthouseMessage,
+    LighthouseMessageCategory,
+    LighthouseMessageType,
+    LighthouseStatusResponse,
     StatusInfo,
     TokenInfo,
 )
@@ -18,6 +23,7 @@ from .models import (
 __all__ = [
     "KsefClientOptions",
     "KsefEnvironment",
+    "KsefLighthouseEnvironment",
     "KsefClient",
     "AsyncKsefClient",
     "KsefApiError",
@@ -27,6 +33,11 @@ __all__ = [
     "AuthenticationInitResponse",
     "AuthenticationTokensResponse",
     "AuthenticationTokenRefreshResponse",
+    "LighthouseKsefStatus",
+    "LighthouseMessageCategory",
+    "LighthouseMessageType",
+    "LighthouseMessage",
+    "LighthouseStatusResponse",
     "TokenInfo",
     "StatusInfo",
     "InvoicePackage",

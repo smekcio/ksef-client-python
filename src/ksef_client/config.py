@@ -17,6 +17,12 @@ class KsefQrEnvironment(str, Enum):
     PROD = "https://qr.ksef.mf.gov.pl"
 
 
+class KsefLighthouseEnvironment(str, Enum):
+    TEST = "https://api-latarnia-test.ksef.mf.gov.pl"
+    PROD = "https://api-latarnia.ksef.mf.gov.pl"
+    PRD = PROD
+
+
 def _package_version() -> str:
     try:
         return metadata.version("ksef-client")
@@ -35,6 +41,7 @@ def _default_user_agent() -> str:
 class KsefClientOptions:
     base_url: str
     base_qr_url: str | None = None
+    base_lighthouse_url: str | None = None
     timeout_seconds: float = 30.0
     proxy: str | None = None
     custom_headers: dict[str, str] | None = None
@@ -63,3 +70,19 @@ class KsefClientOptions:
         if base.startswith(KsefEnvironment.PROD.value):
             return KsefQrEnvironment.PROD.value
         raise ValueError("Unknown KSeF environment; set base_qr_url explicitly.")
+
+    def resolve_lighthouse_base_url(self) -> str:
+        if self.base_lighthouse_url:
+            return self.base_lighthouse_url.rstrip("/")
+        base = self.base_url.rstrip("/")
+        if base.startswith(KsefLighthouseEnvironment.TEST.value):
+            return KsefLighthouseEnvironment.TEST.value
+        if base.startswith(KsefLighthouseEnvironment.PROD.value):
+            return KsefLighthouseEnvironment.PROD.value
+        if base.startswith(KsefEnvironment.TEST.value):
+            return KsefLighthouseEnvironment.TEST.value
+        if base.startswith(KsefEnvironment.DEMO.value):
+            return KsefLighthouseEnvironment.TEST.value
+        if base.startswith(KsefEnvironment.PROD.value):
+            return KsefLighthouseEnvironment.PROD.value
+        raise ValueError("Unknown KSeF environment; set base_lighthouse_url explicitly.")

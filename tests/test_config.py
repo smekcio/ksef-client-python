@@ -1,7 +1,12 @@
 import unittest
 from unittest.mock import patch
 
-from ksef_client.config import KsefClientOptions, KsefEnvironment, _package_version
+from ksef_client.config import (
+    KsefClientOptions,
+    KsefEnvironment,
+    KsefLighthouseEnvironment,
+    _package_version,
+)
 
 
 class ConfigTests(unittest.TestCase):
@@ -38,6 +43,47 @@ class ConfigTests(unittest.TestCase):
         options = KsefClientOptions(base_url="https://example.com")
         with self.assertRaises(ValueError):
             options.resolve_qr_base_url()
+
+    def test_resolve_lighthouse_base_url(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl",
+            base_lighthouse_url="https://example.com/lh/",
+        )
+        self.assertEqual(options.resolve_lighthouse_base_url(), "https://example.com/lh")
+
+        options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
+        self.assertEqual(
+            options.resolve_lighthouse_base_url(),
+            KsefLighthouseEnvironment.TEST.value,
+        )
+
+        options = KsefClientOptions(base_url=KsefEnvironment.DEMO.value)
+        self.assertEqual(
+            options.resolve_lighthouse_base_url(),
+            KsefLighthouseEnvironment.TEST.value,
+        )
+
+        options = KsefClientOptions(base_url=KsefEnvironment.PROD.value)
+        self.assertEqual(
+            options.resolve_lighthouse_base_url(),
+            KsefLighthouseEnvironment.PROD.value,
+        )
+
+        options = KsefClientOptions(base_url=KsefLighthouseEnvironment.PRD.value)
+        self.assertEqual(
+            options.resolve_lighthouse_base_url(),
+            KsefLighthouseEnvironment.PROD.value,
+        )
+
+        options = KsefClientOptions(base_url=KsefLighthouseEnvironment.TEST.value)
+        self.assertEqual(
+            options.resolve_lighthouse_base_url(),
+            KsefLighthouseEnvironment.TEST.value,
+        )
+
+        options = KsefClientOptions(base_url="https://example.com")
+        with self.assertRaises(ValueError):
+            options.resolve_lighthouse_base_url()
 
 
 if __name__ == "__main__":

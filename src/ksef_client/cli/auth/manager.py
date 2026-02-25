@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ksef_client.config import KsefEnvironment
+from ksef_client.config import KsefClientOptions, KsefEnvironment, KsefLighthouseEnvironment
 from ksef_client.services.workflows import AuthCoordinator
 from ksef_client.services.xades import XadesKeyPair
 
@@ -49,6 +49,26 @@ def resolve_base_url(base_url: str | None, *, profile: str | None = None) -> str
         if profile_base_url and profile_base_url.strip():
             return profile_base_url.strip()
     return KsefEnvironment.DEMO.value
+
+
+def resolve_lighthouse_base_url(
+    base_lighthouse_url: str | None,
+    *,
+    profile: str | None = None,
+) -> str:
+    if base_lighthouse_url and base_lighthouse_url.strip():
+        return base_lighthouse_url.strip()
+
+    if profile:
+        profile_base_url, _, _ = _profile_context(profile)
+        if profile_base_url and profile_base_url.strip():
+            try:
+                options = KsefClientOptions(base_url=profile_base_url.strip())
+                return options.resolve_lighthouse_base_url()
+            except ValueError:
+                pass
+
+    return KsefLighthouseEnvironment.TEST.value
 
 
 def login_with_token(

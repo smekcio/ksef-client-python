@@ -11,10 +11,19 @@ from ksef_client.exceptions import KsefHttpError
 
 
 class _FakeClient:
-    def __init__(self, *, invoices=None, sessions=None, security=None, http_client=None) -> None:
+    def __init__(
+        self,
+        *,
+        invoices=None,
+        sessions=None,
+        security=None,
+        lighthouse=None,
+        http_client=None,
+    ) -> None:
         self.invoices = invoices
         self.sessions = sessions
         self.security = security
+        self.lighthouse = lighthouse
         self.http_client = http_client
 
     def __enter__(self) -> _FakeClient:
@@ -122,6 +131,86 @@ def test_list_invoices_rejects_reverse_date_range(monkeypatch) -> None:
             sort_order="Desc",
         )
     assert exc.value.code == ExitCode.VALIDATION_ERROR
+
+
+def test_get_lighthouse_status_success(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    class _Lighthouse:
+        def get_status(self):
+            message = SimpleNamespace(
+                to_dict=lambda: {
+                    "id": "m-1",
+                    "eventId": 1,
+                    "category": "MAINTENANCE",
+                    "type": "MAINTENANCE_ANNOUNCEMENT",
+                    "title": "Planned",
+                    "text": "Window",
+                    "start": "2026-03-15T01:00:00Z",
+                    "end": "2026-03-15T06:00:00Z",
+                    "version": 1,
+                    "published": "2026-03-10T12:00:00Z",
+                }
+            )
+            return SimpleNamespace(status=SimpleNamespace(value="MAINTENANCE"), messages=[message])
+
+    def _fake_create_client(base_url, access_token=None, base_lighthouse_url=None):
+        seen["base_url"] = base_url
+        seen["access_token"] = access_token
+        seen["base_lighthouse_url"] = base_lighthouse_url
+        return _FakeClient(lighthouse=_Lighthouse())
+
+    monkeypatch.setattr(adapters, "create_client", _fake_create_client)
+
+    result = adapters.get_lighthouse_status(
+        profile="demo",
+        base_url="https://api-demo.ksef.mf.gov.pl",
+        lighthouse_base_url="https://api-latarnia-test.ksef.mf.gov.pl",
+    )
+
+    assert seen["base_url"] == "https://api-demo.ksef.mf.gov.pl"
+    assert seen["base_lighthouse_url"] == "https://api-latarnia-test.ksef.mf.gov.pl"
+    assert seen["access_token"] is None
+    assert result["status"] == "MAINTENANCE"
+    assert len(result["messages"]) == 1
+
+
+def test_get_lighthouse_messages_success(monkeypatch) -> None:
+    class _Lighthouse:
+        def get_messages(self):
+            return [
+                SimpleNamespace(
+                    to_dict=lambda: {
+                        "id": "m-1",
+                        "eventId": 1,
+                        "category": "FAILURE",
+                        "type": "FAILURE_START",
+                        "title": "Failure",
+                        "text": "Down",
+                        "start": "2026-05-12T10:00:00Z",
+                        "end": None,
+                        "version": 1,
+                        "published": "2026-05-12T10:01:00Z",
+                    }
+                )
+            ]
+
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None, base_lighthouse_url=None: _FakeClient(
+            lighthouse=_Lighthouse()
+        ),
+    )
+
+    result = adapters.get_lighthouse_messages(
+        profile="demo",
+        base_url="https://api-demo.ksef.mf.gov.pl",
+        lighthouse_base_url=None,
+    )
+
+    assert result["count"] == 1
+    assert result["items"][0]["id"] == "m-1"
 
 
 def test_download_invoice_xml_success(monkeypatch, tmp_path) -> None:

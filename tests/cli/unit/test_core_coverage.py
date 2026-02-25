@@ -97,6 +97,7 @@ def test_factory_create_client() -> None:
     client = create_client("https://api-demo.ksef.mf.gov.pl")
     try:
         assert isinstance(client, KsefClient)
+        assert client.lighthouse is not None
     finally:
         client.close()
 

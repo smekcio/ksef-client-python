@@ -20,6 +20,9 @@ CLI ma skracac droge od instalacji do pierwszej realnej operacji KSeF:
   - `auth logout`
 - diagnostyka:
   - `health check`
+- latarnia:
+  - `lighthouse status`
+  - `lighthouse messages`
 - faktury i UPO:
   - `invoice list`, `invoice download`
   - `send online`, `send batch`, `send status`
@@ -80,6 +83,9 @@ ksef
     logout
   health
     check
+  lighthouse
+    status
+    messages
   invoice
     list
     download
@@ -118,6 +124,7 @@ Zachowanie profilu:
 
 Brak aktywnego profilu:
 - komendy `auth`, `health`, `invoice`, `send`, `upo`, `export` wymagaja aktywnego profilu,
+- komendy `lighthouse ...` dzialaja bez profilu (publiczne API Latarni),
 - jesli profil nie jest ustawiony, CLI zwraca czytelny blad z podpowiedzia:
   - `ksef init --set-active`
   - `ksef profile use --name <name>`
@@ -289,6 +296,30 @@ Options:
   --dry-run
   --check-auth
   --check-certs
+  --base-url TEXT
+```
+
+## `ksef lighthouse status`
+
+```text
+Usage: ksef lighthouse status [OPTIONS]
+
+Options:
+  --base-url TEXT
+```
+
+Uwagi:
+- komenda korzysta z publicznego API Latarni (bez tokenu dostepowego),
+- domyslnie base URL Latarni mapowany jest z profilu KSeF (`TEST`/`DEMO` -> latarnia TEST, `PROD` -> latarnia PROD),
+- gdy brak profilu i brak override (`--base-url`/`KSEF_LIGHTHOUSE_BASE_URL`), uzywana jest domyslnie **latarnia test**: `https://api-latarnia-test.ksef.mf.gov.pl`,
+- `--base-url` lub `KSEF_LIGHTHOUSE_BASE_URL` pozwala nadpisac endpoint Latarni.
+
+## `ksef lighthouse messages`
+
+```text
+Usage: ksef lighthouse messages [OPTIONS]
+
+Options:
   --base-url TEXT
 ```
 

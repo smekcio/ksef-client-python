@@ -47,6 +47,7 @@ Biblioteka udostępnia dwa poziomy użycia:
 - [`client.auth`](api/auth.md)
 - [`client.sessions`](api/sessions.md)
 - [`client.invoices`](api/invoices.md)
+- [`client.lighthouse`](api/lighthouse.md)
 - [`client.permissions`](api/permissions.md)
 - [`client.certificates`](api/certificates.md)
 - [`client.tokens`](api/tokens.md)

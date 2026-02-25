@@ -11,6 +11,7 @@ from ksef_client.clients.invoices import (
     InvoicesClient,
     _normalize_datetime_without_offset,
 )
+from ksef_client.clients.lighthouse import AsyncLighthouseClient, LighthouseClient
 from ksef_client.clients.limits import AsyncLimitsClient, LimitsClient
 from ksef_client.clients.peppol import AsyncPeppolClient, PeppolClient
 from ksef_client.clients.permissions import AsyncPermissionsClient, PermissionsClient
@@ -288,6 +289,46 @@ class ClientsTests(unittest.TestCase):
         with patch.object(client, "_request_json", Mock(return_value={"ok": True})):
             client.list_providers(page_offset=0, page_size=10)
 
+    def test_lighthouse_client(self):
+        client = LighthouseClient(self.http, "https://api-latarnia-test.ksef.mf.gov.pl")
+        with patch.object(
+            client,
+            "_request_json",
+            Mock(
+                side_effect=[
+                    {
+                        "status": "AVAILABLE",
+                        "messages": [],
+                    },
+                    [],
+                ]
+            ),
+        ) as request_json_mock:
+            status = client.get_status()
+            messages = client.get_messages()
+            self.assertEqual(status.status.value, "AVAILABLE")
+            self.assertEqual(messages, [])
+            self.assertEqual(
+                request_json_mock.call_args_list[0].args[1],
+                "https://api-latarnia-test.ksef.mf.gov.pl/status",
+            )
+            self.assertEqual(
+                request_json_mock.call_args_list[1].args[1],
+                "https://api-latarnia-test.ksef.mf.gov.pl/messages",
+            )
+
+    def test_lighthouse_client_handles_invalid_payload_and_missing_base_url(self):
+        client = LighthouseClient(self.http, "https://api-latarnia-test.ksef.mf.gov.pl")
+        with patch.object(client, "_request_json", Mock(side_effect=[None, {"unexpected": True}])):
+            status = client.get_status()
+            messages = client.get_messages()
+            self.assertEqual(status.status.value, "AVAILABLE")
+            self.assertEqual(messages, [])
+
+        missing_base_client = LighthouseClient(self.http, "")
+        with self.assertRaises(ValueError):
+            missing_base_client.get_status()
+
 
 class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_clients(self):
@@ -556,6 +597,43 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         peppol = AsyncPeppolClient(http)
         with patch.object(peppol, "_request_json", AsyncMock(return_value={"ok": True})):
             await peppol.list_providers(page_offset=0, page_size=10)
+
+        lighthouse = AsyncLighthouseClient(http, "https://api-latarnia-test.ksef.mf.gov.pl")
+        with patch.object(
+            lighthouse,
+            "_request_json",
+            AsyncMock(side_effect=[{"status": "AVAILABLE", "messages": []}, []]),
+        ) as request_json_mock:
+            status = await lighthouse.get_status()
+            messages = await lighthouse.get_messages()
+            self.assertEqual(status.status.value, "AVAILABLE")
+            self.assertEqual(messages, [])
+            self.assertEqual(
+                request_json_mock.call_args_list[0].args[1],
+                "https://api-latarnia-test.ksef.mf.gov.pl/status",
+            )
+            self.assertEqual(
+                request_json_mock.call_args_list[1].args[1],
+                "https://api-latarnia-test.ksef.mf.gov.pl/messages",
+            )
+
+    async def test_async_lighthouse_handles_invalid_payload_and_missing_base_url(self):
+        response = HttpResponse(200, httpx.Headers({}), b"{}")
+        http = DummyAsyncHttp(response)
+        lighthouse = AsyncLighthouseClient(http, "https://api-latarnia-test.ksef.mf.gov.pl")
+        with patch.object(
+            lighthouse,
+            "_request_json",
+            AsyncMock(side_effect=[None, {"unexpected": True}]),
+        ):
+            status = await lighthouse.get_status()
+            messages = await lighthouse.get_messages()
+            self.assertEqual(status.status.value, "AVAILABLE")
+            self.assertEqual(messages, [])
+
+        missing_base = AsyncLighthouseClient(http, "")
+        with self.assertRaises(ValueError):
+            await missing_base.get_messages()
 
 
 if __name__ == "__main__":

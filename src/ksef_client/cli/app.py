@@ -10,6 +10,7 @@ from .commands import (
     health_cmd,
     init_cmd,
     invoice_cmd,
+    lighthouse_cmd,
     profile_cmd,
     send_cmd,
     upo_cmd,
@@ -79,6 +80,7 @@ def main(
 app.add_typer(profile_cmd.app, name="profile")
 app.add_typer(auth_cmd.app, name="auth")
 app.add_typer(health_cmd.app, name="health")
+app.add_typer(lighthouse_cmd.app, name="lighthouse")
 app.add_typer(invoice_cmd.app, name="invoice")
 app.add_typer(send_cmd.app, name="send")
 app.add_typer(upo_cmd.app, name="upo")

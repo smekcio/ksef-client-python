@@ -7,6 +7,7 @@
 - `client.auth`
 - `client.sessions`
 - `client.invoices`
+- `client.lighthouse`
 - `client.permissions`
 - `client.certificates`
 - `client.tokens`

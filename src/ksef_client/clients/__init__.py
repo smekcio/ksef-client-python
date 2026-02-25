@@ -1,6 +1,7 @@
 from .auth import AsyncAuthClient, AuthClient
 from .certificates import AsyncCertificatesClient, CertificatesClient
 from .invoices import AsyncInvoicesClient, InvoicesClient
+from .lighthouse import AsyncLighthouseClient, LighthouseClient
 from .limits import AsyncLimitsClient, LimitsClient
 from .peppol import AsyncPeppolClient, PeppolClient
 from .permissions import AsyncPermissionsClient, PermissionsClient
@@ -17,6 +18,8 @@ __all__ = [
     "AsyncSessionsClient",
     "InvoicesClient",
     "AsyncInvoicesClient",
+    "LighthouseClient",
+    "AsyncLighthouseClient",
     "PermissionsClient",
     "AsyncPermissionsClient",
     "CertificatesClient",

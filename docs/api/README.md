@@ -12,6 +12,7 @@ Dla `AsyncKsefClient` zestaw metod jest taki sam – różni się tylko sposób 
 - [`client.auth`](auth.md)
 - [`client.sessions`](sessions.md)
 - [`client.invoices`](invoices.md)
+- [`client.lighthouse`](lighthouse.md)
 - [`client.permissions`](permissions.md)
 - [`client.certificates`](certificates.md)
 - [`client.tokens`](tokens.md)
