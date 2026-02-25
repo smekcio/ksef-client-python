@@ -100,6 +100,7 @@ Najważniejsze grupy komend:
 - operacje: `invoice ...`, `send ...`, `upo ...`, `export ...`
 - diagnostyka: `health check`
 - latarnia: `lighthouse status`, `lighthouse messages`
+  - komendy Latarni sa publiczne (dzialaja bez logowania; bez profilu domyslnie uzywana jest latarnia test)
 
 Pełna specyfikacja CLI: [`docs/cli/README.md`](docs/cli/README.md)
 

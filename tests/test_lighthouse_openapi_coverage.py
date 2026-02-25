@@ -3,6 +3,7 @@ import json
 import re
 import unittest
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def _normalize_path(path: str) -> str:
@@ -35,13 +36,19 @@ def _render_path(node: ast.AST) -> str | None:
     return None
 
 
-def _extract_path_suffix(path: str) -> str | None:
-    if path.startswith("/"):
-        return path
-    match = re.search(r"(/[^/?#]+)$", path)
-    if not match:
+def _normalize_request_path(path: str) -> str | None:
+    stripped = path.strip()
+    if not stripped:
         return None
-    return match.group(1)
+    if stripped.startswith("http://") or stripped.startswith("https://"):
+        parsed = urlparse(stripped)
+        return parsed.path or "/"
+    if stripped.startswith("/"):
+        return stripped.split("?", 1)[0].split("#", 1)[0]
+    slash_index = stripped.find("/")
+    if slash_index >= 0:
+        return stripped[slash_index:].split("?", 1)[0].split("#", 1)[0]
+    return None
 
 
 def _extract_python_lighthouse_operations() -> set[tuple[str, str]]:
@@ -62,10 +69,10 @@ def _extract_python_lighthouse_operations() -> set[tuple[str, str]]:
         path_expr = _render_path(node.args[1])
         if not method or not path_expr:
             continue
-        suffix = _extract_path_suffix(path_expr)
-        if not suffix:
+        normalized_path = _normalize_request_path(path_expr)
+        if not normalized_path:
             continue
-        ops.add((method.upper(), _normalize_path(suffix)))
+        ops.add((method.upper(), _normalize_path(normalized_path)))
 
     return ops
 
@@ -82,6 +89,22 @@ def _extract_openapi_lighthouse_operations(openapi_path: Path) -> set[tuple[str,
 
 
 class LighthouseOpenApiCoverageTests(unittest.TestCase):
+    def test_normalize_request_path(self) -> None:
+        self.assertEqual(
+            _normalize_request_path("https://api-latarnia-test.ksef.mf.gov.pl/messages"),
+            "/messages",
+        )
+        self.assertEqual(
+            _normalize_request_path("https://example.com/api/v1/lighthouse/status?x=1"),
+            "/api/v1/lighthouse/status",
+        )
+        self.assertEqual(
+            _normalize_request_path("/status?expand=true"),
+            "/status",
+        )
+        self.assertEqual(_normalize_request_path("{}/messages"), "/messages")
+        self.assertIsNone(_normalize_request_path("status"))
+
     def test_python_lighthouse_client_covers_openapi_spec(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]
         openapi_path = repo_root / "ksef-latarnia" / "open-api.json"

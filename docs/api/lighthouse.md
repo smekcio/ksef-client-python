@@ -25,3 +25,9 @@ Domyślne mapowanie dla `KsefClientOptions.base_url`:
 
 Nadpisanie mapowania:
 - `KsefClientOptions(base_lighthouse_url="https://...")`
+
+## CLI (`ksef lighthouse ...`)
+
+- Komendy Latarni działają bez tokenu i bez aktywnego profilu.
+- Jeśli nie ustawisz profilu i nie podasz `--base-url`/`KSEF_LIGHTHOUSE_BASE_URL`, CLI używa domyślnie **latarni test**:
+  - `https://api-latarnia-test.ksef.mf.gov.pl`

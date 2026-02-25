@@ -9,6 +9,7 @@ from ksef_client.cli.auth import manager
 from ksef_client.cli.config.schema import CliConfig, ProfileConfig
 from ksef_client.cli.errors import CliError
 from ksef_client.cli.exit_codes import ExitCode
+from ksef_client.config import KsefLighthouseEnvironment
 
 
 class _FakeClient:
@@ -211,6 +212,39 @@ def test_resolve_base_url_uses_profile_when_missing(monkeypatch) -> None:
         ),
     )
     assert manager.resolve_base_url(None, profile="demo") == "https://profile.example"
+
+
+def test_resolve_lighthouse_base_url_prefers_explicit_value() -> None:
+    assert manager.resolve_lighthouse_base_url(" https://api-latarnia-test.ksef.mf.gov.pl/ ") == (
+        "https://api-latarnia-test.ksef.mf.gov.pl/"
+    ).strip()
+
+
+def test_resolve_lighthouse_base_url_uses_profile_mapping(monkeypatch) -> None:
+    monkeypatch.setattr(
+        manager,
+        "load_config",
+        lambda: CliConfig(
+            active_profile="demo",
+            profiles={
+                "demo": ProfileConfig(
+                    name="demo",
+                    env="DEMO",
+                    base_url="https://api-demo.ksef.mf.gov.pl",
+                    context_type="nip",
+                    context_value="123",
+                )
+            },
+        ),
+    )
+    assert manager.resolve_lighthouse_base_url(None, profile="demo") == (
+        KsefLighthouseEnvironment.TEST.value
+    )
+
+
+def test_resolve_lighthouse_base_url_fallbacks_to_lighthouse_test(monkeypatch) -> None:
+    monkeypatch.setattr(manager, "load_config", lambda: CliConfig())
+    assert manager.resolve_lighthouse_base_url(None) == KsefLighthouseEnvironment.TEST.value
 
 
 def test_refresh_access_token_missing_token_in_response(monkeypatch) -> None:

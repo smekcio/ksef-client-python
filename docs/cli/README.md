@@ -123,7 +123,8 @@ Zachowanie profilu:
 - gdy nie podasz `--base-url`, CLI bierze kolejno: CLI option -> `KSEF_BASE_URL` -> `profile.base_url` -> DEMO.
 
 Brak aktywnego profilu:
-- komendy `auth`, `health`, `lighthouse`, `invoice`, `send`, `upo`, `export` wymagaja aktywnego profilu,
+- komendy `auth`, `health`, `invoice`, `send`, `upo`, `export` wymagaja aktywnego profilu,
+- komendy `lighthouse ...` dzialaja bez profilu (publiczne API Latarni),
 - jesli profil nie jest ustawiony, CLI zwraca czytelny blad z podpowiedzia:
   - `ksef init --set-active`
   - `ksef profile use --name <name>`
@@ -310,6 +311,7 @@ Options:
 Uwagi:
 - komenda korzysta z publicznego API Latarni (bez tokenu dostepowego),
 - domyslnie base URL Latarni mapowany jest z profilu KSeF (`TEST`/`DEMO` -> latarnia TEST, `PROD` -> latarnia PROD),
+- gdy brak profilu i brak override (`--base-url`/`KSEF_LIGHTHOUSE_BASE_URL`), uzywana jest domyslnie **latarnia test**: `https://api-latarnia-test.ksef.mf.gov.pl`,
 - `--base-url` lub `KSEF_LIGHTHOUSE_BASE_URL` pozwala nadpisac endpoint Latarni.
 
 ## `ksef lighthouse messages`

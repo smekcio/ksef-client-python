@@ -6,8 +6,8 @@ import typer
 
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 
-from ..auth.manager import resolve_base_url
-from ..context import profile_label, require_context, require_profile
+from ..auth.manager import resolve_base_url, resolve_lighthouse_base_url
+from ..context import profile_label, require_context
 from ..errors import CliError
 from ..exit_codes import ExitCode
 from ..output import get_renderer
@@ -71,12 +71,15 @@ def lighthouse_status(
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
     profile = profile_label(cli_ctx)
+    selected_profile = cli_ctx.profile
     try:
-        profile = require_profile(cli_ctx)
         result = get_lighthouse_status(
-            profile=profile,
-            base_url=resolve_base_url(os.getenv("KSEF_BASE_URL"), profile=profile),
-            lighthouse_base_url=base_url or os.getenv("KSEF_LIGHTHOUSE_BASE_URL"),
+            profile=selected_profile or "",
+            base_url=resolve_base_url(os.getenv("KSEF_BASE_URL"), profile=selected_profile),
+            lighthouse_base_url=resolve_lighthouse_base_url(
+                base_url or os.getenv("KSEF_LIGHTHOUSE_BASE_URL"),
+                profile=selected_profile,
+            ),
         )
     except Exception as exc:
         _render_error(ctx, "lighthouse.status", exc)
@@ -93,12 +96,15 @@ def lighthouse_messages(
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
     profile = profile_label(cli_ctx)
+    selected_profile = cli_ctx.profile
     try:
-        profile = require_profile(cli_ctx)
         result = get_lighthouse_messages(
-            profile=profile,
-            base_url=resolve_base_url(os.getenv("KSEF_BASE_URL"), profile=profile),
-            lighthouse_base_url=base_url or os.getenv("KSEF_LIGHTHOUSE_BASE_URL"),
+            profile=selected_profile or "",
+            base_url=resolve_base_url(os.getenv("KSEF_BASE_URL"), profile=selected_profile),
+            lighthouse_base_url=resolve_lighthouse_base_url(
+                base_url or os.getenv("KSEF_LIGHTHOUSE_BASE_URL"),
+                profile=selected_profile,
+            ),
         )
     except Exception as exc:
         _render_error(ctx, "lighthouse.messages", exc)
