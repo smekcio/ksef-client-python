@@ -31,6 +31,7 @@ Aktualna kompatybilność: **KSeF API `v2.1.2`** ([api-changelog.md](https://git
 - Uwierzytelnianie: token KSeF i podpis XAdES, w tym `XadesKeyPair` dla PKCS#12 lub PEM.
 - Workflows wysyłki: sesje online i batch z ZIP, partiami i pre-signed URL.
 - Eksport/pobieranie: obsługa paczek i narzędzi do odszyfrowania/rozpakowania.
+- Latarnia: publiczne endpointy dostępności KSeF (`client.lighthouse`, `ksef lighthouse ...`).
 - Narzędzia pomocnicze: AES/ZIP/Base64Url, linki weryfikacyjne, QR.
 - CLI `ksef`: szybka ścieżka od konfiguracji do pierwszych operacji: `init -> auth -> invoice/send/upo`.
 
@@ -98,6 +99,7 @@ Najważniejsze grupy komend:
 - auth: `auth login-token`, `auth login-xades`, `auth status`, `auth refresh`, `auth logout`
 - operacje: `invoice ...`, `send ...`, `upo ...`, `export ...`
 - diagnostyka: `health check`
+- latarnia: `lighthouse status`, `lighthouse messages`
 
 Pełna specyfikacja CLI: [`docs/cli/README.md`](docs/cli/README.md)
 
@@ -185,6 +187,13 @@ session_reference_number = BatchSessionWorkflow(client.sessions, client.http_cli
     access_token=access_token,
     parallelism=4,
 )
+```
+
+### Odczyt statusu Latarni
+
+```python
+status = client.lighthouse.get_status()
+messages = client.lighthouse.get_messages()
 ```
 
 ## 📚 Dokumentacja

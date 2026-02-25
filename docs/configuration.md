@@ -19,6 +19,7 @@ options = KsefClientOptions(
     allowed_presigned_hosts=None,
     allow_private_network_presigned_urls=False,
     base_qr_url=None,
+    base_lighthouse_url=None,
 )
 ```
 
@@ -43,6 +44,26 @@ Używane przez `VerificationLinkService` do budowania linków pod QR.
 
 - Jeśli `base_qr_url` nie jest ustawione, biblioteka dobiera je na podstawie `base_url` (TEST/DEMO/PROD).
 - Dla niestandardowego `base_url` wymagane jest ustawienie `base_qr_url` jawnie.
+
+### `base_lighthouse_url`
+
+Używane przez `client.lighthouse` (`/status`, `/messages` API Latarni).
+
+- Jeśli `base_lighthouse_url` nie jest ustawione, biblioteka mapuje je z `base_url`:
+  - KSeF `TEST` -> Latarnia `TEST`
+  - KSeF `DEMO` -> Latarnia `TEST`
+  - KSeF `PROD` -> Latarnia `PROD`
+- Dla niestandardowego `base_url` można ustawić `base_lighthouse_url` jawnie.
+
+Gotowe stałe:
+
+```python
+from ksef_client import KsefLighthouseEnvironment
+
+KsefLighthouseEnvironment.TEST.value
+KsefLighthouseEnvironment.PROD.value
+KsefLighthouseEnvironment.PRD.value  # alias
+```
 
 ### `timeout_seconds`
 

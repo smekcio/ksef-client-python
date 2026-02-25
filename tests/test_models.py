@@ -76,6 +76,58 @@ class ModelsTests(unittest.TestCase):
         parsed = models.PartUploadRequest.from_dict(data)
         self.assertEqual(parsed.headers["x"], "y")
 
+    def test_lighthouse_message_and_status(self):
+        message_data = {
+            "id": "m-1",
+            "eventId": 10,
+            "category": "MAINTENANCE",
+            "type": "MAINTENANCE_ANNOUNCEMENT",
+            "title": "T",
+            "text": "X",
+            "start": "2026-03-15T01:00:00Z",
+            "end": "2026-03-15T06:00:00Z",
+            "version": 1,
+            "published": "2026-03-10T10:00:00Z",
+        }
+        message = models.LighthouseMessage.from_dict(message_data)
+        self.assertEqual(message.category, models.LighthouseMessageCategory.MAINTENANCE)
+        self.assertEqual(message.type, models.LighthouseMessageType.MAINTENANCE_ANNOUNCEMENT)
+        self.assertEqual(message.to_dict()["eventId"], 10)
+
+        status = models.LighthouseStatusResponse.from_dict(
+            {
+                "status": "MAINTENANCE",
+                "messages": [message_data],
+            }
+        )
+        self.assertEqual(status.status, models.LighthouseKsefStatus.MAINTENANCE)
+        self.assertIsNotNone(status.messages)
+        assert status.messages is not None
+        self.assertEqual(status.messages[0].id, "m-1")
+        self.assertEqual(status.to_dict()["status"], "MAINTENANCE")
+
+    def test_lighthouse_enum_fallbacks(self):
+        message = models.LighthouseMessage.from_dict(
+            {
+                "id": "m-2",
+                "eventId": 11,
+                "category": "UNKNOWN",
+                "type": "UNKNOWN",
+                "title": "",
+                "text": "",
+                "start": "",
+                "end": None,
+                "version": 0,
+                "published": "",
+            }
+        )
+        self.assertEqual(message.category, models.LighthouseMessageCategory.FAILURE)
+        self.assertEqual(message.type, models.LighthouseMessageType.FAILURE_START)
+
+        status = models.LighthouseStatusResponse.from_dict({"status": "UNKNOWN"})
+        self.assertEqual(status.status, models.LighthouseKsefStatus.AVAILABLE)
+        self.assertIsNone(status.messages)
+
 
 if __name__ == "__main__":
     unittest.main()

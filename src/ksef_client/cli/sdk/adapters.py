@@ -427,6 +427,46 @@ def _wait_for_export_status(
     )
 
 
+def get_lighthouse_status(
+    *,
+    profile: str,
+    base_url: str,
+    lighthouse_base_url: str | None = None,
+) -> dict[str, Any]:
+    _ = profile
+    with create_client(
+        base_url,
+        base_lighthouse_url=lighthouse_base_url,
+    ) as client:
+        status = client.lighthouse.get_status()
+
+    messages = [message.to_dict() for message in (status.messages or [])]
+    return {
+        "status": status.status.value,
+        "messages": messages,
+    }
+
+
+def get_lighthouse_messages(
+    *,
+    profile: str,
+    base_url: str,
+    lighthouse_base_url: str | None = None,
+) -> dict[str, Any]:
+    _ = profile
+    with create_client(
+        base_url,
+        base_lighthouse_url=lighthouse_base_url,
+    ) as client:
+        messages = client.lighthouse.get_messages()
+
+    items = [message.to_dict() for message in messages]
+    return {
+        "count": len(items),
+        "items": items,
+    }
+
+
 def list_invoices(
     *,
     profile: str,
