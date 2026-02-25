@@ -8,6 +8,7 @@ from ksef_client.cli.commands import lighthouse_cmd
 from ksef_client.cli.config import paths
 from ksef_client.cli.errors import CliError
 from ksef_client.cli.exit_codes import ExitCode
+from ksef_client.exceptions import KsefHttpError, KsefRateLimitError
 
 
 def _json_output(text: str) -> dict:
@@ -68,6 +69,38 @@ def test_lighthouse_status_validation_error_exit_code(runner, monkeypatch) -> No
     assert result.exit_code == int(ExitCode.VALIDATION_ERROR)
 
 
+def test_lighthouse_status_rate_limit_error_exit_code(runner, monkeypatch) -> None:
+    monkeypatch.setattr(
+        lighthouse_cmd,
+        "get_lighthouse_status",
+        lambda **kwargs: (_ for _ in ()).throw(
+            KsefRateLimitError(status_code=429, message="Too Many Requests")
+        ),
+    )
+    result = runner.invoke(app, ["lighthouse", "status"])
+    assert result.exit_code == int(ExitCode.RETRY_EXHAUSTED)
+
+
+def test_lighthouse_status_api_error_exit_code(runner, monkeypatch) -> None:
+    monkeypatch.setattr(
+        lighthouse_cmd,
+        "get_lighthouse_status",
+        lambda **kwargs: (_ for _ in ()).throw(KsefHttpError(status_code=500, message="boom")),
+    )
+    result = runner.invoke(app, ["lighthouse", "status"])
+    assert result.exit_code == int(ExitCode.API_ERROR)
+
+
+def test_lighthouse_status_unexpected_error_exit_code(runner, monkeypatch) -> None:
+    monkeypatch.setattr(
+        lighthouse_cmd,
+        "get_lighthouse_status",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("unexpected")),
+    )
+    result = runner.invoke(app, ["lighthouse", "status"])
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+
+
 def test_lighthouse_status_works_without_active_profile(runner, monkeypatch, tmp_path) -> None:
     _write_unconfigured_config(monkeypatch, tmp_path)
     seen: dict[str, object] = {}
@@ -99,6 +132,16 @@ def test_lighthouse_status_without_profile_prefers_env_base_url(
     result = runner.invoke(app, ["lighthouse", "status"])
     assert result.exit_code == 0
     assert seen["lighthouse_base_url"] == "https://api-latarnia.ksef.mf.gov.pl"
+
+
+def test_lighthouse_messages_unexpected_error_exit_code(runner, monkeypatch) -> None:
+    monkeypatch.setattr(
+        lighthouse_cmd,
+        "get_lighthouse_messages",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("unexpected")),
+    )
+    result = runner.invoke(app, ["lighthouse", "messages"])
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
 
 
 def _write_unconfigured_config(monkeypatch, tmp_path: Path) -> Path:

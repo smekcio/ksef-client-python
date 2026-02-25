@@ -221,9 +221,15 @@ class AdvancedClientVisitor(ast.NodeVisitor):
         return set()
 
 
-def get_implemented_endpoints_deep(source_dir: Path) -> list[ImplementedEndpoint]:
+def get_implemented_endpoints_deep(
+    source_dir: Path,
+    excluded_file_names: set[str] | None = None,
+) -> list[ImplementedEndpoint]:
     endpoints = []
+    excluded = excluded_file_names or set()
     for py_file in source_dir.rglob("*.py"):
+        if py_file.name in excluded:
+            continue
         try:
             visitor = AdvancedClientVisitor(str(py_file))
             tree = ast.parse(py_file.read_text(encoding="utf-8"))
@@ -249,13 +255,22 @@ def main():
     parser.add_argument(
         "--src", required=True, type=Path, help="Path to source directory containing clients"
     )
+    parser.add_argument(
+        "--exclude-files",
+        nargs="*",
+        default=["lighthouse.py"],
+        help="Client file names to exclude from this OpenAPI coverage check.",
+    )
     args = parser.parse_args()
 
     # 1. Load OpenAPI Specs
     openapi_specs = get_openapi_specs(args.openapi)
 
     # 2. Analyze Code
-    implemented_eps = get_implemented_endpoints_deep(args.src)
+    implemented_eps = get_implemented_endpoints_deep(
+        args.src,
+        excluded_file_names=set(args.exclude_files),
+    )
 
     # 3. Compare
     openapi_keys = set(openapi_specs.keys())

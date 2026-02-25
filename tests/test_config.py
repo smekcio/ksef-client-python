@@ -75,6 +75,12 @@ class ConfigTests(unittest.TestCase):
             KsefLighthouseEnvironment.PROD.value,
         )
 
+        options = KsefClientOptions(base_url=KsefLighthouseEnvironment.TEST.value)
+        self.assertEqual(
+            options.resolve_lighthouse_base_url(),
+            KsefLighthouseEnvironment.TEST.value,
+        )
+
         options = KsefClientOptions(base_url="https://example.com")
         with self.assertRaises(ValueError):
             options.resolve_lighthouse_base_url()

@@ -247,6 +247,28 @@ def test_resolve_lighthouse_base_url_fallbacks_to_lighthouse_test(monkeypatch) -
     assert manager.resolve_lighthouse_base_url(None) == KsefLighthouseEnvironment.TEST.value
 
 
+def test_resolve_lighthouse_base_url_invalid_profile_base_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(
+        manager,
+        "load_config",
+        lambda: CliConfig(
+            active_profile="demo",
+            profiles={
+                "demo": ProfileConfig(
+                    name="demo",
+                    env="DEMO",
+                    base_url="https://unknown.example",
+                    context_type="nip",
+                    context_value="123",
+                )
+            },
+        ),
+    )
+    assert manager.resolve_lighthouse_base_url(None, profile="demo") == (
+        KsefLighthouseEnvironment.TEST.value
+    )
+
+
 def test_refresh_access_token_missing_token_in_response(monkeypatch) -> None:
     class _FakeClientNoToken:
         def __init__(self) -> None:
