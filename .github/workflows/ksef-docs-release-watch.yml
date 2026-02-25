@@ -1,0 +1,128 @@
+name: Watch ksef-docs releases
+
+on:
+  schedule:
+    # Once per day (UTC)
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  create-issue-on-new-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check latest ksef-docs release and create issue once per version
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sourceOwner = "CIRFMF";
+            const sourceRepo = "ksef-docs";
+
+            const targetOwner = context.repo.owner;
+            const targetRepo = context.repo.repo;
+
+            async function getLatestVersion() {
+              try {
+                const { data } = await github.rest.repos.getLatestRelease({
+                  owner: sourceOwner,
+                  repo: sourceRepo,
+                });
+                return {
+                  version: (data.tag_name || data.name || "").trim(),
+                  htmlUrl: data.html_url,
+                  publishedAt: data.published_at || null,
+                };
+              } catch (error) {
+                // Fallback for repos without formal releases: use latest tag.
+                if (error.status !== 404) throw error;
+                const { data } = await github.rest.repos.listTags({
+                  owner: sourceOwner,
+                  repo: sourceRepo,
+                  per_page: 1,
+                });
+                if (!data.length) {
+                  core.info("No releases/tags found in source repository.");
+                  return null;
+                }
+                return {
+                  version: (data[0].name || "").trim(),
+                  htmlUrl: `https://github.com/${sourceOwner}/${sourceRepo}/releases`,
+                  publishedAt: null,
+                };
+              }
+            }
+
+            const latest = await getLatestVersion();
+            if (!latest || !latest.version) {
+              core.info("No version found, skipping.");
+              return;
+            }
+
+            const marker = `<!-- ksef-docs-release:${latest.version} -->`;
+            const issueTitle = `ksef-docs: nowy release ${latest.version}`;
+            const labelName = "ksef-docs-release";
+
+            // Ensure label exists.
+            try {
+              await github.rest.issues.getLabel({
+                owner: targetOwner,
+                repo: targetRepo,
+                name: labelName,
+              });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.issues.createLabel({
+                owner: targetOwner,
+                repo: targetRepo,
+                name: labelName,
+                color: "1D76DB",
+                description: "Tracking new releases in CIRFMF/ksef-docs",
+              });
+            }
+
+            // Search all issues (open + closed) to avoid duplicates forever for the same version.
+            const existingIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: targetOwner,
+              repo: targetRepo,
+              state: "all",
+              per_page: 100,
+              labels: labelName,
+            });
+
+            const duplicate = existingIssues.find((issue) => {
+              if (issue.pull_request) return false;
+              const body = issue.body || "";
+              return body.includes(marker);
+            });
+
+            if (duplicate) {
+              core.info(`Issue already exists for ${latest.version}: #${duplicate.number}`);
+              return;
+            }
+
+            const bodyLines = [
+              `Wykryto nowy release w \`${sourceOwner}/${sourceRepo}\`: **${latest.version}**.`,
+              "",
+              `Źródło: ${latest.htmlUrl}`,
+              latest.publishedAt ? `Data publikacji: ${latest.publishedAt}` : null,
+              "",
+              "Checklist:",
+              "- [ ] Przejrzeć changelog/release notes",
+              "- [ ] Ocenić wpływ na SDK i CLI",
+              "- [ ] Zaplanować ewentualne zmiany",
+              "",
+              marker,
+            ].filter(Boolean);
+
+            const created = await github.rest.issues.create({
+              owner: targetOwner,
+              repo: targetRepo,
+              title: issueTitle,
+              body: bodyLines.join("\n"),
+              labels: [labelName],
+            });
+
+            core.info(`Created issue #${created.data.number} for version ${latest.version}`);
