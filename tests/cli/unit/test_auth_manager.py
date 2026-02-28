@@ -244,9 +244,10 @@ def test_resolve_base_url_falls_back_when_profile_base_url_empty(monkeypatch) ->
 
 
 def test_resolve_lighthouse_base_url_prefers_explicit_value() -> None:
-    assert manager.resolve_lighthouse_base_url(" https://api-latarnia-test.ksef.mf.gov.pl/ ") == (
-        "https://api-latarnia-test.ksef.mf.gov.pl/"
-    ).strip()
+    assert (
+        manager.resolve_lighthouse_base_url(" https://api-latarnia-test.ksef.mf.gov.pl/ ")
+        == ("https://api-latarnia-test.ksef.mf.gov.pl/").strip()
+    )
 
 
 def test_resolve_lighthouse_base_url_uses_profile_mapping(monkeypatch) -> None:
@@ -548,11 +549,19 @@ def test_login_with_xades_loader_errors_are_mapped(monkeypatch) -> None:
 def test_login_with_token_without_save(monkeypatch) -> None:
     monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
     monkeypatch.setattr(manager, "AuthCoordinator", _FakeAuthCoordinator)
-    monkeypatch.setattr(manager, "save_tokens", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("save_tokens should not be called")))
+    monkeypatch.setattr(
+        manager,
+        "save_tokens",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("save_tokens should not be called")
+        ),
+    )
     monkeypatch.setattr(
         manager,
         "set_cached_metadata",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("set_cached_metadata should not be called")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("set_cached_metadata should not be called")
+        ),
     )
 
     result = manager.login_with_token(
@@ -574,12 +583,16 @@ def test_refresh_access_token_success_without_save(monkeypatch) -> None:
     monkeypatch.setattr(
         manager,
         "save_tokens",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("save_tokens should not be called")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("save_tokens should not be called")
+        ),
     )
     monkeypatch.setattr(
         manager,
         "set_cached_metadata",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("set_cached_metadata should not be called")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("set_cached_metadata should not be called")
+        ),
     )
 
     result = manager.refresh_access_token(

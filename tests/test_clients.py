@@ -79,7 +79,9 @@ class ClientsTests(unittest.TestCase):
 
     def test_auth_client_get_active_sessions_without_optional_filters(self):
         client = AuthClient(self.http)
-        with patch.object(client, "_request_json", Mock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            client, "_request_json", Mock(return_value={"ok": True})
+        ) as request_json_mock:
             client.get_active_sessions(continuation_token="", access_token="token")
             self.assertIsNone(request_json_mock.call_args.kwargs["headers"])
             self.assertIsNone(request_json_mock.call_args.kwargs["params"])
@@ -123,7 +125,9 @@ class ClientsTests(unittest.TestCase):
 
     def test_sessions_client_without_optional_filters(self):
         client = SessionsClient(self.http)
-        with patch.object(client, "_request_json", Mock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            client, "_request_json", Mock(return_value={"ok": True})
+        ) as request_json_mock:
             client.get_sessions(
                 session_type="online",
                 continuation_token="",
@@ -137,12 +141,16 @@ class ClientsTests(unittest.TestCase):
                 statuses=[],
                 access_token="token",
             )
-            self.assertEqual(request_json_mock.call_args.kwargs["params"], {"sessionType": "online"})
+            self.assertEqual(
+                request_json_mock.call_args.kwargs["params"], {"sessionType": "online"}
+            )
             self.assertIsNone(request_json_mock.call_args.kwargs["headers"])
 
     def test_sessions_client_without_upo_feature_and_pagination(self):
         client = SessionsClient(self.http)
-        with patch.object(client, "_request_json", Mock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            client, "_request_json", Mock(return_value={"ok": True})
+        ) as request_json_mock:
             client.open_online_session({"a": 1}, access_token="token")
             client.open_batch_session({"a": 1}, access_token="token")
             client.get_session_invoices("ref", continuation_token="", access_token="token")
@@ -219,7 +227,9 @@ class ClientsTests(unittest.TestCase):
 
     def test_invoices_client_query_metadata_without_optional_params(self):
         client = InvoicesClient(self.http)
-        with patch.object(client, "_request_json", Mock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            client, "_request_json", Mock(return_value={"ok": True})
+        ) as request_json_mock:
             client.query_invoice_metadata({"subjectType": "Subject1"}, access_token="token")
             self.assertIsNone(request_json_mock.call_args.kwargs["params"])
 
@@ -294,7 +304,9 @@ class ClientsTests(unittest.TestCase):
 
     def test_certificates_client_query_without_pagination(self):
         client = CertificatesClient(self.http)
-        with patch.object(client, "_request_json", Mock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            client, "_request_json", Mock(return_value={"ok": True})
+        ) as request_json_mock:
             client.query_certificates({"a": 1}, access_token="token")
             self.assertIsNone(request_json_mock.call_args.kwargs["params"])
 
@@ -316,7 +328,9 @@ class ClientsTests(unittest.TestCase):
 
     def test_tokens_client_list_tokens_without_optional_filters(self):
         client = TokensClient(self.http)
-        with patch.object(client, "_request_json", Mock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            client, "_request_json", Mock(return_value={"ok": True})
+        ) as request_json_mock:
             client.list_tokens(
                 access_token="token",
                 statuses=[],
@@ -371,7 +385,9 @@ class ClientsTests(unittest.TestCase):
 
     def test_peppol_client_without_pagination(self):
         client = PeppolClient(self.http)
-        with patch.object(client, "_request_json", Mock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            client, "_request_json", Mock(return_value={"ok": True})
+        ) as request_json_mock:
             client.list_providers()
             self.assertIsNone(request_json_mock.call_args.kwargs["params"])
 
@@ -652,7 +668,9 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         http = DummyAsyncHttp(response)
         payload = {"a": 1}
         tokens = AsyncTokensClient(http)
-        with patch.object(tokens, "_request_json", AsyncMock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            tokens, "_request_json", AsyncMock(return_value={"ok": True})
+        ) as request_json_mock:
             await tokens.list_tokens(
                 access_token="token",
                 statuses=[],
@@ -705,7 +723,9 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         response = HttpResponse(200, httpx.Headers({}), b"{}")
         http = DummyAsyncHttp(response)
         peppol = AsyncPeppolClient(http)
-        with patch.object(peppol, "_request_json", AsyncMock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            peppol, "_request_json", AsyncMock(return_value={"ok": True})
+        ) as request_json_mock:
             await peppol.list_providers()
             self.assertIsNone(request_json_mock.call_args.kwargs["params"])
 
@@ -713,7 +733,9 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         response = HttpResponse(200, httpx.Headers({}), b"{}")
         http = DummyAsyncHttp(response)
         auth = AsyncAuthClient(http)
-        with patch.object(auth, "_request_json", AsyncMock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            auth, "_request_json", AsyncMock(return_value={"ok": True})
+        ) as request_json_mock:
             await auth.get_active_sessions(continuation_token="", access_token="token")
             self.assertIsNone(request_json_mock.call_args.kwargs["headers"])
             self.assertIsNone(request_json_mock.call_args.kwargs["params"])
@@ -732,7 +754,9 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         response = HttpResponse(200, httpx.Headers({}), b"{}")
         http = DummyAsyncHttp(response)
         invoices = AsyncInvoicesClient(http)
-        with patch.object(invoices, "_request_json", AsyncMock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            invoices, "_request_json", AsyncMock(return_value={"ok": True})
+        ) as request_json_mock:
             await invoices.query_invoice_metadata({"subjectType": "Subject1"}, access_token="token")
             self.assertIsNone(request_json_mock.call_args.kwargs["params"])
 
@@ -740,7 +764,9 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         response = HttpResponse(200, httpx.Headers({}), b"{}")
         http = DummyAsyncHttp(response)
         sessions = AsyncSessionsClient(http)
-        with patch.object(sessions, "_request_json", AsyncMock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            sessions, "_request_json", AsyncMock(return_value={"ok": True})
+        ) as request_json_mock:
             await sessions.get_sessions(
                 session_type="online",
                 continuation_token="",
@@ -754,18 +780,24 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
                 statuses=[],
                 access_token="token",
             )
-            self.assertEqual(request_json_mock.call_args.kwargs["params"], {"sessionType": "online"})
+            self.assertEqual(
+                request_json_mock.call_args.kwargs["params"], {"sessionType": "online"}
+            )
             self.assertIsNone(request_json_mock.call_args.kwargs["headers"])
 
     async def test_async_sessions_client_without_upo_feature_and_pagination(self):
         response = HttpResponse(200, httpx.Headers({}), b"{}")
         http = DummyAsyncHttp(response)
         sessions = AsyncSessionsClient(http)
-        with patch.object(sessions, "_request_json", AsyncMock(return_value={"ok": True})) as request_json_mock:
+        with patch.object(
+            sessions, "_request_json", AsyncMock(return_value={"ok": True})
+        ) as request_json_mock:
             await sessions.open_online_session({"a": 1}, access_token="token")
             await sessions.open_batch_session({"a": 1}, access_token="token")
             await sessions.get_session_invoices("ref", continuation_token="", access_token="token")
-            await sessions.get_session_failed_invoices("ref", continuation_token="", access_token="token")
+            await sessions.get_session_failed_invoices(
+                "ref", continuation_token="", access_token="token"
+            )
 
             self.assertIsNone(request_json_mock.call_args_list[0].kwargs["headers"])
             self.assertIsNone(request_json_mock.call_args_list[1].kwargs["headers"])

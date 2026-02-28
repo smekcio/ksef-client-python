@@ -2471,7 +2471,10 @@ def test_send_online_invoice_wait_status_without_wait_upo(monkeypatch, tmp_path)
     monkeypatch.setattr(
         adapters,
         "_wait_for_invoice_status",
-        lambda **kwargs: {"status": {"code": 200, "description": "Accepted"}, "ksefNumber": "KSEF-X"},
+        lambda **kwargs: {
+            "status": {"code": 200, "description": "Accepted"},
+            "ksefNumber": "KSEF-X",
+        },
     )
 
     invoice_path = tmp_path / "invoice.xml"
