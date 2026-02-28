@@ -61,6 +61,14 @@ def test_human_renderer_success_skips_raw_response_payload(capsys) -> None:
     assert "raw" not in out
 
 
+def test_human_renderer_success_without_data(capsys) -> None:
+    renderer = HumanRenderer(no_color=True)
+    renderer.success(command="send.status", profile="demo", data=None)
+    out = capsys.readouterr().out
+    assert "OK" in out
+    assert "send.status" in out
+
+
 def test_human_renderer_error_prints_hint(capsys) -> None:
     renderer = HumanRenderer(no_color=True)
     renderer.error(

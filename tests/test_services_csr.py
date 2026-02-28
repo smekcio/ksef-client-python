@@ -42,6 +42,10 @@ class CsrServiceTests(unittest.TestCase):
         parsed = x509.load_der_x509_csr(csr_bytes)
         self.assertEqual(parsed.subject.rfc4514_string(), "CN=Test")
 
+    def test_build_subject_without_common_name(self):
+        subject = _build_subject({"organizationName": "KSeF"})
+        self.assertEqual(subject.rfc4514_string(), "O=KSeF")
+
 
 if __name__ == "__main__":
     unittest.main()

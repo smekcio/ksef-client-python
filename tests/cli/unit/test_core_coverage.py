@@ -44,6 +44,18 @@ def test_cli_main_module_invokes_entrypoint(monkeypatch) -> None:
     assert called["value"] is True
 
 
+def test_cli_main_module_import_does_not_invoke_entrypoint(monkeypatch) -> None:
+    called = {"value": False}
+
+    def _fake_entrypoint() -> None:
+        called["value"] = True
+
+    monkeypatch.setattr(app_module, "app_entrypoint", _fake_entrypoint)
+    main_module = importlib.import_module("ksef_client.cli.__main__")
+    importlib.reload(main_module)
+    assert called["value"] is False
+
+
 def test_config_loader_and_profiles(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(paths, "config_file", lambda: tmp_path / "config.json")
     cfg = loader.load_config()

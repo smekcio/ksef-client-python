@@ -293,6 +293,30 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "localhost"):
             await client.request("GET", "https://localhost/upload", skip_auth=True)
 
+    async def test_async_request_absolute_url_without_skip_auth(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = AsyncBaseHttpClient(options, access_token="token")
+        response = httpx.Response(200, json={"ok": True})
+        with patch.object(
+            client._client, "request", AsyncMock(return_value=response)
+        ) as request_mock:
+            await client.request("GET", "https://files.example.com/upload")
+            _, kwargs = request_mock.call_args
+            self.assertEqual(kwargs["url"], "https://files.example.com/upload")
+            self.assertIn("Authorization", kwargs["headers"])
+
+    async def test_async_skip_auth_presigned_url_accepts_valid_https(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = AsyncBaseHttpClient(options, access_token="token")
+        response = httpx.Response(200, json={"ok": True})
+        with patch.object(
+            client._client, "request", AsyncMock(return_value=response)
+        ) as request_mock:
+            await client.request("GET", "https://files.example.com/upload", skip_auth=True)
+            _, kwargs = request_mock.call_args
+            self.assertEqual(kwargs["url"], "https://files.example.com/upload")
+            self.assertNotIn("Authorization", kwargs["headers"])
+
 
 if __name__ == "__main__":
     unittest.main()

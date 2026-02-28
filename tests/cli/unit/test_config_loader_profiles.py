@@ -82,6 +82,18 @@ def test_loader_profile_parser_skips_invalid_entries(monkeypatch, tmp_path) -> N
     assert loader.load_config().profiles == {}
 
 
+def test_loader_accepts_non_dict_profiles_key(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr(paths, "config_file", lambda: config_path)
+    config_path.write_text(
+        json.dumps({"active_profile": "demo", "profiles": []}),
+        encoding="utf-8",
+    )
+    loaded = loader.load_config()
+    assert loaded.profiles == {}
+    assert loaded.active_profile is None
+
+
 def test_loader_skips_non_string_profile_names(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.json"
     monkeypatch.setattr(paths, "config_file", lambda: config_path)
@@ -293,3 +305,27 @@ def test_profiles_upsert_and_active_fallback() -> None:
 
     profiles.delete_profile(config, name="one")
     assert config.active_profile == "two"
+
+
+def test_profiles_delete_non_active_profile_keeps_active() -> None:
+    config = CliConfig(
+        active_profile="one",
+        profiles={
+            "one": ProfileConfig(
+                name="one",
+                env="DEMO",
+                base_url="https://api-demo.ksef.mf.gov.pl",
+                context_type="nip",
+                context_value="1",
+            ),
+            "two": ProfileConfig(
+                name="two",
+                env="TEST",
+                base_url="https://api-test.ksef.mf.gov.pl",
+                context_type="nip",
+                context_value="2",
+            ),
+        },
+    )
+    profiles.delete_profile(config, name="two")
+    assert config.active_profile == "one"

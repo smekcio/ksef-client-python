@@ -76,3 +76,53 @@ def test_init_non_interactive_requires_context_fields(runner, monkeypatch, tmp_p
         ],
     )
     assert result.exit_code == 2
+
+
+def test_init_interactive_respects_provided_options_and_keeps_active_profile(
+    runner, monkeypatch, tmp_path
+) -> None:
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr(paths, "config_file", lambda: config_path)
+
+    seed_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "init",
+            "--name",
+            "seed",
+            "--env",
+            "DEMO",
+            "--context-type",
+            "nip",
+            "--context-value",
+            "111",
+            "--non-interactive",
+            "--set-active",
+        ],
+    )
+    assert seed_result.exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "init",
+            "--name",
+            "second",
+            "--env",
+            "TEST",
+            "--base-url",
+            "https://example.test",
+            "--context-type",
+            "nip",
+            "--context-value",
+            "222",
+        ],
+        input="second\n",
+    )
+    assert result.exit_code == 0
+    payload = _json_output(result.stdout)
+    assert payload["ok"] is True
+    assert payload["profile"] == "second"
+    assert payload["data"]["active_profile"] == "seed"

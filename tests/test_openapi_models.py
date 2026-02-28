@@ -1,5 +1,7 @@
 import json
+from typing import List
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from ksef_client import openapi_models as m
@@ -115,6 +117,19 @@ class OpenApiModelsTests(unittest.TestCase):
         self.assertEqual(parsed.headers["X-Meta"], {"source": "ksef"})
         self.assertTrue(parsed.headers["X-Enabled"])
         self.assertEqual(parsed.to_dict()["headers"], payload["headers"])
+
+    def test_convert_value_handles_unsubscripted_list_hint(self):
+        self.assertEqual(m._convert_value(List, ["a", "b"]), ["a", "b"])
+
+    def test_convert_value_openapi_model_non_dict_returns_raw_value(self):
+        self.assertEqual(m._convert_value(m.AuthenticationListItem, "raw"), "raw")
+
+    def test_convert_value_union_with_empty_args_falls_through(self):
+        with (
+            patch("ksef_client.openapi_models.get_origin", return_value=object()),
+            patch("ksef_client.openapi_models.get_args", return_value=()),
+        ):
+            self.assertEqual(m._convert_value("ignored", "value"), "value")
 
 
 if __name__ == "__main__":

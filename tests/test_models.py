@@ -127,6 +127,7 @@ class ModelsTests(unittest.TestCase):
         status = models.LighthouseStatusResponse.from_dict({"status": "UNKNOWN"})
         self.assertEqual(status.status, models.LighthouseKsefStatus.AVAILABLE)
         self.assertIsNone(status.messages)
+        self.assertNotIn("messages", status.to_dict())
 
 
 if __name__ == "__main__":

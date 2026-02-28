@@ -180,6 +180,15 @@ def test_status_and_logout(monkeypatch) -> None:
 
 
 def test_select_certificate_and_require_non_empty_errors() -> None:
+    cert = manager._select_certificate(
+        [
+            {"usage": ["KsefTokenEncryption"], "certificate": ""},
+            {"usage": ["KsefTokenEncryption"], "certificate": "CERT"},
+        ],
+        "KsefTokenEncryption",
+    )
+    assert cert == "CERT"
+
     with pytest.raises(CliError) as cert_error:
         manager._select_certificate([], "KsefTokenEncryption")
     assert cert_error.value.code == ExitCode.API_ERROR
@@ -212,6 +221,26 @@ def test_resolve_base_url_uses_profile_when_missing(monkeypatch) -> None:
         ),
     )
     assert manager.resolve_base_url(None, profile="demo") == "https://profile.example"
+
+
+def test_resolve_base_url_falls_back_when_profile_base_url_empty(monkeypatch) -> None:
+    monkeypatch.setattr(
+        manager,
+        "load_config",
+        lambda: CliConfig(
+            active_profile="demo",
+            profiles={
+                "demo": ProfileConfig(
+                    name="demo",
+                    env="DEMO",
+                    base_url=" ",
+                    context_type="nip",
+                    context_value="123",
+                )
+            },
+        ),
+    )
+    assert manager.resolve_base_url(None, profile="demo") == manager.KsefEnvironment.DEMO.value
 
 
 def test_resolve_lighthouse_base_url_prefers_explicit_value() -> None:
@@ -258,6 +287,28 @@ def test_resolve_lighthouse_base_url_invalid_profile_base_fallback(monkeypatch) 
                     name="demo",
                     env="DEMO",
                     base_url="https://unknown.example",
+                    context_type="nip",
+                    context_value="123",
+                )
+            },
+        ),
+    )
+    assert manager.resolve_lighthouse_base_url(None, profile="demo") == (
+        KsefLighthouseEnvironment.TEST.value
+    )
+
+
+def test_resolve_lighthouse_base_url_fallback_when_profile_base_url_empty(monkeypatch) -> None:
+    monkeypatch.setattr(
+        manager,
+        "load_config",
+        lambda: CliConfig(
+            active_profile="demo",
+            profiles={
+                "demo": ProfileConfig(
+                    name="demo",
+                    env="DEMO",
+                    base_url=" ",
                     context_type="nip",
                     context_value="123",
                 )
@@ -492,3 +543,48 @@ def test_login_with_xades_loader_errors_are_mapped(monkeypatch) -> None:
             save=False,
         )
     assert exc.value.code == ExitCode.VALIDATION_ERROR
+
+
+def test_login_with_token_without_save(monkeypatch) -> None:
+    monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
+    monkeypatch.setattr(manager, "AuthCoordinator", _FakeAuthCoordinator)
+    monkeypatch.setattr(manager, "save_tokens", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("save_tokens should not be called")))
+    monkeypatch.setattr(
+        manager,
+        "set_cached_metadata",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("set_cached_metadata should not be called")),
+    )
+
+    result = manager.login_with_token(
+        profile="demo",
+        base_url="https://api-demo.ksef.mf.gov.pl",
+        token="TOKEN",
+        context_type="nip",
+        context_value="5265877635",
+        poll_interval=0.0,
+        max_attempts=1,
+        save=False,
+    )
+    assert result["saved"] is False
+
+
+def test_refresh_access_token_success_without_save(monkeypatch) -> None:
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
+    monkeypatch.setattr(
+        manager,
+        "save_tokens",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("save_tokens should not be called")),
+    )
+    monkeypatch.setattr(
+        manager,
+        "set_cached_metadata",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("set_cached_metadata should not be called")),
+    )
+
+    result = manager.refresh_access_token(
+        profile="demo",
+        base_url="https://api-demo.ksef.mf.gov.pl",
+        save=False,
+    )
+    assert result["saved"] is False

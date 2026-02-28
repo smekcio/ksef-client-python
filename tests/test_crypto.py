@@ -101,6 +101,8 @@ class CryptoTests(unittest.TestCase):
         rsa_cert = generate_rsa_cert()
         key = crypto._load_private_key(rsa_cert.private_key_pem)
         self.assertEqual(key.key_size, rsa_cert.private_key.key_size)
+        key_from_bytes = crypto._load_private_key(rsa_cert.private_key_pem.encode("ascii"))
+        self.assertEqual(key_from_bytes.key_size, rsa_cert.private_key.key_size)
         der = rsa_cert.private_key.private_bytes(
             encoding=crypto.serialization.Encoding.DER,
             format=crypto.serialization.PrivateFormat.PKCS8,

@@ -360,6 +360,26 @@ class WorkflowsTests(unittest.TestCase):
         )
         self.assertEqual(ref, "ref")
 
+    def test_batch_session_workflow_without_offline_mode_flag(self):
+        sessions = StubSessionsClient()
+        http = RecordingHttp()
+        workflow = workflows.BatchSessionWorkflow(sessions, http)
+        rsa_cert = generate_rsa_cert()
+        zip_bytes = build_zip({"a.xml": b"<xml/>"})
+        workflow.open_upload_and_close(
+            form_code={"systemCode": "FA"},
+            zip_bytes=zip_bytes,
+            public_certificate=rsa_cert.certificate_pem,
+            access_token="token",
+            offline_mode=None,
+            upo_v43=False,
+            parallelism=1,
+        )
+        open_batch_calls = [call for call in sessions.calls if call[0] == "open_batch"]
+        assert open_batch_calls
+        payload = open_batch_calls[0][1]
+        self.assertNotIn("offlineMode", payload)
+
     def test_export_workflow(self):
         key = generate_symmetric_key()
         iv = generate_iv()
@@ -383,6 +403,30 @@ class WorkflowsTests(unittest.TestCase):
             result = workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
         self.assertIn("inv.xml", result.invoice_xml_files)
+
+    def test_export_workflow_ignores_non_xml_non_metadata_files(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        files = {
+            "_metadata.json": json.dumps({"invoices": [{"ksefNumber": "1"}]}).encode("utf-8"),
+            "inv.xml": b"<xml/>",
+            "notes.txt": b"ignored",
+        }
+        archive = build_zip(files)
+        encrypted = encrypt_aes_cbc_pkcs7(archive, key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)  # type: ignore[arg-type]
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.ExportWorkflow(cast(InvoicesClient, DummyInvoices()), RecordingHttp())
+        with patch.object(
+            workflow._download_helper,
+            "download_parts_with_hash",
+            return_value=[(encrypted, _sha256_b64(encrypted))],
+        ):
+            result = workflow.download_and_process_package({"parts": [{"url": "u"}]}, encryption)
+        self.assertNotIn("notes.txt", result.invoice_xml_files)
 
     def test_export_workflow_rejects_missing_hash_by_default(self):
         key = generate_symmetric_key()
@@ -647,6 +691,24 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(ref, "ref")
 
+    async def test_async_batch_session_workflow_without_offline_mode_flag(self):
+        sessions = StubAsyncSessionsClient()
+        batch = workflows.AsyncBatchSessionWorkflow(sessions, RecordingAsyncHttp())
+        rsa_cert = generate_rsa_cert()
+        zip_bytes = build_zip({"a.xml": b"<xml/>"})
+        await batch.open_upload_and_close(
+            form_code={"systemCode": "FA"},
+            zip_bytes=zip_bytes,
+            public_certificate=rsa_cert.certificate_pem,
+            access_token="token",
+            offline_mode=None,
+            upo_v43=False,
+        )
+        open_batch_calls = [call for call in sessions.calls if call[0] == "open_batch"]
+        assert open_batch_calls
+        payload = open_batch_calls[0][1]
+        self.assertNotIn("offlineMode", payload)
+
     async def test_async_export_workflow(self):
         key = generate_symmetric_key()
         iv = generate_iv()
@@ -674,6 +736,35 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
                 {"parts": [{"url": "u"}]}, encryption
             )
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
+
+    async def test_async_export_workflow_ignores_non_xml_non_metadata_files(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        files = {
+            "_metadata.json": json.dumps({"invoiceList": [{"ksefNumber": "1"}]}).encode("utf-8"),
+            "inv.xml": b"<xml/>",
+            "notes.txt": b"ignored",
+        }
+        archive = build_zip(files)
+        encrypted = encrypt_aes_cbc_pkcs7(archive, key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)  # type: ignore[arg-type]
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.AsyncExportWorkflow(
+            cast(AsyncInvoicesClient, DummyInvoices()),
+            RecordingAsyncHttp(),
+        )
+        with patch.object(
+            workflow._download_helper,
+            "download_parts_with_hash",
+            AsyncMock(return_value=[(encrypted, _sha256_b64(encrypted))]),
+        ):
+            result = await workflow.download_and_process_package(
+                {"parts": [{"url": "u"}]}, encryption
+            )
+        self.assertNotIn("notes.txt", result.invoice_xml_files)
 
     async def test_async_export_workflow_rejects_missing_hash_by_default(self):
         key = generate_symmetric_key()
