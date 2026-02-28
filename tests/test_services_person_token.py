@@ -63,6 +63,7 @@ class PersonTokenTests(unittest.TestCase):
         self.assertEqual(_parse_json_string_array(json.dumps(["a", "b"])), ["a", "b"])
         self.assertEqual(_parse_json_string_array("a,b"), ["a", "b"])
         self.assertEqual(_parse_json_string_array("a"), ["a"])
+        self.assertEqual(_parse_json_string_array(json.dumps({"a": 1})), ['{"a": 1}'])
         self.assertEqual(_parse_json_string_array(None), [])
 
     def test_unwrap_if_quoted_json(self):

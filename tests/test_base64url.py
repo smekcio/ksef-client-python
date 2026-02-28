@@ -16,6 +16,12 @@ class Base64UrlTests(unittest.TestCase):
         decoded = b64decode(encoded)
         self.assertEqual(decoded, data)
 
+    def test_standard_base64_decode_bytes_input(self):
+        data = b"data"
+        encoded = b64encode(data).encode("ascii")
+        decoded = b64decode(encoded)
+        self.assertEqual(decoded, data)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,14 @@ class ZipUtilsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             unzip_bytes(zip_bytes, max_compression_ratio=ratio - 0.001)
 
+    def test_unzip_safe_allows_disabling_compression_ratio_check(self):
+        payload = b"a" * (256 * 1024)
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("a.txt", payload)
+        unzipped = unzip_bytes_safe(buffer.getvalue(), max_compression_ratio=None)
+        self.assertEqual(unzipped["a.txt"], payload)
+
     def test_unzip_safe_rejects_invalid_limits(self):
         zip_bytes = build_zip({"a.txt": b"hello"})
         with self.assertRaises(ValueError):
@@ -75,6 +83,11 @@ class ZipUtilsTests(unittest.TestCase):
             zipfile.ZipFile, "infolist", infolist_with_bad_metadata
         ), self.assertRaises(ValueError):
             unzip_bytes_safe(zip_bytes)
+
+    def test_unzip_safe_accepts_empty_file_entry(self):
+        zip_bytes = build_zip({"empty.txt": b""})
+        unzipped = unzip_bytes_safe(zip_bytes)
+        self.assertEqual(unzipped["empty.txt"], b"")
 
     def test_unzip_safe_rejects_absolute_entry_path(self):
         buffer = BytesIO()

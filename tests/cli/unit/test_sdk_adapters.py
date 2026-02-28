@@ -2187,3 +2187,392 @@ def test_run_health_check_variants(monkeypatch) -> None:
         check_certs=False,
     )
     assert fail["overall"] == "FAIL"
+
+
+def test_build_zip_from_directory_skips_non_file_xml_paths(tmp_path) -> None:
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested" / "invoice.xml").mkdir()
+    with pytest.raises(CliError) as exc:
+        adapters._build_zip_from_directory(str(tmp_path))
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+
+
+def test_wait_helpers_include_details_in_error_hints(monkeypatch) -> None:
+    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+
+    class _InvoiceStatusClient:
+        class sessions:
+            @staticmethod
+            def get_session_invoice_status(session_ref, invoice_ref, access_token):
+                _ = (session_ref, invoice_ref, access_token)
+                return {"status": {"code": 400, "description": "bad", "details": ["d1"]}}
+
+    class _SessionStatusClient:
+        class sessions:
+            @staticmethod
+            def get_session_status(session_ref, access_token):
+                _ = (session_ref, access_token)
+                return {"status": {"code": 400, "description": "bad", "details": ["d2"]}}
+
+    class _ExportStatusClient:
+        class invoices:
+            @staticmethod
+            def get_export_status(reference_number, access_token):
+                _ = (reference_number, access_token)
+                return {"status": {"code": 400, "description": "bad", "details": ["d3"]}}
+
+    with pytest.raises(CliError) as invoice_exc:
+        adapters._wait_for_invoice_status(
+            client=_InvoiceStatusClient(),
+            session_ref="S",
+            invoice_ref="I",
+            access_token="acc",
+            poll_interval=0.01,
+            max_attempts=1,
+        )
+    assert "Details: d1" in (invoice_exc.value.hint or "")
+
+    with pytest.raises(CliError) as session_exc:
+        adapters._wait_for_session_status(
+            client=_SessionStatusClient(),
+            session_ref="S",
+            access_token="acc",
+            poll_interval=0.01,
+            max_attempts=1,
+        )
+    assert "Details: d2" in (session_exc.value.hint or "")
+
+    with pytest.raises(CliError) as export_exc:
+        adapters._wait_for_export_status(
+            client=_ExportStatusClient(),
+            reference_number="R",
+            access_token="acc",
+            poll_interval=0.01,
+            max_attempts=1,
+        )
+    assert "Details: d3" in (export_exc.value.hint or "")
+
+
+def test_wait_helpers_error_hints_without_details(monkeypatch) -> None:
+    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+
+    class _InvoiceStatusClient:
+        class sessions:
+            @staticmethod
+            def get_session_invoice_status(session_ref, invoice_ref, access_token):
+                _ = (session_ref, invoice_ref, access_token)
+                return {"status": {"code": 400, "description": "bad"}}
+
+    class _SessionStatusClient:
+        class sessions:
+            @staticmethod
+            def get_session_status(session_ref, access_token):
+                _ = (session_ref, access_token)
+                return {"status": {"code": 400, "description": "bad"}}
+
+    class _ExportStatusClient:
+        class invoices:
+            @staticmethod
+            def get_export_status(reference_number, access_token):
+                _ = (reference_number, access_token)
+                return {"status": {"code": 400, "description": "bad"}}
+
+    with pytest.raises(CliError) as invoice_exc:
+        adapters._wait_for_invoice_status(
+            client=_InvoiceStatusClient(),
+            session_ref="S",
+            invoice_ref="I",
+            access_token="acc",
+            poll_interval=0.01,
+            max_attempts=1,
+        )
+    assert invoice_exc.value.hint == "bad"
+
+    with pytest.raises(CliError) as session_exc:
+        adapters._wait_for_session_status(
+            client=_SessionStatusClient(),
+            session_ref="S",
+            access_token="acc",
+            poll_interval=0.01,
+            max_attempts=1,
+        )
+    assert session_exc.value.hint == "bad"
+
+    with pytest.raises(CliError) as export_exc:
+        adapters._wait_for_export_status(
+            client=_ExportStatusClient(),
+            reference_number="R",
+            access_token="acc",
+            poll_interval=0.01,
+            max_attempts=1,
+        )
+    assert export_exc.value.hint == "bad"
+
+
+def test_wait_helpers_retry_on_empty_upo_bytes(monkeypatch) -> None:
+    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+
+    class _InvoiceUpoClient:
+        class sessions:
+            @staticmethod
+            def get_session_invoice_upo_by_ref(session_ref, invoice_ref, access_token):
+                _ = (session_ref, invoice_ref, access_token)
+                return b""
+
+    class _BatchUpoClient:
+        class sessions:
+            @staticmethod
+            def get_session_upo(session_ref, upo_ref, access_token):
+                _ = (session_ref, upo_ref, access_token)
+                return b""
+
+    with pytest.raises(CliError) as invoice_exc:
+        adapters._wait_for_invoice_upo(
+            client=_InvoiceUpoClient(),
+            session_ref="S",
+            invoice_ref="I",
+            access_token="acc",
+            poll_interval=0.01,
+            max_attempts=1,
+        )
+    assert invoice_exc.value.code == ExitCode.RETRY_EXHAUSTED
+
+    with pytest.raises(CliError) as batch_exc:
+        adapters._wait_for_batch_upo(
+            client=_BatchUpoClient(),
+            session_ref="S",
+            upo_ref="U",
+            access_token="acc",
+            poll_interval=0.01,
+            max_attempts=1,
+        )
+    assert batch_exc.value.code == ExitCode.RETRY_EXHAUSTED
+
+
+def test_wait_for_upo_invoice_ref_pending_status_times_out(monkeypatch) -> None:
+    class _Sessions:
+        @staticmethod
+        def get_session_invoice_status(session_ref, invoice_ref, access_token):
+            _ = (session_ref, invoice_ref, access_token)
+            return {"status": {"code": 100}}
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_Sessions()),
+    )
+    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+
+    with pytest.raises(CliError) as exc:
+        adapters.wait_for_upo(
+            profile="demo",
+            base_url="https://example.invalid",
+            session_ref="SES-PENDING",
+            invoice_ref="INV-PENDING",
+            upo_ref=None,
+            batch_auto=False,
+            poll_interval=0.01,
+            max_attempts=1,
+            out=None,
+            overwrite=False,
+        )
+    assert exc.value.code == ExitCode.RETRY_EXHAUSTED
+
+
+def test_send_online_invoice_success_without_waits(monkeypatch, tmp_path) -> None:
+    class _Security:
+        @staticmethod
+        def get_public_key_certificates():
+            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+
+    class _Sessions:
+        pass
+
+    class _OnlineWorkflow:
+        def __init__(self, sessions):
+            _ = sessions
+
+        def open_session(self, *, form_code, public_certificate, access_token, upo_v43=False):
+            _ = (form_code, public_certificate, access_token, upo_v43)
+            return SimpleNamespace(
+                session_reference_number="SES-NO-WAIT",
+                encryption_data=SimpleNamespace(key=b"k", iv=b"i"),
+            )
+
+        def send_invoice(self, **kwargs):
+            _ = kwargs
+            return {"referenceNumber": "INV-NO-WAIT"}
+
+        def close_session(self, reference_number, access_token):
+            _ = (reference_number, access_token)
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(adapters, "OnlineSessionWorkflow", _OnlineWorkflow)
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_Sessions(), security=_Security()),
+    )
+
+    invoice_path = tmp_path / "invoice.xml"
+    invoice_path.write_text("<f/>", encoding="utf-8")
+    result = adapters.send_online_invoice(
+        profile="demo",
+        base_url="https://example.invalid",
+        invoice=str(invoice_path),
+        system_code="FA (3)",
+        schema_version="1-0E",
+        form_value="FA",
+        upo_v43=False,
+        wait_status=False,
+        wait_upo=False,
+        poll_interval=0.01,
+        max_attempts=1,
+        save_upo=None,
+    )
+    assert result == {"session_ref": "SES-NO-WAIT", "invoice_ref": "INV-NO-WAIT"}
+
+
+def test_send_online_invoice_wait_status_without_wait_upo(monkeypatch, tmp_path) -> None:
+    class _Security:
+        @staticmethod
+        def get_public_key_certificates():
+            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+
+    class _Sessions:
+        pass
+
+    class _OnlineWorkflow:
+        def __init__(self, sessions):
+            _ = sessions
+
+        def open_session(self, *, form_code, public_certificate, access_token, upo_v43=False):
+            _ = (form_code, public_certificate, access_token, upo_v43)
+            return SimpleNamespace(
+                session_reference_number="SES-STATUS-ONLY",
+                encryption_data=SimpleNamespace(key=b"k", iv=b"i"),
+            )
+
+        def send_invoice(self, **kwargs):
+            _ = kwargs
+            return {"referenceNumber": "INV-STATUS-ONLY"}
+
+        def close_session(self, reference_number, access_token):
+            _ = (reference_number, access_token)
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(adapters, "OnlineSessionWorkflow", _OnlineWorkflow)
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_Sessions(), security=_Security()),
+    )
+    monkeypatch.setattr(
+        adapters,
+        "_wait_for_invoice_status",
+        lambda **kwargs: {
+            "status": {"code": 200, "description": "Accepted"},
+            "ksefNumber": "KSEF-X",
+        },
+    )
+
+    invoice_path = tmp_path / "invoice.xml"
+    invoice_path.write_text("<f/>", encoding="utf-8")
+    result = adapters.send_online_invoice(
+        profile="demo",
+        base_url="https://example.invalid",
+        invoice=str(invoice_path),
+        system_code="FA (3)",
+        schema_version="1-0E",
+        form_value="FA",
+        upo_v43=False,
+        wait_status=True,
+        wait_upo=False,
+        poll_interval=0.01,
+        max_attempts=1,
+        save_upo=None,
+    )
+    assert result["ksef_number"] == "KSEF-X"
+    assert "upo_bytes" not in result
+
+
+def test_send_batch_invoices_wait_status_without_wait_upo(monkeypatch, tmp_path) -> None:
+    class _Security:
+        @staticmethod
+        def get_public_key_certificates():
+            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+
+    class _Sessions:
+        @staticmethod
+        def get_session_status(session_ref, access_token):
+            _ = (session_ref, access_token)
+            return {"status": {"code": 200, "description": "Done"}, "upoReferenceNumber": "UPO-1"}
+
+    class _BatchWorkflow:
+        def __init__(self, sessions, http_client):
+            _ = (sessions, http_client)
+
+        @staticmethod
+        def open_upload_and_close(**kwargs):
+            _ = kwargs
+            return "SES-BATCH-STATUS"
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(adapters, "BatchSessionWorkflow", _BatchWorkflow)
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(
+            sessions=_Sessions(), security=_Security(), http_client=SimpleNamespace()
+        ),
+    )
+    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+
+    zip_path = tmp_path / "batch.zip"
+    zip_path.write_bytes(b"PK\x03\x04")
+    result = adapters.send_batch_invoices(
+        profile="demo",
+        base_url="https://example.invalid",
+        zip_path=str(zip_path),
+        directory=None,
+        system_code="FA (3)",
+        schema_version="1-0E",
+        form_value="FA",
+        parallelism=1,
+        upo_v43=False,
+        wait_status=True,
+        wait_upo=False,
+        poll_interval=0.01,
+        max_attempts=1,
+        save_upo=None,
+    )
+    assert result["session_ref"] == "SES-BATCH-STATUS"
+    assert result["upo_ref"] == "UPO-1"
+    assert "upo_path" not in result
+
+
+def test_run_health_check_ignores_non_list_usage_values(monkeypatch) -> None:
+    class _SecurityClient:
+        @staticmethod
+        def get_public_key_certificates():
+            return [
+                {"usage": "KsefTokenEncryption", "certificate": "A"},
+                {"usage": ["SymmetricKeyEncryption"], "certificate": "B"},
+            ]
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(security=_SecurityClient()),
+    )
+    result = adapters.run_health_check(
+        profile="demo",
+        base_url="https://example.invalid",
+        dry_run=True,
+        check_auth=False,
+        check_certs=False,
+    )
+    cert_check = [item for item in result["checks"] if item["name"] == "certificates"][0]
+    assert cert_check["status"] == "FAIL"
