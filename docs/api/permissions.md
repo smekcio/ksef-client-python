@@ -59,6 +59,9 @@ Endpoint: `POST /permissions/query/authorizations/grants`
 ### `query_entities_roles(..., access_token)`
 Endpoint: `GET /permissions/query/entities/roles`
 
+### `query_entities_grants(request_payload, ..., access_token)`
+Endpoint: `POST /permissions/query/entities/grants`
+
 ### `query_eu_entities_grants(request_payload, ..., access_token)`
 Endpoint: `POST /permissions/query/eu-entities/grants`
 

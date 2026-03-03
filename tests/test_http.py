@@ -10,12 +10,19 @@ from ksef_client.http import (
     BaseHttpClient,
     HttpResponse,
     _host_allowed,
+    _is_json_content_type,
     _merge_headers,
     _validate_presigned_url_security,
 )
 
 
 class HttpTests(unittest.TestCase):
+    def test_is_json_content_type(self):
+        self.assertTrue(_is_json_content_type("application/json"))
+        self.assertTrue(_is_json_content_type("application/problem+json"))
+        self.assertTrue(_is_json_content_type("application/vnd.api+json; charset=utf-8"))
+        self.assertFalse(_is_json_content_type("text/plain"))
+
     def test_merge_headers(self):
         base = {"a": "1"}
         merged = _merge_headers(base, {"b": "2"})
@@ -89,6 +96,24 @@ class HttpTests(unittest.TestCase):
         response = httpx.Response(400, json={"error": "bad"})
         with self.assertRaises(KsefApiError):
             client._raise_for_status(response)
+
+    def test_raise_for_status_problem_json_error(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        response = httpx.Response(
+            403,
+            headers={"Content-Type": "application/problem+json"},
+            json={
+                "title": "Forbidden",
+                "status": 403,
+                "detail": "Missing permissions",
+                "reasonCode": "missing-permissions",
+            },
+        )
+        with self.assertRaises(KsefApiError) as ctx:
+            client._raise_for_status(response)
+        assert isinstance(ctx.exception.response_body, dict)
+        self.assertEqual(ctx.exception.response_body["reasonCode"], "missing-permissions")
 
     def test_raise_for_status_http_error(self):
         options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
@@ -286,6 +311,18 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
         response_http = httpx.Response(500, content=b"boom", headers={"Content-Type": "text/plain"})
         with self.assertRaises(KsefHttpError):
             client._raise_for_status(response_http)
+
+        response_problem = httpx.Response(
+            401,
+            headers={"Content-Type": "application/problem+json"},
+            json={
+                "title": "Unauthorized",
+                "status": 401,
+                "detail": "Missing bearer token",
+            },
+        )
+        with self.assertRaises(KsefApiError):
+            client._raise_for_status(response_problem)
 
     async def test_async_skip_auth_presigned_validation_rejects_localhost(self):
         options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")

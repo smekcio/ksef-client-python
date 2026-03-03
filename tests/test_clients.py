@@ -272,6 +272,9 @@ class ClientsTests(unittest.TestCase):
                 payload, page_offset=0, page_size=10, access_token="token"
             )
             client.query_entities_roles(page_offset=0, page_size=10, access_token="token")
+            client.query_entities_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
             client.query_eu_entities_grants(
                 payload, page_offset=0, page_size=10, access_token="token"
             )
@@ -598,6 +601,12 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
                 access_token="token",
             )
             await permissions.query_entities_roles(
+                page_offset=0,
+                page_size=10,
+                access_token="token",
+            )
+            await permissions.query_entities_grants(
+                payload,
                 page_offset=0,
                 page_size=10,
                 access_token="token",

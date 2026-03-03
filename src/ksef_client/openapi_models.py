@@ -348,9 +348,17 @@ class EntityAuthorizationsAuthorizedEntityIdentifierType(Enum):
 class EntityAuthorizationsAuthorizingEntityIdentifierType(Enum):
     NIP = "Nip"
 
+class EntityPermissionItemScope(Enum):
+    INVOICEWRITE = "InvoiceWrite"
+    INVOICEREAD = "InvoiceRead"
+
 class EntityPermissionType(Enum):
     INVOICEWRITE = "InvoiceWrite"
     INVOICEREAD = "InvoiceRead"
+
+class EntityPermissionsContextIdentifierType(Enum):
+    NIP = "Nip"
+    INTERNALID = "InternalId"
 
 class EntityPermissionsSubjectIdentifierType(Enum):
     NIP = "Nip"
@@ -734,6 +742,7 @@ class AttachmentPermissionRevokeRequest(OpenApiModel):
 @dataclass(frozen=True)
 class AuthenticationChallengeResponse(OpenApiModel):
     challenge: Challenge
+    clientIp: str
     timestamp: str
     timestampMs: int
 
@@ -996,11 +1005,29 @@ class EntityPermission(OpenApiModel):
     canDelegate: Optional[bool] = None
 
 @dataclass(frozen=True)
+class EntityPermissionItem(OpenApiModel):
+    canDelegate: bool
+    contextIdentifier: EntityPermissionsContextIdentifier
+    description: str
+    id: PermissionId
+    permissionScope: EntityPermissionItemScope
+    startDate: str
+
+@dataclass(frozen=True)
+class EntityPermissionsContextIdentifier(OpenApiModel):
+    type: EntityPermissionsContextIdentifierType
+    value: str
+
+@dataclass(frozen=True)
 class EntityPermissionsGrantRequest(OpenApiModel):
     description: str
     permissions: list[EntityPermission]
     subjectDetails: EntityDetails
     subjectIdentifier: EntityPermissionsSubjectIdentifier
+
+@dataclass(frozen=True)
+class EntityPermissionsQueryRequest(OpenApiModel):
+    contextIdentifier: Optional[EntityPermissionsContextIdentifier] = None
 
 @dataclass(frozen=True)
 class EntityPermissionsSubjectIdentifier(OpenApiModel):
@@ -1114,6 +1141,16 @@ class ExceptionResponse(OpenApiModel):
 @dataclass(frozen=True)
 class ExportInvoicesResponse(OpenApiModel):
     referenceNumber: ReferenceNumber
+
+@dataclass(frozen=True)
+class ForbiddenProblemDetails(OpenApiModel):
+    detail: str
+    reasonCode: str
+    status: int
+    title: str
+    instance: Optional[str] = None
+    security: Optional[dict[str, Optional[Any]]] = None
+    traceId: Optional[str] = None
 
 @dataclass(frozen=True)
 class FormCode(OpenApiModel):
@@ -1292,7 +1329,7 @@ class InvoiceStatusInfo(OpenApiModel):
     code: int
     description: str
     details: Optional[list[str]] = None
-    extensions: Optional[dict[str, Any]] = None
+    extensions: Optional[dict[str, Optional[str]]] = None
 
 @dataclass(frozen=True)
 class OnlineSessionContextLimitsOverride(OpenApiModel):
@@ -1330,7 +1367,7 @@ class OpenOnlineSessionResponse(OpenApiModel):
 
 @dataclass(frozen=True)
 class PartUploadRequest(OpenApiModel):
-    headers: dict[str, Any]
+    headers: dict[str, Optional[str]]
     method: str
     ordinalNumber: int
     url: str
@@ -1549,6 +1586,11 @@ class QueryCertificatesResponse(OpenApiModel):
 class QueryEntityAuthorizationPermissionsResponse(OpenApiModel):
     authorizationGrants: list[EntityAuthorizationGrant]
     hasMore: bool
+
+@dataclass(frozen=True)
+class QueryEntityPermissionsResponse(OpenApiModel):
+    hasMore: bool
+    permissions: list[EntityPermissionItem]
 
 @dataclass(frozen=True)
 class QueryEntityRolesResponse(OpenApiModel):
@@ -1854,6 +1896,14 @@ class TokenStatusResponse(OpenApiModel):
 @dataclass(frozen=True)
 class TooManyRequestsResponse(OpenApiModel):
     status: dict[str, Any]
+
+@dataclass(frozen=True)
+class UnauthorizedProblemDetails(OpenApiModel):
+    detail: str
+    status: int
+    title: str
+    instance: Optional[str] = None
+    traceId: Optional[str] = None
 
 @dataclass(frozen=True)
 class UnblockContextAuthenticationRequest(OpenApiModel):

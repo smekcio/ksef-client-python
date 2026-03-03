@@ -11,10 +11,16 @@ class ModelsTests(unittest.TestCase):
         self.assertEqual(token.valid_until, "2024-01-01")
 
     def test_auth_challenge_from_dict(self):
-        data = {"challenge": "c", "timestamp": "t", "timestampMs": 123}
+        data = {
+            "challenge": "c",
+            "timestamp": "t",
+            "timestampMs": 123,
+            "clientIp": "203.0.113.10",
+        }
         parsed = models.AuthenticationChallengeResponse.from_dict(data)
         self.assertEqual(parsed.challenge, "c")
         self.assertEqual(parsed.timestamp_ms, 123)
+        self.assertEqual(parsed.client_ip, "203.0.113.10")
 
     def test_auth_init_from_dict(self):
         data = {"referenceNumber": "ref", "authenticationToken": {"token": "tok"}}
