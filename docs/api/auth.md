@@ -32,6 +32,7 @@ Endpoint: `POST /auth/challenge` (bez `accessToken`).
 
 Zwraca JSON z polami m.in.:
 - `challenge`
+- `clientIp`
 - `timestamp`
 - `timestampMs`
 

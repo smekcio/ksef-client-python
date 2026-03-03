@@ -140,6 +140,23 @@ class PermissionsClient(BaseApiClient):
             access_token=access_token,
         )
 
+    def query_entities_grants(
+        self,
+        request_payload: dict[str, Any],
+        *,
+        page_offset: int | None = None,
+        page_size: int | None = None,
+        access_token: str,
+    ) -> Any:
+        params = _page_params(page_offset, page_size)
+        return self._request_json(
+            "POST",
+            "/permissions/query/entities/grants",
+            params=params or None,
+            json=request_payload,
+            access_token=access_token,
+        )
+
     def query_eu_entities_grants(
         self,
         request_payload: dict[str, Any],
@@ -353,6 +370,23 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
             "GET",
             "/permissions/query/entities/roles",
             params=params or None,
+            access_token=access_token,
+        )
+
+    async def query_entities_grants(
+        self,
+        request_payload: dict[str, Any],
+        *,
+        page_offset: int | None = None,
+        page_size: int | None = None,
+        access_token: str,
+    ) -> Any:
+        params = _page_params(page_offset, page_size)
+        return await self._request_json(
+            "POST",
+            "/permissions/query/entities/grants",
+            params=params or None,
+            json=request_payload,
             access_token=access_token,
         )
 

@@ -23,6 +23,11 @@ def _is_absolute_http_url(url: str) -> bool:
     return url.startswith("http://") or url.startswith("https://")
 
 
+def _is_json_content_type(content_type: str) -> bool:
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    return media_type == "application/json" or media_type.endswith("+json")
+
+
 def _host_allowed(host: str, allowed_hosts: list[str]) -> bool:
     normalized_host = host.lower().rstrip(".")
     for allowed in allowed_hosts:
@@ -177,7 +182,7 @@ class BaseHttpClient:
         retry_after = response.headers.get("Retry-After")
         content_type = response.headers.get("Content-Type", "")
         body: Any = None
-        if "application/json" in content_type:
+        if _is_json_content_type(content_type):
             try:
                 body = response.json()
             except ValueError:
@@ -285,7 +290,7 @@ class AsyncBaseHttpClient:
         retry_after = response.headers.get("Retry-After")
         content_type = response.headers.get("Content-Type", "")
         body: Any = None
-        if "application/json" in content_type:
+        if _is_json_content_type(content_type):
             try:
                 body = response.json()
             except ValueError:

@@ -12,7 +12,7 @@ Projekt odwzorowuje oficjalne przepływy KSeF i zapewnia spójny model pracy w d
 
 ## 🔄 Kompatybilność
 
-Aktualna kompatybilność: **KSeF API `v2.1.2`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.1.2/api-changelog.md)).
+Aktualna kompatybilność: **KSeF API `v2.2.0`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.2.0/api-changelog.md)).
 
 ## 🧭 Spis treści
 

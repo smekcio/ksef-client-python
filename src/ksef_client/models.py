@@ -62,13 +62,16 @@ class AuthenticationChallengeResponse:
     challenge: str
     timestamp: str
     timestamp_ms: int
+    client_ip: str | None = None
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> AuthenticationChallengeResponse:
+        raw_client_ip = data.get("clientIp")
         return AuthenticationChallengeResponse(
             challenge=str(data.get("challenge", "")),
             timestamp=str(data.get("timestamp", "")),
             timestamp_ms=int(data.get("timestampMs", 0)),
+            client_ip=str(raw_client_ip) if raw_client_ip is not None else None,
         )
 
 

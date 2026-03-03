@@ -85,6 +85,45 @@ class OpenApiModelsTests(unittest.TestCase):
         values = {item.value for item in m.TokenPermissionType}
         self.assertIn("Introspection", values)
 
+    def test_authentication_challenge_response_contains_client_ip(self):
+        payload = {
+            "challenge": "challenge",
+            "timestamp": "2026-03-03T12:00:00+01:00",
+            "timestampMs": 1741009200000,
+            "clientIp": "203.0.113.10",
+        }
+        parsed = m.AuthenticationChallengeResponse.from_dict(payload)
+        self.assertEqual(parsed.clientIp, "203.0.113.10")
+        self.assertEqual(parsed.to_dict()["clientIp"], "203.0.113.10")
+
+    def test_problem_details_models_roundtrip(self):
+        forbidden_payload = {
+            "detail": "Missing permissions",
+            "reasonCode": "missing-permissions",
+            "status": 403,
+            "title": "Forbidden",
+            "security": {
+                "requiredAnyOfPermissions": ["InvoiceWrite"],
+                "presentPermissions": ["CredentialsRead"],
+            },
+            "traceId": "trace-1",
+        }
+        forbidden = m.ForbiddenProblemDetails.from_dict(forbidden_payload)
+        self.assertEqual(forbidden.reasonCode, "missing-permissions")
+        assert forbidden.security is not None
+        self.assertEqual(forbidden.security["presentPermissions"], ["CredentialsRead"])
+        self.assertEqual(forbidden.to_dict()["traceId"], "trace-1")
+
+        unauthorized_payload = {
+            "detail": "Missing bearer token",
+            "status": 401,
+            "title": "Unauthorized",
+            "instance": "/auth/challenge",
+        }
+        unauthorized = m.UnauthorizedProblemDetails.from_dict(unauthorized_payload)
+        self.assertEqual(unauthorized.status, 401)
+        self.assertEqual(unauthorized.to_dict()["instance"], "/auth/challenge")
+
     def test_token_permission_type_matches_openapi_when_available(self):
         repo_root = Path(__file__).resolve().parents[2]
         openapi_path = repo_root / "ksef-docs" / "open-api.json"
