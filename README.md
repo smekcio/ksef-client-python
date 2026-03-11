@@ -12,7 +12,7 @@ Projekt odwzorowuje oficjalne przepływy KSeF i zapewnia spójny model pracy w d
 
 ## 🔄 Kompatybilność
 
-Aktualna kompatybilność: **KSeF API `v2.2.0`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.2.0/api-changelog.md)).
+Aktualna kompatybilność: **KSeF API `v2.2.1`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.2.1/api-changelog.md)).
 
 ## 🧭 Spis treści
 
@@ -92,6 +92,12 @@ ksef auth status
 ksef invoice list --from 2026-01-01 --to 2026-01-31
 ksef send online --invoice ./fa.xml --wait-upo --save-upo ./out/upo-online.xml
 ksef invoice download --ksef-number <KSEF_NUMBER> --out ./out/
+```
+
+Dla dokumentów `FA_RR (1)` w wersji `1-1E` przekaż jawnie `FormCode`:
+
+```bash
+ksef send online --invoice ./rr.xml --system-code "FA_RR (1)" --schema-version 1-1E --form-value RR
 ```
 
 Najważniejsze grupy komend:

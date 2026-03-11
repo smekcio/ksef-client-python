@@ -76,5 +76,6 @@ print(len(result.metadata_summaries), len(result.invoice_xml_files))
 - Jeśli integracja wymaga tolerowania braku nagłówka, ustaw `require_export_part_hash=False` w `KsefClientOptions` lub podczas tworzenia workflow.
 - Linki do partów wygasają; pobranie powinno nastąpić bez zbędnej zwłoki.
 - Paczka eksportu zawiera `_metadata.json` (dla deduplikacji i synchronizacji przyrostowej).
+- Poprawka `_metadata.json` opisana w KSeF API `2.2.1` dotyczy generowania paczki po stronie upstream/server-side i nie wymaga zmiany logiki `ExportWorkflow` w SDK.
 
 Do HWM i deduplikacji: [HWM](../services/hwm.md).
