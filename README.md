@@ -94,12 +94,6 @@ ksef send online --invoice ./fa.xml --wait-upo --save-upo ./out/upo-online.xml
 ksef invoice download --ksef-number <KSEF_NUMBER> --out ./out/
 ```
 
-Dla dokumentów `FA_RR (1)` w wersji `1-1E` przekaż jawnie `FormCode`:
-
-```bash
-ksef send online --invoice ./rr.xml --system-code "FA_RR (1)" --schema-version 1-1E --form-value RR
-```
-
 Najważniejsze grupy komend:
 - onboarding/profiles: `init`, `profile ...`
 - auth: `auth login-token`, `auth login-xades`, `auth status`, `auth refresh`, `auth logout`
