@@ -54,6 +54,40 @@ def test_send_online_success(runner, monkeypatch, tmp_path) -> None:
     assert seen["save_upo_overwrite"] is False
 
 
+def test_send_online_rr_form_code_override(runner, monkeypatch, tmp_path) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_send(**kwargs):
+        seen.update(kwargs)
+        return {"session_ref": "SES-RR", "invoice_ref": "INV-RR"}
+
+    monkeypatch.setattr(send_cmd, "send_online_invoice", _fake_send)
+
+    invoice_path = tmp_path / "rr.xml"
+    invoice_path.write_text("<rr/>", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "send",
+            "online",
+            "--invoice",
+            str(invoice_path),
+            "--system-code",
+            "FA_RR (1)",
+            "--schema-version",
+            "1-1E",
+            "--form-value",
+            "RR",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["system_code"] == "FA_RR (1)"
+    assert seen["schema_version"] == "1-1E"
+    assert seen["form_value"] == "RR"
+
+
 def test_send_online_save_upo_overwrite_flag(runner, monkeypatch, tmp_path) -> None:
     seen: dict[str, object] = {}
 

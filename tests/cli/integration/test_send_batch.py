@@ -50,6 +50,39 @@ def test_send_batch_success(runner, monkeypatch, tmp_path) -> None:
     assert seen["save_upo_overwrite"] is False
 
 
+def test_send_batch_rr_form_code_override(runner, monkeypatch, tmp_path) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_send(**kwargs):
+        seen.update(kwargs)
+        return {"session_ref": "BATCH-RR"}
+
+    monkeypatch.setattr(send_cmd, "send_batch_invoices", _fake_send)
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "send",
+            "batch",
+            "--dir",
+            str(batch_dir),
+            "--system-code",
+            "FA_RR (1)",
+            "--schema-version",
+            "1-1E",
+            "--form-value",
+            "RR",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["system_code"] == "FA_RR (1)"
+    assert seen["schema_version"] == "1-1E"
+    assert seen["form_value"] == "RR"
+
+
 def test_send_batch_save_upo_overwrite_flag(runner, monkeypatch, tmp_path) -> None:
     seen: dict[str, object] = {}
 
