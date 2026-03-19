@@ -71,6 +71,7 @@ print("OK")
 ## Uwagi
 
 - `encryption_data` z `open_session()` musi być użyte dla wszystkich faktur wysyłanych w ramach sesji.
+- Dla `FA_RR (1)` w wersji `1-1E` przekazuj `formCode.value="FA_RR"` zamiast `RR`.
 - Status przetwarzania jest udostępniany asynchronicznie; sprawdzanie statusu odbywa się przez polling.
 - Pobranie UPO:
   - dla faktury: `get_session_invoice_upo_by_ref()` / `...by_ksef()`

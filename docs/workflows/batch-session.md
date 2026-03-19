@@ -52,6 +52,7 @@ print(session_ref)
 ## Uwagi
 
 - Wysyłka partów odbywa się na pre-signed URL: **bez Bearer tokena** (workflow wykonuje wywołania z `skip_auth=True`).
+- Dla `FA_RR (1)` w wersji `1-1E` przekazuj `formCode.value="FA_RR"` zamiast `RR`.
 - Limit czasu wysyłki w sesji wsadowej wynosi **liczba partów × 20 minut na każdy part**; liczba partów wpływa bezpośrednio na czas dostępny na wysyłkę.
 - Podział ZIP musi nastąpić **przed szyfrowaniem** (biblioteka wykonuje to w `encrypt_batch_parts()`).
 - Korelacja statusów z plikami źródłowymi jest możliwa przez zapisanie hashy SHA-256 faktur (przed szyfrowaniem) i mapowanie ich na identyfikatory w procesie weryfikacji (`invoiceHash`).

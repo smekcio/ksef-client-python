@@ -445,6 +445,7 @@ class InvoiceQueryFormType(Enum):
     FA = "FA"
     PEF = "PEF"
     RR = "RR"
+    FA_RR = "FA_RR"
 
 class InvoiceQuerySubjectType(Enum):
     SUBJECT1 = "Subject1"
@@ -1203,6 +1204,7 @@ class InitTokenAuthenticationRequest(OpenApiModel):
 class InvoiceExportRequest(OpenApiModel):
     encryption: EncryptionInfo
     filters: InvoiceQueryFilters
+    onlyMetadata: Optional[bool] = None
 
 @dataclass(frozen=True)
 class InvoiceExportStatusResponse(OpenApiModel):

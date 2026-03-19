@@ -67,7 +67,11 @@ def send_online(
     invoice: str = typer.Option(..., "--invoice", help="Path to invoice XML file."),
     system_code: str = typer.Option("FA (3)", "--system-code", help="Form code systemCode."),
     schema_version: str = typer.Option("1-0E", "--schema-version", help="Form code schemaVersion."),
-    form_value: str = typer.Option("FA", "--form-value", help="Form code value."),
+    form_value: str = typer.Option(
+        "FA",
+        "--form-value",
+        help="Form code value (use FA_RR for FA_RR (1) 1-1E).",
+    ),
     upo_v43: bool = typer.Option(False, "--upo-v43", help="Request UPO v4.3 format."),
     wait_status: bool = typer.Option(
         False, "--wait-status", help="Wait until invoice processing status is final."
@@ -125,7 +129,11 @@ def send_batch(
     ),
     system_code: str = typer.Option("FA (3)", "--system-code", help="Form code systemCode."),
     schema_version: str = typer.Option("1-0E", "--schema-version", help="Form code schemaVersion."),
-    form_value: str = typer.Option("FA", "--form-value", help="Form code value."),
+    form_value: str = typer.Option(
+        "FA",
+        "--form-value",
+        help="Form code value (use FA_RR for FA_RR (1) 1-1E).",
+    ),
     parallelism: int = typer.Option(4, "--parallelism", help="Parallel upload worker count."),
     upo_v43: bool = typer.Option(False, "--upo-v43", help="Request UPO v4.3 format."),
     wait_status: bool = typer.Option(

@@ -69,6 +69,11 @@ def export_run(
     subject_type: str = typer.Option(
         "Subject1", "--subject-type", help="KSeF subject type filter."
     ),
+    only_metadata: bool = typer.Option(
+        False,
+        "--only-metadata",
+        help="Export only _metadata.json without invoice XML files.",
+    ),
     poll_interval: float = typer.Option(
         2.0, "--poll-interval", help="Polling interval in seconds."
     ),
@@ -89,6 +94,7 @@ def export_run(
             date_from=date_from,
             date_to=date_to,
             subject_type=subject_type,
+            only_metadata=only_metadata,
             poll_interval=poll_interval,
             max_attempts=max_attempts,
             out=out,

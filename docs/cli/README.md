@@ -382,6 +382,7 @@ Uwagi:
 - `--save-upo` wymaga `--wait-upo`.
 - `--save-upo` bez rozszerzenia jest traktowane jako sciezka pliku.
 - `--save-upo-overwrite` pozwala nadpisac istniejacy plik UPO wskazany przez `--save-upo`.
+- Dla `FA_RR (1)` z `--schema-version 1-1E` uzyj `--form-value FA_RR`; CLI normalizuje historyczne `RR` do `FA_RR`.
 
 ## `ksef send batch`
 
@@ -408,6 +409,7 @@ Options:
 Walidacja:
 - dokladnie jedno z `--zip` albo `--dir`.
 - `--save-upo-overwrite` pozwala nadpisac istniejacy plik UPO wskazany przez `--save-upo`.
+- Dla `FA_RR (1)` z `--schema-version 1-1E` uzyj `--form-value FA_RR`; CLI normalizuje historyczne `RR` do `FA_RR`.
 
 ## `ksef upo get`
 
@@ -456,11 +458,15 @@ Options:
   --from TEXT
   --to TEXT
   --subject-type TEXT        [default: Subject1]
+  --only-metadata
   --poll-interval FLOAT      [default: 2.0]
   --max-attempts INTEGER     [default: 120]
   --out TEXT                 [required]
   --base-url TEXT
 ```
+
+Uwagi:
+- `--only-metadata` pobiera tylko `_metadata.json` bez XML faktur.
 
 ## Exit codes
 

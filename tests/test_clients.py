@@ -175,6 +175,7 @@ class ClientsTests(unittest.TestCase):
         }
         export_payload = {
             "encryption": {"encryptedSymmetricKey": "abc", "initializationVector": "def"},
+            "onlyMetadata": True,
             "filters": {
                 "subjectType": "Subject1",
                 "dateRange": {
@@ -224,6 +225,7 @@ class ClientsTests(unittest.TestCase):
                 request_json_mock.call_args_list[1].kwargs["json"]["filters"]["dateRange"]["to"],
                 "2025-07-02T11:15:00+02:00",
             )
+            self.assertTrue(request_json_mock.call_args_list[1].kwargs["json"]["onlyMetadata"])
 
     def test_invoices_client_query_metadata_without_optional_params(self):
         client = InvoicesClient(self.http)
@@ -541,6 +543,7 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         }
         export_payload = {
             "encryption": {"encryptedSymmetricKey": "abc", "initializationVector": "def"},
+            "onlyMetadata": True,
             "filters": {
                 "subjectType": "Subject1",
                 "dateRange": {
@@ -579,6 +582,7 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
                 request_json_mock.call_args_list[1].kwargs["json"]["filters"]["dateRange"]["from"],
                 "2025-07-02T10:15:00+02:00",
             )
+            self.assertTrue(request_json_mock.call_args_list[1].kwargs["json"]["onlyMetadata"])
 
         permissions = AsyncPermissionsClient(http)
         with patch.object(permissions, "_request_json", AsyncMock(return_value={"ok": True})):

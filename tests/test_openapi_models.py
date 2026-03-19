@@ -81,6 +81,30 @@ class OpenApiModelsTests(unittest.TestCase):
         self.assertEqual(parsed.to, 20.0)
         self.assertIn("from", parsed.to_dict())
 
+    def test_invoice_query_form_type_contains_fa_rr(self):
+        values = {item.value for item in m.InvoiceQueryFormType}
+        self.assertIn("FA_RR", values)
+
+    def test_invoice_export_request_supports_only_metadata(self):
+        payload = {
+            "encryption": {
+                "encryptedSymmetricKey": "enc",
+                "initializationVector": "iv",
+            },
+            "filters": {
+                "subjectType": "Subject1",
+                "dateRange": {
+                    "dateType": "Issue",
+                    "from": "2026-01-01T00:00:00Z",
+                    "to": "2026-01-31T23:59:59Z",
+                },
+            },
+            "onlyMetadata": True,
+        }
+        parsed = m.InvoiceExportRequest.from_dict(payload)
+        self.assertTrue(parsed.onlyMetadata)
+        self.assertTrue(parsed.to_dict()["onlyMetadata"])
+
     def test_token_permission_type_contains_introspection(self):
         values = {item.value for item in m.TokenPermissionType}
         self.assertIn("Introspection", values)

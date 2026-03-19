@@ -37,6 +37,7 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
             "encryptedSymmetricKey": encryption.encryption_info.encrypted_symmetric_key,
             "initializationVector": encryption.encryption_info.initialization_vector,
         },
+        "onlyMetadata": False,
         "filters": {
             "subjectType": "Subject1",
             "dateRange": {
@@ -70,6 +71,7 @@ print(len(result.metadata_summaries), len(result.invoice_xml_files))
 ## Uwagi
 
 - Części paczki są dostępne pod `package.parts[].url` i są pobierane **bez Bearer tokena** (pre-signed URL).
+- Ustaw `onlyMetadata=True`, jeśli potrzebujesz wyłącznie `_metadata.json` bez XML faktur.
 - Dla każdego pobranego (zaszyfrowanego) partu workflow liczy hash `SHA-256` (base64) i porównuje z `x-ms-meta-hash`, jeśli nagłówek jest obecny.
 - Domyślnie (`KsefClientOptions.require_export_part_hash=True`) brak `x-ms-meta-hash` powoduje `ValueError`.
 - Niezgodność hash (`x-ms-meta-hash` vs. wyliczony hash) zawsze powoduje `ValueError`.

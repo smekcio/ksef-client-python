@@ -37,6 +37,9 @@ Wymagane minimum w `request_payload`:
 - `encryption.initializationVector`
 - `filters` (np. `subjectType` + `dateRange`)
 
+Opcjonalnie:
+- `onlyMetadata=True` – eksport zwraca wyłącznie `_metadata.json` bez XML faktur.
+
 Uwaga dla `filters.dateRange`:
 - ISO date-time bez offsetu jest normalizowany do `Europe/Warsaw` przed wysyłką requestu.
 
