@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/smekcio/ksef-client-python/compare/v0.7.1...v0.8.0) (2026-03-19)
+
+
+### Features
+
+* **api:** align SDK with KSeF API 2.3.0 ([32484e8](https://github.com/smekcio/ksef-client-python/commit/32484e8ff502cc0c6b33310c6b657d42a778d153))
+* **api:** align SDK with KSeF API 2.3.0 ([a4561ab](https://github.com/smekcio/ksef-client-python/commit/a4561abb5f94c8c9c8b54de545d4fad0393c2a46))
+
 ## [0.7.1](https://github.com/smekcio/ksef-client-python/compare/v0.7.0...v0.7.1) (2026-03-11)
 
 
