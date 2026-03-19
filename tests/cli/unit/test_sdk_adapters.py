@@ -1187,6 +1187,11 @@ def test_build_form_code_validation() -> None:
     assert exc.value.code == ExitCode.VALIDATION_ERROR
 
 
+def test_build_form_code_normalizes_fa_rr_1_1e_value() -> None:
+    form_code = adapters._build_form_code("FA_RR (1)", "1-1E", "RR")
+    assert form_code["value"] == "FA_RR"
+
+
 def test_load_invoice_xml_missing_and_empty(tmp_path) -> None:
     with pytest.raises(CliError) as missing:
         adapters._load_invoice_xml(str(tmp_path / "nope.xml"))
@@ -1941,13 +1946,16 @@ def test_wait_for_export_status_handles_http_transient_and_non_transient(monkeyp
 
 
 def test_run_export_success(monkeypatch, tmp_path) -> None:
+    seen: dict[str, object] = {}
+
     class _Security:
         def get_public_key_certificates(self):
             return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
 
     class _Invoices:
         def export_invoices(self, payload, access_token):
-            _ = (payload, access_token)
+            seen["payload"] = payload
+            seen["access_token"] = access_token
             return {"referenceNumber": "EXP-OK"}
 
         def get_export_status(self, reference_number, access_token):
@@ -1998,8 +2006,87 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
     )
     assert result["reference_number"] == "EXP-OK"
     assert result["metadata_count"] == 1
+    assert result["only_metadata"] is False
+    payload = seen["payload"]
+    assert isinstance(payload, dict)
+    assert payload["onlyMetadata"] is False
     assert (tmp_path / "_metadata.json").exists()
     assert (tmp_path / "a.xml").read_text(encoding="utf-8") == "<xml/>"
+
+
+def test_run_export_only_metadata_success(monkeypatch, tmp_path) -> None:
+    seen: dict[str, object] = {}
+
+    class _Security:
+        def get_public_key_certificates(self):
+            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+
+    class _Invoices:
+        def export_invoices(self, payload, access_token):
+            seen["payload"] = payload
+            seen["access_token"] = access_token
+            return {"referenceNumber": "EXP-META"}
+
+        def get_export_status(self, reference_number, access_token):
+            _ = (reference_number, access_token)
+            return {
+                "status": {"code": 200, "description": "Done"},
+                "package": {"parts": [{"url": "https://example.com", "method": "GET"}]},
+            }
+
+    class _FakeExportWorkflow:
+        def __init__(self, invoices, http_client):
+            _ = (invoices, http_client)
+
+        def download_and_process_package(self, package, encryption):
+            _ = (package, encryption)
+            return SimpleNamespace(
+                metadata_summaries=[{"ksefNumber": "KSEF-1"}],
+                invoice_xml_files={},
+            )
+
+    fake_encryption = SimpleNamespace(
+        key=b"k",
+        iv=b"i",
+        encryption_info=SimpleNamespace(
+            encrypted_symmetric_key="enc",
+            initialization_vector="iv",
+        ),
+    )
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(
+            invoices=_Invoices(), security=_Security(), http_client=SimpleNamespace()
+        ),
+    )
+    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert: fake_encryption)
+    monkeypatch.setattr(adapters, "ExportWorkflow", _FakeExportWorkflow)
+    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+
+    result = adapters.run_export(
+        profile="demo",
+        base_url="https://example.invalid",
+        date_from="2026-01-01",
+        date_to="2026-01-31",
+        subject_type="Subject1",
+        only_metadata=True,
+        poll_interval=0.01,
+        max_attempts=2,
+        out=str(tmp_path),
+    )
+
+    assert result["reference_number"] == "EXP-META"
+    assert result["metadata_count"] == 1
+    assert result["xml_files_count"] == 0
+    assert result["only_metadata"] is True
+    payload = seen["payload"]
+    assert isinstance(payload, dict)
+    assert payload["onlyMetadata"] is True
+    assert (tmp_path / "_metadata.json").exists()
+    assert list(tmp_path.glob("*.xml")) == []
 
 
 def test_run_export_missing_reference_and_package(monkeypatch, tmp_path) -> None:

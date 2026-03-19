@@ -150,16 +150,27 @@ def _select_certificate(certs: list[dict[str, Any]], usage_name: str) -> str:
 
 
 def _build_form_code(system_code: str, schema_version: str, form_value: str) -> dict[str, str]:
-    if not system_code.strip() or not schema_version.strip() or not form_value.strip():
+    normalized_system_code = system_code.strip()
+    normalized_schema_version = schema_version.strip()
+    normalized_form_value = form_value.strip()
+    if not normalized_system_code or not normalized_schema_version or not normalized_form_value:
         raise CliError(
             "Invalid form code options.",
             ExitCode.VALIDATION_ERROR,
             "Use non-empty --system-code, --schema-version and --form-value.",
         )
+
+    if (
+        normalized_system_code == "FA_RR (1)"
+        and normalized_schema_version == "1-1E"
+        and normalized_form_value == "RR"
+    ):
+        normalized_form_value = "FA_RR"
+
     return {
-        "systemCode": system_code.strip(),
-        "schemaVersion": schema_version.strip(),
-        "value": form_value.strip(),
+        "systemCode": normalized_system_code,
+        "schemaVersion": normalized_schema_version,
+        "value": normalized_form_value,
     }
 
 
@@ -983,6 +994,7 @@ def run_export(
     date_from: str | None,
     date_to: str | None,
     subject_type: str,
+    only_metadata: bool = False,
     poll_interval: float,
     max_attempts: int,
     out: str,
@@ -1002,6 +1014,7 @@ def run_export(
                 "encryptedSymmetricKey": encryption.encryption_info.encrypted_symmetric_key,
                 "initializationVector": encryption.encryption_info.initialization_vector,
             },
+            "onlyMetadata": only_metadata,
             "filters": {
                 "subjectType": subject_type,
                 "dateRange": {
@@ -1060,6 +1073,7 @@ def run_export(
         "metadata_file": str(metadata_path),
         "metadata_count": len(processed.metadata_summaries),
         "xml_files_count": files_saved,
+        "only_metadata": only_metadata,
         "out_dir": str(out_dir),
         "from": from_iso,
         "to": to_iso,

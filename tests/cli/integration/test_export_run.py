@@ -42,6 +42,19 @@ def test_export_run_json_success(runner, monkeypatch, tmp_path) -> None:
     assert payload["command"] == "export.run"
 
 
+def test_export_run_only_metadata_flag(runner, monkeypatch, tmp_path) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_run(**kwargs):
+        seen.update(kwargs)
+        return {"reference_number": "EXP-ONLY-META"}
+
+    monkeypatch.setattr(export_cmd, "run_export", _fake_run)
+    result = runner.invoke(app, ["export", "run", "--only-metadata", "--out", str(tmp_path)])
+    assert result.exit_code == 0
+    assert seen["only_metadata"] is True
+
+
 def test_export_run_validation_error_exit(runner, monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         export_cmd,
