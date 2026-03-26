@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from ksef_client.cli.app import app
+from ksef_client.cli import app
 from ksef_client.cli.commands import send_cmd
 from ksef_client.cli.errors import CliError
 from ksef_client.cli.exit_codes import ExitCode

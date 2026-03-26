@@ -38,7 +38,7 @@ CLI ma skracac droge od instalacji do pierwszej realnej operacji KSeF:
 1. Instalacja:
 
 ```bash
-pip install -e .
+pip install -e .[cli]
 ```
 
 2. Inicjalizacja profilu:
@@ -62,6 +62,17 @@ ksef invoice list --from 2026-01-01 --to 2026-01-31
 ksef send online --invoice ./fa.xml --wait-upo --save-upo ./out/upo-online.xml
 ksef invoice download --ksef-number <KSEF_NUMBER> --out ./out/
 ```
+
+## Troubleshooting
+
+Bazowa instalacja `pip install -e .` albo `pip install ksef-client` nie instaluje zależności CLI.
+W takim przypadku uruchomienie `ksef` kończy się kontrolowanym komunikatem:
+
+```text
+Install CLI dependencies with: pip install "ksef-client[cli]"
+```
+
+To zachowanie jest poprawne. Aby korzystać z CLI, doinstaluj extra `cli`.
 
 ## Drzewo komend
 

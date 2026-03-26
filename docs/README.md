@@ -22,11 +22,15 @@ pip install -e .
 Opcjonalne dodatki (extras):
 
 ```bash
-pip install -e .[xml,qr]
+pip install -e .[cli,xml,qr]
 ```
 
+- `cli` – komenda `ksef` i zależności CLI (`typer`, `rich`, `keyring`)
 - `xml` – podpis XAdES (`lxml`, `xmlsec`)
 - `qr` – generowanie PNG z kodami QR (`qrcode`, `pillow`)
+
+Jeżeli pracujesz tylko z API Pythona, `pip install -e .` wystarcza. Do pracy z CLI użyj `pip install -e .[cli]`
+albo pełnego zestawu extras.
 
 ## Struktura SDK
 

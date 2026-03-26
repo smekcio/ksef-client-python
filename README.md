@@ -39,7 +39,7 @@ Aktualna kompatybilność: **KSeF API `v2.3.0`** ([api-changelog.md](https://git
 
 Wymagania: Python `>= 3.10`.
 
-Podstawowe SDK:
+Podstawowe SDK (bez zależności CLI):
 
 ```bash
 pip install ksef-client
@@ -61,9 +61,18 @@ pip install "ksef-client[xml,qr,cli]"
 - `qr` - generowanie PNG z kodami QR przez `qrcode` i `pillow`
 - `cli` - interfejs wiersza poleceń oparty o `typer`, `rich`, `keyring`
 
+Po podstawowej instalacji `pip install ksef-client` pakiet SDK jest gotowy do użycia, ale komenda `ksef`
+zwróci kontrolowany komunikat o brakujących zależnościach CLI. Aby uruchamiać CLI, doinstaluj extra `cli`.
+
 ## 🚀 Szybki start: CLI
 
 CLI `ksef` zostało zaprojektowane tak, aby skrócić wejście w SDK do minimum.
+
+Najpierw zainstaluj zależności CLI:
+
+```bash
+pip install "ksef-client[cli]"
+```
 
 1. Utwórz i aktywuj profil:
 
@@ -103,6 +112,17 @@ Najważniejsze grupy komend:
   - komendy Latarni sa publiczne (dzialaja bez logowania; bez profilu domyslnie uzywana jest latarnia test)
 
 Pełna specyfikacja CLI: [`docs/cli/README.md`](docs/cli/README.md)
+
+## 🛠️ Troubleshooting CLI
+
+Jeśli po `pip install ksef-client` uruchomisz `ksef`, komenda nie zakończy się tracebackiem, tylko czytelną
+instrukcją doinstalowania CLI:
+
+```text
+Install CLI dependencies with: pip install "ksef-client[cli]"
+```
+
+To zachowanie jest celowe: bazowa instalacja obejmuje SDK, a CLI pozostaje opcjonalne.
 
 ## 🧩 Szybki start: SDK
 
