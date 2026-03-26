@@ -133,8 +133,8 @@ def test_types_module_is_imported_and_shapes() -> None:
 
 def test_cli_package_exports() -> None:
     mod = importlib.import_module("ksef_client.cli")
-    assert getattr(mod, "app") is not None
-    assert getattr(mod, "app_entrypoint") is bootstrap.app_entrypoint
+    assert mod.app is not None
+    assert mod.app_entrypoint is bootstrap.app_entrypoint
 
 
 def test_cli_package_app_entrypoint_attribute() -> None:
@@ -147,4 +147,4 @@ def test_cli_package_unknown_attribute_raises_attribute_error() -> None:
     mod = importlib.import_module("ksef_client.cli")
 
     with pytest.raises(AttributeError):
-        getattr(mod, "missing_attribute")
+        _ = mod.missing_attribute

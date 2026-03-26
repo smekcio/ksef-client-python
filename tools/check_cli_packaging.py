@@ -6,7 +6,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD_DIR = REPO_ROOT / ".tmp" / "cli-packaging"
 INSTALL_HINT = 'pip install "ksef-client[cli]"'
@@ -81,7 +80,9 @@ def _check_base_install(wheel: Path) -> None:
     result = subprocess.run([str(ksef), "--version"], text=True, capture_output=True, check=False)
     output = f"{result.stdout}{result.stderr}"
     if result.returncode != 6:
-        raise AssertionError(f"Expected exit code 6 for base install, got {result.returncode}\n{output}")
+        raise AssertionError(
+            f"Expected exit code 6 for base install, got {result.returncode}\n{output}"
+        )
     _assert_contains(output, INSTALL_HINT)
     if "ModuleNotFoundError" in output:
         raise AssertionError(f"Unexpected traceback in base install output:\n{output}")
@@ -96,7 +97,9 @@ def _check_cli_extra_install(wheel: Path) -> None:
     result = subprocess.run([str(ksef), "--version"], text=True, capture_output=True, check=False)
     output = f"{result.stdout}{result.stderr}"
     if result.returncode != 0:
-        raise AssertionError(f"Expected exit code 0 for CLI extra install, got {result.returncode}\n{output}")
+        raise AssertionError(
+            f"Expected exit code 0 for CLI extra install, got {result.returncode}\n{output}"
+        )
     _assert_contains(output, "ksef-cli")
 
 

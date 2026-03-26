@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from ..context import CliContext
 
 
-def get_renderer(ctx: "CliContext") -> Renderer:
+def get_renderer(ctx: CliContext) -> Renderer:
     if ctx.json_output:
         return JsonRenderer(started_at=ctx.started_at)
     from .human import HumanRenderer
