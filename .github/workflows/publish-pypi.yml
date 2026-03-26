@@ -60,6 +60,10 @@ jobs:
         run: |
           python -m pytest --cov=ksef_client --cov-report=term-missing --cov-fail-under=100
 
+      - name: Check CLI packaging
+        run: |
+          python tools/check_cli_packaging.py
+
       - name: Build
         run: |
           python -m build

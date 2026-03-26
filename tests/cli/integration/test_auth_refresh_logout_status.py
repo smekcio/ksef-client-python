@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ksef_client.cli.app import app
+from ksef_client.cli import app
 from ksef_client.cli.auth.keyring_store import clear_tokens
 from ksef_client.cli.commands import auth_cmd
 from ksef_client.cli.errors import CliError

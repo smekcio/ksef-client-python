@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ksef_client.cli.app import app
+from ksef_client.cli import app
 from ksef_client.cli.commands import lighthouse_cmd
 from ksef_client.cli.config import paths
 from ksef_client.cli.errors import CliError

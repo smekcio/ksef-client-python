@@ -4,7 +4,10 @@ import importlib
 import runpy
 from pathlib import Path
 
+import pytest
+
 from ksef_client import KsefClient
+from ksef_client.cli import bootstrap
 from ksef_client.cli.config import loader, paths, profiles
 from ksef_client.cli.diagnostics.checks import run_preflight
 from ksef_client.cli.diagnostics.report import DiagnosticReport
@@ -12,7 +15,7 @@ from ksef_client.cli.output import get_renderer
 from ksef_client.cli.sdk.factory import create_client
 from ksef_client.cli.types import Envelope, EnvelopeError, EnvelopeMeta
 
-app_module = importlib.import_module("ksef_client.cli.app")
+app_module = importlib.import_module("ksef_client.cli.typer_app")
 
 
 def test_app_version_text_fallback(monkeypatch) -> None:
@@ -39,7 +42,7 @@ def test_cli_main_module_invokes_entrypoint(monkeypatch) -> None:
     def _fake_entrypoint() -> None:
         called["value"] = True
 
-    monkeypatch.setattr(app_module, "app_entrypoint", _fake_entrypoint)
+    monkeypatch.setattr(bootstrap, "app_entrypoint", _fake_entrypoint)
     runpy.run_module("ksef_client.cli.__main__", run_name="__main__")
     assert called["value"] is True
 
@@ -50,7 +53,7 @@ def test_cli_main_module_import_does_not_invoke_entrypoint(monkeypatch) -> None:
     def _fake_entrypoint() -> None:
         called["value"] = True
 
-    monkeypatch.setattr(app_module, "app_entrypoint", _fake_entrypoint)
+    monkeypatch.setattr(bootstrap, "app_entrypoint", _fake_entrypoint)
     main_module = importlib.import_module("ksef_client.cli.__main__")
     importlib.reload(main_module)
     assert called["value"] is False
@@ -130,5 +133,18 @@ def test_types_module_is_imported_and_shapes() -> None:
 
 def test_cli_package_exports() -> None:
     mod = importlib.import_module("ksef_client.cli")
-    assert hasattr(mod, "app")
-    assert hasattr(mod, "app_entrypoint")
+    assert mod.app is not None
+    assert mod.app_entrypoint is bootstrap.app_entrypoint
+
+
+def test_cli_package_app_entrypoint_attribute() -> None:
+    mod = importlib.import_module("ksef_client.cli")
+
+    assert mod.app_entrypoint is bootstrap.app_entrypoint
+
+
+def test_cli_package_unknown_attribute_raises_attribute_error() -> None:
+    mod = importlib.import_module("ksef_client.cli")
+
+    with pytest.raises(AttributeError):
+        _ = mod.missing_attribute

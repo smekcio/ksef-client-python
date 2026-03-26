@@ -43,7 +43,7 @@ Documentation = "https://github.com/smekcio/ksef-client-python/blob/main/docs/RE
 Issues = "https://github.com/smekcio/ksef-client-python/issues"
 
 [project.scripts]
-ksef = "ksef_client.cli.app:app_entrypoint"
+ksef = "ksef_client.cli.bootstrap:app_entrypoint"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
