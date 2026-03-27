@@ -58,7 +58,12 @@ def test_render_error_cli_error(module, command) -> None:
     ],
 )
 def test_render_error_rate_limit(module, command) -> None:
-    err = KsefRateLimitError(status_code=429, message="too many", retry_after="2")
+    err = KsefRateLimitError(
+        status_code=429,
+        message="too many",
+        retry_after=2,
+        retry_after_raw="2",
+    )
     with pytest.raises(typer.Exit) as exc:
         module._render_error(_ctx(), command, err)
     assert exc.value.exit_code == int(ExitCode.RETRY_EXHAUSTED)

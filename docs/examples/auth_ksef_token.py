@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 
-from ksef_client.client import KsefClient
-from ksef_client.config import KsefClientOptions, KsefEnvironment
-from ksef_client.services.workflows import AuthCoordinator
+from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
+from ksef_client import models as m
+from ksef_client.services import AuthCoordinator
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -21,11 +21,8 @@ def main() -> None:
     context_value = _env("KSEF_CONTEXT_VALUE")
 
     with KsefClient(KsefClientOptions(base_url=base_url)) as client:
-        certs = client.security.get_public_key_certificates()
-        token_cert_pem = next(
-            c["certificate"]
-            for c in certs
-            if "KsefTokenEncryption" in (c.get("usage") or [])
+        token_cert_pem = client.security.get_public_key_certificate_pem(
+            m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
         )
         result = AuthCoordinator(client.auth).authenticate_with_ksef_token(
             token=token,
@@ -37,10 +34,9 @@ def main() -> None:
         )
 
     print(f"Auth reference: {result.reference_number}")
-    print(f"Access token: {result.tokens.access_token.token}")
-    print(f"Refresh token: {result.tokens.refresh_token.token}")
+    print(f"Access token: {result.access_token}")
+    print(f"Refresh token: {result.refresh_token}")
 
 
 if __name__ == "__main__":
     main()
-

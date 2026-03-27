@@ -7,7 +7,7 @@ Rekomendowane podejście: `BatchSessionWorkflow.open_upload_and_close()`.
 ## Przykład (sync)
 
 ```python
-from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
+from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment, models as m
 from ksef_client.services import AuthCoordinator, BatchSessionWorkflow
 from ksef_client.utils import build_zip
 
@@ -15,7 +15,7 @@ KSEF_TOKEN = "<TOKEN_KSEF>"
 CONTEXT_TYPE = "nip"
 CONTEXT_VALUE = "5265877635"
 
-FORM_CODE = {"systemCode": "FA (3)", "schemaVersion": "1-0E", "value": "FA"}
+FORM_CODE = m.FormCode(system_code="FA (3)", schema_version="1-0E", value="FA")
 
 zip_bytes = build_zip({
     "invoice1.xml": b\"\"\"<Invoice>...</Invoice>\"\"\",
@@ -23,9 +23,12 @@ zip_bytes = build_zip({
 })
 
 with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as client:
-    certs = client.security.get_public_key_certificates()
-    token_cert = next(c["certificate"] for c in certs if "KsefTokenEncryption" in (c.get("usage") or []))
-    sym_cert = next(c["certificate"] for c in certs if "SymmetricKeyEncryption" in (c.get("usage") or []))
+    token_cert = client.security.get_public_key_certificate_pem(
+        m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
+    )
+    sym_cert = client.security.get_public_key_certificate_pem(
+        m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION,
+    )
 
     access_token = AuthCoordinator(client.auth).authenticate_with_ksef_token(
         token=KSEF_TOKEN,
@@ -34,7 +37,7 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
         context_identifier_value=CONTEXT_VALUE,
         max_attempts=90,
         poll_interval_seconds=2.0,
-    ).tokens.access_token.token
+    ).access_token
 
     workflow = BatchSessionWorkflow(client.sessions, client.http_client)
     session_ref = workflow.open_upload_and_close(

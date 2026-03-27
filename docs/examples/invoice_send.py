@@ -4,9 +4,9 @@ import os
 import time
 from pathlib import Path
 
-from ksef_client.client import KsefClient
-from ksef_client.config import KsefClientOptions, KsefEnvironment
-from ksef_client.services.workflows import AuthCoordinator, OnlineSessionWorkflow
+from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
+from ksef_client import models as m
+from ksef_client.services import AuthCoordinator, OnlineSessionWorkflow
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -26,16 +26,11 @@ def main() -> None:
     invoice_xml = Path(invoice_xml_path).read_bytes()
 
     with KsefClient(KsefClientOptions(base_url=base_url)) as client:
-        certs = client.security.get_public_key_certificates()
-        token_cert_pem = next(
-            c["certificate"]
-            for c in certs
-            if "KsefTokenEncryption" in (c.get("usage") or [])
+        token_cert_pem = client.security.get_public_key_certificate_pem(
+            m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
         )
-        symmetric_cert_pem = next(
-            c["certificate"]
-            for c in certs
-            if "SymmetricKeyEncryption" in (c.get("usage") or [])
+        symmetric_cert_pem = client.security.get_public_key_certificate_pem(
+            m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION,
         )
         access_token = AuthCoordinator(client.auth).authenticate_with_ksef_token(
             token=token,
@@ -44,11 +39,11 @@ def main() -> None:
             context_identifier_value=context_value,
             max_attempts=90,
             poll_interval_seconds=2.0,
-        ).tokens.access_token.token
+        ).access_token
 
         workflow = OnlineSessionWorkflow(client.sessions)
         session = workflow.open_session(
-            form_code={"systemCode": "FA (3)", "schemaVersion": "1-0E", "value": "FA"},
+            form_code=m.FormCode(system_code="FA (3)", schema_version="1-0E", value="FA"),
             public_certificate=symmetric_cert_pem,
             access_token=access_token,
         )
@@ -58,7 +53,7 @@ def main() -> None:
             encryption_data=session.encryption_data,
             access_token=access_token,
         )
-        invoice_reference = send_result["referenceNumber"]
+        invoice_reference = send_result.reference_number
 
         status = None
         for _ in range(60):
@@ -67,19 +62,18 @@ def main() -> None:
                 invoice_reference,
                 access_token=access_token,
             )
-            code = int(status.get("status", {}).get("code", 0))
+            code = int(status.status.code)
             if code == 200:
                 break
             if code not in {100, 150}:
-                raise RuntimeError(status)
+                raise RuntimeError(status.to_dict())
             time.sleep(2)
 
         workflow.close_session(session.session_reference_number, access_token)
 
     print(f"Invoice reference: {invoice_reference}")
-    print(f"KSeF number: {None if status is None else status.get('ksefNumber')}")
+    print(f"KSeF number: {None if status is None else status.ksef_number}")
 
 
 if __name__ == "__main__":
     main()
-

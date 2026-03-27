@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import base64
-from typing import Any
 
+from ..models import (
+    AuthenticationContextIdentifier,
+    AuthenticationContextIdentifierType,
+    AuthorizationPolicy,
+    InitTokenAuthenticationRequest,
+)
 from .crypto import encrypt_ksef_token_ec, encrypt_ksef_token_rsa
 
 AUTH_NS = "http://ksef.mf.gov.pl/auth/token/2.0"
@@ -38,20 +43,17 @@ def build_ksef_token_auth_request(
     context_identifier_type: str,
     context_identifier_value: str,
     encrypted_token_base64: str,
-    authorization_policy: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    context_type = _normalize_context_identifier_type(context_identifier_type)
-    payload: dict[str, Any] = {
-        "challenge": challenge,
-        "contextIdentifier": {
-            "type": context_type,
-            "value": context_identifier_value,
-        },
-        "encryptedToken": encrypted_token_base64,
-    }
-    if authorization_policy:
-        payload["authorizationPolicy"] = authorization_policy
-    return payload
+    authorization_policy: AuthorizationPolicy | None = None,
+) -> InitTokenAuthenticationRequest:
+    return InitTokenAuthenticationRequest(
+        challenge=challenge,
+        context_identifier=AuthenticationContextIdentifier(
+            type=_normalize_context_identifier_type(context_identifier_type),
+            value=context_identifier_value,
+        ),
+        encrypted_token=encrypted_token_base64,
+        authorization_policy=authorization_policy,
+    )
 
 
 def encrypt_ksef_token(
@@ -76,17 +78,19 @@ def encrypt_ksef_token(
 
 
 def _context_tag(context_identifier_type: str) -> str:
-    return _normalize_context_identifier_type(context_identifier_type)
+    return _normalize_context_identifier_type(context_identifier_type).value
 
 
-def _normalize_context_identifier_type(context_identifier_type: str) -> str:
+def _normalize_context_identifier_type(
+    context_identifier_type: str,
+) -> AuthenticationContextIdentifierType:
     key = context_identifier_type.strip().lower()
     if key == "nip":
-        return "Nip"
+        return AuthenticationContextIdentifierType.NIP
     if key == "internalid":
-        return "InternalId"
+        return AuthenticationContextIdentifierType.INTERNALID
     if key == "nipvatue":
-        return "NipVatUe"
+        return AuthenticationContextIdentifierType.NIPVATUE
     if key == "peppolid":
-        return "PeppolId"
+        return AuthenticationContextIdentifierType.PEPPOLID
     raise ValueError("Unsupported context identifier type")

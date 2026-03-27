@@ -1,10 +1,15 @@
 # ruff: noqa: E501
 import argparse
 import ast
-import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from tools.openapi_spec import OpenApiSpecError, load_openapi_json
 
 
 def normalize_path(path: str) -> str:
@@ -42,11 +47,8 @@ class ImplementedEndpoint:
     line_no: int
 
 
-def get_openapi_specs(openapi_path: Path) -> dict[tuple[str, str], EndpointSpec]:
+def get_openapi_specs(data: dict) -> dict[tuple[str, str], EndpointSpec]:
     """Returns a map of (method, normalized_path) -> EndpointSpec from OpenAPI."""
-    with open(openapi_path, encoding="utf-8") as f:
-        data = json.load(f)
-
     specs = {}
     for path, methods in data.get("paths", {}).items():
         norm_path = normalize_path(path)
@@ -87,12 +89,15 @@ class AdvancedClientVisitor(ast.NodeVisitor):
         self.found_endpoints: list[ImplementedEndpoint] = []
 
     def visit_Call(self, node):
-        # Look for self._request_json / self._request_bytes / self._request_raw
+        # Look for request helpers used by API clients.
         if isinstance(node.func, ast.Attribute) and node.func.attr in (
             "_request_json",
             "_request_bytes",
             "_request_no_auth",
             "_request_raw",
+            "_request_model",
+            "_request_optional_model",
+            "_request_model_list",
         ):
             self._analyze_request_call(node)
         self.generic_visit(node)
@@ -251,7 +256,11 @@ def main():
     # (though already defined above, ensuring valid scope)
 
     parser = argparse.ArgumentParser(description="Deep API coverage check.")
-    parser.add_argument("--openapi", required=True, type=Path, help="Path to open-api.json")
+    parser.add_argument(
+        "--openapi",
+        type=Path,
+        help="Optional path to a local OpenAPI JSON file. Defaults to the official KSeF endpoint.",
+    )
     parser.add_argument(
         "--src", required=True, type=Path, help="Path to source directory containing clients"
     )
@@ -264,7 +273,10 @@ def main():
     args = parser.parse_args()
 
     # 1. Load OpenAPI Specs
-    openapi_specs = get_openapi_specs(args.openapi)
+    try:
+        openapi_specs = get_openapi_specs(load_openapi_json(args.openapi))
+    except OpenApiSpecError as exc:
+        raise SystemExit(str(exc)) from exc
 
     # 2. Analyze Code
     implemented_eps = get_implemented_endpoints_deep(

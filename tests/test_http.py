@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 
+from ksef_client import models
 from ksef_client.config import KsefClientOptions
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 from ksef_client.http import (
@@ -88,7 +89,8 @@ class HttpTests(unittest.TestCase):
         response = httpx.Response(429, headers={"Retry-After": "5"}, json={"error": "limit"})
         with self.assertRaises(KsefRateLimitError) as ctx:
             client._raise_for_status(response)
-        self.assertEqual(ctx.exception.retry_after, "5")
+        self.assertEqual(ctx.exception.retry_after, 5)
+        self.assertEqual(ctx.exception.retry_after_raw, "5")
 
     def test_raise_for_status_api_error(self):
         options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
@@ -114,6 +116,9 @@ class HttpTests(unittest.TestCase):
             client._raise_for_status(response)
         assert isinstance(ctx.exception.response_body, dict)
         self.assertEqual(ctx.exception.response_body["reasonCode"], "missing-permissions")
+        assert ctx.exception.problem is not None
+        assert isinstance(ctx.exception.problem, models.ForbiddenProblemDetails)
+        self.assertEqual(ctx.exception.problem.reason_code, "missing-permissions")
 
     def test_raise_for_status_http_error(self):
         options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")

@@ -1,8 +1,8 @@
 # ruff: noqa
-# Generated from ksef-docs/open-api.json. Do not edit manually.
+# Generated from the official KSeF OpenAPI spec. Do not edit manually.
 from __future__ import annotations
 
-from dataclasses import MISSING, dataclass, field, fields
+from dataclasses import dataclass, field, fields
 from enum import Enum
 import sys
 from typing import Any, Optional, TypeAlias, TypeVar
@@ -706,30 +706,30 @@ Sha256HashBase64: TypeAlias = str
 
 @dataclass(frozen=True)
 class AllowedIps(OpenApiModel):
-    ip4Addresses: Optional[list[str]] = None
-    ip4Masks: Optional[list[str]] = None
-    ip4Ranges: Optional[list[str]] = None
+    ip4_addresses: Optional[list[str]] = field(default=None, metadata={"json_key": "ip4Addresses"})
+    ip4_masks: Optional[list[str]] = field(default=None, metadata={"json_key": "ip4Masks"})
+    ip4_ranges: Optional[list[str]] = field(default=None, metadata={"json_key": "ip4Ranges"})
 
 @dataclass(frozen=True)
 class ApiRateLimitValuesOverride(OpenApiModel):
-    perHour: int
-    perMinute: int
-    perSecond: int
+    per_hour: int = field(metadata={"json_key": "perHour"})
+    per_minute: int = field(metadata={"json_key": "perMinute"})
+    per_second: int = field(metadata={"json_key": "perSecond"})
 
 @dataclass(frozen=True)
 class ApiRateLimitsOverride(OpenApiModel):
-    batchSession: ApiRateLimitValuesOverride
-    invoiceDownload: ApiRateLimitValuesOverride
-    invoiceExport: ApiRateLimitValuesOverride
-    invoiceExportStatus: ApiRateLimitValuesOverride
-    invoiceMetadata: ApiRateLimitValuesOverride
-    invoiceSend: ApiRateLimitValuesOverride
-    invoiceStatus: ApiRateLimitValuesOverride
-    onlineSession: ApiRateLimitValuesOverride
+    batch_session: ApiRateLimitValuesOverride = field(metadata={"json_key": "batchSession"})
+    invoice_download: ApiRateLimitValuesOverride = field(metadata={"json_key": "invoiceDownload"})
+    invoice_export: ApiRateLimitValuesOverride = field(metadata={"json_key": "invoiceExport"})
+    invoice_export_status: ApiRateLimitValuesOverride = field(metadata={"json_key": "invoiceExportStatus"})
+    invoice_metadata: ApiRateLimitValuesOverride = field(metadata={"json_key": "invoiceMetadata"})
+    invoice_send: ApiRateLimitValuesOverride = field(metadata={"json_key": "invoiceSend"})
+    invoice_status: ApiRateLimitValuesOverride = field(metadata={"json_key": "invoiceStatus"})
+    online_session: ApiRateLimitValuesOverride = field(metadata={"json_key": "onlineSession"})
     other: ApiRateLimitValuesOverride
-    sessionInvoiceList: ApiRateLimitValuesOverride
-    sessionList: ApiRateLimitValuesOverride
-    sessionMisc: ApiRateLimitValuesOverride
+    session_invoice_list: ApiRateLimitValuesOverride = field(metadata={"json_key": "sessionInvoiceList"})
+    session_list: ApiRateLimitValuesOverride = field(metadata={"json_key": "sessionList"})
+    session_misc: ApiRateLimitValuesOverride = field(metadata={"json_key": "sessionMisc"})
 
 @dataclass(frozen=True)
 class AttachmentPermissionGrantRequest(OpenApiModel):
@@ -738,14 +738,14 @@ class AttachmentPermissionGrantRequest(OpenApiModel):
 @dataclass(frozen=True)
 class AttachmentPermissionRevokeRequest(OpenApiModel):
     nip: Nip
-    expectedEndDate: Optional[str] = None
+    expected_end_date: Optional[str] = field(default=None, metadata={"json_key": "expectedEndDate"})
 
 @dataclass(frozen=True)
 class AuthenticationChallengeResponse(OpenApiModel):
     challenge: Challenge
-    clientIp: str
+    client_ip: str = field(metadata={"json_key": "clientIp"})
     timestamp: str
-    timestampMs: int
+    timestamp_ms: int = field(metadata={"json_key": "timestampMs"})
 
 @dataclass(frozen=True)
 class AuthenticationContextIdentifier(OpenApiModel):
@@ -754,103 +754,103 @@ class AuthenticationContextIdentifier(OpenApiModel):
 
 @dataclass(frozen=True)
 class AuthenticationInitResponse(OpenApiModel):
-    authenticationToken: TokenInfo
-    referenceNumber: ReferenceNumber
+    authentication_token: TokenInfo = field(metadata={"json_key": "authenticationToken"})
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
 
 @dataclass(frozen=True)
 class AuthenticationListItem(OpenApiModel):
-    authenticationMethod: AuthenticationMethod
-    authenticationMethodInfo: AuthenticationMethodInfo
-    referenceNumber: ReferenceNumber
-    startDate: str
+    authentication_method: AuthenticationMethod = field(metadata={"json_key": "authenticationMethod"})
+    authentication_method_info: AuthenticationMethodInfo = field(metadata={"json_key": "authenticationMethodInfo"})
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
+    start_date: str = field(metadata={"json_key": "startDate"})
     status: StatusInfo
-    isCurrent: Optional[bool] = None
-    isTokenRedeemed: Optional[bool] = None
-    lastTokenRefreshDate: Optional[str] = None
-    refreshTokenValidUntil: Optional[str] = None
+    is_current: Optional[bool] = field(default=None, metadata={"json_key": "isCurrent"})
+    is_token_redeemed: Optional[bool] = field(default=None, metadata={"json_key": "isTokenRedeemed"})
+    last_token_refresh_date: Optional[str] = field(default=None, metadata={"json_key": "lastTokenRefreshDate"})
+    refresh_token_valid_until: Optional[str] = field(default=None, metadata={"json_key": "refreshTokenValidUntil"})
 
 @dataclass(frozen=True)
 class AuthenticationListResponse(OpenApiModel):
     items: list[AuthenticationListItem]
-    continuationToken: Optional[str] = None
+    continuation_token: Optional[str] = field(default=None, metadata={"json_key": "continuationToken"})
 
 @dataclass(frozen=True)
 class AuthenticationMethodInfo(OpenApiModel):
     category: AuthenticationMethodCategory
     code: str
-    displayName: str
+    display_name: str = field(metadata={"json_key": "displayName"})
 
 @dataclass(frozen=True)
 class AuthenticationOperationStatusResponse(OpenApiModel):
-    authenticationMethod: AuthenticationMethod
-    authenticationMethodInfo: AuthenticationMethodInfo
-    startDate: str
+    authentication_method: AuthenticationMethod = field(metadata={"json_key": "authenticationMethod"})
+    authentication_method_info: AuthenticationMethodInfo = field(metadata={"json_key": "authenticationMethodInfo"})
+    start_date: str = field(metadata={"json_key": "startDate"})
     status: StatusInfo
-    isTokenRedeemed: Optional[bool] = None
-    lastTokenRefreshDate: Optional[str] = None
-    refreshTokenValidUntil: Optional[str] = None
+    is_token_redeemed: Optional[bool] = field(default=None, metadata={"json_key": "isTokenRedeemed"})
+    last_token_refresh_date: Optional[str] = field(default=None, metadata={"json_key": "lastTokenRefreshDate"})
+    refresh_token_valid_until: Optional[str] = field(default=None, metadata={"json_key": "refreshTokenValidUntil"})
 
 @dataclass(frozen=True)
 class AuthenticationTokenRefreshResponse(OpenApiModel):
-    accessToken: TokenInfo
+    access_token: TokenInfo = field(metadata={"json_key": "accessToken"})
 
 @dataclass(frozen=True)
 class AuthenticationTokensResponse(OpenApiModel):
-    accessToken: TokenInfo
-    refreshToken: TokenInfo
+    access_token: TokenInfo = field(metadata={"json_key": "accessToken"})
+    refresh_token: TokenInfo = field(metadata={"json_key": "refreshToken"})
 
 @dataclass(frozen=True)
 class AuthorizationPolicy(OpenApiModel):
-    allowedIps: Optional[AllowedIps] = None
+    allowed_ips: Optional[AllowedIps] = field(default=None, metadata={"json_key": "allowedIps"})
 
 @dataclass(frozen=True)
 class BatchFileInfo(OpenApiModel):
-    fileHash: Sha256HashBase64
-    fileParts: list[BatchFilePartInfo]
-    fileSize: int
+    file_hash: Sha256HashBase64 = field(metadata={"json_key": "fileHash"})
+    file_parts: list[BatchFilePartInfo] = field(metadata={"json_key": "fileParts"})
+    file_size: int = field(metadata={"json_key": "fileSize"})
 
 @dataclass(frozen=True)
 class BatchFilePartInfo(OpenApiModel):
-    fileHash: Sha256HashBase64
-    fileSize: int
-    ordinalNumber: int
+    file_hash: Sha256HashBase64 = field(metadata={"json_key": "fileHash"})
+    file_size: int = field(metadata={"json_key": "fileSize"})
+    ordinal_number: int = field(metadata={"json_key": "ordinalNumber"})
 
 @dataclass(frozen=True)
 class BatchSessionContextLimitsOverride(OpenApiModel):
-    maxInvoiceSizeInMB: int
-    maxInvoiceWithAttachmentSizeInMB: int
-    maxInvoices: int
+    max_invoice_size_in_mb: int = field(metadata={"json_key": "maxInvoiceSizeInMB"})
+    max_invoice_with_attachment_size_in_mb: int = field(metadata={"json_key": "maxInvoiceWithAttachmentSizeInMB"})
+    max_invoices: int = field(metadata={"json_key": "maxInvoices"})
 
 @dataclass(frozen=True)
 class BatchSessionEffectiveContextLimits(OpenApiModel):
-    maxInvoiceSizeInMB: int
-    maxInvoiceWithAttachmentSizeInMB: int
-    maxInvoices: int
+    max_invoice_size_in_mb: int = field(metadata={"json_key": "maxInvoiceSizeInMB"})
+    max_invoice_with_attachment_size_in_mb: int = field(metadata={"json_key": "maxInvoiceWithAttachmentSizeInMB"})
+    max_invoices: int = field(metadata={"json_key": "maxInvoices"})
 
 @dataclass(frozen=True)
 class BlockContextAuthenticationRequest(OpenApiModel):
-    contextIdentifier: Optional[TestDataAuthenticationContextIdentifier] = None
+    context_identifier: Optional[TestDataAuthenticationContextIdentifier] = field(default=None, metadata={"json_key": "contextIdentifier"})
 
 @dataclass(frozen=True)
 class CertificateEffectiveSubjectLimits(OpenApiModel):
-    maxCertificates: Optional[int] = None
+    max_certificates: Optional[int] = field(default=None, metadata={"json_key": "maxCertificates"})
 
 @dataclass(frozen=True)
 class CertificateEnrollmentDataResponse(OpenApiModel):
-    commonName: str
-    countryName: str
-    givenName: Optional[str] = None
-    organizationIdentifier: Optional[str] = None
-    organizationName: Optional[str] = None
-    serialNumber: Optional[str] = None
+    common_name: str = field(metadata={"json_key": "commonName"})
+    country_name: str = field(metadata={"json_key": "countryName"})
+    given_name: Optional[str] = field(default=None, metadata={"json_key": "givenName"})
+    organization_identifier: Optional[str] = field(default=None, metadata={"json_key": "organizationIdentifier"})
+    organization_name: Optional[str] = field(default=None, metadata={"json_key": "organizationName"})
+    serial_number: Optional[str] = field(default=None, metadata={"json_key": "serialNumber"})
     surname: Optional[str] = None
-    uniqueIdentifier: Optional[str] = None
+    unique_identifier: Optional[str] = field(default=None, metadata={"json_key": "uniqueIdentifier"})
 
 @dataclass(frozen=True)
 class CertificateEnrollmentStatusResponse(OpenApiModel):
-    requestDate: str
+    request_date: str = field(metadata={"json_key": "requestDate"})
     status: StatusInfo
-    certificateSerialNumber: Optional[str] = None
+    certificate_serial_number: Optional[str] = field(default=None, metadata={"json_key": "certificateSerialNumber"})
 
 @dataclass(frozen=True)
 class CertificateLimit(OpenApiModel):
@@ -859,22 +859,22 @@ class CertificateLimit(OpenApiModel):
 
 @dataclass(frozen=True)
 class CertificateLimitsResponse(OpenApiModel):
-    canRequest: bool
+    can_request: bool = field(metadata={"json_key": "canRequest"})
     certificate: CertificateLimit
     enrollment: CertificateLimit
 
 @dataclass(frozen=True)
 class CertificateListItem(OpenApiModel):
-    certificateSerialNumber: str
-    commonName: str
+    certificate_serial_number: str = field(metadata={"json_key": "certificateSerialNumber"})
+    common_name: str = field(metadata={"json_key": "commonName"})
     name: str
-    requestDate: str
+    request_date: str = field(metadata={"json_key": "requestDate"})
     status: CertificateListItemStatus
-    subjectIdentifier: CertificateSubjectIdentifier
+    subject_identifier: CertificateSubjectIdentifier = field(metadata={"json_key": "subjectIdentifier"})
     type: KsefCertificateType
-    validFrom: str
-    validTo: str
-    lastUseDate: Optional[str] = None
+    valid_from: str = field(metadata={"json_key": "validFrom"})
+    valid_to: str = field(metadata={"json_key": "validTo"})
+    last_use_date: Optional[str] = field(default=None, metadata={"json_key": "lastUseDate"})
 
 @dataclass(frozen=True)
 class CertificateSubjectIdentifier(OpenApiModel):
@@ -883,38 +883,38 @@ class CertificateSubjectIdentifier(OpenApiModel):
 
 @dataclass(frozen=True)
 class CertificateSubjectLimitsOverride(OpenApiModel):
-    maxCertificates: Optional[int] = None
+    max_certificates: Optional[int] = field(default=None, metadata={"json_key": "maxCertificates"})
 
 @dataclass(frozen=True)
 class CheckAttachmentPermissionStatusResponse(OpenApiModel):
-    isAttachmentAllowed: Optional[bool] = None
-    revokedDate: Optional[str] = None
+    is_attachment_allowed: Optional[bool] = field(default=None, metadata={"json_key": "isAttachmentAllowed"})
+    revoked_date: Optional[str] = field(default=None, metadata={"json_key": "revokedDate"})
 
 @dataclass(frozen=True)
 class EffectiveApiRateLimitValues(OpenApiModel):
-    perHour: int
-    perMinute: int
-    perSecond: int
+    per_hour: int = field(metadata={"json_key": "perHour"})
+    per_minute: int = field(metadata={"json_key": "perMinute"})
+    per_second: int = field(metadata={"json_key": "perSecond"})
 
 @dataclass(frozen=True)
 class EffectiveApiRateLimits(OpenApiModel):
-    batchSession: EffectiveApiRateLimitValues
-    invoiceDownload: EffectiveApiRateLimitValues
-    invoiceExport: EffectiveApiRateLimitValues
-    invoiceExportStatus: EffectiveApiRateLimitValues
-    invoiceMetadata: EffectiveApiRateLimitValues
-    invoiceSend: EffectiveApiRateLimitValues
-    invoiceStatus: EffectiveApiRateLimitValues
-    onlineSession: EffectiveApiRateLimitValues
+    batch_session: EffectiveApiRateLimitValues = field(metadata={"json_key": "batchSession"})
+    invoice_download: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceDownload"})
+    invoice_export: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceExport"})
+    invoice_export_status: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceExportStatus"})
+    invoice_metadata: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceMetadata"})
+    invoice_send: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceSend"})
+    invoice_status: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceStatus"})
+    online_session: EffectiveApiRateLimitValues = field(metadata={"json_key": "onlineSession"})
     other: EffectiveApiRateLimitValues
-    sessionInvoiceList: EffectiveApiRateLimitValues
-    sessionList: EffectiveApiRateLimitValues
-    sessionMisc: EffectiveApiRateLimitValues
+    session_invoice_list: EffectiveApiRateLimitValues = field(metadata={"json_key": "sessionInvoiceList"})
+    session_list: EffectiveApiRateLimitValues = field(metadata={"json_key": "sessionList"})
+    session_misc: EffectiveApiRateLimitValues = field(metadata={"json_key": "sessionMisc"})
 
 @dataclass(frozen=True)
 class EffectiveContextLimits(OpenApiModel):
-    batchSession: BatchSessionEffectiveContextLimits
-    onlineSession: OnlineSessionEffectiveContextLimits
+    batch_session: BatchSessionEffectiveContextLimits = field(metadata={"json_key": "batchSession"})
+    online_session: OnlineSessionEffectiveContextLimits = field(metadata={"json_key": "onlineSession"})
 
 @dataclass(frozen=True)
 class EffectiveSubjectLimits(OpenApiModel):
@@ -923,53 +923,53 @@ class EffectiveSubjectLimits(OpenApiModel):
 
 @dataclass(frozen=True)
 class EncryptionInfo(OpenApiModel):
-    encryptedSymmetricKey: str
-    initializationVector: str
+    encrypted_symmetric_key: str = field(metadata={"json_key": "encryptedSymmetricKey"})
+    initialization_vector: str = field(metadata={"json_key": "initializationVector"})
 
 @dataclass(frozen=True)
 class EnrollCertificateRequest(OpenApiModel):
-    certificateName: str
-    certificateType: KsefCertificateType
+    certificate_name: str = field(metadata={"json_key": "certificateName"})
+    certificate_type: KsefCertificateType = field(metadata={"json_key": "certificateType"})
     csr: str
-    validFrom: Optional[str] = None
+    valid_from: Optional[str] = field(default=None, metadata={"json_key": "validFrom"})
 
 @dataclass(frozen=True)
 class EnrollCertificateResponse(OpenApiModel):
-    referenceNumber: ReferenceNumber
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
     timestamp: str
 
 @dataclass(frozen=True)
 class EnrollmentEffectiveSubjectLimits(OpenApiModel):
-    maxEnrollments: Optional[int] = None
+    max_enrollments: Optional[int] = field(default=None, metadata={"json_key": "maxEnrollments"})
 
 @dataclass(frozen=True)
 class EnrollmentSubjectLimitsOverride(OpenApiModel):
-    maxEnrollments: Optional[int] = None
+    max_enrollments: Optional[int] = field(default=None, metadata={"json_key": "maxEnrollments"})
 
 @dataclass(frozen=True)
 class EntityAuthorizationGrant(OpenApiModel):
-    authorizationScope: InvoicePermissionType
-    authorizedEntityIdentifier: EntityAuthorizationsAuthorizedEntityIdentifier
-    authorizingEntityIdentifier: EntityAuthorizationsAuthorizingEntityIdentifier
+    authorization_scope: InvoicePermissionType = field(metadata={"json_key": "authorizationScope"})
+    authorized_entity_identifier: EntityAuthorizationsAuthorizedEntityIdentifier = field(metadata={"json_key": "authorizedEntityIdentifier"})
+    authorizing_entity_identifier: EntityAuthorizationsAuthorizingEntityIdentifier = field(metadata={"json_key": "authorizingEntityIdentifier"})
     description: str
     id: PermissionId
-    startDate: str
-    authorIdentifier: Optional[EntityAuthorizationsAuthorIdentifier] = None
-    subjectEntityDetails: Optional[PermissionsSubjectEntityByIdentifierDetails] = None
+    start_date: str = field(metadata={"json_key": "startDate"})
+    author_identifier: Optional[EntityAuthorizationsAuthorIdentifier] = field(default=None, metadata={"json_key": "authorIdentifier"})
+    subject_entity_details: Optional[PermissionsSubjectEntityByIdentifierDetails] = field(default=None, metadata={"json_key": "subjectEntityDetails"})
 
 @dataclass(frozen=True)
 class EntityAuthorizationPermissionsGrantRequest(OpenApiModel):
     description: str
     permission: EntityAuthorizationPermissionType
-    subjectDetails: EntityDetails
-    subjectIdentifier: EntityAuthorizationPermissionsSubjectIdentifier
+    subject_details: EntityDetails = field(metadata={"json_key": "subjectDetails"})
+    subject_identifier: EntityAuthorizationPermissionsSubjectIdentifier = field(metadata={"json_key": "subjectIdentifier"})
 
 @dataclass(frozen=True)
 class EntityAuthorizationPermissionsQueryRequest(OpenApiModel):
-    queryType: QueryType
-    authorizedIdentifier: Optional[EntityAuthorizationsAuthorizedEntityIdentifier] = None
-    authorizingIdentifier: Optional[EntityAuthorizationsAuthorizingEntityIdentifier] = None
-    permissionTypes: Optional[list[InvoicePermissionType]] = None
+    query_type: QueryType = field(metadata={"json_key": "queryType"})
+    authorized_identifier: Optional[EntityAuthorizationsAuthorizedEntityIdentifier] = field(default=None, metadata={"json_key": "authorizedIdentifier"})
+    authorizing_identifier: Optional[EntityAuthorizationsAuthorizingEntityIdentifier] = field(default=None, metadata={"json_key": "authorizingIdentifier"})
+    permission_types: Optional[list[InvoicePermissionType]] = field(default=None, metadata={"json_key": "permissionTypes"})
 
 @dataclass(frozen=True)
 class EntityAuthorizationPermissionsSubjectIdentifier(OpenApiModel):
@@ -994,25 +994,25 @@ class EntityAuthorizationsAuthorizingEntityIdentifier(OpenApiModel):
 @dataclass(frozen=True)
 class EntityByFingerprintDetails(OpenApiModel):
     address: str
-    fullName: str
+    full_name: str = field(metadata={"json_key": "fullName"})
 
 @dataclass(frozen=True)
 class EntityDetails(OpenApiModel):
-    fullName: str
+    full_name: str = field(metadata={"json_key": "fullName"})
 
 @dataclass(frozen=True)
 class EntityPermission(OpenApiModel):
     type: EntityPermissionType
-    canDelegate: Optional[bool] = None
+    can_delegate: Optional[bool] = field(default=None, metadata={"json_key": "canDelegate"})
 
 @dataclass(frozen=True)
 class EntityPermissionItem(OpenApiModel):
-    canDelegate: bool
-    contextIdentifier: EntityPermissionsContextIdentifier
+    can_delegate: bool = field(metadata={"json_key": "canDelegate"})
+    context_identifier: EntityPermissionsContextIdentifier = field(metadata={"json_key": "contextIdentifier"})
     description: str
     id: PermissionId
-    permissionScope: EntityPermissionItemScope
-    startDate: str
+    permission_scope: EntityPermissionItemScope = field(metadata={"json_key": "permissionScope"})
+    start_date: str = field(metadata={"json_key": "startDate"})
 
 @dataclass(frozen=True)
 class EntityPermissionsContextIdentifier(OpenApiModel):
@@ -1023,12 +1023,12 @@ class EntityPermissionsContextIdentifier(OpenApiModel):
 class EntityPermissionsGrantRequest(OpenApiModel):
     description: str
     permissions: list[EntityPermission]
-    subjectDetails: EntityDetails
-    subjectIdentifier: EntityPermissionsSubjectIdentifier
+    subject_details: EntityDetails = field(metadata={"json_key": "subjectDetails"})
+    subject_identifier: EntityPermissionsSubjectIdentifier = field(metadata={"json_key": "subjectIdentifier"})
 
 @dataclass(frozen=True)
 class EntityPermissionsQueryRequest(OpenApiModel):
-    contextIdentifier: Optional[EntityPermissionsContextIdentifier] = None
+    context_identifier: Optional[EntityPermissionsContextIdentifier] = field(default=None, metadata={"json_key": "contextIdentifier"})
 
 @dataclass(frozen=True)
 class EntityPermissionsSubjectIdentifier(OpenApiModel):
@@ -1044,8 +1044,8 @@ class EntityPermissionsSubordinateEntityIdentifier(OpenApiModel):
 class EntityRole(OpenApiModel):
     description: str
     role: EntityRoleType
-    startDate: str
-    parentEntityIdentifier: Optional[EntityRolesParentEntityIdentifier] = None
+    start_date: str = field(metadata={"json_key": "startDate"})
+    parent_entity_identifier: Optional[EntityRolesParentEntityIdentifier] = field(default=None, metadata={"json_key": "parentEntityIdentifier"})
 
 @dataclass(frozen=True)
 class EntityRolesParentEntityIdentifier(OpenApiModel):
@@ -1059,12 +1059,12 @@ class EuEntityAdministrationPermissionsContextIdentifier(OpenApiModel):
 
 @dataclass(frozen=True)
 class EuEntityAdministrationPermissionsGrantRequest(OpenApiModel):
-    contextIdentifier: EuEntityAdministrationPermissionsContextIdentifier
+    context_identifier: EuEntityAdministrationPermissionsContextIdentifier = field(metadata={"json_key": "contextIdentifier"})
     description: str
-    euEntityDetails: EuEntityDetails
-    euEntityName: str
-    subjectDetails: EuEntityPermissionSubjectDetails
-    subjectIdentifier: EuEntityAdministrationPermissionsSubjectIdentifier
+    eu_entity_details: EuEntityDetails = field(metadata={"json_key": "euEntityDetails"})
+    eu_entity_name: str = field(metadata={"json_key": "euEntityName"})
+    subject_details: EuEntityPermissionSubjectDetails = field(metadata={"json_key": "subjectDetails"})
+    subject_identifier: EuEntityAdministrationPermissionsSubjectIdentifier = field(metadata={"json_key": "subjectIdentifier"})
 
 @dataclass(frozen=True)
 class EuEntityAdministrationPermissionsSubjectIdentifier(OpenApiModel):
@@ -1074,28 +1074,28 @@ class EuEntityAdministrationPermissionsSubjectIdentifier(OpenApiModel):
 @dataclass(frozen=True)
 class EuEntityDetails(OpenApiModel):
     address: str
-    fullName: str
+    full_name: str = field(metadata={"json_key": "fullName"})
 
 @dataclass(frozen=True)
 class EuEntityPermission(OpenApiModel):
-    authorIdentifier: EuEntityPermissionsAuthorIdentifier
-    authorizedFingerprintIdentifier: str
+    author_identifier: EuEntityPermissionsAuthorIdentifier = field(metadata={"json_key": "authorIdentifier"})
+    authorized_fingerprint_identifier: str = field(metadata={"json_key": "authorizedFingerprintIdentifier"})
     description: str
-    euEntityName: str
+    eu_entity_name: str = field(metadata={"json_key": "euEntityName"})
     id: PermissionId
-    permissionScope: EuEntityPermissionsQueryPermissionType
-    startDate: str
-    vatUeIdentifier: str
-    euEntityDetails: Optional[PermissionsEuEntityDetails] = None
-    subjectEntityDetails: Optional[PermissionsSubjectEntityByFingerprintDetails] = None
-    subjectPersonDetails: Optional[PermissionsSubjectPersonByFingerprintDetails] = None
+    permission_scope: EuEntityPermissionsQueryPermissionType = field(metadata={"json_key": "permissionScope"})
+    start_date: str = field(metadata={"json_key": "startDate"})
+    vat_ue_identifier: str = field(metadata={"json_key": "vatUeIdentifier"})
+    eu_entity_details: Optional[PermissionsEuEntityDetails] = field(default=None, metadata={"json_key": "euEntityDetails"})
+    subject_entity_details: Optional[PermissionsSubjectEntityByFingerprintDetails] = field(default=None, metadata={"json_key": "subjectEntityDetails"})
+    subject_person_details: Optional[PermissionsSubjectPersonByFingerprintDetails] = field(default=None, metadata={"json_key": "subjectPersonDetails"})
 
 @dataclass(frozen=True)
 class EuEntityPermissionSubjectDetails(OpenApiModel):
-    subjectDetailsType: EuEntityPermissionSubjectDetailsType
-    entityByFp: Optional[EntityByFingerprintDetails] = None
-    personByFpNoId: Optional[PersonByFingerprintWithoutIdentifierDetails] = None
-    personByFpWithId: Optional[PersonByFingerprintWithIdentifierDetails] = None
+    subject_details_type: EuEntityPermissionSubjectDetailsType = field(metadata={"json_key": "subjectDetailsType"})
+    entity_by_fp: Optional[EntityByFingerprintDetails] = field(default=None, metadata={"json_key": "entityByFp"})
+    person_by_fp_no_id: Optional[PersonByFingerprintWithoutIdentifierDetails] = field(default=None, metadata={"json_key": "personByFpNoId"})
+    person_by_fp_with_id: Optional[PersonByFingerprintWithIdentifierDetails] = field(default=None, metadata={"json_key": "personByFpWithId"})
 
 @dataclass(frozen=True)
 class EuEntityPermissionsAuthorIdentifier(OpenApiModel):
@@ -1106,14 +1106,14 @@ class EuEntityPermissionsAuthorIdentifier(OpenApiModel):
 class EuEntityPermissionsGrantRequest(OpenApiModel):
     description: str
     permissions: list[EuEntityPermissionType]
-    subjectDetails: EuEntityPermissionSubjectDetails
-    subjectIdentifier: EuEntityPermissionsSubjectIdentifier
+    subject_details: EuEntityPermissionSubjectDetails = field(metadata={"json_key": "subjectDetails"})
+    subject_identifier: EuEntityPermissionsSubjectIdentifier = field(metadata={"json_key": "subjectIdentifier"})
 
 @dataclass(frozen=True)
 class EuEntityPermissionsQueryRequest(OpenApiModel):
-    authorizedFingerprintIdentifier: Optional[str] = None
-    permissionTypes: Optional[list[EuEntityPermissionsQueryPermissionType]] = None
-    vatUeIdentifier: Optional[str] = None
+    authorized_fingerprint_identifier: Optional[str] = field(default=None, metadata={"json_key": "authorizedFingerprintIdentifier"})
+    permission_types: Optional[list[EuEntityPermissionsQueryPermissionType]] = field(default=None, metadata={"json_key": "permissionTypes"})
+    vat_ue_identifier: Optional[str] = field(default=None, metadata={"json_key": "vatUeIdentifier"})
 
 @dataclass(frozen=True)
 class EuEntityPermissionsSubjectIdentifier(OpenApiModel):
@@ -1123,16 +1123,16 @@ class EuEntityPermissionsSubjectIdentifier(OpenApiModel):
 @dataclass(frozen=True)
 class ExceptionDetails(OpenApiModel):
     details: Optional[list[str]] = None
-    exceptionCode: Optional[int] = None
-    exceptionDescription: Optional[str] = None
+    exception_code: Optional[int] = field(default=None, metadata={"json_key": "exceptionCode"})
+    exception_description: Optional[str] = field(default=None, metadata={"json_key": "exceptionDescription"})
 
 @dataclass(frozen=True)
 class ExceptionInfo(OpenApiModel):
-    exceptionDetailList: Optional[list[ExceptionDetails]] = None
-    referenceNumber: Optional[ReferenceNumber] = None
-    serviceCode: Optional[str] = None
-    serviceCtx: Optional[str] = None
-    serviceName: Optional[str] = None
+    exception_detail_list: Optional[list[ExceptionDetails]] = field(default=None, metadata={"json_key": "exceptionDetailList"})
+    reference_number: Optional[ReferenceNumber] = field(default=None, metadata={"json_key": "referenceNumber"})
+    service_code: Optional[str] = field(default=None, metadata={"json_key": "serviceCode"})
+    service_ctx: Optional[str] = field(default=None, metadata={"json_key": "serviceCtx"})
+    service_name: Optional[str] = field(default=None, metadata={"json_key": "serviceName"})
     timestamp: Optional[str] = None
 
 @dataclass(frozen=True)
@@ -1141,22 +1141,22 @@ class ExceptionResponse(OpenApiModel):
 
 @dataclass(frozen=True)
 class ExportInvoicesResponse(OpenApiModel):
-    referenceNumber: ReferenceNumber
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
 
 @dataclass(frozen=True)
 class ForbiddenProblemDetails(OpenApiModel):
     detail: str
-    reasonCode: str
+    reason_code: str = field(metadata={"json_key": "reasonCode"})
     status: int
     title: str
     instance: Optional[str] = None
     security: Optional[dict[str, Optional[Any]]] = None
-    traceId: Optional[str] = None
+    trace_id: Optional[str] = field(default=None, metadata={"json_key": "traceId"})
 
 @dataclass(frozen=True)
 class FormCode(OpenApiModel):
-    schemaVersion: str
-    systemCode: str
+    schema_version: str = field(metadata={"json_key": "schemaVersion"})
+    system_code: str = field(metadata={"json_key": "systemCode"})
     value: str
 
 @dataclass(frozen=True)
@@ -1166,7 +1166,7 @@ class GenerateTokenRequest(OpenApiModel):
 
 @dataclass(frozen=True)
 class GenerateTokenResponse(OpenApiModel):
-    referenceNumber: ReferenceNumber
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
     token: str
 
 @dataclass(frozen=True)
@@ -1179,9 +1179,9 @@ class IdDocument(OpenApiModel):
 class IndirectPermissionsGrantRequest(OpenApiModel):
     description: str
     permissions: list[IndirectPermissionType]
-    subjectDetails: PersonPermissionSubjectDetails
-    subjectIdentifier: IndirectPermissionsSubjectIdentifier
-    targetIdentifier: Optional[IndirectPermissionsTargetIdentifier] = None
+    subject_details: PersonPermissionSubjectDetails = field(metadata={"json_key": "subjectDetails"})
+    subject_identifier: IndirectPermissionsSubjectIdentifier = field(metadata={"json_key": "subjectIdentifier"})
+    target_identifier: Optional[IndirectPermissionsTargetIdentifier] = field(default=None, metadata={"json_key": "targetIdentifier"})
 
 @dataclass(frozen=True)
 class IndirectPermissionsSubjectIdentifier(OpenApiModel):
@@ -1196,46 +1196,46 @@ class IndirectPermissionsTargetIdentifier(OpenApiModel):
 @dataclass(frozen=True)
 class InitTokenAuthenticationRequest(OpenApiModel):
     challenge: Challenge
-    contextIdentifier: AuthenticationContextIdentifier
-    encryptedToken: str
-    authorizationPolicy: Optional[AuthorizationPolicy] = None
+    context_identifier: AuthenticationContextIdentifier = field(metadata={"json_key": "contextIdentifier"})
+    encrypted_token: str = field(metadata={"json_key": "encryptedToken"})
+    authorization_policy: Optional[AuthorizationPolicy] = field(default=None, metadata={"json_key": "authorizationPolicy"})
 
 @dataclass(frozen=True)
 class InvoiceExportRequest(OpenApiModel):
     encryption: EncryptionInfo
     filters: InvoiceQueryFilters
-    onlyMetadata: Optional[bool] = None
+    only_metadata: Optional[bool] = field(default=None, metadata={"json_key": "onlyMetadata"})
 
 @dataclass(frozen=True)
 class InvoiceExportStatusResponse(OpenApiModel):
     status: StatusInfo
-    completedDate: Optional[str] = None
+    completed_date: Optional[str] = field(default=None, metadata={"json_key": "completedDate"})
     package: Optional[InvoicePackage] = None
-    packageExpirationDate: Optional[str] = None
+    package_expiration_date: Optional[str] = field(default=None, metadata={"json_key": "packageExpirationDate"})
 
 @dataclass(frozen=True)
 class InvoiceMetadata(OpenApiModel):
-    acquisitionDate: str
+    acquisition_date: str = field(metadata={"json_key": "acquisitionDate"})
     buyer: InvoiceMetadataBuyer
     currency: str
-    formCode: FormCode
-    grossAmount: float
-    hasAttachment: bool
-    invoiceHash: Sha256HashBase64
-    invoiceNumber: str
-    invoiceType: InvoiceType
-    invoicingDate: str
-    invoicingMode: InvoicingMode
-    isSelfInvoicing: bool
-    issueDate: str
-    ksefNumber: KsefNumber
-    netAmount: float
-    permanentStorageDate: str
+    form_code: FormCode = field(metadata={"json_key": "formCode"})
+    gross_amount: float = field(metadata={"json_key": "grossAmount"})
+    has_attachment: bool = field(metadata={"json_key": "hasAttachment"})
+    invoice_hash: Sha256HashBase64 = field(metadata={"json_key": "invoiceHash"})
+    invoice_number: str = field(metadata={"json_key": "invoiceNumber"})
+    invoice_type: InvoiceType = field(metadata={"json_key": "invoiceType"})
+    invoicing_date: str = field(metadata={"json_key": "invoicingDate"})
+    invoicing_mode: InvoicingMode = field(metadata={"json_key": "invoicingMode"})
+    is_self_invoicing: bool = field(metadata={"json_key": "isSelfInvoicing"})
+    issue_date: str = field(metadata={"json_key": "issueDate"})
+    ksef_number: KsefNumber = field(metadata={"json_key": "ksefNumber"})
+    net_amount: float = field(metadata={"json_key": "netAmount"})
+    permanent_storage_date: str = field(metadata={"json_key": "permanentStorageDate"})
     seller: InvoiceMetadataSeller
-    vatAmount: float
-    authorizedSubject: Optional[InvoiceMetadataAuthorizedSubject] = None
-    hashOfCorrectedInvoice: Optional[Sha256HashBase64] = None
-    thirdSubjects: Optional[list[InvoiceMetadataThirdSubject]] = None
+    vat_amount: float = field(metadata={"json_key": "vatAmount"})
+    authorized_subject: Optional[InvoiceMetadataAuthorizedSubject] = field(default=None, metadata={"json_key": "authorizedSubject"})
+    hash_of_corrected_invoice: Optional[Sha256HashBase64] = field(default=None, metadata={"json_key": "hashOfCorrectedInvoice"})
+    third_subjects: Optional[list[InvoiceMetadataThirdSubject]] = field(default=None, metadata={"json_key": "thirdSubjects"})
 
 @dataclass(frozen=True)
 class InvoiceMetadataAuthorizedSubject(OpenApiModel):
@@ -1271,25 +1271,25 @@ class InvoiceMetadataThirdSubjectIdentifier(OpenApiModel):
 
 @dataclass(frozen=True)
 class InvoicePackage(OpenApiModel):
-    invoiceCount: int
-    isTruncated: bool
+    invoice_count: int = field(metadata={"json_key": "invoiceCount"})
+    is_truncated: bool = field(metadata={"json_key": "isTruncated"})
     parts: list[InvoicePackagePart]
     size: int
-    lastInvoicingDate: Optional[str] = None
-    lastIssueDate: Optional[str] = None
-    lastPermanentStorageDate: Optional[str] = None
-    permanentStorageHwmDate: Optional[str] = None
+    last_invoicing_date: Optional[str] = field(default=None, metadata={"json_key": "lastInvoicingDate"})
+    last_issue_date: Optional[str] = field(default=None, metadata={"json_key": "lastIssueDate"})
+    last_permanent_storage_date: Optional[str] = field(default=None, metadata={"json_key": "lastPermanentStorageDate"})
+    permanent_storage_hwm_date: Optional[str] = field(default=None, metadata={"json_key": "permanentStorageHwmDate"})
 
 @dataclass(frozen=True)
 class InvoicePackagePart(OpenApiModel):
-    encryptedPartHash: Sha256HashBase64
-    encryptedPartSize: int
-    expirationDate: str
+    encrypted_part_hash: Sha256HashBase64 = field(metadata={"json_key": "encryptedPartHash"})
+    encrypted_part_size: int = field(metadata={"json_key": "encryptedPartSize"})
+    expiration_date: str = field(metadata={"json_key": "expirationDate"})
     method: str
-    ordinalNumber: int
-    partHash: Sha256HashBase64
-    partName: str
-    partSize: int
+    ordinal_number: int = field(metadata={"json_key": "ordinalNumber"})
+    part_hash: Sha256HashBase64 = field(metadata={"json_key": "partHash"})
+    part_name: str = field(metadata={"json_key": "partName"})
+    part_size: int = field(metadata={"json_key": "partSize"})
     url: str
 
 @dataclass(frozen=True)
@@ -1305,26 +1305,26 @@ class InvoiceQueryBuyerIdentifier(OpenApiModel):
 
 @dataclass(frozen=True)
 class InvoiceQueryDateRange(OpenApiModel):
-    dateType: InvoiceQueryDateType
+    date_type: InvoiceQueryDateType = field(metadata={"json_key": "dateType"})
     from_: str = field(metadata={"json_key": "from"})
-    restrictToPermanentStorageHwmDate: Optional[bool] = None
+    restrict_to_permanent_storage_hwm_date: Optional[bool] = field(default=None, metadata={"json_key": "restrictToPermanentStorageHwmDate"})
     to: Optional[str] = None
 
 @dataclass(frozen=True)
 class InvoiceQueryFilters(OpenApiModel):
-    dateRange: InvoiceQueryDateRange
-    subjectType: InvoiceQuerySubjectType
+    date_range: InvoiceQueryDateRange = field(metadata={"json_key": "dateRange"})
+    subject_type: InvoiceQuerySubjectType = field(metadata={"json_key": "subjectType"})
     amount: Optional[InvoiceQueryAmount] = None
-    buyerIdentifier: Optional[InvoiceQueryBuyerIdentifier] = None
-    currencyCodes: Optional[list[CurrencyCode]] = None
-    formType: Optional[InvoiceQueryFormType] = None
-    hasAttachment: Optional[bool] = None
-    invoiceNumber: Optional[str] = None
-    invoiceTypes: Optional[list[InvoiceType]] = None
-    invoicingMode: Optional[InvoicingMode] = None
-    isSelfInvoicing: Optional[bool] = None
-    ksefNumber: Optional[KsefNumber] = None
-    sellerNip: Optional[Nip] = None
+    buyer_identifier: Optional[InvoiceQueryBuyerIdentifier] = field(default=None, metadata={"json_key": "buyerIdentifier"})
+    currency_codes: Optional[list[CurrencyCode]] = field(default=None, metadata={"json_key": "currencyCodes"})
+    form_type: Optional[InvoiceQueryFormType] = field(default=None, metadata={"json_key": "formType"})
+    has_attachment: Optional[bool] = field(default=None, metadata={"json_key": "hasAttachment"})
+    invoice_number: Optional[str] = field(default=None, metadata={"json_key": "invoiceNumber"})
+    invoice_types: Optional[list[InvoiceType]] = field(default=None, metadata={"json_key": "invoiceTypes"})
+    invoicing_mode: Optional[InvoicingMode] = field(default=None, metadata={"json_key": "invoicingMode"})
+    is_self_invoicing: Optional[bool] = field(default=None, metadata={"json_key": "isSelfInvoicing"})
+    ksef_number: Optional[KsefNumber] = field(default=None, metadata={"json_key": "ksefNumber"})
+    seller_nip: Optional[Nip] = field(default=None, metadata={"json_key": "sellerNip"})
 
 @dataclass(frozen=True)
 class InvoiceStatusInfo(OpenApiModel):
@@ -1335,59 +1335,59 @@ class InvoiceStatusInfo(OpenApiModel):
 
 @dataclass(frozen=True)
 class OnlineSessionContextLimitsOverride(OpenApiModel):
-    maxInvoiceSizeInMB: int
-    maxInvoiceWithAttachmentSizeInMB: int
-    maxInvoices: int
+    max_invoice_size_in_mb: int = field(metadata={"json_key": "maxInvoiceSizeInMB"})
+    max_invoice_with_attachment_size_in_mb: int = field(metadata={"json_key": "maxInvoiceWithAttachmentSizeInMB"})
+    max_invoices: int = field(metadata={"json_key": "maxInvoices"})
 
 @dataclass(frozen=True)
 class OnlineSessionEffectiveContextLimits(OpenApiModel):
-    maxInvoiceSizeInMB: int
-    maxInvoiceWithAttachmentSizeInMB: int
-    maxInvoices: int
+    max_invoice_size_in_mb: int = field(metadata={"json_key": "maxInvoiceSizeInMB"})
+    max_invoice_with_attachment_size_in_mb: int = field(metadata={"json_key": "maxInvoiceWithAttachmentSizeInMB"})
+    max_invoices: int = field(metadata={"json_key": "maxInvoices"})
 
 @dataclass(frozen=True)
 class OpenBatchSessionRequest(OpenApiModel):
-    batchFile: BatchFileInfo
+    batch_file: BatchFileInfo = field(metadata={"json_key": "batchFile"})
     encryption: EncryptionInfo
-    formCode: FormCode
-    offlineMode: Optional[bool] = None
+    form_code: FormCode = field(metadata={"json_key": "formCode"})
+    offline_mode: Optional[bool] = field(default=None, metadata={"json_key": "offlineMode"})
 
 @dataclass(frozen=True)
 class OpenBatchSessionResponse(OpenApiModel):
-    partUploadRequests: list[PartUploadRequest]
-    referenceNumber: ReferenceNumber
+    part_upload_requests: list[PartUploadRequest] = field(metadata={"json_key": "partUploadRequests"})
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
 
 @dataclass(frozen=True)
 class OpenOnlineSessionRequest(OpenApiModel):
     encryption: EncryptionInfo
-    formCode: FormCode
+    form_code: FormCode = field(metadata={"json_key": "formCode"})
 
 @dataclass(frozen=True)
 class OpenOnlineSessionResponse(OpenApiModel):
-    referenceNumber: ReferenceNumber
-    validUntil: str
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
+    valid_until: str = field(metadata={"json_key": "validUntil"})
 
 @dataclass(frozen=True)
 class PartUploadRequest(OpenApiModel):
     headers: dict[str, Optional[str]]
     method: str
-    ordinalNumber: int
+    ordinal_number: int = field(metadata={"json_key": "ordinalNumber"})
     url: str
 
 @dataclass(frozen=True)
 class PeppolProvider(OpenApiModel):
-    dateCreated: str
+    date_created: str = field(metadata={"json_key": "dateCreated"})
     id: PeppolId
     name: str
 
 @dataclass(frozen=True)
 class PermissionsEuEntityDetails(OpenApiModel):
     address: str
-    fullName: str
+    full_name: str = field(metadata={"json_key": "fullName"})
 
 @dataclass(frozen=True)
 class PermissionsOperationResponse(OpenApiModel):
-    referenceNumber: ReferenceNumber
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
 
 @dataclass(frozen=True)
 class PermissionsOperationStatusResponse(OpenApiModel):
@@ -1395,65 +1395,65 @@ class PermissionsOperationStatusResponse(OpenApiModel):
 
 @dataclass(frozen=True)
 class PermissionsSubjectEntityByFingerprintDetails(OpenApiModel):
-    fullName: str
-    subjectDetailsType: EntitySubjectByFingerprintDetailsType
+    full_name: str = field(metadata={"json_key": "fullName"})
+    subject_details_type: EntitySubjectByFingerprintDetailsType = field(metadata={"json_key": "subjectDetailsType"})
     address: Optional[str] = None
 
 @dataclass(frozen=True)
 class PermissionsSubjectEntityByIdentifierDetails(OpenApiModel):
-    fullName: str
-    subjectDetailsType: EntitySubjectByIdentifierDetailsType
+    full_name: str = field(metadata={"json_key": "fullName"})
+    subject_details_type: EntitySubjectByIdentifierDetailsType = field(metadata={"json_key": "subjectDetailsType"})
 
 @dataclass(frozen=True)
 class PermissionsSubjectEntityDetails(OpenApiModel):
-    fullName: str
-    subjectDetailsType: EntitySubjectDetailsType
+    full_name: str = field(metadata={"json_key": "fullName"})
+    subject_details_type: EntitySubjectDetailsType = field(metadata={"json_key": "subjectDetailsType"})
     address: Optional[str] = None
 
 @dataclass(frozen=True)
 class PermissionsSubjectPersonByFingerprintDetails(OpenApiModel):
-    firstName: str
-    lastName: str
-    subjectDetailsType: PersonSubjectByFingerprintDetailsType
-    birthDate: Optional[str] = None
-    idDocument: Optional[IdDocument] = None
-    personIdentifier: Optional[PersonIdentifier] = None
+    first_name: str = field(metadata={"json_key": "firstName"})
+    last_name: str = field(metadata={"json_key": "lastName"})
+    subject_details_type: PersonSubjectByFingerprintDetailsType = field(metadata={"json_key": "subjectDetailsType"})
+    birth_date: Optional[str] = field(default=None, metadata={"json_key": "birthDate"})
+    id_document: Optional[IdDocument] = field(default=None, metadata={"json_key": "idDocument"})
+    person_identifier: Optional[PersonIdentifier] = field(default=None, metadata={"json_key": "personIdentifier"})
 
 @dataclass(frozen=True)
 class PermissionsSubjectPersonDetails(OpenApiModel):
-    firstName: str
-    lastName: str
-    subjectDetailsType: PersonSubjectDetailsType
-    birthDate: Optional[str] = None
-    idDocument: Optional[IdDocument] = None
-    personIdentifier: Optional[PersonIdentifier] = None
+    first_name: str = field(metadata={"json_key": "firstName"})
+    last_name: str = field(metadata={"json_key": "lastName"})
+    subject_details_type: PersonSubjectDetailsType = field(metadata={"json_key": "subjectDetailsType"})
+    birth_date: Optional[str] = field(default=None, metadata={"json_key": "birthDate"})
+    id_document: Optional[IdDocument] = field(default=None, metadata={"json_key": "idDocument"})
+    person_identifier: Optional[PersonIdentifier] = field(default=None, metadata={"json_key": "personIdentifier"})
 
 @dataclass(frozen=True)
 class PersonByFingerprintWithIdentifierDetails(OpenApiModel):
-    firstName: str
+    first_name: str = field(metadata={"json_key": "firstName"})
     identifier: PersonIdentifier
-    lastName: str
+    last_name: str = field(metadata={"json_key": "lastName"})
 
 @dataclass(frozen=True)
 class PersonByFingerprintWithoutIdentifierDetails(OpenApiModel):
-    birthDate: str
-    firstName: str
-    idDocument: IdDocument
-    lastName: str
+    birth_date: str = field(metadata={"json_key": "birthDate"})
+    first_name: str = field(metadata={"json_key": "firstName"})
+    id_document: IdDocument = field(metadata={"json_key": "idDocument"})
+    last_name: str = field(metadata={"json_key": "lastName"})
 
 @dataclass(frozen=True)
 class PersonCreateRequest(OpenApiModel):
     description: str
-    isBailiff: bool
+    is_bailiff: bool = field(metadata={"json_key": "isBailiff"})
     nip: Nip
     pesel: Pesel
-    createdDate: Optional[str] = None
-    isDeceased: Optional[bool] = None
+    created_date: Optional[str] = field(default=None, metadata={"json_key": "createdDate"})
+    is_deceased: Optional[bool] = field(default=None, metadata={"json_key": "isDeceased"})
 
 @dataclass(frozen=True)
 class PersonDetails(OpenApiModel):
-    firstName: str
-    lastName: str
+    first_name: str = field(metadata={"json_key": "firstName"})
+    last_name: str = field(metadata={"json_key": "lastName"})
 
 @dataclass(frozen=True)
 class PersonIdentifier(OpenApiModel):
@@ -1462,25 +1462,25 @@ class PersonIdentifier(OpenApiModel):
 
 @dataclass(frozen=True)
 class PersonPermission(OpenApiModel):
-    authorIdentifier: PersonPermissionsAuthorIdentifier
-    authorizedIdentifier: PersonPermissionsAuthorizedIdentifier
-    canDelegate: bool
+    author_identifier: PersonPermissionsAuthorIdentifier = field(metadata={"json_key": "authorIdentifier"})
+    authorized_identifier: PersonPermissionsAuthorizedIdentifier = field(metadata={"json_key": "authorizedIdentifier"})
+    can_delegate: bool = field(metadata={"json_key": "canDelegate"})
     description: str
     id: PermissionId
-    permissionScope: PersonPermissionScope
-    permissionState: PermissionState
-    startDate: str
-    contextIdentifier: Optional[PersonPermissionsContextIdentifier] = None
-    subjectEntityDetails: Optional[PermissionsSubjectEntityDetails] = None
-    subjectPersonDetails: Optional[PermissionsSubjectPersonDetails] = None
-    targetIdentifier: Optional[PersonPermissionsTargetIdentifier] = None
+    permission_scope: PersonPermissionScope = field(metadata={"json_key": "permissionScope"})
+    permission_state: PermissionState = field(metadata={"json_key": "permissionState"})
+    start_date: str = field(metadata={"json_key": "startDate"})
+    context_identifier: Optional[PersonPermissionsContextIdentifier] = field(default=None, metadata={"json_key": "contextIdentifier"})
+    subject_entity_details: Optional[PermissionsSubjectEntityDetails] = field(default=None, metadata={"json_key": "subjectEntityDetails"})
+    subject_person_details: Optional[PermissionsSubjectPersonDetails] = field(default=None, metadata={"json_key": "subjectPersonDetails"})
+    target_identifier: Optional[PersonPermissionsTargetIdentifier] = field(default=None, metadata={"json_key": "targetIdentifier"})
 
 @dataclass(frozen=True)
 class PersonPermissionSubjectDetails(OpenApiModel):
-    subjectDetailsType: PersonPermissionSubjectDetailsType
-    personByFpNoId: Optional[PersonByFingerprintWithoutIdentifierDetails] = None
-    personByFpWithId: Optional[PersonByFingerprintWithIdentifierDetails] = None
-    personById: Optional[PersonDetails] = None
+    subject_details_type: PersonPermissionSubjectDetailsType = field(metadata={"json_key": "subjectDetailsType"})
+    person_by_fp_no_id: Optional[PersonByFingerprintWithoutIdentifierDetails] = field(default=None, metadata={"json_key": "personByFpNoId"})
+    person_by_fp_with_id: Optional[PersonByFingerprintWithIdentifierDetails] = field(default=None, metadata={"json_key": "personByFpWithId"})
+    person_by_id: Optional[PersonDetails] = field(default=None, metadata={"json_key": "personById"})
 
 @dataclass(frozen=True)
 class PersonPermissionsAuthorIdentifier(OpenApiModel):
@@ -1501,18 +1501,18 @@ class PersonPermissionsContextIdentifier(OpenApiModel):
 class PersonPermissionsGrantRequest(OpenApiModel):
     description: str
     permissions: list[PersonPermissionType]
-    subjectDetails: PersonPermissionSubjectDetails
-    subjectIdentifier: PersonPermissionsSubjectIdentifier
+    subject_details: PersonPermissionSubjectDetails = field(metadata={"json_key": "subjectDetails"})
+    subject_identifier: PersonPermissionsSubjectIdentifier = field(metadata={"json_key": "subjectIdentifier"})
 
 @dataclass(frozen=True)
 class PersonPermissionsQueryRequest(OpenApiModel):
-    queryType: PersonPermissionsQueryType
-    authorIdentifier: Optional[PersonPermissionsAuthorIdentifier] = None
-    authorizedIdentifier: Optional[PersonPermissionsAuthorizedIdentifier] = None
-    contextIdentifier: Optional[PersonPermissionsContextIdentifier] = None
-    permissionState: Optional[PermissionState] = None
-    permissionTypes: Optional[list[PersonPermissionType]] = None
-    targetIdentifier: Optional[PersonPermissionsTargetIdentifier] = None
+    query_type: PersonPermissionsQueryType = field(metadata={"json_key": "queryType"})
+    author_identifier: Optional[PersonPermissionsAuthorIdentifier] = field(default=None, metadata={"json_key": "authorIdentifier"})
+    authorized_identifier: Optional[PersonPermissionsAuthorizedIdentifier] = field(default=None, metadata={"json_key": "authorizedIdentifier"})
+    context_identifier: Optional[PersonPermissionsContextIdentifier] = field(default=None, metadata={"json_key": "contextIdentifier"})
+    permission_state: Optional[PermissionState] = field(default=None, metadata={"json_key": "permissionState"})
+    permission_types: Optional[list[PersonPermissionType]] = field(default=None, metadata={"json_key": "permissionTypes"})
+    target_identifier: Optional[PersonPermissionsTargetIdentifier] = field(default=None, metadata={"json_key": "targetIdentifier"})
 
 @dataclass(frozen=True)
 class PersonPermissionsSubjectIdentifier(OpenApiModel):
@@ -1530,17 +1530,17 @@ class PersonRemoveRequest(OpenApiModel):
 
 @dataclass(frozen=True)
 class PersonalPermission(OpenApiModel):
-    canDelegate: bool
+    can_delegate: bool = field(metadata={"json_key": "canDelegate"})
     description: str
     id: PermissionId
-    permissionScope: PersonalPermissionScope
-    permissionState: PermissionState
-    startDate: str
-    authorizedIdentifier: Optional[PersonalPermissionsAuthorizedIdentifier] = None
-    contextIdentifier: Optional[PersonalPermissionsContextIdentifier] = None
-    subjectEntityDetails: Optional[PermissionsSubjectEntityDetails] = None
-    subjectPersonDetails: Optional[PermissionsSubjectPersonDetails] = None
-    targetIdentifier: Optional[PersonalPermissionsTargetIdentifier] = None
+    permission_scope: PersonalPermissionScope = field(metadata={"json_key": "permissionScope"})
+    permission_state: PermissionState = field(metadata={"json_key": "permissionState"})
+    start_date: str = field(metadata={"json_key": "startDate"})
+    authorized_identifier: Optional[PersonalPermissionsAuthorizedIdentifier] = field(default=None, metadata={"json_key": "authorizedIdentifier"})
+    context_identifier: Optional[PersonalPermissionsContextIdentifier] = field(default=None, metadata={"json_key": "contextIdentifier"})
+    subject_entity_details: Optional[PermissionsSubjectEntityDetails] = field(default=None, metadata={"json_key": "subjectEntityDetails"})
+    subject_person_details: Optional[PermissionsSubjectPersonDetails] = field(default=None, metadata={"json_key": "subjectPersonDetails"})
+    target_identifier: Optional[PersonalPermissionsTargetIdentifier] = field(default=None, metadata={"json_key": "targetIdentifier"})
 
 @dataclass(frozen=True)
 class PersonalPermissionsAuthorizedIdentifier(OpenApiModel):
@@ -1554,10 +1554,10 @@ class PersonalPermissionsContextIdentifier(OpenApiModel):
 
 @dataclass(frozen=True)
 class PersonalPermissionsQueryRequest(OpenApiModel):
-    contextIdentifier: Optional[PersonalPermissionsContextIdentifier] = None
-    permissionState: Optional[PermissionState] = None
-    permissionTypes: Optional[list[PersonalPermissionType]] = None
-    targetIdentifier: Optional[PersonalPermissionsTargetIdentifier] = None
+    context_identifier: Optional[PersonalPermissionsContextIdentifier] = field(default=None, metadata={"json_key": "contextIdentifier"})
+    permission_state: Optional[PermissionState] = field(default=None, metadata={"json_key": "permissionState"})
+    permission_types: Optional[list[PersonalPermissionType]] = field(default=None, metadata={"json_key": "permissionTypes"})
+    target_identifier: Optional[PersonalPermissionsTargetIdentifier] = field(default=None, metadata={"json_key": "targetIdentifier"})
 
 @dataclass(frozen=True)
 class PersonalPermissionsTargetIdentifier(OpenApiModel):
@@ -1568,13 +1568,13 @@ class PersonalPermissionsTargetIdentifier(OpenApiModel):
 class PublicKeyCertificate(OpenApiModel):
     certificate: str
     usage: list[PublicKeyCertificateUsage]
-    validFrom: str
-    validTo: str
+    valid_from: str = field(metadata={"json_key": "validFrom"})
+    valid_to: str = field(metadata={"json_key": "validTo"})
 
 @dataclass(frozen=True)
 class QueryCertificatesRequest(OpenApiModel):
-    certificateSerialNumber: Optional[str] = None
-    expiresAfter: Optional[str] = None
+    certificate_serial_number: Optional[str] = field(default=None, metadata={"json_key": "certificateSerialNumber"})
+    expires_after: Optional[str] = field(default=None, metadata={"json_key": "expiresAfter"})
     name: Optional[str] = None
     status: Optional[CertificateListItemStatus] = None
     type: Optional[KsefCertificateType] = None
@@ -1582,87 +1582,87 @@ class QueryCertificatesRequest(OpenApiModel):
 @dataclass(frozen=True)
 class QueryCertificatesResponse(OpenApiModel):
     certificates: list[CertificateListItem]
-    hasMore: bool
+    has_more: bool = field(metadata={"json_key": "hasMore"})
 
 @dataclass(frozen=True)
 class QueryEntityAuthorizationPermissionsResponse(OpenApiModel):
-    authorizationGrants: list[EntityAuthorizationGrant]
-    hasMore: bool
+    authorization_grants: list[EntityAuthorizationGrant] = field(metadata={"json_key": "authorizationGrants"})
+    has_more: bool = field(metadata={"json_key": "hasMore"})
 
 @dataclass(frozen=True)
 class QueryEntityPermissionsResponse(OpenApiModel):
-    hasMore: bool
+    has_more: bool = field(metadata={"json_key": "hasMore"})
     permissions: list[EntityPermissionItem]
 
 @dataclass(frozen=True)
 class QueryEntityRolesResponse(OpenApiModel):
-    hasMore: bool
+    has_more: bool = field(metadata={"json_key": "hasMore"})
     roles: list[EntityRole]
 
 @dataclass(frozen=True)
 class QueryEuEntityPermissionsResponse(OpenApiModel):
-    hasMore: bool
+    has_more: bool = field(metadata={"json_key": "hasMore"})
     permissions: list[EuEntityPermission]
 
 @dataclass(frozen=True)
 class QueryInvoicesMetadataResponse(OpenApiModel):
-    hasMore: bool
+    has_more: bool = field(metadata={"json_key": "hasMore"})
     invoices: list[InvoiceMetadata]
-    isTruncated: bool
-    permanentStorageHwmDate: Optional[str] = None
+    is_truncated: bool = field(metadata={"json_key": "isTruncated"})
+    permanent_storage_hwm_date: Optional[str] = field(default=None, metadata={"json_key": "permanentStorageHwmDate"})
 
 @dataclass(frozen=True)
 class QueryPeppolProvidersResponse(OpenApiModel):
-    hasMore: bool
-    peppolProviders: list[PeppolProvider]
+    has_more: bool = field(metadata={"json_key": "hasMore"})
+    peppol_providers: list[PeppolProvider] = field(metadata={"json_key": "peppolProviders"})
 
 @dataclass(frozen=True)
 class QueryPersonPermissionsResponse(OpenApiModel):
-    hasMore: bool
+    has_more: bool = field(metadata={"json_key": "hasMore"})
     permissions: list[PersonPermission]
 
 @dataclass(frozen=True)
 class QueryPersonalPermissionsResponse(OpenApiModel):
-    hasMore: bool
+    has_more: bool = field(metadata={"json_key": "hasMore"})
     permissions: list[PersonalPermission]
 
 @dataclass(frozen=True)
 class QuerySubordinateEntityRolesResponse(OpenApiModel):
-    hasMore: bool
+    has_more: bool = field(metadata={"json_key": "hasMore"})
     roles: list[SubordinateEntityRole]
 
 @dataclass(frozen=True)
 class QuerySubunitPermissionsResponse(OpenApiModel):
-    hasMore: bool
+    has_more: bool = field(metadata={"json_key": "hasMore"})
     permissions: list[SubunitPermission]
 
 @dataclass(frozen=True)
 class QueryTokensResponse(OpenApiModel):
     tokens: list[QueryTokensResponseItem]
-    continuationToken: Optional[str] = None
+    continuation_token: Optional[str] = field(default=None, metadata={"json_key": "continuationToken"})
 
 @dataclass(frozen=True)
 class QueryTokensResponseItem(OpenApiModel):
-    authorIdentifier: TokenAuthorIdentifierTypeIdentifier
-    contextIdentifier: TokenContextIdentifierTypeIdentifier
-    dateCreated: str
+    author_identifier: TokenAuthorIdentifierTypeIdentifier = field(metadata={"json_key": "authorIdentifier"})
+    context_identifier: TokenContextIdentifierTypeIdentifier = field(metadata={"json_key": "contextIdentifier"})
+    date_created: str = field(metadata={"json_key": "dateCreated"})
     description: str
-    referenceNumber: ReferenceNumber
-    requestedPermissions: list[TokenPermissionType]
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
+    requested_permissions: list[TokenPermissionType] = field(metadata={"json_key": "requestedPermissions"})
     status: AuthenticationTokenStatus
-    lastUseDate: Optional[str] = None
-    statusDetails: Optional[list[str]] = None
+    last_use_date: Optional[str] = field(default=None, metadata={"json_key": "lastUseDate"})
+    status_details: Optional[list[str]] = field(default=None, metadata={"json_key": "statusDetails"})
 
 @dataclass(frozen=True)
 class RetrieveCertificatesListItem(OpenApiModel):
     certificate: str
-    certificateName: str
-    certificateSerialNumber: str
-    certificateType: KsefCertificateType
+    certificate_name: str = field(metadata={"json_key": "certificateName"})
+    certificate_serial_number: str = field(metadata={"json_key": "certificateSerialNumber"})
+    certificate_type: KsefCertificateType = field(metadata={"json_key": "certificateType"})
 
 @dataclass(frozen=True)
 class RetrieveCertificatesRequest(OpenApiModel):
-    certificateSerialNumbers: list[str]
+    certificate_serial_numbers: list[str] = field(metadata={"json_key": "certificateSerialNumbers"})
 
 @dataclass(frozen=True)
 class RetrieveCertificatesResponse(OpenApiModel):
@@ -1670,84 +1670,84 @@ class RetrieveCertificatesResponse(OpenApiModel):
 
 @dataclass(frozen=True)
 class RevokeCertificateRequest(OpenApiModel):
-    revocationReason: Optional[CertificateRevocationReason] = None
+    revocation_reason: Optional[CertificateRevocationReason] = field(default=None, metadata={"json_key": "revocationReason"})
 
 @dataclass(frozen=True)
 class SendInvoiceRequest(OpenApiModel):
-    encryptedInvoiceContent: str
-    encryptedInvoiceHash: Sha256HashBase64
-    encryptedInvoiceSize: int
-    invoiceHash: Sha256HashBase64
-    invoiceSize: int
-    hashOfCorrectedInvoice: Optional[Sha256HashBase64] = None
-    offlineMode: Optional[bool] = None
+    encrypted_invoice_content: str = field(metadata={"json_key": "encryptedInvoiceContent"})
+    encrypted_invoice_hash: Sha256HashBase64 = field(metadata={"json_key": "encryptedInvoiceHash"})
+    encrypted_invoice_size: int = field(metadata={"json_key": "encryptedInvoiceSize"})
+    invoice_hash: Sha256HashBase64 = field(metadata={"json_key": "invoiceHash"})
+    invoice_size: int = field(metadata={"json_key": "invoiceSize"})
+    hash_of_corrected_invoice: Optional[Sha256HashBase64] = field(default=None, metadata={"json_key": "hashOfCorrectedInvoice"})
+    offline_mode: Optional[bool] = field(default=None, metadata={"json_key": "offlineMode"})
 
 @dataclass(frozen=True)
 class SendInvoiceResponse(OpenApiModel):
-    referenceNumber: ReferenceNumber
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
 
 @dataclass(frozen=True)
 class SessionInvoiceStatusResponse(OpenApiModel):
-    invoiceHash: Sha256HashBase64
-    invoicingDate: str
-    ordinalNumber: int
-    referenceNumber: ReferenceNumber
+    invoice_hash: Sha256HashBase64 = field(metadata={"json_key": "invoiceHash"})
+    invoicing_date: str = field(metadata={"json_key": "invoicingDate"})
+    ordinal_number: int = field(metadata={"json_key": "ordinalNumber"})
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
     status: InvoiceStatusInfo
-    acquisitionDate: Optional[str] = None
-    invoiceFileName: Optional[str] = None
-    invoiceNumber: Optional[str] = None
-    invoicingMode: Optional[InvoicingMode] = None
-    ksefNumber: Optional[KsefNumber] = None
-    permanentStorageDate: Optional[str] = None
-    upoDownloadUrl: Optional[str] = None
-    upoDownloadUrlExpirationDate: Optional[str] = None
+    acquisition_date: Optional[str] = field(default=None, metadata={"json_key": "acquisitionDate"})
+    invoice_file_name: Optional[str] = field(default=None, metadata={"json_key": "invoiceFileName"})
+    invoice_number: Optional[str] = field(default=None, metadata={"json_key": "invoiceNumber"})
+    invoicing_mode: Optional[InvoicingMode] = field(default=None, metadata={"json_key": "invoicingMode"})
+    ksef_number: Optional[KsefNumber] = field(default=None, metadata={"json_key": "ksefNumber"})
+    permanent_storage_date: Optional[str] = field(default=None, metadata={"json_key": "permanentStorageDate"})
+    upo_download_url: Optional[str] = field(default=None, metadata={"json_key": "upoDownloadUrl"})
+    upo_download_url_expiration_date: Optional[str] = field(default=None, metadata={"json_key": "upoDownloadUrlExpirationDate"})
 
 @dataclass(frozen=True)
 class SessionInvoicesResponse(OpenApiModel):
     invoices: list[SessionInvoiceStatusResponse]
-    continuationToken: Optional[str] = None
+    continuation_token: Optional[str] = field(default=None, metadata={"json_key": "continuationToken"})
 
 @dataclass(frozen=True)
 class SessionStatusResponse(OpenApiModel):
-    dateCreated: str
-    dateUpdated: str
+    date_created: str = field(metadata={"json_key": "dateCreated"})
+    date_updated: str = field(metadata={"json_key": "dateUpdated"})
     status: StatusInfo
-    failedInvoiceCount: Optional[int] = None
-    invoiceCount: Optional[int] = None
-    successfulInvoiceCount: Optional[int] = None
+    failed_invoice_count: Optional[int] = field(default=None, metadata={"json_key": "failedInvoiceCount"})
+    invoice_count: Optional[int] = field(default=None, metadata={"json_key": "invoiceCount"})
+    successful_invoice_count: Optional[int] = field(default=None, metadata={"json_key": "successfulInvoiceCount"})
     upo: Optional[UpoResponse] = None
-    validUntil: Optional[str] = None
+    valid_until: Optional[str] = field(default=None, metadata={"json_key": "validUntil"})
 
 @dataclass(frozen=True)
 class SessionsQueryResponse(OpenApiModel):
     sessions: list[SessionsQueryResponseItem]
-    continuationToken: Optional[str] = None
+    continuation_token: Optional[str] = field(default=None, metadata={"json_key": "continuationToken"})
 
 @dataclass(frozen=True)
 class SessionsQueryResponseItem(OpenApiModel):
-    dateCreated: str
-    dateUpdated: str
-    failedInvoiceCount: int
-    referenceNumber: ReferenceNumber
+    date_created: str = field(metadata={"json_key": "dateCreated"})
+    date_updated: str = field(metadata={"json_key": "dateUpdated"})
+    failed_invoice_count: int = field(metadata={"json_key": "failedInvoiceCount"})
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
     status: StatusInfo
-    successfulInvoiceCount: int
-    totalInvoiceCount: int
-    validUntil: Optional[str] = None
+    successful_invoice_count: int = field(metadata={"json_key": "successfulInvoiceCount"})
+    total_invoice_count: int = field(metadata={"json_key": "totalInvoiceCount"})
+    valid_until: Optional[str] = field(default=None, metadata={"json_key": "validUntil"})
 
 @dataclass(frozen=True)
 class SetRateLimitsRequest(OpenApiModel):
-    rateLimits: ApiRateLimitsOverride
+    rate_limits: ApiRateLimitsOverride = field(metadata={"json_key": "rateLimits"})
 
 @dataclass(frozen=True)
 class SetSessionLimitsRequest(OpenApiModel):
-    batchSession: BatchSessionContextLimitsOverride
-    onlineSession: OnlineSessionContextLimitsOverride
+    batch_session: BatchSessionContextLimitsOverride = field(metadata={"json_key": "batchSession"})
+    online_session: OnlineSessionContextLimitsOverride = field(metadata={"json_key": "onlineSession"})
 
 @dataclass(frozen=True)
 class SetSubjectLimitsRequest(OpenApiModel):
     certificate: Optional[CertificateSubjectLimitsOverride] = None
     enrollment: Optional[EnrollmentSubjectLimitsOverride] = None
-    subjectIdentifierType: Optional[SubjectIdentifierType] = None
+    subject_identifier_type: Optional[SubjectIdentifierType] = field(default=None, metadata={"json_key": "subjectIdentifierType"})
 
 @dataclass(frozen=True)
 class StatusInfo(OpenApiModel):
@@ -1758,25 +1758,25 @@ class StatusInfo(OpenApiModel):
 @dataclass(frozen=True)
 class SubjectCreateRequest(OpenApiModel):
     description: str
-    subjectNip: Nip
-    subjectType: SubjectType
-    createdDate: Optional[str] = None
+    subject_nip: Nip = field(metadata={"json_key": "subjectNip"})
+    subject_type: SubjectType = field(metadata={"json_key": "subjectType"})
+    created_date: Optional[str] = field(default=None, metadata={"json_key": "createdDate"})
     subunits: Optional[list[Subunit]] = None
 
 @dataclass(frozen=True)
 class SubjectRemoveRequest(OpenApiModel):
-    subjectNip: Nip
+    subject_nip: Nip = field(metadata={"json_key": "subjectNip"})
 
 @dataclass(frozen=True)
 class SubordinateEntityRole(OpenApiModel):
     description: str
     role: SubordinateEntityRoleType
-    startDate: str
-    subordinateEntityIdentifier: SubordinateRoleSubordinateEntityIdentifier
+    start_date: str = field(metadata={"json_key": "startDate"})
+    subordinate_entity_identifier: SubordinateRoleSubordinateEntityIdentifier = field(metadata={"json_key": "subordinateEntityIdentifier"})
 
 @dataclass(frozen=True)
 class SubordinateEntityRolesQueryRequest(OpenApiModel):
-    subordinateEntityIdentifier: Optional[EntityPermissionsSubordinateEntityIdentifier] = None
+    subordinate_entity_identifier: Optional[EntityPermissionsSubordinateEntityIdentifier] = field(default=None, metadata={"json_key": "subordinateEntityIdentifier"})
 
 @dataclass(frozen=True)
 class SubordinateRoleSubordinateEntityIdentifier(OpenApiModel):
@@ -1786,19 +1786,19 @@ class SubordinateRoleSubordinateEntityIdentifier(OpenApiModel):
 @dataclass(frozen=True)
 class Subunit(OpenApiModel):
     description: str
-    subjectNip: Nip
+    subject_nip: Nip = field(metadata={"json_key": "subjectNip"})
 
 @dataclass(frozen=True)
 class SubunitPermission(OpenApiModel):
-    authorIdentifier: SubunitPermissionsAuthorIdentifier
-    authorizedIdentifier: SubunitPermissionsAuthorizedIdentifier
+    author_identifier: SubunitPermissionsAuthorIdentifier = field(metadata={"json_key": "authorIdentifier"})
+    authorized_identifier: SubunitPermissionsAuthorizedIdentifier = field(metadata={"json_key": "authorizedIdentifier"})
     description: str
     id: PermissionId
-    permissionScope: SubunitPermissionScope
-    startDate: str
-    subunitIdentifier: SubunitPermissionsSubunitIdentifier
-    subjectPersonDetails: Optional[PermissionsSubjectPersonDetails] = None
-    subunitName: Optional[str] = None
+    permission_scope: SubunitPermissionScope = field(metadata={"json_key": "permissionScope"})
+    start_date: str = field(metadata={"json_key": "startDate"})
+    subunit_identifier: SubunitPermissionsSubunitIdentifier = field(metadata={"json_key": "subunitIdentifier"})
+    subject_person_details: Optional[PermissionsSubjectPersonDetails] = field(default=None, metadata={"json_key": "subjectPersonDetails"})
+    subunit_name: Optional[str] = field(default=None, metadata={"json_key": "subunitName"})
 
 @dataclass(frozen=True)
 class SubunitPermissionsAuthorIdentifier(OpenApiModel):
@@ -1817,15 +1817,15 @@ class SubunitPermissionsContextIdentifier(OpenApiModel):
 
 @dataclass(frozen=True)
 class SubunitPermissionsGrantRequest(OpenApiModel):
-    contextIdentifier: SubunitPermissionsContextIdentifier
+    context_identifier: SubunitPermissionsContextIdentifier = field(metadata={"json_key": "contextIdentifier"})
     description: str
-    subjectDetails: PersonPermissionSubjectDetails
-    subjectIdentifier: SubunitPermissionsSubjectIdentifier
-    subunitName: Optional[str] = None
+    subject_details: PersonPermissionSubjectDetails = field(metadata={"json_key": "subjectDetails"})
+    subject_identifier: SubunitPermissionsSubjectIdentifier = field(metadata={"json_key": "subjectIdentifier"})
+    subunit_name: Optional[str] = field(default=None, metadata={"json_key": "subunitName"})
 
 @dataclass(frozen=True)
 class SubunitPermissionsQueryRequest(OpenApiModel):
-    subunitIdentifier: Optional[SubunitPermissionsSubunitIdentifier] = None
+    subunit_identifier: Optional[SubunitPermissionsSubunitIdentifier] = field(default=None, metadata={"json_key": "subunitIdentifier"})
 
 @dataclass(frozen=True)
 class SubunitPermissionsSubjectIdentifier(OpenApiModel):
@@ -1855,18 +1855,18 @@ class TestDataContextIdentifier(OpenApiModel):
 @dataclass(frozen=True)
 class TestDataPermission(OpenApiModel):
     description: str
-    permissionType: TestDataPermissionType
+    permission_type: TestDataPermissionType = field(metadata={"json_key": "permissionType"})
 
 @dataclass(frozen=True)
 class TestDataPermissionsGrantRequest(OpenApiModel):
-    authorizedIdentifier: TestDataAuthorizedIdentifier
-    contextIdentifier: TestDataContextIdentifier
+    authorized_identifier: TestDataAuthorizedIdentifier = field(metadata={"json_key": "authorizedIdentifier"})
+    context_identifier: TestDataContextIdentifier = field(metadata={"json_key": "contextIdentifier"})
     permissions: list[TestDataPermission]
 
 @dataclass(frozen=True)
 class TestDataPermissionsRevokeRequest(OpenApiModel):
-    authorizedIdentifier: TestDataAuthorizedIdentifier
-    contextIdentifier: TestDataContextIdentifier
+    authorized_identifier: TestDataAuthorizedIdentifier = field(metadata={"json_key": "authorizedIdentifier"})
+    context_identifier: TestDataContextIdentifier = field(metadata={"json_key": "contextIdentifier"})
 
 @dataclass(frozen=True)
 class TokenAuthorIdentifierTypeIdentifier(OpenApiModel):
@@ -1881,19 +1881,19 @@ class TokenContextIdentifierTypeIdentifier(OpenApiModel):
 @dataclass(frozen=True)
 class TokenInfo(OpenApiModel):
     token: str
-    validUntil: str
+    valid_until: str = field(metadata={"json_key": "validUntil"})
 
 @dataclass(frozen=True)
 class TokenStatusResponse(OpenApiModel):
-    authorIdentifier: TokenAuthorIdentifierTypeIdentifier
-    contextIdentifier: TokenContextIdentifierTypeIdentifier
-    dateCreated: str
+    author_identifier: TokenAuthorIdentifierTypeIdentifier = field(metadata={"json_key": "authorIdentifier"})
+    context_identifier: TokenContextIdentifierTypeIdentifier = field(metadata={"json_key": "contextIdentifier"})
+    date_created: str = field(metadata={"json_key": "dateCreated"})
     description: str
-    referenceNumber: ReferenceNumber
-    requestedPermissions: list[TokenPermissionType]
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
+    requested_permissions: list[TokenPermissionType] = field(metadata={"json_key": "requestedPermissions"})
     status: AuthenticationTokenStatus
-    lastUseDate: Optional[str] = None
-    statusDetails: Optional[list[str]] = None
+    last_use_date: Optional[str] = field(default=None, metadata={"json_key": "lastUseDate"})
+    status_details: Optional[list[str]] = field(default=None, metadata={"json_key": "statusDetails"})
 
 @dataclass(frozen=True)
 class TooManyRequestsResponse(OpenApiModel):
@@ -1905,17 +1905,17 @@ class UnauthorizedProblemDetails(OpenApiModel):
     status: int
     title: str
     instance: Optional[str] = None
-    traceId: Optional[str] = None
+    trace_id: Optional[str] = field(default=None, metadata={"json_key": "traceId"})
 
 @dataclass(frozen=True)
 class UnblockContextAuthenticationRequest(OpenApiModel):
-    contextIdentifier: Optional[TestDataAuthenticationContextIdentifier] = None
+    context_identifier: Optional[TestDataAuthenticationContextIdentifier] = field(default=None, metadata={"json_key": "contextIdentifier"})
 
 @dataclass(frozen=True)
 class UpoPageResponse(OpenApiModel):
-    downloadUrl: str
-    downloadUrlExpirationDate: str
-    referenceNumber: ReferenceNumber
+    download_url: str = field(metadata={"json_key": "downloadUrl"})
+    download_url_expiration_date: str = field(metadata={"json_key": "downloadUrlExpirationDate"})
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
 
 @dataclass(frozen=True)
 class UpoResponse(OpenApiModel):

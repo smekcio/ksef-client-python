@@ -131,25 +131,28 @@ Minimalny przebieg integracji:
 - wykonanie pierwszego wywołania API, np. listowania metadanych faktur.
 
 ```python
-from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
-from ksef_client.services.workflows import AuthCoordinator
+from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment, models as m
+from ksef_client.services import AuthCoordinator
 
 with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as client:
-    token_cert_pem = ...  # usage: KsefTokenEncryption, client.security.get_public_key_certificates
+    token_cert_pem = client.security.get_public_key_certificate_pem(
+        m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
+    )
 
     access_token = AuthCoordinator(client.auth).authenticate_with_ksef_token(
         token=KSEF_TOKEN,
         public_certificate=token_cert_pem,
         context_identifier_type="nip",
         context_identifier_value="5265877635",
-    ).tokens.access_token.token
+    ).access_token
 
-    metadata = client.invoices.query_invoice_metadata(
-        {...},
+    metadata = client.invoices.query_invoice_metadata_by_date_range(
+        subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
+        date_type=m.InvoiceQueryDateType.ISSUE,
+        date_from="2026-01-01T00:00:00Z",
+        date_to="2026-01-31T23:59:59Z",
         access_token=access_token,
-        page_offset=0,
         page_size=10,
-        sort_order="Desc",
     )
 ```
 
@@ -200,9 +203,10 @@ send_result = OnlineSessionWorkflow(client.sessions).send_invoice(
 
 ```python
 from ksef_client.services.workflows import BatchSessionWorkflow
+from ksef_client import models as m
 
 session_reference_number = BatchSessionWorkflow(client.sessions, client.http_client).open_upload_and_close(
-    form_code={"systemCode": "FA (3)", "schemaVersion": "1-0E", "value": "FA"},
+    form_code=m.FormCode(system_code="FA (3)", schema_version="1-0E", value="FA"),
     zip_bytes=zip_bytes,
     public_certificate=symmetric_cert_pem,
     access_token=access_token,
@@ -254,6 +258,21 @@ Uruchomienie testów z kontrolą pokrycia:
 ```bash
 pytest --cov=ksef_client --cov-report=term-missing --cov-fail-under=100
 ```
+
+Regeneracja modeli OpenAPI z aktualnej oficjalnej specyfikacji KSeF:
+
+```bash
+python tools/generate_openapi_models.py --output src/ksef_client/openapi_models.py
+```
+
+Walidacja, że `src/ksef_client/openapi_models.py` jest zgodny z generatorem:
+
+```bash
+python tools/generate_openapi_models.py --check --output src/ksef_client/openapi_models.py
+```
+
+Przy pracy bez `--input` narzędzia próbują najpierw pobrać oficjalną specyfikację KSeF, a przy
+niedostępności endpointu przechodzą na ostatni snapshot zapisany w repo.
 
 Testy E2E w `tests/test_e2e_token_flows.py` wymagają osobnej konfiguracji środowiska i danych dostępowych.
 

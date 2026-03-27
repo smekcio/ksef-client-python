@@ -9,7 +9,7 @@ Dostępne są dwa podejścia:
 ## Wariant A: token KSeF
 
 ```python
-from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
+from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment, models as m
 from ksef_client.services import AuthCoordinator
 
 KSEF_TOKEN = "<TOKEN_KSEF>"
@@ -17,11 +17,8 @@ CONTEXT_TYPE = "nip"
 CONTEXT_VALUE = "5265877635"
 
 with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as client:
-    certs = client.security.get_public_key_certificates()
-    token_cert_pem = next(
-        c["certificate"]
-        for c in certs
-        if "KsefTokenEncryption" in (c.get("usage") or [])
+    token_cert_pem = client.security.get_public_key_certificate_pem(
+        m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
     )
 
     result = AuthCoordinator(client.auth).authenticate_with_ksef_token(
@@ -35,8 +32,8 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
         poll_interval_seconds=2.0,
     )
 
-    access_token = result.tokens.access_token.token
-    refresh_token = result.tokens.refresh_token.token
+    access_token = result.access_token
+    refresh_token = result.refresh_token
 ```
 
 `method="ec"` ma uzasadnienie m.in. w następujących przypadkach:
@@ -84,7 +81,7 @@ Refresh token jest wysyłany jako `Authorization: Bearer <refreshToken>`. W bibl
 
 ```python
 new_tokens = client.auth.refresh_access_token(refresh_token)
-access_token = new_tokens["accessToken"]["token"]
+access_token = new_tokens.access_token.token
 ```
 
 ## Najczęstsze problemy

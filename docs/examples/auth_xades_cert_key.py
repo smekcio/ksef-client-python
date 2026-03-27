@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import os
 
-from ksef_client.client import KsefClient
-from ksef_client.config import KsefClientOptions, KsefEnvironment
-from ksef_client.services import XadesKeyPair
-from ksef_client.services.workflows import AuthCoordinator
+from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
+from ksef_client.services import AuthCoordinator, XadesKeyPair
 
 
 def _env(name: str, default: str | None = None) -> str:

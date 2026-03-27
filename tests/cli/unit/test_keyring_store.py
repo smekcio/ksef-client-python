@@ -22,7 +22,8 @@ def test_keyring_store_roundtrip_file_fallback(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(keyring_store.os, "name", "posix", raising=False)
     monkeypatch.setenv(keyring_store._ALLOW_INSECURE_FALLBACK_ENV, "1")
 
-    keyring_store.save_tokens("demo", "acc", "ref")
+    with pytest.warns(UserWarning, match="plaintext token fallback"):
+        keyring_store.save_tokens("demo", "acc", "ref")
     fallback_path = tmp_path / "tokens.json"
     assert fallback_path.exists()
     assert keyring_store.get_tokens("demo") == ("acc", "ref")
@@ -194,9 +195,7 @@ def test_keyring_store_fallback_save_replace_error_cleans_temp_file(monkeypatch,
     assert not [path for path in tmp_path.iterdir() if path.suffix == ".tmp"]
 
 
-def test_keyring_store_file_fallback_recovers_from_corrupted_payload(
-    monkeypatch, tmp_path
-) -> None:
+def test_keyring_store_file_fallback_recovers_from_corrupted_payload(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", False)
     monkeypatch.setattr(keyring_store, "_keyring", None)
     monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)

@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 
-from ksef_client.client import KsefClient
-from ksef_client.config import KsefClientOptions, KsefEnvironment
-from ksef_client.services.workflows import AuthCoordinator
+from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
+from ksef_client import models as m
+from ksef_client.services import AuthCoordinator
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -28,21 +28,9 @@ def main() -> None:
     date_to = datetime.now(timezone.utc)
     date_from = date_to - timedelta(days=date_range_days)
 
-    payload = {
-        "subjectType": subject_type,
-        "dateRange": {
-            "dateType": "Issue",
-            "from": date_from.isoformat(),
-            "to": date_to.isoformat(),
-        },
-    }
-
     with KsefClient(KsefClientOptions(base_url=base_url)) as client:
-        certs = client.security.get_public_key_certificates()
-        token_cert_pem = next(
-            c["certificate"]
-            for c in certs
-            if "KsefTokenEncryption" in (c.get("usage") or [])
+        token_cert_pem = client.security.get_public_key_certificate_pem(
+            m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
         )
         access_token = AuthCoordinator(client.auth).authenticate_with_ksef_token(
             token=token,
@@ -51,22 +39,22 @@ def main() -> None:
             context_identifier_value=context_value,
             max_attempts=90,
             poll_interval_seconds=2.0,
-        ).tokens.access_token.token
+        ).access_token
 
-        metadata = client.invoices.query_invoice_metadata(
-            payload,
+        metadata = client.invoices.query_invoice_metadata_by_date_range(
+            subject_type=m.InvoiceQuerySubjectType(subject_type),
+            date_type=m.InvoiceQueryDateType.ISSUE,
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
             access_token=access_token,
-            page_offset=0,
             page_size=page_size,
-            sort_order="Desc",
         )
 
-    invoices = metadata.get("invoices") or metadata.get("invoiceList") or []
+    invoices = metadata.invoices
     print(f"Invoices returned: {len(invoices)}")
     for invoice in invoices:
-        print(invoice)
+        print(invoice.to_dict())
 
 
 if __name__ == "__main__":
     main()
-

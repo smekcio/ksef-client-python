@@ -7,8 +7,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ksef_client import models as m
 from ksef_client.exceptions import KsefHttpError, KsefRateLimitError
-from ksef_client.services.crypto import build_encryption_data
+from ksef_client.services.crypto import EncryptionData, build_encryption_data
 from ksef_client.services.workflows import (
     BatchSessionWorkflow,
     ExportWorkflow,
@@ -36,7 +37,7 @@ def _transient_retry_delay_seconds(
     poll_interval: float,
     exc: KsefHttpError,
 ) -> float:
-    retry_after = exc.retry_after if isinstance(exc, KsefRateLimitError) else None
+    retry_after = exc.retry_after_raw if isinstance(exc, KsefRateLimitError) else None
     policy = RetryPolicy(
         max_retries=max(1, attempt),
         base_delay_ms=max(1, int(poll_interval * 1000)),
@@ -137,11 +138,62 @@ def _safe_child_path(root: Path, relative_path: str) -> Path:
     return candidate
 
 
-def _select_certificate(certs: list[dict[str, Any]], usage_name: str) -> str:
+def _to_output_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        return value
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        return to_dict()
+    return value
+
+
+def _get_value(
+    payload: Any,
+    attr_name: str,
+    json_name: str | None = None,
+    default: Any = None,
+) -> Any:
+    if isinstance(payload, dict):
+        key = json_name or attr_name
+        return payload.get(key, default)
+    return getattr(payload, attr_name, default)
+
+
+def _as_string_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    result: list[str] = []
+    for item in values:
+        value = getattr(item, "value", item)
+        result.append(str(value))
+    return result
+
+
+def _extract_reference_number(payload: Any) -> str:
+    value = _get_value(payload, "reference_number", "referenceNumber")
+    return str(value or "")
+
+
+def _extract_ksef_number(payload: Any) -> str:
+    value = _get_value(payload, "ksef_number", "ksefNumber")
+    return str(value or "")
+
+
+def _extract_upo_reference(payload: Any) -> str:
+    direct = _get_value(payload, "upo_reference_number", "upoReferenceNumber")
+    if direct:
+        return str(direct)
+    upo = _get_value(payload, "upo")
+    nested = _get_value(upo, "reference_number", "referenceNumber")
+    return str(nested or "")
+
+
+def _select_certificate(certs: list[Any], usage_name: str) -> str:
     for cert in certs:
-        usage = cert.get("usage") or []
-        if usage_name in usage and cert.get("certificate"):
-            return str(cert["certificate"])
+        usage = _as_string_list(_get_value(cert, "usage", default=[]))
+        certificate = _get_value(cert, "certificate")
+        if usage_name in usage and certificate:
+            return str(certificate)
     raise CliError(
         f"Missing KSeF public certificate usage: {usage_name}.",
         ExitCode.API_ERROR,
@@ -149,7 +201,7 @@ def _select_certificate(certs: list[dict[str, Any]], usage_name: str) -> str:
     )
 
 
-def _build_form_code(system_code: str, schema_version: str, form_value: str) -> dict[str, str]:
+def _build_form_code(system_code: str, schema_version: str, form_value: str) -> m.FormCode:
     normalized_system_code = system_code.strip()
     normalized_schema_version = schema_version.strip()
     normalized_form_value = form_value.strip()
@@ -167,11 +219,22 @@ def _build_form_code(system_code: str, schema_version: str, form_value: str) -> 
     ):
         normalized_form_value = "FA_RR"
 
-    return {
-        "systemCode": normalized_system_code,
-        "schemaVersion": normalized_schema_version,
-        "value": normalized_form_value,
-    }
+    return m.FormCode(
+        system_code=normalized_system_code,
+        schema_version=normalized_schema_version,
+        value=normalized_form_value,
+    )
+
+
+def _require_encryption_info(encryption: EncryptionData) -> m.EncryptionInfo:
+    encryption_info = getattr(encryption, "encryption_info", None)
+    if encryption_info is None:
+        raise CliError(
+            "Missing encryption metadata.",
+            ExitCode.CONFIG_ERROR,
+            "Regenerate encryption data before opening a session or export.",
+        )
+    return encryption_info
 
 
 def _load_invoice_xml(path: str) -> bytes:
@@ -250,11 +313,11 @@ def _validate_polling_options(poll_interval: float, max_attempts: int) -> None:
         )
 
 
-def _extract_status_fields(payload: dict[str, Any]) -> tuple[int, str, str]:
-    status = payload.get("status") or {}
-    code = int(status.get("code", 0))
-    description = str(status.get("description", ""))
-    details = status.get("details") or []
+def _extract_status_fields(payload: Any) -> tuple[int, str, str]:
+    status = _get_value(payload, "status", default={}) or {}
+    code = int(_get_value(status, "code", default=0) or 0)
+    description = str(_get_value(status, "description", default="") or "")
+    details = _get_value(status, "details", default=[]) or []
     details_text = ", ".join(str(item) for item in details) if isinstance(details, list) else ""
     return code, description, details_text
 
@@ -267,7 +330,7 @@ def _wait_for_invoice_status(
     access_token: str,
     poll_interval: float,
     max_attempts: int,
-) -> dict[str, Any]:
+) -> Any:
     for _ in range(max_attempts):
         try:
             status_payload = client.sessions.get_session_invoice_status(
@@ -336,7 +399,7 @@ def _wait_for_session_status(
     access_token: str,
     poll_interval: float,
     max_attempts: int,
-) -> dict[str, Any]:
+) -> Any:
     for _ in range(max_attempts):
         try:
             status_payload = client.sessions.get_session_status(
@@ -401,7 +464,7 @@ def _wait_for_export_status(
     access_token: str,
     poll_interval: float,
     max_attempts: int,
-) -> dict[str, Any]:
+) -> Any:
     for attempt in range(1, max_attempts + 1):
         try:
             payload = client.invoices.get_export_status(reference_number, access_token=access_token)
@@ -503,20 +566,22 @@ def list_invoices(
 
     with create_client(base_url, access_token=access_token) as client:
         response = client.invoices.query_invoice_metadata(
-            payload,
+            m.InvoiceQueryFilters.from_dict(payload),
             access_token=access_token,
             page_offset=page_offset,
             page_size=page_size,
             sort_order=sort_order,
         )
 
-    invoices = response.get("invoices") or response.get("invoiceList") or []
-    continuation_token = response.get("continuationToken")
+    invoices = _get_value(response, "invoices", default=[]) or []
+    if isinstance(response, dict) and not invoices:
+        invoices = response.get("invoiceList") or []
+    continuation_token = _get_value(response, "continuation_token", "continuationToken", "")
     return {
         "count": len(invoices),
         "from": from_iso,
         "to": to_iso,
-        "items": invoices,
+        "items": [_to_output_payload(item) for item in invoices],
         "continuation_token": continuation_token or "",
     }
 
@@ -645,7 +710,7 @@ def wait_for_upo(
                         time.sleep(poll_interval)
                         continue
                     raise
-                code = int((status.get("status") or {}).get("code", 0))
+                code, _, _ = _extract_status_fields(status)
                 if code == 200:
                     upo_bytes = client.sessions.get_session_invoice_upo_by_ref(
                         session_ref, invoice_ref, access_token=access_token
@@ -709,9 +774,7 @@ def wait_for_upo(
                         time.sleep(poll_interval)
                         continue
                     raise
-                detected_upo_ref = session_status.get("upoReferenceNumber") or (
-                    session_status.get("upo") or {}
-                ).get("referenceNumber")
+                detected_upo_ref = _extract_upo_reference(session_status) or None
 
             time.sleep(poll_interval)
 
@@ -772,8 +835,8 @@ def send_online_invoice(
                 encryption_data=session.encryption_data,
                 access_token=access_token,
             )
-            invoice_ref = send_response.get("referenceNumber")
-            if not isinstance(invoice_ref, str) or not invoice_ref:
+            invoice_ref = _extract_reference_number(send_response)
+            if not invoice_ref:
                 raise CliError(
                     "Send response does not contain invoice reference number.",
                     ExitCode.API_ERROR,
@@ -797,11 +860,7 @@ def send_online_invoice(
                 code, description, _ = _extract_status_fields(status_payload)
                 result["status_code"] = code
                 result["status_description"] = description
-                ksef_number = status_payload.get("ksefNumber")
-                if isinstance(ksef_number, str) and ksef_number:
-                    result["ksef_number"] = ksef_number
-                else:
-                    result["ksef_number"] = ""
+                result["ksef_number"] = _extract_ksef_number(status_payload)
 
             if wait_upo:
                 upo_bytes = _wait_for_invoice_upo(
@@ -913,11 +972,7 @@ def send_batch_invoices(
             result["status_code"] = code
             result["status_description"] = description
 
-            upo_ref = (
-                session_status.get("upoReferenceNumber")
-                or (session_status.get("upo") or {}).get("referenceNumber")
-                or ""
-            )
+            upo_ref = _extract_upo_reference(session_status)
             result["upo_ref"] = str(upo_ref or "")
 
             if wait_upo:
@@ -961,6 +1016,7 @@ def get_send_status(
 ) -> dict[str, Any]:
     access_token = _require_access_token(profile)
     with create_client(base_url, access_token=access_token) as client:
+        payload: Any
         if invoice_ref:
             payload = client.sessions.get_session_invoice_status(
                 session_ref,
@@ -974,16 +1030,15 @@ def get_send_status(
             )
 
     code, description, details = _extract_status_fields(payload)
-    upo_ref = payload.get("upoReferenceNumber") or (payload.get("upo") or {}).get("referenceNumber")
     return {
         "session_ref": session_ref,
         "invoice_ref": invoice_ref or "",
         "status_code": code,
         "status_description": description,
         "status_details": details,
-        "ksef_number": payload.get("ksefNumber", ""),
-        "upo_ref": upo_ref or "",
-        "response": payload,
+        "ksef_number": _extract_ksef_number(payload),
+        "upo_ref": _extract_upo_reference(payload),
+        "response": _to_output_payload(payload),
     }
 
 
@@ -1009,10 +1064,11 @@ def run_export(
         certs = client.security.get_public_key_certificates()
         symmetric_cert = _select_certificate(certs, "SymmetricKeyEncryption")
         encryption = build_encryption_data(symmetric_cert)
+        encryption_info = _require_encryption_info(encryption)
         payload = {
             "encryption": {
-                "encryptedSymmetricKey": encryption.encryption_info.encrypted_symmetric_key,
-                "initializationVector": encryption.encryption_info.initialization_vector,
+                "encryptedSymmetricKey": encryption_info.encrypted_symmetric_key,
+                "initializationVector": encryption_info.initialization_vector,
             },
             "onlyMetadata": only_metadata,
             "filters": {
@@ -1024,9 +1080,12 @@ def run_export(
                 },
             },
         }
-        start = client.invoices.export_invoices(payload, access_token=access_token)
-        reference_number = start.get("referenceNumber")
-        if not isinstance(reference_number, str) or not reference_number:
+        start = client.invoices.export_invoices(
+            m.InvoiceExportRequest.from_dict(payload),
+            access_token=access_token,
+        )
+        reference_number = _extract_reference_number(start)
+        if not reference_number:
             raise CliError(
                 "Export response does not contain reference number.",
                 ExitCode.API_ERROR,
@@ -1040,13 +1099,15 @@ def run_export(
             poll_interval=poll_interval,
             max_attempts=max_attempts,
         )
-        package = export_status.get("package")
-        if not isinstance(package, dict):
+        package = _get_value(export_status, "package")
+        if package is None:
             raise CliError(
                 "Export completed but package metadata is missing.",
                 ExitCode.API_ERROR,
                 "Check KSeF export status response.",
             )
+        if isinstance(package, dict):
+            package = m.InvoicePackage.from_dict(package)
 
         workflow = ExportWorkflow(client.invoices, client.http_client)
         processed = workflow.download_and_process_package(package, encryption)
@@ -1095,7 +1156,7 @@ def get_export_status(
         "status_code": code,
         "status_description": description,
         "status_details": details,
-        "response": payload,
+        "response": _to_output_payload(payload),
     }
 
 
@@ -1153,9 +1214,7 @@ def run_health_check(
                 certs = client.security.get_public_key_certificates()
             usages: set[str] = set()
             for cert in certs:
-                usage = cert.get("usage") or []
-                if isinstance(usage, list):
-                    usages.update(str(item) for item in usage)
+                usages.update(_as_string_list(_get_value(cert, "usage", default=[])))
             required = {"KsefTokenEncryption", "SymmetricKeyEncryption"}
             missing = sorted(required - usages)
             checks.append(

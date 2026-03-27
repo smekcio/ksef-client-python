@@ -68,7 +68,12 @@ def test_send_status_auth_error_exit_code(runner, monkeypatch) -> None:
     ("error", "expected_exit"),
     [
         (
-            KsefRateLimitError(status_code=429, message="too many requests", retry_after="7"),
+            KsefRateLimitError(
+                status_code=429,
+                message="too many requests",
+                retry_after=7,
+                retry_after_raw="7",
+            ),
             ExitCode.RETRY_EXHAUSTED,
         ),
         (KsefApiError(status_code=400, message="bad request"), ExitCode.API_ERROR),
@@ -90,7 +95,12 @@ def test_send_status_mapped_error_exit_codes(runner, monkeypatch, error, expecte
 def test_send_status_json_rate_limit_error_envelope(runner, monkeypatch) -> None:
     def _raise_error(**kwargs):
         _ = kwargs
-        raise KsefRateLimitError(status_code=429, message="too many requests", retry_after="7")
+        raise KsefRateLimitError(
+            status_code=429,
+            message="too many requests",
+            retry_after=7,
+            retry_after_raw="7",
+        )
 
     monkeypatch.setattr(send_cmd, "get_send_status", _raise_error)
 

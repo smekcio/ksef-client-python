@@ -23,22 +23,25 @@ class ModelsTests(unittest.TestCase):
         self.assertEqual(parsed.client_ip, "203.0.113.10")
 
     def test_auth_init_from_dict(self):
-        data = {"referenceNumber": "ref", "authenticationToken": {"token": "tok"}}
+        data = {
+            "referenceNumber": "ref",
+            "authenticationToken": {"token": "tok", "validUntil": "2024-01-01"},
+        }
         parsed = models.AuthenticationInitResponse.from_dict(data)
         self.assertEqual(parsed.reference_number, "ref")
         self.assertEqual(parsed.authentication_token.token, "tok")
 
     def test_auth_tokens_from_dict(self):
         data = {
-            "accessToken": {"token": "acc"},
-            "refreshToken": {"token": "ref"},
+            "accessToken": {"token": "acc", "validUntil": "2024-01-01"},
+            "refreshToken": {"token": "ref", "validUntil": "2024-02-01"},
         }
         parsed = models.AuthenticationTokensResponse.from_dict(data)
         self.assertEqual(parsed.access_token.token, "acc")
         self.assertEqual(parsed.refresh_token.token, "ref")
 
     def test_auth_token_refresh(self):
-        data = {"accessToken": {"token": "acc"}}
+        data = {"accessToken": {"token": "acc", "validUntil": "2024-01-01"}}
         parsed = models.AuthenticationTokenRefreshResponse.from_dict(data)
         self.assertEqual(parsed.access_token.token, "acc")
 

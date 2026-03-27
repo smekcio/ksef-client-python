@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from ksef_client import models as m
 from ksef_client.cli.errors import CliError
 from ksef_client.cli.exit_codes import ExitCode
 from ksef_client.cli.sdk import adapters
@@ -66,8 +67,8 @@ def test_list_invoices_success(monkeypatch) -> None:
     assert seen["page_size"] == 10
     assert seen["sort_order"] == "Desc"
     payload = seen["payload"]
-    assert isinstance(payload, dict)
-    assert payload["subjectType"] == "Subject1"
+    assert isinstance(payload, m.InvoiceQueryFilters)
+    assert payload.subject_type.value == "Subject1"
 
 
 def test_list_invoices_requires_token(monkeypatch) -> None:
@@ -1189,7 +1190,7 @@ def test_build_form_code_validation() -> None:
 
 def test_build_form_code_normalizes_fa_rr_1_1e_value() -> None:
     form_code = adapters._build_form_code("FA_RR (1)", "1-1E", "RR")
-    assert form_code["value"] == "FA_RR"
+    assert form_code.value == "FA_RR"
 
 
 def test_load_invoice_xml_missing_and_empty(tmp_path) -> None:
@@ -1960,7 +1961,15 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
 
         def get_export_status(self, reference_number, access_token):
             _ = (reference_number, access_token)
-            return {"status": {"code": 200, "description": "Done"}, "package": {"parts": []}}
+            return {
+                "status": {"code": 200, "description": "Done"},
+                "package": {
+                    "invoiceCount": 0,
+                    "size": 0,
+                    "isTruncated": False,
+                    "parts": [],
+                },
+            }
 
     class _FakeExportWorkflow:
         def __init__(self, invoices_client, http_client):
@@ -2008,8 +2017,8 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
     assert result["metadata_count"] == 1
     assert result["only_metadata"] is False
     payload = seen["payload"]
-    assert isinstance(payload, dict)
-    assert payload["onlyMetadata"] is False
+    assert isinstance(payload, m.InvoiceExportRequest)
+    assert payload.only_metadata is False
     assert (tmp_path / "_metadata.json").exists()
     assert (tmp_path / "a.xml").read_text(encoding="utf-8") == "<xml/>"
 
@@ -2031,7 +2040,24 @@ def test_run_export_only_metadata_success(monkeypatch, tmp_path) -> None:
             _ = (reference_number, access_token)
             return {
                 "status": {"code": 200, "description": "Done"},
-                "package": {"parts": [{"url": "https://example.com", "method": "GET"}]},
+                "package": {
+                    "invoiceCount": 0,
+                    "size": 0,
+                    "isTruncated": False,
+                    "parts": [
+                        {
+                            "ordinalNumber": 1,
+                            "partName": "p1",
+                            "method": "GET",
+                            "url": "https://example.com",
+                            "partSize": 1,
+                            "partHash": "h",
+                            "encryptedPartSize": 2,
+                            "encryptedPartHash": "eh",
+                            "expirationDate": "2026-03-27T12:00:00Z",
+                        }
+                    ],
+                },
             }
 
     class _FakeExportWorkflow:
@@ -2083,8 +2109,8 @@ def test_run_export_only_metadata_success(monkeypatch, tmp_path) -> None:
     assert result["xml_files_count"] == 0
     assert result["only_metadata"] is True
     payload = seen["payload"]
-    assert isinstance(payload, dict)
-    assert payload["onlyMetadata"] is True
+    assert isinstance(payload, m.InvoiceExportRequest)
+    assert payload.only_metadata is True
     assert (tmp_path / "_metadata.json").exists()
     assert list(tmp_path.glob("*.xml")) == []
 
@@ -2162,6 +2188,40 @@ def test_run_export_missing_reference_and_package(monkeypatch, tmp_path) -> None
             out=str(tmp_path),
         )
     assert no_package.value.code == ExitCode.API_ERROR
+
+
+def test_run_export_requires_encryption_metadata(monkeypatch, tmp_path) -> None:
+    class _Security:
+        def get_public_key_certificates(self):
+            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+
+    fake_encryption = adapters.EncryptionData(key=b"k" * 32, iv=b"i" * 16, encryption_info=None)
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert: fake_encryption)
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(
+            invoices=SimpleNamespace(),
+            security=_Security(),
+            http_client=SimpleNamespace(),
+        ),
+    )
+
+    with pytest.raises(CliError) as exc:
+        adapters.run_export(
+            profile="demo",
+            base_url="https://example.invalid",
+            date_from="2026-01-01",
+            date_to="2026-01-31",
+            subject_type="Subject1",
+            poll_interval=0.01,
+            max_attempts=1,
+            out=str(tmp_path),
+        )
+
+    assert exc.value.code == ExitCode.CONFIG_ERROR
 
 
 def test_get_export_status_success(monkeypatch) -> None:
