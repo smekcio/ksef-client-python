@@ -13,6 +13,8 @@ from ksef_client.http import (
     _host_allowed,
     _is_json_content_type,
     _merge_headers,
+    _parse_api_problem,
+    _parse_retry_after,
     _validate_presigned_url_security,
 )
 
@@ -242,6 +244,48 @@ class HttpTests(unittest.TestCase):
         options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
         with self.assertRaisesRegex(ValueError, "host is missing"):
             _validate_presigned_url_security(options, "https:///no-host")
+
+    def test_parse_retry_after_variants(self):
+        self.assertIsNone(_parse_retry_after(None))
+        self.assertEqual(_parse_retry_after("5"), 5)
+        self.assertIsNone(_parse_retry_after("bad"))
+
+    def test_parse_api_problem_variants(self):
+        self.assertIsNone(_parse_api_problem(400, []))
+
+        exception_problem = _parse_api_problem(400, {"exception": {}})
+        self.assertIsInstance(exception_problem, models.ExceptionResponse)
+
+        forbidden = _parse_api_problem(
+            403,
+            {
+                "title": "Forbidden",
+                "status": 403,
+                "detail": "Missing permissions",
+                "reasonCode": "missing-permissions",
+            },
+        )
+        self.assertIsInstance(forbidden, models.ForbiddenProblemDetails)
+
+        unauthorized = _parse_api_problem(
+            401,
+            {"title": "Unauthorized", "status": 401, "detail": "Missing bearer token"},
+        )
+        self.assertIsInstance(unauthorized, models.UnauthorizedProblemDetails)
+
+        unknown = _parse_api_problem(400, {"title": "Bad", "detail": "x"})
+        self.assertIsInstance(unknown, models.UnknownApiProblem)
+        self.assertIsNotNone(unknown)
+        assert unknown is not None
+        self.assertEqual(unknown.title, "Bad")
+
+        raw_unknown = _parse_api_problem(400, {"error": "bad"})
+        self.assertIsInstance(raw_unknown, models.UnknownApiProblem)
+        self.assertIsNotNone(raw_unknown)
+        assert raw_unknown is not None
+        self.assertEqual(raw_unknown.status, 400)
+
+        self.assertIsNone(_parse_api_problem(400, {}))
 
 
 class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):

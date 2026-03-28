@@ -34,6 +34,11 @@ class _FakeClient:
         _ = (exc_type, exc, tb)
 
 
+class _ToDictPayload:
+    def to_dict(self):
+        return {"value": "ok"}
+
+
 def test_list_invoices_success(monkeypatch) -> None:
     seen: dict[str, object] = {}
 
@@ -69,6 +74,13 @@ def test_list_invoices_success(monkeypatch) -> None:
     payload = seen["payload"]
     assert isinstance(payload, m.InvoiceQueryFilters)
     assert payload.subject_type.value == "Subject1"
+
+
+def test_to_output_payload_variants() -> None:
+    assert adapters._to_output_payload({"x": 1}) == {"x": 1}
+    assert adapters._to_output_payload(_ToDictPayload()) == {"value": "ok"}
+    marker = object()
+    assert adapters._to_output_payload(marker) is marker
 
 
 def test_list_invoices_requires_token(monkeypatch) -> None:

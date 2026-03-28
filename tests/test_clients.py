@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 
 from ksef_client import models as m
-from ksef_client.clients.auth import AsyncAuthClient, AuthClient
+from ksef_client.clients.auth import AsyncAuthClient, AuthClient, _parse_init_response
 from ksef_client.clients.certificates import AsyncCertificatesClient, CertificatesClient
 from ksef_client.clients.invoices import (
     AsyncInvoicesClient,
@@ -13,13 +13,23 @@ from ksef_client.clients.invoices import (
     _build_invoice_query_filters,
     _normalize_datetime_without_offset,
     _normalize_invoice_date_range_payload,
+    _normalize_invoice_query_date_type,
+    _normalize_invoice_query_subject_type,
 )
 from ksef_client.clients.lighthouse import AsyncLighthouseClient, LighthouseClient
 from ksef_client.clients.limits import AsyncLimitsClient, LimitsClient
 from ksef_client.clients.peppol import AsyncPeppolClient, PeppolClient
-from ksef_client.clients.permissions import AsyncPermissionsClient, PermissionsClient, _page_params
+from ksef_client.clients.permissions import (
+    AsyncPermissionsClient,
+    PermissionsClient,
+    _page_params,
+)
 from ksef_client.clients.rate_limits import AsyncRateLimitsClient, RateLimitsClient
-from ksef_client.clients.security import AsyncSecurityClient, SecurityClient
+from ksef_client.clients.security import (
+    AsyncSecurityClient,
+    SecurityClient,
+    _normalize_certificate_usage,
+)
 from ksef_client.clients.sessions import AsyncSessionsClient, SessionsClient
 from ksef_client.clients.testdata import AsyncTestDataClient, TestDataClient
 from ksef_client.clients.tokens import AsyncTokensClient, TokensClient
@@ -144,6 +154,10 @@ class ClientsTests(unittest.TestCase):
             self.assertIsNone(request_model.call_args.kwargs["headers"])
             self.assertIsNone(request_model.call_args.kwargs["params"])
 
+    def test_parse_init_response_rejects_non_object_payload(self):
+        with self.assertRaises(TypeError):
+            _parse_init_response(b"[]", path="/auth/xades-signature")
+
     def test_sessions_client(self):
         client = SessionsClient(self.http)
         with (
@@ -175,6 +189,7 @@ class ClientsTests(unittest.TestCase):
             client.get_session_failed_invoices(
                 "ref", page_size=1, continuation_token="cont", access_token="token"
             )
+            client.get_session_status("ref", access_token="token")
             client.get_session_invoice_status("ref", "inv", access_token="token")
             self.assertEqual(
                 client.get_session_invoice_upo_by_ref("ref", "inv", access_token="token"), b"upo"
@@ -281,6 +296,14 @@ class ClientsTests(unittest.TestCase):
         )
         self.assertEqual(built_filters.subject_type.value, "Subject1")
         self.assertEqual(built_filters.date_range.date_type.value, "Issue")
+        self.assertEqual(
+            _normalize_invoice_query_subject_type(m.InvoiceQuerySubjectType.SUBJECT1),
+            m.InvoiceQuerySubjectType.SUBJECT1,
+        )
+        self.assertEqual(
+            _normalize_invoice_query_date_type(m.InvoiceQueryDateType.ISSUE),
+            m.InvoiceQueryDateType.ISSUE,
+        )
 
     def test_other_clients(self):
         payload: Any = object()
@@ -290,8 +313,36 @@ class ClientsTests(unittest.TestCase):
             permissions.check_attachment_permission_status("token")
             permissions.grant_authorization(payload, access_token="token")
             permissions.revoke_authorization("perm", access_token="token")
+            permissions.revoke_common_permission("perm", access_token="token")
             permissions.grant_entity(payload, access_token="token")
+            permissions.grant_eu_entity(payload, access_token="token")
+            permissions.grant_eu_entity_admin(payload, access_token="token")
+            permissions.grant_indirect(payload, access_token="token")
+            permissions.grant_person(payload, access_token="token")
+            permissions.grant_subunit(payload, access_token="token")
+            permissions.get_operation_status("op-ref", access_token="token")
+            permissions.query_authorizations_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
             permissions.query_entities_roles(page_offset=0, page_size=10, access_token="token")
+            permissions.query_entities_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
+            permissions.query_eu_entities_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
+            permissions.query_personal_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
+            permissions.query_persons_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
+            permissions.query_subordinate_entities_roles(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
+            permissions.query_subunits_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
         self.assertEqual(_page_params(None, None), {})
 
         certificates = CertificatesClient(self.http)
@@ -385,8 +436,14 @@ class ClientsTests(unittest.TestCase):
             self.assertEqual(selected_pem, "pem-1")
             selected_from_str = security.get_public_key_certificate("KsefTokenEncryption")
             self.assertEqual(selected_from_str.certificate, "pem-1")
+            self.assertEqual(
+                _normalize_certificate_usage("ksef_token_encryption"),
+                m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
+            )
             with self.assertRaises(ValueError):
                 security.get_public_key_certificate("SymmetricKeyEncryption")
+            with self.assertRaises(ValueError):
+                _normalize_certificate_usage("bad-usage")
 
         testdata = TestDataClient(self.http)
         with (
@@ -514,27 +571,47 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 sessions, "_request_model", AsyncMock(return_value=object())
             ) as request_model,
-            patch.object(sessions, "_request_json", AsyncMock()),
+            patch.object(sessions, "_request_json", AsyncMock()) as request_json,
             patch.object(sessions, "_request_bytes", AsyncMock(return_value=b"upo")),
         ):
             await sessions.get_sessions(
-                session_type="online", continuation_token="cont", access_token="token"
+                session_type="online",
+                page_size=1,
+                continuation_token="cont",
+                reference_number="ref",
+                date_created_from="2024-01-01",
+                date_created_to="2024-01-02",
+                date_closed_from="2024-01-03",
+                date_closed_to="2024-01-04",
+                date_modified_from="2024-01-05",
+                date_modified_to="2024-01-06",
+                statuses=["OK"],
+                access_token="token",
             )
             await sessions.open_online_session(payload, access_token="token", upo_v43=True)
             await sessions.send_online_invoice("ref", payload, access_token="token")
             await sessions.open_batch_session(payload, access_token="token", upo_v43=True)
             await sessions.get_session_invoices(
-                "ref", continuation_token="cont", access_token="token"
+                "ref", page_size=1, continuation_token="cont", access_token="token"
             )
             await sessions.get_session_failed_invoices(
-                "ref", continuation_token="cont", access_token="token"
+                "ref", page_size=1, continuation_token="cont", access_token="token"
             )
             await sessions.get_session_invoice_status("ref", "inv", access_token="token")
             await sessions.get_session_invoice_upo_by_ref("ref", "inv", access_token="token")
             await sessions.get_session_invoice_upo_by_ksef("ref", "ksef", access_token="token")
             await sessions.get_session_upo("ref", "upo", access_token="token")
+            await sessions.close_online_session("ref", "token")
+            await sessions.close_batch_session("ref", "token")
+            await sessions.get_session_status("ref", "token")
+            self.assertEqual(
+                request_model.call_args_list[0].kwargs["params"]["referenceNumber"], "ref"
+            )
             self.assertEqual(
                 request_model.call_args_list[1].kwargs["headers"], {"X-KSeF-Feature": "upo-v4-3"}
+            )
+            request_json.assert_any_await(
+                "POST", "/sessions/online/ref/close", access_token="token", expected_status={204}
             )
 
         invoices = AsyncInvoicesClient(self.http)
@@ -554,6 +631,8 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
                 date_from="2025-01-02T10:15:00",
                 date_to="2025-01-02T11:15:00",
                 access_token="token",
+                page_offset=0,
+                page_size=5,
                 sort_order="Desc",
             )
             await invoices.export_invoices(_export_payload(), access_token="token")
@@ -571,15 +650,45 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 request_model.call_args_list[1].kwargs["params"],
-                {"sortOrder": "Desc"},
+                {"pageOffset": 0, "pageSize": 5, "sortOrder": "Desc"},
             )
 
         permissions = AsyncPermissionsClient(self.http)
         with patch.object(permissions, "_request_model", AsyncMock(return_value=object())):
             await permissions.check_attachment_permission_status("token")
             await permissions.grant_authorization(payload, access_token="token")
+            await permissions.revoke_authorization("perm", access_token="token")
+            await permissions.revoke_common_permission("perm", access_token="token")
+            await permissions.grant_entity(payload, access_token="token")
+            await permissions.grant_eu_entity(payload, access_token="token")
+            await permissions.grant_eu_entity_admin(payload, access_token="token")
+            await permissions.grant_indirect(payload, access_token="token")
+            await permissions.grant_person(payload, access_token="token")
+            await permissions.grant_subunit(payload, access_token="token")
+            await permissions.get_operation_status("op-ref", access_token="token")
+            await permissions.query_authorizations_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
             await permissions.query_entities_roles(
                 page_offset=0, page_size=10, access_token="token"
+            )
+            await permissions.query_entities_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
+            await permissions.query_eu_entities_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
+            await permissions.query_personal_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
+            await permissions.query_persons_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
+            await permissions.query_subordinate_entities_roles(
+                payload, page_offset=0, page_size=10, access_token="token"
+            )
+            await permissions.query_subunits_grants(
+                payload, page_offset=0, page_size=10, access_token="token"
             )
 
         certificates = AsyncCertificatesClient(self.http)
@@ -587,28 +696,46 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 certificates, "_request_model", AsyncMock(return_value=object())
             ) as request_model,
-            patch.object(certificates, "_request_json", AsyncMock()),
+            patch.object(certificates, "_request_json", AsyncMock()) as request_json,
         ):
+            await certificates.get_limits("token")
+            await certificates.get_enrollment_data("token")
+            await certificates.send_enrollment(payload, access_token="token")
+            await certificates.get_enrollment_status("ref", access_token="token")
             await certificates.query_certificates(
                 payload, page_size=10, page_offset=0, access_token="token"
             )
+            await certificates.retrieve_certificate(payload, access_token="token")
             await certificates.revoke_certificate("serial", payload, access_token="token")
             self.assertEqual(
-                request_model.call_args.kwargs["params"], {"pageSize": 10, "pageOffset": 0}
+                request_model.call_args_list[4].kwargs["params"], {"pageSize": 10, "pageOffset": 0}
             )
+            request_json.assert_awaited_once()
 
         tokens = AsyncTokensClient(self.http)
         with (
             patch.object(
                 tokens, "_request_model", AsyncMock(return_value=object())
             ) as request_model,
-            patch.object(tokens, "_request_json", AsyncMock()),
+            patch.object(tokens, "_request_json", AsyncMock()) as request_json,
         ):
-            await tokens.list_tokens(access_token="token", continuation_token="cont")
+            await tokens.generate_token(payload, access_token="token")
+            await tokens.list_tokens(
+                access_token="token",
+                statuses=["active"],
+                description="desc",
+                author_identifier="id",
+                author_identifier_type="nip",
+                page_size=10,
+                continuation_token="cont",
+            )
+            await tokens.get_token_status("ref", access_token="token")
             await tokens.revoke_token("ref", access_token="token")
             self.assertEqual(
-                request_model.call_args.kwargs["headers"], {"x-continuation-token": "cont"}
+                request_model.call_args_list[1].kwargs["headers"], {"x-continuation-token": "cont"}
             )
+            self.assertEqual(request_model.call_args_list[1].kwargs["params"]["pageSize"], 10)
+            request_json.assert_awaited_once()
         with patch.object(
             tokens, "_request_model", AsyncMock(return_value=object())
         ) as request_model:
@@ -655,6 +782,10 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
                 "SymmetricKeyEncryption"
             )
             self.assertEqual(selected_from_str.certificate, "pem-1")
+            self.assertEqual(
+                _normalize_certificate_usage("symmetric-key-encryption"),
+                m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION,
+            )
             with self.assertRaises(ValueError):
                 await security.get_public_key_certificate("KsefTokenEncryption")
 
@@ -666,15 +797,30 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             patch.object(testdata, "_request_json", AsyncMock()) as request_json,
         ):
             await testdata.create_subject(payload)
+            await testdata.remove_subject(payload)
+            await testdata.create_person(payload)
+            await testdata.remove_person(payload)
+            await testdata.grant_permissions(payload)
+            await testdata.revoke_permissions(payload)
+            await testdata.enable_attachment(payload)
+            await testdata.disable_attachment(payload)
+            await testdata.block_context_authentication(payload)
+            await testdata.unblock_context_authentication(payload)
             await testdata.change_session_limits(payload, access_token="token")
+            await testdata.reset_session_limits(access_token="token")
+            await testdata.change_certificate_limits(payload, access_token="token")
+            await testdata.reset_certificate_limits(access_token="token")
+            await testdata.set_rate_limits(payload, access_token="token")
+            await testdata.reset_rate_limits(access_token="token")
             await testdata.restore_production_rate_limits(access_token="token")
-            self.assertEqual(request_json.await_count, 1)
-            self.assertEqual(request_model.await_count, 2)
+            self.assertEqual(request_json.await_count, 10)
+            self.assertEqual(request_model.await_count, 7)
 
         peppol = AsyncPeppolClient(self.http)
         with patch.object(
             peppol, "_request_model", AsyncMock(return_value=object())
         ) as request_model:
+            await peppol.list_providers(page_offset=0, page_size=10)
             await peppol.list_providers()
             self.assertIsNone(request_model.call_args.kwargs["params"])
 
