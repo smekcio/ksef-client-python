@@ -115,7 +115,7 @@ def _generate_alias(name: str, schema: dict) -> list[str]:
 
 
 def _generate_enum(name: str, schema: dict) -> list[str]:
-    lines = [f"class {name}(Enum):"]
+    lines = [f"class {name}(OpenApiEnum):"]
     used: set[str] = set()
     for value in schema.get("enum", []):
         value_str = str(value)
@@ -191,6 +191,20 @@ def render_models(data: dict[str, Any]) -> str:
         "",
         'T = TypeVar("T", bound="OpenApiModel")',
         "_TYPE_CACHE: dict[type, dict[str, Any]] = {}",
+        "",
+        "class OpenApiEnum(str, Enum):",
+        "    @classmethod",
+        "    def _missing_(cls, value: object) -> OpenApiEnum:",
+        "        if not isinstance(value, str):",
+        '            raise ValueError(f"{value!r} is not a valid {cls.__name__}")',
+        "        existing = cls._value2member_map_.get(value)",
+        "        if existing is not None:",
+        "            return existing",
+        "        pseudo_member = str.__new__(cls, value)",
+        '        pseudo_member._name_ = f"UNKNOWN__{len(cls._value2member_map_) + 1}"',
+        "        pseudo_member._value_ = value",
+        "        cls._value2member_map_[value] = pseudo_member",
+        "        return pseudo_member",
         "",
         "def _get_type_map(cls: type) -> dict[str, Any]:",
         "    cached = _TYPE_CACHE.get(cls)",
@@ -282,8 +296,13 @@ def generate_models(
     output_path: Path,
     *,
     snapshot_path: Path = DEFAULT_KSEF_OPENAPI_FALLBACK_PATH,
+    allow_fallback: bool = True,
 ) -> None:
-    document = load_openapi_document(input_path=input_path, fallback_path=snapshot_path)
+    document = load_openapi_document(
+        input_path=input_path,
+        fallback_path=snapshot_path,
+        allow_fallback=allow_fallback,
+    )
     data = parse_openapi_json(document)
     rendered = render_models(data)
     output_path.write_text(rendered, encoding="utf-8", newline="\n")
@@ -291,8 +310,13 @@ def generate_models(
         write_openapi_snapshot(document.text, snapshot_path=snapshot_path)
 
 
-def check_generated_models(input_path: Path | None, output_path: Path) -> str | None:
-    document = load_openapi_document(input_path=input_path)
+def check_generated_models(
+    input_path: Path | None,
+    output_path: Path,
+    *,
+    allow_fallback: bool = True,
+) -> str | None:
+    document = load_openapi_document(input_path=input_path, allow_fallback=allow_fallback)
     data = parse_openapi_json(document)
     rendered = render_models(data)
     try:
@@ -331,10 +355,19 @@ def main() -> None:
         action="store_true",
         help="Fail if the generated content differs from --output instead of writing the file.",
     )
+    parser.add_argument(
+        "--no-fallback",
+        action="store_true",
+        help="Require the live OpenAPI spec when --input is not provided.",
+    )
     args = parser.parse_args()
     try:
         if args.check:
-            diff = check_generated_models(args.input, args.output)
+            diff = check_generated_models(
+                args.input,
+                args.output,
+                allow_fallback=not args.no_fallback,
+            )
             if diff is not None:
                 print(diff, end="")
                 raise SystemExit(
@@ -342,7 +375,11 @@ def main() -> None:
                     "Run tools/generate_openapi_models.py and commit the result."
                 )
             return
-        generate_models(args.input, args.output)
+        generate_models(
+            args.input,
+            args.output,
+            allow_fallback=not args.no_fallback,
+        )
     except OpenApiSpecError as exc:
         raise SystemExit(str(exc)) from exc
 

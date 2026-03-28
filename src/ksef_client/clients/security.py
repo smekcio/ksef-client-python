@@ -9,13 +9,13 @@ def _normalize_certificate_usage(
 ) -> PublicKeyCertificateUsage:
     if isinstance(usage, PublicKeyCertificateUsage):
         return usage
-    try:
-        return PublicKeyCertificateUsage(usage)
-    except ValueError:
-        normalized = usage.strip().upper().replace("-", "").replace("_", "")
-        for candidate in PublicKeyCertificateUsage:
-            if normalized == candidate.name.replace("_", ""):
-                return candidate
+    for candidate in PublicKeyCertificateUsage:
+        if usage == candidate.value:
+            return candidate
+    normalized = usage.strip().upper().replace("-", "").replace("_", "")
+    for candidate in PublicKeyCertificateUsage:
+        if normalized == candidate.name.replace("_", ""):
+            return candidate
     raise ValueError(f"Unsupported public key certificate usage: {usage}")
 
 

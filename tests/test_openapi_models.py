@@ -30,6 +30,17 @@ class OpenApiModelsTests(unittest.TestCase):
         self.assertEqual(item.authentication_method.value, method_value)
         self.assertEqual(item.to_dict()["authenticationMethod"], method_value)
 
+    def test_unknown_enum_value_roundtrips_without_error(self):
+        payload = {
+            "certificate": "pem-1",
+            "usage": ["FutureUsage"],
+            "validFrom": "2026-01-01T00:00:00Z",
+            "validTo": "2026-12-31T23:59:59Z",
+        }
+        parsed = m.PublicKeyCertificate.from_dict(payload)
+        self.assertEqual(parsed.usage[0].value, "FutureUsage")
+        self.assertEqual(parsed.to_dict()["usage"], ["FutureUsage"])
+
     def test_invoice_package_roundtrip(self):
         payload = {
             "invoiceCount": 1,

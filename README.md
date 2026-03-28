@@ -14,6 +14,9 @@ Projekt odwzorowuje oficjalne przepływy KSeF i zapewnia spójny model pracy w d
 
 Aktualna kompatybilność: **KSeF API `v2.3.0`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.3.0/api-changelog.md)).
 
+Od tej wersji publiczne payloady requestów SDK są **typed-only**. Do metod klientów przekazuj
+obiekty `ksef_client.models.*`, a nie surowe `dict`.
+
 ## 🧭 Spis treści
 
 - [Zakres funkcjonalny](#zakres-funkcjonalny)
@@ -269,6 +272,13 @@ Walidacja, że `src/ksef_client/openapi_models.py` jest zgodny z generatorem:
 
 ```bash
 python tools/generate_openapi_models.py --check --output src/ksef_client/openapi_models.py
+```
+
+Walidacja strict-live bez fallbacku do snapshotu:
+
+```bash
+python tools/generate_openapi_models.py --check --no-fallback --output src/ksef_client/openapi_models.py
+python tools/check_coverage.py --no-fallback --src src/ksef_client/clients
 ```
 
 Przy pracy bez `--input` narzędzia próbują najpierw pobrać oficjalną specyfikację KSeF, a przy

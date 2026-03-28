@@ -6,6 +6,7 @@ import httpx
 
 from ksef_client import models as m
 from ksef_client.clients.auth import AsyncAuthClient, AuthClient, _parse_init_response
+from ksef_client.clients.base import _serialize_json_payload
 from ksef_client.clients.certificates import AsyncCertificatesClient, CertificatesClient
 from ksef_client.clients.invoices import (
     AsyncInvoicesClient,
@@ -158,6 +159,11 @@ class ClientsTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             _parse_init_response(b"[]", path="/auth/xades-signature")
 
+    def test_serialize_json_payload_requires_typed_model(self):
+        with self.assertRaisesRegex(TypeError, "typed model payload"):
+            _serialize_json_payload(cast(Any, {"x": 1}))
+        self.assertEqual(_serialize_json_payload(JsonPayload({"x": 1})), {"x": 1})
+
     def test_sessions_client(self):
         client = SessionsClient(self.http)
         with (
@@ -276,6 +282,13 @@ class ClientsTests(unittest.TestCase):
                 access_token="token",
             )
             self.assertIsNone(request_model.call_args.kwargs["params"])
+        with self.assertRaisesRegex(TypeError, "typed model payload"):
+            client.query_invoice_metadata(
+                cast(Any, {"subjectType": "Subject1"}),
+                access_token="token",
+            )
+        with self.assertRaisesRegex(TypeError, "typed model payload"):
+            client.export_invoices(cast(Any, {"filters": {}}), access_token="token")
 
         normalized = _normalize_invoice_date_range_payload(
             {"dateRange": {"from": 1, "to": None}, "filters": {"dateRange": "invalid"}}
@@ -652,6 +665,13 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
                 request_model.call_args_list[1].kwargs["params"],
                 {"pageOffset": 0, "pageSize": 5, "sortOrder": "Desc"},
             )
+        with self.assertRaisesRegex(TypeError, "typed model payload"):
+            await invoices.query_invoice_metadata(
+                cast(Any, {"subjectType": "Subject1"}),
+                access_token="token",
+            )
+        with self.assertRaisesRegex(TypeError, "typed model payload"):
+            await invoices.export_invoices(cast(Any, {"filters": {}}), access_token="token")
 
         permissions = AsyncPermissionsClient(self.http)
         with patch.object(permissions, "_request_model", AsyncMock(return_value=object())):

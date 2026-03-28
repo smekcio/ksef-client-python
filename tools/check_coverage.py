@@ -270,11 +270,18 @@ def main():
         default=["lighthouse.py"],
         help="Client file names to exclude from this OpenAPI coverage check.",
     )
+    parser.add_argument(
+        "--no-fallback",
+        action="store_true",
+        help="Require the live OpenAPI spec when --openapi is not provided.",
+    )
     args = parser.parse_args()
 
     # 1. Load OpenAPI Specs
     try:
-        openapi_specs = get_openapi_specs(load_openapi_json(args.openapi))
+        openapi_specs = get_openapi_specs(
+            load_openapi_json(args.openapi, allow_fallback=not args.no_fallback)
+        )
     except OpenApiSpecError as exc:
         raise SystemExit(str(exc)) from exc
 

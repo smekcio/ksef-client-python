@@ -26,13 +26,14 @@ class _ModelType(Protocol[ModelT_co]):
     def from_dict(cls, data: dict[str, Any]) -> ModelT_co: ...
 
 
-def _serialize_json_payload(
-    payload: dict[str, Any] | _SerializableModel | None,
-) -> dict[str, Any] | None:
+def _serialize_json_payload(payload: _SerializableModel | None) -> dict[str, Any] | None:
     if payload is None:
         return None
     if isinstance(payload, dict):
-        return payload
+        raise TypeError(
+            "Expected typed model payload with to_dict(), got dict. Construct the appropriate "
+            "ksef_client.models.* request model before calling the client."
+        )
     return payload.to_dict()
 
 
@@ -66,7 +67,7 @@ class BaseApiClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | _SerializableModel | None = None,
+        json: _SerializableModel | None = None,
         access_token: str | None = None,
         refresh_token: str | None = None,
         skip_auth: bool = False,
@@ -95,7 +96,7 @@ class BaseApiClient:
         response_model: _ModelType[ModelT],
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | _SerializableModel | None = None,
+        json: _SerializableModel | None = None,
         access_token: str | None = None,
         refresh_token: str | None = None,
         skip_auth: bool = False,
@@ -122,7 +123,7 @@ class BaseApiClient:
         response_model: _ModelType[ModelT],
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | _SerializableModel | None = None,
+        json: _SerializableModel | None = None,
         access_token: str | None = None,
         refresh_token: str | None = None,
         skip_auth: bool = False,
@@ -151,7 +152,7 @@ class BaseApiClient:
         response_model: _ModelType[ModelT],
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | _SerializableModel | None = None,
+        json: _SerializableModel | None = None,
         access_token: str | None = None,
         refresh_token: str | None = None,
         skip_auth: bool = False,
@@ -180,7 +181,7 @@ class BaseApiClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | _SerializableModel | None = None,
+        json: _SerializableModel | None = None,
         data: bytes | None = None,
         access_token: str | None = None,
         skip_auth: bool = False,
@@ -206,7 +207,7 @@ class BaseApiClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | _SerializableModel | None = None,
+        json: _SerializableModel | None = None,
         data: bytes | None = None,
         access_token: str | None = None,
         skip_auth: bool = False,
@@ -236,7 +237,7 @@ class AsyncBaseApiClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | _SerializableModel | None = None,
+        json: _SerializableModel | None = None,
         access_token: str | None = None,
         refresh_token: str | None = None,
         skip_auth: bool = False,
@@ -265,7 +266,7 @@ class AsyncBaseApiClient:
         response_model: _ModelType[ModelT],
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | _SerializableModel | None = None,
+        json: _SerializableModel | None = None,
         access_token: str | None = None,
         refresh_token: str | None = None,
         skip_auth: bool = False,
@@ -292,7 +293,7 @@ class AsyncBaseApiClient:
         response_model: _ModelType[ModelT],
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | _SerializableModel | None = None,
+        json: _SerializableModel | None = None,
         access_token: str | None = None,
         refresh_token: str | None = None,
         skip_auth: bool = False,
@@ -321,7 +322,7 @@ class AsyncBaseApiClient:
         response_model: _ModelType[ModelT],
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | _SerializableModel | None = None,
+        json: _SerializableModel | None = None,
         access_token: str | None = None,
         refresh_token: str | None = None,
         skip_auth: bool = False,

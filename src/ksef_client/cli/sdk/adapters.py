@@ -226,6 +226,28 @@ def _build_form_code(system_code: str, schema_version: str, form_value: str) -> 
     )
 
 
+def _require_invoice_query_subject_type(value: str) -> m.InvoiceQuerySubjectType:
+    for candidate in m.InvoiceQuerySubjectType:
+        if value == candidate.value:
+            return candidate
+    raise CliError(
+        "Invalid subject type.",
+        ExitCode.VALIDATION_ERROR,
+        "Use a valid KSeF InvoiceQuerySubjectType value such as Subject1.",
+    )
+
+
+def _require_invoice_query_date_type(value: str) -> m.InvoiceQueryDateType:
+    for candidate in m.InvoiceQueryDateType:
+        if value == candidate.value:
+            return candidate
+    raise CliError(
+        "Invalid date type.",
+        ExitCode.VALIDATION_ERROR,
+        "Use a valid KSeF InvoiceQueryDateType value such as Issue.",
+    )
+
+
 def _require_encryption_info(encryption: EncryptionData) -> m.EncryptionInfo:
     encryption_info = getattr(encryption, "encryption_info", None)
     if encryption_info is None:
@@ -555,18 +577,18 @@ def list_invoices(
 ) -> dict[str, Any]:
     access_token = _require_access_token(profile)
     from_iso, to_iso = _normalize_date_range(date_from, date_to)
-    payload = {
-        "subjectType": subject_type,
-        "dateRange": {
-            "dateType": date_type,
-            "from": from_iso,
-            "to": to_iso,
-        },
-    }
+    payload = m.InvoiceQueryFilters(
+        subject_type=_require_invoice_query_subject_type(subject_type),
+        date_range=m.InvoiceQueryDateRange(
+            date_type=_require_invoice_query_date_type(date_type),
+            from_=from_iso,
+            to=to_iso,
+        ),
+    )
 
     with create_client(base_url, access_token=access_token) as client:
         response = client.invoices.query_invoice_metadata(
-            m.InvoiceQueryFilters.from_dict(payload),
+            payload,
             access_token=access_token,
             page_offset=page_offset,
             page_size=page_size,
@@ -1065,23 +1087,23 @@ def run_export(
         symmetric_cert = _select_certificate(certs, "SymmetricKeyEncryption")
         encryption = build_encryption_data(symmetric_cert)
         encryption_info = _require_encryption_info(encryption)
-        payload = {
-            "encryption": {
-                "encryptedSymmetricKey": encryption_info.encrypted_symmetric_key,
-                "initializationVector": encryption_info.initialization_vector,
-            },
-            "onlyMetadata": only_metadata,
-            "filters": {
-                "subjectType": subject_type,
-                "dateRange": {
-                    "dateType": "Issue",
-                    "from": from_iso,
-                    "to": to_iso,
-                },
-            },
-        }
+        payload = m.InvoiceExportRequest(
+            encryption=m.EncryptionInfo(
+                encrypted_symmetric_key=encryption_info.encrypted_symmetric_key,
+                initialization_vector=encryption_info.initialization_vector,
+            ),
+            only_metadata=only_metadata,
+            filters=m.InvoiceQueryFilters(
+                subject_type=_require_invoice_query_subject_type(subject_type),
+                date_range=m.InvoiceQueryDateRange(
+                    date_type=m.InvoiceQueryDateType.ISSUE,
+                    from_=from_iso,
+                    to=to_iso,
+                ),
+            ),
+        )
         start = client.invoices.export_invoices(
-            m.InvoiceExportRequest.from_dict(payload),
+            payload,
             access_token=access_token,
         )
         reference_number = _extract_reference_number(start)

@@ -13,6 +13,20 @@ JsonValue: TypeAlias = Any
 T = TypeVar("T", bound="OpenApiModel")
 _TYPE_CACHE: dict[type, dict[str, Any]] = {}
 
+class OpenApiEnum(str, Enum):
+    @classmethod
+    def _missing_(cls, value: object) -> OpenApiEnum:
+        if not isinstance(value, str):
+            raise ValueError(f"{value!r} is not a valid {cls.__name__}")
+        existing = cls._value2member_map_.get(value)
+        if existing is not None:
+            return existing
+        pseudo_member = str.__new__(cls, value)
+        pseudo_member._name_ = f"UNKNOWN__{len(cls._value2member_map_) + 1}"
+        pseudo_member._value_ = value
+        cls._value2member_map_[value] = pseudo_member
+        return pseudo_member
+
 def _get_type_map(cls: type) -> dict[str, Any]:
     cached = _TYPE_CACHE.get(cls)
     if cached is not None:
@@ -81,18 +95,18 @@ class OpenApiModel:
             result[json_key] = _serialize_value(value)
         return result
 
-class AmountType(Enum):
+class AmountType(OpenApiEnum):
     BRUTTO = "Brutto"
     NETTO = "Netto"
     VAT = "Vat"
 
-class AuthenticationContextIdentifierType(Enum):
+class AuthenticationContextIdentifierType(OpenApiEnum):
     NIP = "Nip"
     INTERNALID = "InternalId"
     NIPVATUE = "NipVatUe"
     PEPPOLID = "PeppolId"
 
-class AuthenticationMethod(Enum):
+class AuthenticationMethod(OpenApiEnum):
     TOKEN = "Token"
     TRUSTEDPROFILE = "TrustedProfile"
     INTERNALCERTIFICATE = "InternalCertificate"
@@ -101,48 +115,48 @@ class AuthenticationMethod(Enum):
     PERSONALSIGNATURE = "PersonalSignature"
     PEPPOLSIGNATURE = "PeppolSignature"
 
-class AuthenticationMethodCategory(Enum):
+class AuthenticationMethodCategory(OpenApiEnum):
     XADESSIGNATURE = "XadesSignature"
     NATIONALNODE = "NationalNode"
     TOKEN = "Token"
     OTHER = "Other"
 
-class AuthenticationTokenStatus(Enum):
+class AuthenticationTokenStatus(OpenApiEnum):
     PENDING = "Pending"
     ACTIVE = "Active"
     REVOKING = "Revoking"
     REVOKED = "Revoked"
     FAILED = "Failed"
 
-class BuyerIdentifierType(Enum):
+class BuyerIdentifierType(OpenApiEnum):
     NIP = "Nip"
     VATUE = "VatUe"
     OTHER = "Other"
     NONE = "None"
 
-class CertificateListItemStatus(Enum):
+class CertificateListItemStatus(OpenApiEnum):
     ACTIVE = "Active"
     BLOCKED = "Blocked"
     REVOKED = "Revoked"
     EXPIRED = "Expired"
 
-class CertificateRevocationReason(Enum):
+class CertificateRevocationReason(OpenApiEnum):
     UNSPECIFIED = "Unspecified"
     SUPERSEDED = "Superseded"
     KEYCOMPROMISE = "KeyCompromise"
 
-class CertificateSubjectIdentifierType(Enum):
+class CertificateSubjectIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class CommonSessionStatus(Enum):
+class CommonSessionStatus(OpenApiEnum):
     INPROGRESS = "InProgress"
     SUCCEEDED = "Succeeded"
     FAILED = "Failed"
     CANCELLED = "Cancelled"
 
-class CurrencyCode(Enum):
+class CurrencyCode(OpenApiEnum):
     AED = "AED"
     AFN = "AFN"
     ALL = "ALL"
@@ -326,47 +340,47 @@ class CurrencyCode(Enum):
     ZMW = "ZMW"
     ZWL = "ZWL"
 
-class EntityAuthorizationPermissionType(Enum):
+class EntityAuthorizationPermissionType(OpenApiEnum):
     SELFINVOICING = "SelfInvoicing"
     RRINVOICING = "RRInvoicing"
     TAXREPRESENTATIVE = "TaxRepresentative"
     PEFINVOICING = "PefInvoicing"
 
-class EntityAuthorizationPermissionsSubjectIdentifierType(Enum):
+class EntityAuthorizationPermissionsSubjectIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PEPPOLID = "PeppolId"
 
-class EntityAuthorizationsAuthorIdentifierType(Enum):
+class EntityAuthorizationsAuthorIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class EntityAuthorizationsAuthorizedEntityIdentifierType(Enum):
+class EntityAuthorizationsAuthorizedEntityIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PEPPOLID = "PeppolId"
 
-class EntityAuthorizationsAuthorizingEntityIdentifierType(Enum):
+class EntityAuthorizationsAuthorizingEntityIdentifierType(OpenApiEnum):
     NIP = "Nip"
 
-class EntityPermissionItemScope(Enum):
+class EntityPermissionItemScope(OpenApiEnum):
     INVOICEWRITE = "InvoiceWrite"
     INVOICEREAD = "InvoiceRead"
 
-class EntityPermissionType(Enum):
+class EntityPermissionType(OpenApiEnum):
     INVOICEWRITE = "InvoiceWrite"
     INVOICEREAD = "InvoiceRead"
 
-class EntityPermissionsContextIdentifierType(Enum):
+class EntityPermissionsContextIdentifierType(OpenApiEnum):
     NIP = "Nip"
     INTERNALID = "InternalId"
 
-class EntityPermissionsSubjectIdentifierType(Enum):
+class EntityPermissionsSubjectIdentifierType(OpenApiEnum):
     NIP = "Nip"
 
-class EntityPermissionsSubordinateEntityIdentifierType(Enum):
+class EntityPermissionsSubordinateEntityIdentifierType(OpenApiEnum):
     NIP = "Nip"
 
-class EntityRoleType(Enum):
+class EntityRoleType(OpenApiEnum):
     COURTBAILIFF = "CourtBailiff"
     ENFORCEMENTAUTHORITY = "EnforcementAuthority"
     LOCALGOVERNMENTUNIT = "LocalGovernmentUnit"
@@ -374,86 +388,86 @@ class EntityRoleType(Enum):
     VATGROUPUNIT = "VatGroupUnit"
     VATGROUPSUBUNIT = "VatGroupSubUnit"
 
-class EntityRolesParentEntityIdentifierType(Enum):
+class EntityRolesParentEntityIdentifierType(OpenApiEnum):
     NIP = "Nip"
 
-class EntitySubjectByFingerprintDetailsType(Enum):
+class EntitySubjectByFingerprintDetailsType(OpenApiEnum):
     ENTITYBYFINGERPRINT = "EntityByFingerprint"
 
-class EntitySubjectByIdentifierDetailsType(Enum):
+class EntitySubjectByIdentifierDetailsType(OpenApiEnum):
     ENTITYBYIDENTIFIER = "EntityByIdentifier"
 
-class EntitySubjectDetailsType(Enum):
+class EntitySubjectDetailsType(OpenApiEnum):
     ENTITYBYIDENTIFIER = "EntityByIdentifier"
     ENTITYBYFINGERPRINT = "EntityByFingerprint"
 
-class EuEntityAdministrationPermissionsContextIdentifierType(Enum):
+class EuEntityAdministrationPermissionsContextIdentifierType(OpenApiEnum):
     NIPVATUE = "NipVatUe"
 
-class EuEntityAdministrationPermissionsSubjectIdentifierType(Enum):
+class EuEntityAdministrationPermissionsSubjectIdentifierType(OpenApiEnum):
     FINGERPRINT = "Fingerprint"
 
-class EuEntityPermissionSubjectDetailsType(Enum):
+class EuEntityPermissionSubjectDetailsType(OpenApiEnum):
     PERSONBYFINGERPRINTWITHIDENTIFIER = "PersonByFingerprintWithIdentifier"
     PERSONBYFINGERPRINTWITHOUTIDENTIFIER = "PersonByFingerprintWithoutIdentifier"
     ENTITYBYFINGERPRINT = "EntityByFingerprint"
 
-class EuEntityPermissionType(Enum):
+class EuEntityPermissionType(OpenApiEnum):
     INVOICEWRITE = "InvoiceWrite"
     INVOICEREAD = "InvoiceRead"
 
-class EuEntityPermissionsAuthorIdentifierType(Enum):
+class EuEntityPermissionsAuthorIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class EuEntityPermissionsQueryPermissionType(Enum):
+class EuEntityPermissionsQueryPermissionType(OpenApiEnum):
     VATUEMANAGE = "VatUeManage"
     INVOICEWRITE = "InvoiceWrite"
     INVOICEREAD = "InvoiceRead"
     INTROSPECTION = "Introspection"
 
-class EuEntityPermissionsSubjectIdentifierType(Enum):
+class EuEntityPermissionsSubjectIdentifierType(OpenApiEnum):
     FINGERPRINT = "Fingerprint"
 
-class IndirectPermissionType(Enum):
+class IndirectPermissionType(OpenApiEnum):
     INVOICEREAD = "InvoiceRead"
     INVOICEWRITE = "InvoiceWrite"
 
-class IndirectPermissionsSubjectIdentifierType(Enum):
+class IndirectPermissionsSubjectIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class IndirectPermissionsTargetIdentifierType(Enum):
+class IndirectPermissionsTargetIdentifierType(OpenApiEnum):
     NIP = "Nip"
     ALLPARTNERS = "AllPartners"
     INTERNALID = "InternalId"
 
-class InvoicePermissionType(Enum):
+class InvoicePermissionType(OpenApiEnum):
     SELFINVOICING = "SelfInvoicing"
     TAXREPRESENTATIVE = "TaxRepresentative"
     RRINVOICING = "RRInvoicing"
     PEFINVOICING = "PefInvoicing"
 
-class InvoiceQueryDateType(Enum):
+class InvoiceQueryDateType(OpenApiEnum):
     ISSUE = "Issue"
     INVOICING = "Invoicing"
     PERMANENTSTORAGE = "PermanentStorage"
 
-class InvoiceQueryFormType(Enum):
+class InvoiceQueryFormType(OpenApiEnum):
     FA = "FA"
     PEF = "PEF"
     RR = "RR"
     FA_RR = "FA_RR"
 
-class InvoiceQuerySubjectType(Enum):
+class InvoiceQuerySubjectType(OpenApiEnum):
     SUBJECT1 = "Subject1"
     SUBJECT2 = "Subject2"
     SUBJECT3 = "Subject3"
     SUBJECTAUTHORIZED = "SubjectAuthorized"
 
-class InvoiceType(Enum):
+class InvoiceType(OpenApiEnum):
     VAT = "Vat"
     ZAL = "Zal"
     KOR = "Kor"
@@ -467,23 +481,23 @@ class InvoiceType(Enum):
     VATRR = "VatRr"
     KORVATRR = "KorVatRr"
 
-class InvoicingMode(Enum):
+class InvoicingMode(OpenApiEnum):
     ONLINE = "Online"
     OFFLINE = "Offline"
 
-class KsefCertificateType(Enum):
+class KsefCertificateType(OpenApiEnum):
     AUTHENTICATION = "Authentication"
     OFFLINE = "Offline"
 
-class PermissionState(Enum):
+class PermissionState(OpenApiEnum):
     ACTIVE = "Active"
     INACTIVE = "Inactive"
 
-class PersonIdentifierType(Enum):
+class PersonIdentifierType(OpenApiEnum):
     PESEL = "Pesel"
     NIP = "Nip"
 
-class PersonPermissionScope(Enum):
+class PersonPermissionScope(OpenApiEnum):
     CREDENTIALSMANAGE = "CredentialsManage"
     CREDENTIALSREAD = "CredentialsRead"
     INVOICEWRITE = "InvoiceWrite"
@@ -492,12 +506,12 @@ class PersonPermissionScope(Enum):
     SUBUNITMANAGE = "SubunitManage"
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
 
-class PersonPermissionSubjectDetailsType(Enum):
+class PersonPermissionSubjectDetailsType(OpenApiEnum):
     PERSONBYIDENTIFIER = "PersonByIdentifier"
     PERSONBYFINGERPRINTWITHIDENTIFIER = "PersonByFingerprintWithIdentifier"
     PERSONBYFINGERPRINTWITHOUTIDENTIFIER = "PersonByFingerprintWithoutIdentifier"
 
-class PersonPermissionType(Enum):
+class PersonPermissionType(OpenApiEnum):
     CREDENTIALSMANAGE = "CredentialsManage"
     CREDENTIALSREAD = "CredentialsRead"
     INVOICEWRITE = "InvoiceWrite"
@@ -506,45 +520,45 @@ class PersonPermissionType(Enum):
     SUBUNITMANAGE = "SubunitManage"
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
 
-class PersonPermissionsAuthorIdentifierType(Enum):
+class PersonPermissionsAuthorIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
     SYSTEM = "System"
 
-class PersonPermissionsAuthorizedIdentifierType(Enum):
+class PersonPermissionsAuthorizedIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class PersonPermissionsContextIdentifierType(Enum):
+class PersonPermissionsContextIdentifierType(OpenApiEnum):
     NIP = "Nip"
     INTERNALID = "InternalId"
 
-class PersonPermissionsQueryType(Enum):
+class PersonPermissionsQueryType(OpenApiEnum):
     PERMISSIONSINCURRENTCONTEXT = "PermissionsInCurrentContext"
     PERMISSIONSGRANTEDINCURRENTCONTEXT = "PermissionsGrantedInCurrentContext"
 
-class PersonPermissionsSubjectIdentifierType(Enum):
+class PersonPermissionsSubjectIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class PersonPermissionsTargetIdentifierType(Enum):
+class PersonPermissionsTargetIdentifierType(OpenApiEnum):
     NIP = "Nip"
     ALLPARTNERS = "AllPartners"
     INTERNALID = "InternalId"
 
-class PersonSubjectByFingerprintDetailsType(Enum):
+class PersonSubjectByFingerprintDetailsType(OpenApiEnum):
     PERSONBYFINGERPRINTWITHIDENTIFIER = "PersonByFingerprintWithIdentifier"
     PERSONBYFINGERPRINTWITHOUTIDENTIFIER = "PersonByFingerprintWithoutIdentifier"
 
-class PersonSubjectDetailsType(Enum):
+class PersonSubjectDetailsType(OpenApiEnum):
     PERSONBYIDENTIFIER = "PersonByIdentifier"
     PERSONBYFINGERPRINTWITHIDENTIFIER = "PersonByFingerprintWithIdentifier"
     PERSONBYFINGERPRINTWITHOUTIDENTIFIER = "PersonByFingerprintWithoutIdentifier"
 
-class PersonalPermissionScope(Enum):
+class PersonalPermissionScope(OpenApiEnum):
     CREDENTIALSMANAGE = "CredentialsManage"
     CREDENTIALSREAD = "CredentialsRead"
     INVOICEWRITE = "InvoiceWrite"
@@ -554,7 +568,7 @@ class PersonalPermissionScope(Enum):
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
     VATUEMANAGE = "VatUeManage"
 
-class PersonalPermissionType(Enum):
+class PersonalPermissionType(OpenApiEnum):
     CREDENTIALSMANAGE = "CredentialsManage"
     CREDENTIALSREAD = "CredentialsRead"
     INVOICEWRITE = "InvoiceWrite"
@@ -564,89 +578,89 @@ class PersonalPermissionType(Enum):
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
     VATUEMANAGE = "VatUeManage"
 
-class PersonalPermissionsAuthorizedIdentifierType(Enum):
+class PersonalPermissionsAuthorizedIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class PersonalPermissionsContextIdentifierType(Enum):
+class PersonalPermissionsContextIdentifierType(OpenApiEnum):
     NIP = "Nip"
     INTERNALID = "InternalId"
 
-class PersonalPermissionsTargetIdentifierType(Enum):
+class PersonalPermissionsTargetIdentifierType(OpenApiEnum):
     NIP = "Nip"
     ALLPARTNERS = "AllPartners"
     INTERNALID = "InternalId"
 
-class PublicKeyCertificateUsage(Enum):
+class PublicKeyCertificateUsage(OpenApiEnum):
     KSEFTOKENENCRYPTION = "KsefTokenEncryption"
     SYMMETRICKEYENCRYPTION = "SymmetricKeyEncryption"
 
-class QueryType(Enum):
+class QueryType(OpenApiEnum):
     GRANTED = "Granted"
     RECEIVED = "Received"
 
-class SessionType(Enum):
+class SessionType(OpenApiEnum):
     ONLINE = "Online"
     BATCH = "Batch"
 
-class SortOrder(Enum):
+class SortOrder(OpenApiEnum):
     ASC = "Asc"
     DESC = "Desc"
 
-class SubjectIdentifierType(Enum):
+class SubjectIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class SubjectType(Enum):
+class SubjectType(OpenApiEnum):
     ENFORCEMENTAUTHORITY = "EnforcementAuthority"
     VATGROUP = "VatGroup"
     JST = "JST"
 
-class SubordinateEntityRoleType(Enum):
+class SubordinateEntityRoleType(OpenApiEnum):
     LOCALGOVERNMENTSUBUNIT = "LocalGovernmentSubUnit"
     VATGROUPSUBUNIT = "VatGroupSubUnit"
 
-class SubordinateRoleSubordinateEntityIdentifierType(Enum):
+class SubordinateRoleSubordinateEntityIdentifierType(OpenApiEnum):
     NIP = "Nip"
 
-class SubunitPermissionScope(Enum):
+class SubunitPermissionScope(OpenApiEnum):
     CREDENTIALSMANAGE = "CredentialsManage"
 
-class SubunitPermissionsAuthorIdentifierType(Enum):
+class SubunitPermissionsAuthorIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class SubunitPermissionsContextIdentifierType(Enum):
+class SubunitPermissionsContextIdentifierType(OpenApiEnum):
     INTERNALID = "InternalId"
     NIP = "Nip"
 
-class SubunitPermissionsSubjectIdentifierType(Enum):
+class SubunitPermissionsSubjectIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class SubunitPermissionsSubunitIdentifierType(Enum):
+class SubunitPermissionsSubunitIdentifierType(OpenApiEnum):
     INTERNALID = "InternalId"
     NIP = "Nip"
 
-class TestDataAuthenticationContextIdentifierType(Enum):
+class TestDataAuthenticationContextIdentifierType(OpenApiEnum):
     NIP = "Nip"
     INTERNALID = "InternalId"
     NIPVATUE = "NipVatUe"
     PEPPOLID = "PeppolId"
 
-class TestDataAuthorizedIdentifierType(Enum):
+class TestDataAuthorizedIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class TestDataContextIdentifierType(Enum):
+class TestDataContextIdentifierType(OpenApiEnum):
     NIP = "Nip"
 
-class TestDataPermissionType(Enum):
+class TestDataPermissionType(OpenApiEnum):
     INVOICEREAD = "InvoiceRead"
     INVOICEWRITE = "InvoiceWrite"
     INTROSPECTION = "Introspection"
@@ -655,25 +669,25 @@ class TestDataPermissionType(Enum):
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
     SUBUNITMANAGE = "SubunitManage"
 
-class ThirdSubjectIdentifierType(Enum):
+class ThirdSubjectIdentifierType(OpenApiEnum):
     NIP = "Nip"
     INTERNALID = "InternalId"
     VATUE = "VatUe"
     OTHER = "Other"
     NONE = "None"
 
-class TokenAuthorIdentifierType(Enum):
+class TokenAuthorIdentifierType(OpenApiEnum):
     NIP = "Nip"
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
-class TokenContextIdentifierType(Enum):
+class TokenContextIdentifierType(OpenApiEnum):
     NIP = "Nip"
     INTERNALID = "InternalId"
     NIPVATUE = "NipVatUe"
     PEPPOLID = "PeppolId"
 
-class TokenPermissionType(Enum):
+class TokenPermissionType(OpenApiEnum):
     INVOICEREAD = "InvoiceRead"
     INVOICEWRITE = "InvoiceWrite"
     CREDENTIALSREAD = "CredentialsRead"

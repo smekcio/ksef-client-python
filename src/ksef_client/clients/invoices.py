@@ -17,7 +17,7 @@ from ..models import (
     InvoiceQuerySubjectType,
     QueryInvoicesMetadataResponse,
 )
-from .base import AsyncBaseApiClient, BaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient, _serialize_json_payload
 
 _OFFSET_SUFFIX_RE = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
 
@@ -78,7 +78,10 @@ def _normalize_invoice_query_subject_type(
 ) -> InvoiceQuerySubjectType:
     if isinstance(subject_type, InvoiceQuerySubjectType):
         return subject_type
-    return InvoiceQuerySubjectType(subject_type)
+    for candidate in InvoiceQuerySubjectType:
+        if subject_type == candidate.value:
+            return candidate
+    raise ValueError(f"Unsupported invoice query subject type: {subject_type}")
 
 
 def _normalize_invoice_query_date_type(
@@ -86,7 +89,10 @@ def _normalize_invoice_query_date_type(
 ) -> InvoiceQueryDateType:
     if isinstance(date_type, InvoiceQueryDateType):
         return date_type
-    return InvoiceQueryDateType(date_type)
+    for candidate in InvoiceQueryDateType:
+        if date_type == candidate.value:
+            return candidate
+    raise ValueError(f"Unsupported invoice query date type: {date_type}")
 
 
 def _build_invoice_query_filters(
@@ -104,6 +110,13 @@ def _build_invoice_query_filters(
             to=date_to,
         ),
     )
+
+
+def _serialize_invoice_payload(request_payload: Any) -> dict[str, Any]:
+    serialized = _serialize_json_payload(request_payload)
+    if serialized is None:
+        raise TypeError("Invoice request payload is required.")
+    return _normalize_invoice_date_range_payload(serialized)
 
 
 class InvoicesClient(BaseApiClient):
@@ -152,7 +165,7 @@ class InvoicesClient(BaseApiClient):
             "/invoices/query/metadata",
             response_model=QueryInvoicesMetadataResponse,
             params=params or None,
-            json=_normalize_invoice_date_range_payload(request_payload.to_dict()),
+            json=_serialize_invoice_payload(request_payload),
             access_token=access_token,
         )
 
@@ -188,7 +201,7 @@ class InvoicesClient(BaseApiClient):
             "POST",
             "/invoices/exports",
             response_model=ExportInvoicesResponse,
-            json=_normalize_invoice_date_range_payload(request_payload.to_dict()),
+            json=_serialize_invoice_payload(request_payload),
             access_token=access_token,
             expected_status={201, 202},
         )
@@ -263,7 +276,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             "/invoices/query/metadata",
             response_model=QueryInvoicesMetadataResponse,
             params=params or None,
-            json=_normalize_invoice_date_range_payload(request_payload.to_dict()),
+            json=_serialize_invoice_payload(request_payload),
             access_token=access_token,
         )
 
@@ -299,7 +312,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             "POST",
             "/invoices/exports",
             response_model=ExportInvoicesResponse,
-            json=_normalize_invoice_date_range_payload(request_payload.to_dict()),
+            json=_serialize_invoice_payload(request_payload),
             access_token=access_token,
             expected_status={201, 202},
         )

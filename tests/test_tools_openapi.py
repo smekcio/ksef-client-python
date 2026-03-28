@@ -111,6 +111,28 @@ def test_load_openapi_json_falls_back_to_snapshot_when_remote_is_unavailable(
     assert "using fallback OpenAPI snapshot" in capsys.readouterr().err
 
 
+def test_load_openapi_json_without_fallback_raises_on_remote_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / "ksef-openapi.snapshot.json"
+    snapshot_path.write_text(json.dumps(_minimal_openapi()), encoding="utf-8")
+
+    def _offline(*args, **kwargs):
+        _ = (args, kwargs)
+        raise OSError("network blocked")
+
+    monkeypatch.setattr(openapi_spec, "urlopen", _offline)
+
+    with pytest.raises(openapi_spec.OpenApiSpecError) as exc:
+        openapi_spec.load_openapi_json(
+            fallback_path=snapshot_path,
+            allow_fallback=False,
+        )
+
+    assert "Failed to download OpenAPI spec" in str(exc.value)
+
+
 def test_load_openapi_json_raises_when_remote_and_fallback_are_unavailable(
     monkeypatch,
     tmp_path: Path,
@@ -184,6 +206,22 @@ def test_check_generated_models_detects_diff(tmp_path: Path) -> None:
     assert "generated-openapi-models" in diff
 
 
+def test_generate_models_without_fallback_raises_when_remote_is_unavailable(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "openapi_models.py"
+
+    def _offline(*args, **kwargs):
+        _ = (args, kwargs)
+        raise OSError("network blocked")
+
+    monkeypatch.setattr(openapi_spec, "urlopen", _offline)
+
+    with pytest.raises(openapi_spec.OpenApiSpecError):
+        generator.generate_models(None, output_path, allow_fallback=False)
+
+
 def test_coverage_tool_detects_typed_request_helpers(tmp_path: Path) -> None:
     client_file = tmp_path / "client.py"
     client_file.write_text(
@@ -206,3 +244,27 @@ def test_coverage_tool_detects_typed_request_helpers(tmp_path: Path) -> None:
     assert ("GET", "/auth/sessions") in keys
     assert ("POST", "/auth/{}") in keys
     assert ("GET", "/security/public-key-certificates") in keys
+
+
+def test_check_coverage_uses_allow_fallback_flag(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_load_openapi_json(path, *, allow_fallback=True, **kwargs):
+        captured["path"] = path
+        captured["allow_fallback"] = allow_fallback
+        captured["kwargs"] = kwargs
+        return _minimal_openapi()
+
+    monkeypatch.setattr(coverage_tool, "load_openapi_json", _fake_load_openapi_json)
+    monkeypatch.setattr(coverage_tool, "get_implemented_endpoints_deep", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        coverage_tool.sys,
+        "argv",
+        ["check_coverage.py", "--src", str(tmp_path), "--no-fallback"],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        coverage_tool.main()
+
+    assert exc.value.code == 1
+    assert captured["allow_fallback"] is False

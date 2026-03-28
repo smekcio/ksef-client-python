@@ -62,12 +62,15 @@ def load_openapi_document(
     url: str = DEFAULT_KSEF_OPENAPI_URL,
     timeout: float = 30.0,
     fallback_path: Path = DEFAULT_KSEF_OPENAPI_FALLBACK_PATH,
+    allow_fallback: bool = True,
 ) -> OpenApiSpecDocument:
     if input_path is not None:
         return OpenApiSpecDocument(text=_read_openapi_text_file(input_path), source=str(input_path))
     try:
         return OpenApiSpecDocument(text=fetch_openapi_text(url=url, timeout=timeout), source=url)
     except OpenApiSpecError as remote_exc:
+        if not allow_fallback:
+            raise remote_exc
         try:
             fallback_text = _read_openapi_text_file(fallback_path)
         except OpenApiSpecError as fallback_exc:
@@ -92,12 +95,14 @@ def load_openapi_text(
     url: str = DEFAULT_KSEF_OPENAPI_URL,
     timeout: float = 30.0,
     fallback_path: Path = DEFAULT_KSEF_OPENAPI_FALLBACK_PATH,
+    allow_fallback: bool = True,
 ) -> str:
     return load_openapi_document(
         input_path=input_path,
         url=url,
         timeout=timeout,
         fallback_path=fallback_path,
+        allow_fallback=allow_fallback,
     ).text
 
 
@@ -121,11 +126,13 @@ def load_openapi_json(
     url: str = DEFAULT_KSEF_OPENAPI_URL,
     timeout: float = 30.0,
     fallback_path: Path = DEFAULT_KSEF_OPENAPI_FALLBACK_PATH,
+    allow_fallback: bool = True,
 ) -> dict[str, Any]:
     document = load_openapi_document(
         input_path=input_path,
         url=url,
         timeout=timeout,
         fallback_path=fallback_path,
+        allow_fallback=allow_fallback,
     )
     return parse_openapi_json(document)

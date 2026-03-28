@@ -22,10 +22,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Download live OpenAPI spec
+        run: |
+          python -c "from pathlib import Path; from tools.openapi_spec import load_openapi_document; output = Path('.tmp/openapi.json'); output.parent.mkdir(parents=True, exist_ok=True); output.write_text(load_openapi_document(allow_fallback=False).text, encoding='utf-8', newline='\n')"
+
       - name: Verify generated models are up to date
         run: |
-          python tools/generate_openapi_models.py --check --output src/ksef_client/openapi_models.py
+          python tools/generate_openapi_models.py --check --input .tmp/openapi.json --output src/ksef_client/openapi_models.py
 
       - name: Check API Coverage
         run: |
-          python tools/check_coverage.py --src src/ksef_client/clients
+          python tools/check_coverage.py --openapi .tmp/openapi.json --src src/ksef_client/clients
