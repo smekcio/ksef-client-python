@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
@@ -247,9 +248,20 @@ class HttpTests(unittest.TestCase):
 
     def test_parse_retry_after_variants(self):
         self.assertIsNone(_parse_retry_after(None))
+        self.assertIsNone(_parse_retry_after("   "))
         self.assertEqual(_parse_retry_after("5"), 5)
         self.assertIsNone(_parse_retry_after("bad"))
         parsed_http_date = _parse_retry_after("Wed, 01 Jan 2099 00:00:00 GMT")
+        self.assertIsNotNone(parsed_http_date)
+        assert parsed_http_date is not None
+        self.assertGreater(parsed_http_date, 0)
+
+    def test_parse_retry_after_assigns_utc_to_naive_http_date(self):
+        with patch(
+            "ksef_client.http.parsedate_to_datetime",
+            return_value=datetime(2099, 1, 1, 0, 0, 0),
+        ):
+            parsed_http_date = _parse_retry_after("Wed, 01 Jan 2099 00:00:00")
         self.assertIsNotNone(parsed_http_date)
         assert parsed_http_date is not None
         self.assertGreater(parsed_http_date, 0)

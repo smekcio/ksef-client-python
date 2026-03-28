@@ -53,6 +53,79 @@ class ModelsTests(unittest.TestCase):
         self.assertIsNone(parsed.authentication_method)
         self.assertIsNone(parsed.start_date)
 
+    def test_wrapper_models_to_dict_include_optional_fields_when_requested(self):
+        status = models.StatusInfo.from_dict({"code": 200, "description": "ok"})
+        self.assertEqual(
+            status.to_dict(omit_none=False),
+            {"code": 200, "description": "ok", "details": None, "extensions": None},
+        )
+
+        token = models.TokenInfo.from_dict({"token": "abc"})
+        self.assertEqual(token.to_dict(omit_none=False), {"token": "abc", "validUntil": None})
+
+        challenge = models.AuthenticationChallengeResponse.from_dict(
+            {"challenge": "c", "timestamp": "t", "timestampMs": 1}
+        )
+        self.assertEqual(
+            challenge.to_dict(omit_none=False),
+            {"challenge": "c", "timestamp": "t", "timestampMs": 1, "clientIp": None},
+        )
+
+        init_response = models.AuthenticationInitResponse.from_dict(
+            {"referenceNumber": "ref", "authenticationToken": {"token": "abc"}}
+        )
+        self.assertEqual(
+            init_response.to_dict(omit_none=False),
+            {
+                "referenceNumber": "ref",
+                "authenticationToken": {"token": "abc", "validUntil": None},
+            },
+        )
+
+        auth_status = models.AuthenticationOperationStatusResponse.from_dict(
+            {"status": {"code": 200, "description": "ok"}}
+        )
+        self.assertEqual(
+            auth_status.to_dict(omit_none=False),
+            {
+                "status": {"code": 200, "description": "ok", "details": None, "extensions": None},
+                "authenticationMethod": None,
+                "authenticationMethodInfo": None,
+                "startDate": None,
+                "isTokenRedeemed": None,
+                "lastTokenRefreshDate": None,
+                "refreshTokenValidUntil": None,
+            },
+        )
+
+        tokens_response = models.AuthenticationTokensResponse.from_dict(
+            {
+                "accessToken": {"token": "abc"},
+                "refreshToken": {"token": "ref"},
+            }
+        )
+        self.assertEqual(
+            tokens_response.to_dict(omit_none=False),
+            {
+                "accessToken": {"token": "abc", "validUntil": None},
+                "refreshToken": {"token": "ref", "validUntil": None},
+            },
+        )
+
+        token_refresh = models.AuthenticationTokenRefreshResponse.from_dict(
+            {"accessToken": {"token": "abc"}}
+        )
+        self.assertEqual(
+            token_refresh.to_dict(omit_none=False),
+            {"accessToken": {"token": "abc", "validUntil": None}},
+        )
+
+        session = models.OpenOnlineSessionResponse.from_dict({"referenceNumber": "ref"})
+        self.assertEqual(
+            session.to_dict(omit_none=False),
+            {"referenceNumber": "ref", "validUntil": None},
+        )
+
     def test_invoice_export_status(self):
         data = {
             "status": {"code": 200, "description": "ok"},
@@ -170,10 +243,15 @@ class ModelsTests(unittest.TestCase):
     def test_query_invoices_metadata_response_to_dict_serializes_items(self):
         parsed = models.QueryInvoicesMetadataResponse(
             invoices=[
-                models.InvoiceMetadata(
-                    ksef_number="KSEF-1",
-                    invoice_number="FV/1",
-                    permanent_storage_date="2026-01-02T00:00:00Z",
+                models.InvoiceMetadata.from_dict(
+                    {
+                        "ksefNumber": "KSEF-1",
+                        "invoiceNumber": "FV/1",
+                        "invoiceHash": "hash",
+                        "issueDate": "2026-01-01",
+                        "invoicingDate": "2026-01-01",
+                        "permanentStorageDate": "2026-01-02T00:00:00Z",
+                    }
                 )
             ],
             has_more=True,
@@ -183,9 +261,44 @@ class ModelsTests(unittest.TestCase):
         payload = parsed.to_dict()
         self.assertEqual(payload["invoices"][0]["ksefNumber"], "KSEF-1")
         self.assertEqual(payload["invoices"][0]["invoiceNumber"], "FV/1")
+        self.assertEqual(payload["invoices"][0]["invoiceHash"], "hash")
+        self.assertEqual(payload["invoices"][0]["issueDate"], "2026-01-01")
+        self.assertEqual(payload["invoices"][0]["invoicingDate"], "2026-01-01")
         self.assertEqual(payload["hasMore"], True)
         self.assertEqual(payload["isTruncated"], True)
         self.assertEqual(payload["permanentStorageHwmDate"], "2026-01-03T00:00:00Z")
+
+    def test_session_invoice_and_collection_to_dict_include_optional_fields_when_requested(self):
+        invoice = models.SessionInvoiceStatusResponse.from_dict(
+            {"status": {"code": 200, "description": "ok"}}
+        )
+        self.assertEqual(
+            invoice.to_dict(omit_none=False),
+            {
+                "status": {"code": 200, "description": "ok", "details": None, "extensions": None},
+                "invoiceHash": None,
+                "invoicingDate": None,
+                "ordinalNumber": None,
+                "referenceNumber": None,
+                "acquisitionDate": None,
+                "invoiceFileName": None,
+                "invoiceNumber": None,
+                "invoicingMode": None,
+                "ksefNumber": None,
+                "permanentStorageDate": None,
+                "upoDownloadUrl": None,
+                "upoDownloadUrlExpirationDate": None,
+            },
+        )
+
+        invoices = models.SessionInvoicesResponse(invoices=[invoice])
+        self.assertEqual(
+            invoices.to_dict(omit_none=False),
+            {
+                "invoices": [invoice.to_dict(omit_none=False)],
+                "continuationToken": None,
+            },
+        )
 
     def test_lighthouse_message_and_status(self):
         message_data = {
