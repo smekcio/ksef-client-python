@@ -174,7 +174,9 @@ class ClientsTests(unittest.TestCase):
             _serialize_json_payload(cast(Any, {"x": 1}))
         self.assertEqual(_serialize_json_payload(JsonPayload({"x": 1})), {"x": 1})
         self.assertEqual(
-            _serialize_json_payload(_SerializedInvoicePayload({"dateRange": {"from": "2025-01-02T10:15:00"}})),
+            _serialize_json_payload(
+                _SerializedInvoicePayload({"dateRange": {"from": "2025-01-02T10:15:00"}})
+            ),
             {"dateRange": {"from": "2025-01-02T10:15:00"}},
         )
 
@@ -346,7 +348,7 @@ class ClientsTests(unittest.TestCase):
         response = HttpResponse(200, httpx.Headers(), b'{"invoices":[]}')
         http = DummyHttp(response)
         client = InvoicesClient(http)
-        payload = m.InvoiceQueryFilters.from_dict(
+        invoice_payload = m.InvoiceQueryFilters.from_dict(
             {
                 "subjectType": "Subject1",
                 "dateRange": {
@@ -357,11 +359,17 @@ class ClientsTests(unittest.TestCase):
             }
         )
 
-        result = client.query_invoice_metadata(payload, access_token="token")
+        result = client.query_invoice_metadata(invoice_payload, access_token="token")
 
         assert http.last_request_kwargs is not None
-        self.assertEqual(http.last_request_kwargs["json"]["dateRange"]["from"], "2025-01-02T10:15:00+01:00")
-        self.assertEqual(http.last_request_kwargs["json"]["dateRange"]["to"], "2025-01-02T11:15:00+01:00")
+        self.assertEqual(
+            http.last_request_kwargs["json"]["dateRange"]["from"],
+            "2025-01-02T10:15:00+01:00",
+        )
+        self.assertEqual(
+            http.last_request_kwargs["json"]["dateRange"]["to"],
+            "2025-01-02T11:15:00+01:00",
+        )
         self.assertEqual(result.invoices, [])
 
     def test_other_clients(self):
@@ -723,7 +731,7 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         response = HttpResponse(200, httpx.Headers(), b'{"invoices":[]}')
         http = DummyAsyncHttp(response)
         invoices = AsyncInvoicesClient(http)
-        payload = m.InvoiceQueryFilters.from_dict(
+        invoice_payload = m.InvoiceQueryFilters.from_dict(
             {
                 "subjectType": "Subject1",
                 "dateRange": {
@@ -734,13 +742,20 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-        result = await invoices.query_invoice_metadata(payload, access_token="token")
+        result = await invoices.query_invoice_metadata(invoice_payload, access_token="token")
 
         assert http.last_request_kwargs is not None
-        self.assertEqual(http.last_request_kwargs["json"]["dateRange"]["from"], "2025-01-02T10:15:00+01:00")
-        self.assertEqual(http.last_request_kwargs["json"]["dateRange"]["to"], "2025-01-02T11:15:00+01:00")
+        self.assertEqual(
+            http.last_request_kwargs["json"]["dateRange"]["from"],
+            "2025-01-02T10:15:00+01:00",
+        )
+        self.assertEqual(
+            http.last_request_kwargs["json"]["dateRange"]["to"],
+            "2025-01-02T11:15:00+01:00",
+        )
         self.assertEqual(result.invoices, [])
 
+        payload: Any = object()
         permissions = AsyncPermissionsClient(self.http)
         with patch.object(permissions, "_request_model", AsyncMock(return_value=object())):
             await permissions.check_attachment_permission_status("token")
