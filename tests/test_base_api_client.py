@@ -54,7 +54,8 @@ class ParsedModel:
 class BaseApiClientTests(unittest.TestCase):
     def test_payload_helpers(self):
         self.assertIsNone(_serialize_json_payload(None))
-        self.assertEqual(_serialize_json_payload({"ok": True}), {"ok": True})
+        with self.assertRaises(TypeError):
+            _serialize_json_payload({"ok": True})
         self.assertEqual(_serialize_json_payload(JsonPayload({"x": 1})), {"x": 1})
         self.assertEqual(_validate_model_payload({"ok": True}, path="/path"), {"ok": True})
         self.assertEqual(

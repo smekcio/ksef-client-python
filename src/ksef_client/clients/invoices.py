@@ -22,6 +22,15 @@ from .base import AsyncBaseApiClient, BaseApiClient, _serialize_json_payload
 _OFFSET_SUFFIX_RE = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
 
 
+class _SerializedInvoicePayload(dict[str, Any]):
+    def __init__(self, payload: dict[str, Any]) -> None:
+        super().__init__(payload)
+
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        _ = omit_none
+        return deepcopy(dict(self))
+
+
 def _last_sunday_of_month(year: int, month: int) -> int:
     cursor = date(year, 12, 31) if month == 12 else date(year, month + 1, 1) - timedelta(days=1)
     while cursor.weekday() != 6:
@@ -112,11 +121,11 @@ def _build_invoice_query_filters(
     )
 
 
-def _serialize_invoice_payload(request_payload: Any) -> dict[str, Any]:
+def _serialize_invoice_payload(request_payload: Any) -> _SerializedInvoicePayload:
     serialized = _serialize_json_payload(request_payload)
     if serialized is None:
         raise TypeError("Invoice request payload is required.")
-    return _normalize_invoice_date_range_payload(serialized)
+    return _SerializedInvoicePayload(_normalize_invoice_date_range_payload(serialized))
 
 
 class InvoicesClient(BaseApiClient):

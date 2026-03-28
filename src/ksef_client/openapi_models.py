@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 from enum import Enum
 import sys
-from typing import Any, Optional, TypeAlias, TypeVar
+from typing import Any, Optional, TypeAlias, TypeVar, cast
 from typing import get_args, get_origin, get_type_hints
 
 JsonValue: TypeAlias = Any
@@ -18,7 +18,7 @@ class OpenApiEnum(str, Enum):
     def _missing_(cls, value: object) -> OpenApiEnum:
         if not isinstance(value, str):
             raise ValueError(f"{value!r} is not a valid {cls.__name__}")
-        existing = cls._value2member_map_.get(value)
+        existing = cast(OpenApiEnum | None, cls._value2member_map_.get(value))
         if existing is not None:
             return existing
         pseudo_member = str.__new__(cls, value)
