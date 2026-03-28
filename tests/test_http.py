@@ -249,6 +249,10 @@ class HttpTests(unittest.TestCase):
         self.assertIsNone(_parse_retry_after(None))
         self.assertEqual(_parse_retry_after("5"), 5)
         self.assertIsNone(_parse_retry_after("bad"))
+        parsed_http_date = _parse_retry_after("Wed, 01 Jan 2099 00:00:00 GMT")
+        self.assertIsNotNone(parsed_http_date)
+        assert parsed_http_date is not None
+        self.assertGreater(parsed_http_date, 0)
 
     def test_parse_api_problem_variants(self):
         self.assertIsNone(_parse_api_problem(400, []))
@@ -285,7 +289,27 @@ class HttpTests(unittest.TestCase):
         assert raw_unknown is not None
         self.assertEqual(raw_unknown.status, 400)
 
+        invalid_status_unknown = _parse_api_problem(400, {"title": "Bad", "status": "oops"})
+        self.assertIsInstance(invalid_status_unknown, models.UnknownApiProblem)
+        self.assertIsNotNone(invalid_status_unknown)
+        assert invalid_status_unknown is not None
+        self.assertEqual(invalid_status_unknown.status, 400)
+
         self.assertIsNone(_parse_api_problem(400, {}))
+
+    def test_raise_for_status_rate_limit_http_date(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        response = httpx.Response(
+            429,
+            headers={"Retry-After": "Wed, 01 Jan 2099 00:00:00 GMT"},
+            json={"error": "limit"},
+        )
+        with self.assertRaises(KsefRateLimitError) as ctx:
+            client._raise_for_status(response)
+        self.assertIsNotNone(ctx.exception.retry_after)
+        assert ctx.exception.retry_after is not None
+        self.assertGreater(ctx.exception.retry_after, 0)
 
 
 class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):

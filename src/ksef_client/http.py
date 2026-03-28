@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ipaddress
+import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -103,10 +106,27 @@ def _validate_presigned_url_security(options: KsefClientOptions, url: str) -> No
 def _parse_retry_after(value: str | None) -> int | None:
     if value is None:
         return None
+    normalized_value = value.strip()
+    if not normalized_value:
+        return None
+    try:
+        return int(normalized_value)
+    except ValueError:
+        try:
+            retry_after_dt = parsedate_to_datetime(normalized_value)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+        if retry_after_dt.tzinfo is None:
+            retry_after_dt = retry_after_dt.replace(tzinfo=timezone.utc)
+        delta_seconds = (retry_after_dt - datetime.now(timezone.utc)).total_seconds()
+        return max(0, math.ceil(delta_seconds))
+
+
+def _coerce_problem_status(value: Any, fallback_status: int) -> int:
     try:
         return int(value)
-    except ValueError:
-        return None
+    except (TypeError, ValueError):
+        return fallback_status
 
 
 def _parse_api_problem(status_code: int, body: Any) -> Any | None:
@@ -127,7 +147,7 @@ def _parse_api_problem(status_code: int, body: Any) -> Any | None:
 
     if "status" in body or "title" in body or "detail" in body:
         return UnknownApiProblem(
-            status=int(body.get("status", status_code)),
+            status=_coerce_problem_status(body.get("status"), status_code),
             title=str(body.get("title", "API error")),
             detail=str(body["detail"]) if body.get("detail") is not None else None,
             raw=body,

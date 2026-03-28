@@ -39,14 +39,28 @@ class StatusInfo:
     code: int
     description: str
     details: list[str] | None = None
+    extensions: dict[str, Any] | None = None
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> StatusInfo:
+        raw_extensions = data.get("extensions")
         return StatusInfo(
             code=int(data.get("code", 0)),
             description=str(data.get("description", "")),
             details=data.get("details"),
+            extensions=raw_extensions if isinstance(raw_extensions, dict) else None,
         )
+
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "code": self.code,
+            "description": self.description,
+        }
+        if not omit_none or self.details is not None:
+            payload["details"] = self.details
+        if not omit_none or self.extensions is not None:
+            payload["extensions"] = self.extensions
+        return payload
 
 
 @dataclass(frozen=True)
@@ -60,6 +74,12 @@ class TokenInfo:
             token=str(data.get("token", "")),
             valid_until=data.get("validUntil"),
         )
+
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {"token": self.token}
+        if not omit_none or self.valid_until is not None:
+            payload["validUntil"] = self.valid_until
+        return payload
 
 
 @dataclass(frozen=True)
@@ -79,6 +99,16 @@ class AuthenticationChallengeResponse:
             client_ip=str(raw_client_ip) if raw_client_ip is not None else None,
         )
 
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "challenge": self.challenge,
+            "timestamp": self.timestamp,
+            "timestampMs": self.timestamp_ms,
+        }
+        if not omit_none or self.client_ip is not None:
+            payload["clientIp"] = self.client_ip
+        return payload
+
 
 @dataclass(frozen=True)
 class AuthenticationInitResponse:
@@ -91,6 +121,12 @@ class AuthenticationInitResponse:
             reference_number=str(data.get("referenceNumber", "")),
             authentication_token=TokenInfo.from_dict(data.get("authenticationToken", {})),
         )
+
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        return {
+            "referenceNumber": self.reference_number,
+            "authenticationToken": self.authentication_token.to_dict(omit_none=omit_none),
+        }
 
 
 @dataclass(frozen=True)
@@ -135,6 +171,32 @@ class AuthenticationOperationStatusResponse:
             ),
         )
 
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "status": self.status.to_dict(omit_none=omit_none),
+        }
+        if not omit_none or self.authentication_method is not None:
+            payload["authenticationMethod"] = (
+                self.authentication_method.value
+                if self.authentication_method is not None
+                else None
+            )
+        if not omit_none or self.authentication_method_info is not None:
+            payload["authenticationMethodInfo"] = (
+                self.authentication_method_info.to_dict(omit_none=omit_none)
+                if self.authentication_method_info is not None
+                else None
+            )
+        if not omit_none or self.start_date is not None:
+            payload["startDate"] = self.start_date
+        if not omit_none or self.is_token_redeemed is not None:
+            payload["isTokenRedeemed"] = self.is_token_redeemed
+        if not omit_none or self.last_token_refresh_date is not None:
+            payload["lastTokenRefreshDate"] = self.last_token_refresh_date
+        if not omit_none or self.refresh_token_valid_until is not None:
+            payload["refreshTokenValidUntil"] = self.refresh_token_valid_until
+        return payload
+
 
 @dataclass(frozen=True)
 class AuthenticationTokensResponse:
@@ -148,6 +210,12 @@ class AuthenticationTokensResponse:
             refresh_token=TokenInfo.from_dict(data.get("refreshToken", {})),
         )
 
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        return {
+            "accessToken": self.access_token.to_dict(omit_none=omit_none),
+            "refreshToken": self.refresh_token.to_dict(omit_none=omit_none),
+        }
+
 
 @dataclass(frozen=True)
 class AuthenticationTokenRefreshResponse:
@@ -158,6 +226,9 @@ class AuthenticationTokenRefreshResponse:
         return AuthenticationTokenRefreshResponse(
             access_token=TokenInfo.from_dict(data.get("accessToken", {})),
         )
+
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        return {"accessToken": self.access_token.to_dict(omit_none=omit_none)}
 
 
 class LighthouseKsefStatus(str, Enum):
@@ -276,6 +347,8 @@ class LighthouseStatusResponse:
 class PublicKeyCertificate:
     certificate: str
     usage: list[PublicKeyCertificateUsage] = field(default_factory=list)
+    valid_from: str | None = None
+    valid_to: str | None = None
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> PublicKeyCertificate:
@@ -284,7 +357,20 @@ class PublicKeyCertificate:
         return PublicKeyCertificate(
             certificate=str(data.get("certificate", "")),
             usage=[PublicKeyCertificateUsage(str(item)) for item in usage_values],
+            valid_from=str(data["validFrom"]) if data.get("validFrom") is not None else None,
+            valid_to=str(data["validTo"]) if data.get("validTo") is not None else None,
         )
+
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "certificate": self.certificate,
+            "usage": [item.value for item in self.usage],
+        }
+        if not omit_none or self.valid_from is not None:
+            payload["validFrom"] = self.valid_from
+        if not omit_none or self.valid_to is not None:
+            payload["validTo"] = self.valid_to
+        return payload
 
 
 @dataclass(frozen=True)
@@ -298,6 +384,12 @@ class OpenOnlineSessionResponse:
             reference_number=str(data.get("referenceNumber", "")),
             valid_until=str(data["validUntil"]) if data.get("validUntil") is not None else None,
         )
+
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {"referenceNumber": self.reference_number}
+        if not omit_none or self.valid_until is not None:
+            payload["validUntil"] = self.valid_until
+        return payload
 
 
 @dataclass(frozen=True)
@@ -330,6 +422,22 @@ class InvoiceMetadata:
             ),
         )
 
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if not omit_none or self.ksef_number is not None:
+            payload["ksefNumber"] = self.ksef_number
+        if not omit_none or self.invoice_number is not None:
+            payload["invoiceNumber"] = self.invoice_number
+        if not omit_none or self.invoice_hash is not None:
+            payload["invoiceHash"] = self.invoice_hash
+        if not omit_none or self.issue_date is not None:
+            payload["issueDate"] = self.issue_date
+        if not omit_none or self.invoicing_date is not None:
+            payload["invoicingDate"] = self.invoicing_date
+        if not omit_none or self.permanent_storage_date is not None:
+            payload["permanentStorageDate"] = self.permanent_storage_date
+        return payload
+
 
 @dataclass(frozen=True)
 class QueryInvoicesMetadataResponse:
@@ -357,6 +465,16 @@ class QueryInvoicesMetadataResponse:
                 else None
             ),
         )
+
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "invoices": [invoice.to_dict(omit_none=omit_none) for invoice in self.invoices],
+            "hasMore": self.has_more,
+            "isTruncated": self.is_truncated,
+        }
+        if not omit_none or self.permanent_storage_hwm_date is not None:
+            payload["permanentStorageHwmDate"] = self.permanent_storage_hwm_date
+        return payload
 
 
 @dataclass(frozen=True)
@@ -418,6 +536,38 @@ class SessionInvoiceStatusResponse:
             ),
         )
 
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "status": self.status.to_dict(omit_none=omit_none),
+        }
+        if not omit_none or self.invoice_hash is not None:
+            payload["invoiceHash"] = self.invoice_hash
+        if not omit_none or self.invoicing_date is not None:
+            payload["invoicingDate"] = self.invoicing_date
+        if not omit_none or self.ordinal_number is not None:
+            payload["ordinalNumber"] = self.ordinal_number
+        if not omit_none or self.reference_number is not None:
+            payload["referenceNumber"] = self.reference_number
+        if not omit_none or self.acquisition_date is not None:
+            payload["acquisitionDate"] = self.acquisition_date
+        if not omit_none or self.invoice_file_name is not None:
+            payload["invoiceFileName"] = self.invoice_file_name
+        if not omit_none or self.invoice_number is not None:
+            payload["invoiceNumber"] = self.invoice_number
+        if not omit_none or self.invoicing_mode is not None:
+            payload["invoicingMode"] = (
+                self.invoicing_mode.value if self.invoicing_mode is not None else None
+            )
+        if not omit_none or self.ksef_number is not None:
+            payload["ksefNumber"] = self.ksef_number
+        if not omit_none or self.permanent_storage_date is not None:
+            payload["permanentStorageDate"] = self.permanent_storage_date
+        if not omit_none or self.upo_download_url is not None:
+            payload["upoDownloadUrl"] = self.upo_download_url
+        if not omit_none or self.upo_download_url_expiration_date is not None:
+            payload["upoDownloadUrlExpirationDate"] = self.upo_download_url_expiration_date
+        return payload
+
 
 @dataclass(frozen=True)
 class SessionInvoicesResponse:
@@ -439,6 +589,14 @@ class SessionInvoicesResponse:
                 else None
             ),
         )
+
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "invoices": [invoice.to_dict(omit_none=omit_none) for invoice in self.invoices]
+        }
+        if not omit_none or self.continuation_token is not None:
+            payload["continuationToken"] = self.continuation_token
+        return payload
 
 
 @dataclass(frozen=True)

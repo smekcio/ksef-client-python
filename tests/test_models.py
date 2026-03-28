@@ -120,6 +120,40 @@ class ModelsTests(unittest.TestCase):
         self.assertEqual(len(invoices.invoices), 2)
         self.assertEqual(invoices.invoices[1].ksef_number, "KSEF-2")
 
+    def test_public_key_certificate_preserves_validity_window(self):
+        cert = models.PublicKeyCertificate.from_dict(
+            {
+                "certificate": "pem",
+                "usage": ["KsefTokenEncryption"],
+                "validFrom": "2026-01-01T00:00:00Z",
+                "validTo": "2026-12-31T23:59:59Z",
+            }
+        )
+        self.assertEqual(cert.valid_from, "2026-01-01T00:00:00Z")
+        self.assertEqual(cert.valid_to, "2026-12-31T23:59:59Z")
+        self.assertEqual(cert.to_dict()["validFrom"], "2026-01-01T00:00:00Z")
+        self.assertEqual(cert.to_dict()["validTo"], "2026-12-31T23:59:59Z")
+
+    def test_session_invoice_status_preserves_status_extensions(self):
+        invoice_status = models.SessionInvoiceStatusResponse.from_dict(
+            {
+                "status": {
+                    "code": 200,
+                    "description": "ok",
+                    "extensions": {"source": "ksef", "attempt": "2"},
+                },
+                "invoiceHash": "hash",
+                "invoicingDate": "2026-01-01T00:00:00Z",
+                "ordinalNumber": 1,
+                "referenceNumber": "ref",
+            }
+        )
+        self.assertEqual(invoice_status.status.extensions, {"source": "ksef", "attempt": "2"})
+        self.assertEqual(
+            invoice_status.to_dict()["status"]["extensions"],
+            {"source": "ksef", "attempt": "2"},
+        )
+
     def test_query_invoices_metadata_response_accepts_sparse_invoice_list_shape(self):
         parsed = models.QueryInvoicesMetadataResponse.from_dict(
             {
@@ -132,6 +166,26 @@ class ModelsTests(unittest.TestCase):
         self.assertEqual(parsed.invoices[0].ksef_number, "KSEF-1")
         self.assertEqual(parsed.invoices[1].invoice_number, "FV/1")
         self.assertFalse(parsed.has_more)
+
+    def test_query_invoices_metadata_response_to_dict_serializes_items(self):
+        parsed = models.QueryInvoicesMetadataResponse(
+            invoices=[
+                models.InvoiceMetadata(
+                    ksef_number="KSEF-1",
+                    invoice_number="FV/1",
+                    permanent_storage_date="2026-01-02T00:00:00Z",
+                )
+            ],
+            has_more=True,
+            is_truncated=True,
+            permanent_storage_hwm_date="2026-01-03T00:00:00Z",
+        )
+        payload = parsed.to_dict()
+        self.assertEqual(payload["invoices"][0]["ksefNumber"], "KSEF-1")
+        self.assertEqual(payload["invoices"][0]["invoiceNumber"], "FV/1")
+        self.assertEqual(payload["hasMore"], True)
+        self.assertEqual(payload["isTruncated"], True)
+        self.assertEqual(payload["permanentStorageHwmDate"], "2026-01-03T00:00:00Z")
 
     def test_lighthouse_message_and_status(self):
         message_data = {
