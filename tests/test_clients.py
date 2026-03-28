@@ -50,16 +50,24 @@ class JsonPayload:
 class DummyHttp:
     def __init__(self, response: HttpResponse) -> None:
         self._response = response
+        self.last_request_args: tuple[Any, ...] | None = None
+        self.last_request_kwargs: dict[str, Any] | None = None
 
     def request(self, *args: Any, **kwargs: Any) -> HttpResponse:
+        self.last_request_args = args
+        self.last_request_kwargs = kwargs
         return self._response
 
 
 class DummyAsyncHttp:
     def __init__(self, response: HttpResponse) -> None:
         self._response = response
+        self.last_request_args: tuple[Any, ...] | None = None
+        self.last_request_kwargs: dict[str, Any] | None = None
 
     async def request(self, *args: Any, **kwargs: Any) -> HttpResponse:
+        self.last_request_args = args
+        self.last_request_kwargs = kwargs
         return self._response
 
 
@@ -165,6 +173,10 @@ class ClientsTests(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "typed model payload"):
             _serialize_json_payload(cast(Any, {"x": 1}))
         self.assertEqual(_serialize_json_payload(JsonPayload({"x": 1})), {"x": 1})
+        self.assertEqual(
+            _serialize_json_payload(_SerializedInvoicePayload({"dateRange": {"from": "2025-01-02T10:15:00"}})),
+            {"dateRange": {"from": "2025-01-02T10:15:00"}},
+        )
 
     def test_sessions_client(self):
         client = SessionsClient(self.http)
@@ -329,6 +341,28 @@ class ClientsTests(unittest.TestCase):
             omit_none=False
         )
         self.assertEqual(payload_copy["filters"]["dateRange"]["from"], "a")
+
+    def test_invoices_client_query_metadata_serializes_typed_payload_once(self):
+        response = HttpResponse(200, httpx.Headers(), b'{"invoices":[]}')
+        http = DummyHttp(response)
+        client = InvoicesClient(http)
+        payload = m.InvoiceQueryFilters.from_dict(
+            {
+                "subjectType": "Subject1",
+                "dateRange": {
+                    "dateType": "Issue",
+                    "from": "2025-01-02T10:15:00",
+                    "to": "2025-01-02T11:15:00",
+                },
+            }
+        )
+
+        result = client.query_invoice_metadata(payload, access_token="token")
+
+        assert http.last_request_kwargs is not None
+        self.assertEqual(http.last_request_kwargs["json"]["dateRange"]["from"], "2025-01-02T10:15:00+01:00")
+        self.assertEqual(http.last_request_kwargs["json"]["dateRange"]["to"], "2025-01-02T11:15:00+01:00")
+        self.assertEqual(result.invoices, [])
 
     def test_other_clients(self):
         payload: Any = object()
@@ -684,6 +718,28 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             )
         with self.assertRaisesRegex(TypeError, "typed model payload"):
             await invoices.export_invoices(cast(Any, {"filters": {}}), access_token="token")
+
+    async def test_async_invoices_client_query_metadata_serializes_typed_payload_once(self):
+        response = HttpResponse(200, httpx.Headers(), b'{"invoices":[]}')
+        http = DummyAsyncHttp(response)
+        invoices = AsyncInvoicesClient(http)
+        payload = m.InvoiceQueryFilters.from_dict(
+            {
+                "subjectType": "Subject1",
+                "dateRange": {
+                    "dateType": "Issue",
+                    "from": "2025-01-02T10:15:00",
+                    "to": "2025-01-02T11:15:00",
+                },
+            }
+        )
+
+        result = await invoices.query_invoice_metadata(payload, access_token="token")
+
+        assert http.last_request_kwargs is not None
+        self.assertEqual(http.last_request_kwargs["json"]["dateRange"]["from"], "2025-01-02T10:15:00+01:00")
+        self.assertEqual(http.last_request_kwargs["json"]["dateRange"]["to"], "2025-01-02T11:15:00+01:00")
+        self.assertEqual(result.invoices, [])
 
         permissions = AsyncPermissionsClient(self.http)
         with patch.object(permissions, "_request_model", AsyncMock(return_value=object())):

@@ -30,6 +30,9 @@ def _serialize_json_payload(payload: _SerializableModel | None) -> dict[str, Any
     if payload is None:
         return None
     if isinstance(payload, dict):
+        to_dict = getattr(payload, "to_dict", None)
+        if callable(to_dict) and type(payload) is not dict:
+            return to_dict()
         raise TypeError(
             "Expected typed model payload with to_dict(), got dict. Construct the appropriate "
             "ksef_client.models.* request model before calling the client."
