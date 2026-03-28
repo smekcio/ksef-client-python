@@ -16,6 +16,7 @@ from ksef_client.clients.invoices import (
     _normalize_invoice_date_range_payload,
     _normalize_invoice_query_date_type,
     _normalize_invoice_query_subject_type,
+    _SerializedInvoicePayload,
 )
 from ksef_client.clients.lighthouse import AsyncLighthouseClient, LighthouseClient
 from ksef_client.clients.limits import AsyncLimitsClient, LimitsClient
@@ -41,7 +42,8 @@ class JsonPayload:
     def __init__(self, payload: dict[str, Any]) -> None:
         self._payload = payload
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
+        _ = omit_none
         return dict(self._payload)
 
 
@@ -317,6 +319,16 @@ class ClientsTests(unittest.TestCase):
             _normalize_invoice_query_date_type(m.InvoiceQueryDateType.ISSUE),
             m.InvoiceQueryDateType.ISSUE,
         )
+        with self.assertRaisesRegex(ValueError, "Unsupported invoice query subject type"):
+            _normalize_invoice_query_subject_type("bad-value")
+        with self.assertRaisesRegex(ValueError, "Unsupported invoice query date type"):
+            _normalize_invoice_query_date_type("bad-value")
+        with self.assertRaisesRegex(TypeError, "Invoice request payload is required"):
+            client.query_invoice_metadata(cast(Any, None), access_token="token")
+        payload_copy = _SerializedInvoicePayload({"filters": {"dateRange": {"from": "a"}}}).to_dict(
+            omit_none=False
+        )
+        self.assertEqual(payload_copy["filters"]["dateRange"]["from"], "a")
 
     def test_other_clients(self):
         payload: Any = object()

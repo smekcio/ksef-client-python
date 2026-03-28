@@ -146,6 +146,52 @@ def test_list_invoices_rejects_reverse_date_range(monkeypatch) -> None:
     assert exc.value.code == ExitCode.VALIDATION_ERROR
 
 
+def test_list_invoices_rejects_invalid_subject_type(monkeypatch) -> None:
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(invoices=SimpleNamespace()),
+    )
+
+    with pytest.raises(CliError) as exc:
+        adapters.list_invoices(
+            profile="demo",
+            base_url="https://example.invalid",
+            date_from="2026-01-01",
+            date_to="2026-01-31",
+            subject_type="bad-value",
+            date_type="Issue",
+            page_size=10,
+            page_offset=0,
+            sort_order="Desc",
+        )
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+
+
+def test_list_invoices_rejects_invalid_date_type(monkeypatch) -> None:
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(invoices=SimpleNamespace()),
+    )
+
+    with pytest.raises(CliError) as exc:
+        adapters.list_invoices(
+            profile="demo",
+            base_url="https://example.invalid",
+            date_from="2026-01-01",
+            date_to="2026-01-31",
+            subject_type="Subject1",
+            date_type="bad-value",
+            page_size=10,
+            page_offset=0,
+            sort_order="Desc",
+        )
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+
+
 def test_get_lighthouse_status_success(monkeypatch) -> None:
     seen: dict[str, object] = {}
 

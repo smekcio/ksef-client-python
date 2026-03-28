@@ -1,5 +1,5 @@
 import unittest
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -55,7 +55,7 @@ class BaseApiClientTests(unittest.TestCase):
     def test_payload_helpers(self):
         self.assertIsNone(_serialize_json_payload(None))
         with self.assertRaises(TypeError):
-            _serialize_json_payload({"ok": True})
+            _serialize_json_payload(cast(Any, {"ok": True}))
         self.assertEqual(_serialize_json_payload(JsonPayload({"x": 1})), {"x": 1})
         self.assertEqual(_validate_model_payload({"ok": True}, path="/path"), {"ok": True})
         self.assertEqual(

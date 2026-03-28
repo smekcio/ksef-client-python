@@ -40,6 +40,16 @@ class OpenApiModelsTests(unittest.TestCase):
         parsed = m.PublicKeyCertificate.from_dict(payload)
         self.assertEqual(parsed.usage[0].value, "FutureUsage")
         self.assertEqual(parsed.to_dict()["usage"], ["FutureUsage"])
+        self.assertIs(m.PublicKeyCertificateUsage("FutureUsage"), parsed.usage[0])
+
+    def test_unknown_enum_rejects_non_string_value(self):
+        with self.assertRaises(ValueError):
+            m.PublicKeyCertificateUsage._missing_(123)
+
+    def test_unknown_enum_missing_creates_pseudo_member(self):
+        member = m.PublicKeyCertificateUsage._missing_("BrandNewUsage")
+        self.assertEqual(member.value, "BrandNewUsage")
+        self.assertIs(m.PublicKeyCertificateUsage._missing_("BrandNewUsage"), member)
 
     def test_invoice_package_roundtrip(self):
         payload = {
