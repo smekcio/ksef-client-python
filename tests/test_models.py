@@ -45,6 +45,14 @@ class ModelsTests(unittest.TestCase):
         parsed = models.AuthenticationTokenRefreshResponse.from_dict(data)
         self.assertEqual(parsed.access_token.token, "acc")
 
+    def test_auth_status_from_minimal_payload(self):
+        parsed = models.AuthenticationOperationStatusResponse.from_dict(
+            {"status": {"code": 100, "description": "pending"}}
+        )
+        self.assertEqual(parsed.status.code, 100)
+        self.assertIsNone(parsed.authentication_method)
+        self.assertIsNone(parsed.start_date)
+
     def test_invoice_export_status(self):
         data = {
             "status": {"code": 200, "description": "ok"},
@@ -84,6 +92,46 @@ class ModelsTests(unittest.TestCase):
         }
         parsed = models.PartUploadRequest.from_dict(data)
         self.assertEqual(parsed.headers["x"], "y")
+
+    def test_public_key_certificate_and_session_models_allow_sparse_payloads(self):
+        cert = models.PublicKeyCertificate.from_dict(
+            {"certificate": "pem", "usage": ["KsefTokenEncryption"]}
+        )
+        self.assertEqual(cert.usage[0].value, "KsefTokenEncryption")
+
+        session = models.OpenOnlineSessionResponse.from_dict({"referenceNumber": "ref"})
+        self.assertEqual(session.reference_number, "ref")
+        self.assertIsNone(session.valid_until)
+
+        invoice_status = models.SessionInvoiceStatusResponse.from_dict(
+            {"status": {"code": 200, "description": "ok"}, "ksefNumber": "KSEF-1"}
+        )
+        self.assertEqual(invoice_status.status.code, 200)
+        self.assertEqual(invoice_status.ksef_number, "KSEF-1")
+
+        invoices = models.SessionInvoicesResponse.from_dict(
+            {
+                "invoices": [
+                    {"status": {"code": 100, "description": "pending"}},
+                    {"status": {"code": 200, "description": "ok"}, "ksefNumber": "KSEF-2"},
+                ]
+            }
+        )
+        self.assertEqual(len(invoices.invoices), 2)
+        self.assertEqual(invoices.invoices[1].ksef_number, "KSEF-2")
+
+    def test_query_invoices_metadata_response_accepts_sparse_invoice_list_shape(self):
+        parsed = models.QueryInvoicesMetadataResponse.from_dict(
+            {
+                "invoiceList": [
+                    {"ksefNumber": "KSEF-1"},
+                    {"invoiceNumber": "FV/1"},
+                ]
+            }
+        )
+        self.assertEqual(parsed.invoices[0].ksef_number, "KSEF-1")
+        self.assertEqual(parsed.invoices[1].invoice_number, "FV/1")
+        self.assertFalse(parsed.has_more)
 
     def test_lighthouse_message_and_status(self):
         message_data = {
