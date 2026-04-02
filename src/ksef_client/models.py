@@ -6,14 +6,75 @@ from typing import Any
 
 from . import openapi_models as _openapi_models
 
-for _name in dir(_openapi_models):
+_OPENAPI_EXPORT_EXCLUDES = {
+    "annotations",
+    "Any",
+    "Optional",
+    "TypeAlias",
+    "TypeVar",
+    "cast",
+    "dataclass",
+    "field",
+    "fields",
+    "Enum",
+    "get_args",
+    "get_origin",
+    "get_type_hints",
+    "sys",
+    "JsonValue",
+    "OpenApiEnum",
+    "OpenApiModel",
+    "T",
+}
+_OPENAPI_EXPORTS = tuple(
+    name
+    for name in vars(_openapi_models)
+    if not name.startswith("_") and name not in _OPENAPI_EXPORT_EXCLUDES
+)
+
+for _name in _OPENAPI_EXPORTS:
     if not _name.startswith("_"):
         globals()[_name] = getattr(_openapi_models, _name)
 
 AuthenticationMethod = _openapi_models.AuthenticationMethod
 AuthenticationMethodInfo = _openapi_models.AuthenticationMethodInfo
+FormCode = _openapi_models.FormCode
+InvoiceMetadataAuthorizedSubject = _openapi_models.InvoiceMetadataAuthorizedSubject
+InvoiceMetadataBuyer = _openapi_models.InvoiceMetadataBuyer
+InvoiceMetadataSeller = _openapi_models.InvoiceMetadataSeller
+InvoiceMetadataThirdSubject = _openapi_models.InvoiceMetadataThirdSubject
+InvoiceType = _openapi_models.InvoiceType
 InvoicingMode = _openapi_models.InvoicingMode
 PublicKeyCertificateUsage = _openapi_models.PublicKeyCertificateUsage
+
+
+def _serialize_model_value(value: Any, *, omit_none: bool) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, list):
+        return [_serialize_model_value(item, omit_none=omit_none) for item in value]
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        return to_dict(omit_none=omit_none)
+    return value
+
+
+def _parse_optional_model(value: Any, model_type: type[Any]) -> Any | None:
+    if not isinstance(value, dict):
+        return None
+    return model_type.from_dict(value)
+
+
+def _parse_optional_model_list(value: Any, model_type: type[Any]) -> list[Any] | None:
+    if not isinstance(value, list):
+        return None
+    return [model_type.from_dict(item) for item in value if isinstance(item, dict)]
+
+
+def _parse_optional_enum(value: Any, enum_type: type[Enum]) -> Any | None:
+    if value is None:
+        return None
+    return enum_type(value)
 
 
 @dataclass(frozen=True)
@@ -394,56 +455,146 @@ class OpenOnlineSessionResponse:
 
 @dataclass(frozen=True)
 class InvoiceMetadata:
-    ksef_number: str | None = None
-    invoice_number: str | None = None
+    acquisition_date: str | None = None
+    buyer: InvoiceMetadataBuyer | None = None
+    currency: str | None = None
+    form_code: FormCode | None = None
+    gross_amount: float | None = None
+    has_attachment: bool | None = None
     invoice_hash: str | None = None
-    issue_date: str | None = None
+    invoice_number: str | None = None
+    invoice_type: InvoiceType | None = None
     invoicing_date: str | None = None
+    invoicing_mode: InvoicingMode | None = None
+    is_self_invoicing: bool | None = None
+    issue_date: str | None = None
+    ksef_number: str | None = None
+    net_amount: float | None = None
     permanent_storage_date: str | None = None
+    seller: InvoiceMetadataSeller | None = None
+    vat_amount: float | None = None
+    authorized_subject: InvoiceMetadataAuthorizedSubject | None = None
+    hash_of_corrected_invoice: str | None = None
+    third_subjects: list[InvoiceMetadataThirdSubject] | None = None
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> InvoiceMetadata:
         return InvoiceMetadata(
-            ksef_number=str(data["ksefNumber"]) if data.get("ksefNumber") is not None else None,
-            invoice_number=(
-                str(data["invoiceNumber"]) if data.get("invoiceNumber") is not None else None
+            acquisition_date=(
+                str(data["acquisitionDate"]) if data.get("acquisitionDate") is not None else None
+            ),
+            buyer=_parse_optional_model(data.get("buyer"), InvoiceMetadataBuyer),
+            currency=str(data["currency"]) if data.get("currency") is not None else None,
+            form_code=_parse_optional_model(data.get("formCode"), FormCode),
+            gross_amount=(
+                float(data["grossAmount"]) if data.get("grossAmount") is not None else None
+            ),
+            has_attachment=(
+                bool(data["hasAttachment"]) if data.get("hasAttachment") is not None else None
             ),
             invoice_hash=(
                 str(data["invoiceHash"]) if data.get("invoiceHash") is not None else None
             ),
-            issue_date=str(data["issueDate"]) if data.get("issueDate") is not None else None,
+            invoice_number=(
+                str(data["invoiceNumber"]) if data.get("invoiceNumber") is not None else None
+            ),
+            invoice_type=_parse_optional_enum(data.get("invoiceType"), InvoiceType),
             invoicing_date=(
                 str(data["invoicingDate"]) if data.get("invoicingDate") is not None else None
             ),
+            invoicing_mode=_parse_optional_enum(data.get("invoicingMode"), InvoicingMode),
+            is_self_invoicing=(
+                bool(data["isSelfInvoicing"])
+                if data.get("isSelfInvoicing") is not None
+                else None
+            ),
+            issue_date=str(data["issueDate"]) if data.get("issueDate") is not None else None,
+            ksef_number=str(data["ksefNumber"]) if data.get("ksefNumber") is not None else None,
+            net_amount=float(data["netAmount"]) if data.get("netAmount") is not None else None,
             permanent_storage_date=(
                 str(data["permanentStorageDate"])
                 if data.get("permanentStorageDate") is not None
                 else None
             ),
+            seller=_parse_optional_model(data.get("seller"), InvoiceMetadataSeller),
+            vat_amount=float(data["vatAmount"]) if data.get("vatAmount") is not None else None,
+            authorized_subject=_parse_optional_model(
+                data.get("authorizedSubject"),
+                InvoiceMetadataAuthorizedSubject,
+            ),
+            hash_of_corrected_invoice=(
+                str(data["hashOfCorrectedInvoice"])
+                if data.get("hashOfCorrectedInvoice") is not None
+                else None
+            ),
+            third_subjects=_parse_optional_model_list(
+                data.get("thirdSubjects"),
+                InvoiceMetadataThirdSubject,
+            ),
         )
 
     def to_dict(self, omit_none: bool = True) -> dict[str, Any]:
         payload: dict[str, Any] = {}
-        if not omit_none or self.ksef_number is not None:
-            payload["ksefNumber"] = self.ksef_number
-        if not omit_none or self.invoice_number is not None:
-            payload["invoiceNumber"] = self.invoice_number
+        if not omit_none or self.acquisition_date is not None:
+            payload["acquisitionDate"] = self.acquisition_date
+        if not omit_none or self.buyer is not None:
+            payload["buyer"] = _serialize_model_value(self.buyer, omit_none=omit_none)
+        if not omit_none or self.currency is not None:
+            payload["currency"] = self.currency
+        if not omit_none or self.form_code is not None:
+            payload["formCode"] = _serialize_model_value(self.form_code, omit_none=omit_none)
+        if not omit_none or self.gross_amount is not None:
+            payload["grossAmount"] = self.gross_amount
+        if not omit_none or self.has_attachment is not None:
+            payload["hasAttachment"] = self.has_attachment
         if not omit_none or self.invoice_hash is not None:
             payload["invoiceHash"] = self.invoice_hash
-        if not omit_none or self.issue_date is not None:
-            payload["issueDate"] = self.issue_date
+        if not omit_none or self.invoice_number is not None:
+            payload["invoiceNumber"] = self.invoice_number
+        if not omit_none or self.invoice_type is not None:
+            payload["invoiceType"] = _serialize_model_value(self.invoice_type, omit_none=omit_none)
         if not omit_none or self.invoicing_date is not None:
             payload["invoicingDate"] = self.invoicing_date
+        if not omit_none or self.invoicing_mode is not None:
+            payload["invoicingMode"] = _serialize_model_value(
+                self.invoicing_mode, omit_none=omit_none
+            )
+        if not omit_none or self.is_self_invoicing is not None:
+            payload["isSelfInvoicing"] = self.is_self_invoicing
+        if not omit_none or self.issue_date is not None:
+            payload["issueDate"] = self.issue_date
+        if not omit_none or self.ksef_number is not None:
+            payload["ksefNumber"] = self.ksef_number
+        if not omit_none or self.net_amount is not None:
+            payload["netAmount"] = self.net_amount
         if not omit_none or self.permanent_storage_date is not None:
             payload["permanentStorageDate"] = self.permanent_storage_date
+        if not omit_none or self.seller is not None:
+            payload["seller"] = _serialize_model_value(self.seller, omit_none=omit_none)
+        if not omit_none or self.vat_amount is not None:
+            payload["vatAmount"] = self.vat_amount
+        if not omit_none or self.authorized_subject is not None:
+            payload["authorizedSubject"] = _serialize_model_value(
+                self.authorized_subject,
+                omit_none=omit_none,
+            )
+        if not omit_none or self.hash_of_corrected_invoice is not None:
+            payload["hashOfCorrectedInvoice"] = self.hash_of_corrected_invoice
+        if not omit_none or self.third_subjects is not None:
+            payload["thirdSubjects"] = _serialize_model_value(
+                self.third_subjects,
+                omit_none=omit_none,
+            )
         return payload
 
 
 @dataclass(frozen=True)
 class QueryInvoicesMetadataResponse:
-    invoices: list[InvoiceMetadata]
+    invoices: list[InvoiceMetadata] = field(default_factory=list)
     has_more: bool = False
     is_truncated: bool = False
+    continuation_token: str | None = None
+    last_permanent_storage_date: str | None = None
     permanent_storage_hwm_date: str | None = None
 
     @staticmethod
@@ -459,6 +610,16 @@ class QueryInvoicesMetadataResponse:
             invoices=invoices,
             has_more=bool(data.get("hasMore", False)),
             is_truncated=bool(data.get("isTruncated", False)),
+            continuation_token=(
+                str(data["continuationToken"])
+                if data.get("continuationToken") is not None
+                else None
+            ),
+            last_permanent_storage_date=(
+                str(data["lastPermanentStorageDate"])
+                if data.get("lastPermanentStorageDate") is not None
+                else None
+            ),
             permanent_storage_hwm_date=(
                 str(data["permanentStorageHwmDate"])
                 if data.get("permanentStorageHwmDate") is not None
@@ -472,6 +633,10 @@ class QueryInvoicesMetadataResponse:
             "hasMore": self.has_more,
             "isTruncated": self.is_truncated,
         }
+        if not omit_none or self.continuation_token is not None:
+            payload["continuationToken"] = self.continuation_token
+        if not omit_none or self.last_permanent_storage_date is not None:
+            payload["lastPermanentStorageDate"] = self.last_permanent_storage_date
         if not omit_none or self.permanent_storage_hwm_date is not None:
             payload["permanentStorageHwmDate"] = self.permanent_storage_hwm_date
         return payload
@@ -607,15 +772,34 @@ class UnknownApiProblem:
     raw: dict[str, Any] | None = None
 
 
-__all__ = [
-    *[name for name in dir(_openapi_models) if not name.startswith("_")],
+_WRAPPER_EXPORTS = (
     "BinaryContent",
     "FileMetadata",
     "InvoiceContent",
+    "StatusInfo",
+    "TokenInfo",
+    "AuthenticationChallengeResponse",
+    "AuthenticationInitResponse",
+    "AuthenticationOperationStatusResponse",
+    "AuthenticationTokensResponse",
+    "AuthenticationTokenRefreshResponse",
     "LighthouseKsefStatus",
     "LighthouseMessage",
     "LighthouseMessageCategory",
     "LighthouseMessageType",
     "LighthouseStatusResponse",
+    "PublicKeyCertificate",
+    "OpenOnlineSessionResponse",
+    "InvoiceMetadata",
+    "QueryInvoicesMetadataResponse",
+    "SessionInvoiceStatusResponse",
+    "SessionInvoicesResponse",
     "UnknownApiProblem",
+)
+
+__all__ = [
+    *dict.fromkeys([*_OPENAPI_EXPORTS, *_WRAPPER_EXPORTS]),
 ]
+
+for _name in ("Any", "Enum", "annotations", "dataclass", "field"):
+    globals().pop(_name, None)

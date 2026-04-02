@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -25,23 +26,37 @@ def _get_invoices(payload: Any) -> list[Any]:
     return []
 
 
-def _get_last_permanent_storage_date(payload: Any) -> str | None:
-    direct_value = _get_value(
-        payload,
-        "last_permanent_storage_date",
-        "lastPermanentStorageDate",
-    )
-    if direct_value:
-        return str(direct_value)
-    for invoice in reversed(_get_invoices(payload)):
+def _get_direct_last_permanent_storage_date(payload: Any) -> str | None:
+    direct_value = _get_value(payload, "last_permanent_storage_date", "lastPermanentStorageDate")
+    if not direct_value:
+        return None
+    return str(direct_value)
+
+
+def _permanent_storage_date_sort_key(value: str) -> tuple[str, str]:
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return ("", value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return (parsed.astimezone(timezone.utc).isoformat(), value)
+
+
+def _get_latest_invoice_permanent_storage_date(payload: Any) -> str | None:
+    candidates: list[str] = []
+    for invoice in _get_invoices(payload):
         permanent_storage_date = _get_value(
             invoice,
             "permanent_storage_date",
             "permanentStorageDate",
         )
         if permanent_storage_date:
-            return str(permanent_storage_date)
-    return None
+            candidates.append(str(permanent_storage_date))
+    if not candidates:
+        return None
+    return max(candidates, key=_permanent_storage_date_sort_key)
 
 
 def update_continuation_point(
@@ -49,14 +64,17 @@ def update_continuation_point(
     subject_type: str,
     package: Any,
 ) -> None:
-    is_truncated = bool(_get_value(package, "is_truncated", "isTruncated", False))
-    last_permanent_storage_date = _get_last_permanent_storage_date(package)
     hwm_date = _get_value(package, "permanent_storage_hwm_date", "permanentStorageHwmDate")
+    is_truncated = bool(_get_value(package, "is_truncated", "isTruncated", False))
+    last_permanent_storage_date = _get_direct_last_permanent_storage_date(package)
+    fallback_date = _get_latest_invoice_permanent_storage_date(package)
 
-    if is_truncated and last_permanent_storage_date:
-        continuation_points[subject_type] = str(last_permanent_storage_date)
-    elif hwm_date:
+    if hwm_date:
         continuation_points[subject_type] = str(hwm_date)
+    elif is_truncated and last_permanent_storage_date:
+        continuation_points[subject_type] = str(last_permanent_storage_date)
+    elif fallback_date:
+        continuation_points[subject_type] = fallback_date
     else:
         continuation_points.pop(subject_type, None)
 

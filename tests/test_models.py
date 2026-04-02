@@ -1,9 +1,78 @@
+import subprocess
+import sys
+import textwrap
 import unittest
+from pathlib import Path
 
 from ksef_client import models
 
 
 class ModelsTests(unittest.TestCase):
+    def test_models_public_exports_are_curated(self):
+        self.assertIn("FormCode", models.__all__)
+        self.assertIn("StatusInfo", models.__all__)
+        self.assertIn("QueryInvoicesMetadataResponse", models.__all__)
+
+        unexpected = {
+            "Any",
+            "Enum",
+            "JsonValue",
+            "OpenApiEnum",
+            "OpenApiModel",
+            "Optional",
+            "TypeAlias",
+            "TypeVar",
+            "annotations",
+            "cast",
+            "dataclass",
+            "field",
+            "fields",
+            "sys",
+        }
+        for name in unexpected:
+            self.assertFalse(hasattr(models, name), msg=f"{name} leaked from ksef_client.models")
+
+    def test_models_stub_matches_runtime_wrappers(self):
+        mypy_program = textwrap.dedent(
+            """
+            from ksef_client import models as m
+
+            status = m.StatusInfo(code=200, description="ok")
+            status.extensions
+
+            challenge = m.AuthenticationChallengeResponse(
+                challenge="c",
+                timestamp="t",
+                timestamp_ms=1,
+            )
+            challenge.client_ip
+
+            cert = m.PublicKeyCertificate(certificate="pem")
+            cert.valid_from
+
+            invoice = m.InvoiceMetadata(currency="PLN")
+            invoice.currency
+
+            response = m.QueryInvoicesMetadataResponse()
+            response.continuation_token
+            response.last_permanent_storage_date
+
+            session = m.SessionInvoicesResponse(invoices=[])
+            session.continuation_token
+
+            problem = m.UnknownApiProblem(status=500, title="boom")
+            problem.raw
+            """
+        ).strip()
+        result = subprocess.run(
+            [sys.executable, "-m", "mypy", "-c", mypy_program],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).resolve().parents[1],
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
     def test_token_info_from_dict(self):
         data = {"token": "abc", "validUntil": "2024-01-01"}
         token = models.TokenInfo.from_dict(data)
@@ -240,6 +309,77 @@ class ModelsTests(unittest.TestCase):
         self.assertEqual(parsed.invoices[1].invoice_number, "FV/1")
         self.assertFalse(parsed.has_more)
 
+    def test_query_invoices_metadata_response_preserves_full_invoice_metadata_fields(self):
+        parsed = models.QueryInvoicesMetadataResponse.from_dict(
+            {
+                "invoices": [
+                    {
+                        "acquisitionDate": "2026-01-01T09:00:00Z",
+                        "buyer": {
+                            "identifier": {"type": "Nip", "value": "1234567890"},
+                            "name": "Buyer sp. z o.o.",
+                        },
+                        "currency": "PLN",
+                        "formCode": {
+                            "systemCode": "FA (3)",
+                            "schemaVersion": "1-0E",
+                            "value": "FA",
+                        },
+                        "grossAmount": 123.45,
+                        "hasAttachment": True,
+                        "invoiceHash": "hash",
+                        "invoiceNumber": "FV/1",
+                        "invoiceType": "VAT",
+                        "invoicingDate": "2026-01-01",
+                        "invoicingMode": "Online",
+                        "isSelfInvoicing": False,
+                        "issueDate": "2026-01-01",
+                        "ksefNumber": "KSEF-1",
+                        "netAmount": 100.0,
+                        "permanentStorageDate": "2026-01-02T00:00:00Z",
+                        "seller": {"nip": "9876543210", "name": "Seller SA"},
+                        "vatAmount": 23.45,
+                        "authorizedSubject": {"nip": "1111111111", "role": 7, "name": "Proxy"},
+                        "hashOfCorrectedInvoice": "corr-hash",
+                        "thirdSubjects": [
+                            {
+                                "identifier": {"type": "Nip", "value": "2222222222"},
+                                "role": 3,
+                                "name": "Third subject",
+                            }
+                        ],
+                    }
+                ],
+                "hasMore": True,
+                "continuationToken": "ct-1",
+            }
+        )
+        invoice = parsed.invoices[0]
+        self.assertEqual(invoice.currency, "PLN")
+        self.assertIsNotNone(invoice.buyer)
+        assert invoice.buyer is not None
+        self.assertEqual(invoice.buyer.name, "Buyer sp. z o.o.")
+        self.assertIsNotNone(invoice.form_code)
+        assert invoice.form_code is not None
+        self.assertEqual(invoice.form_code.system_code, "FA (3)")
+        self.assertEqual(invoice.gross_amount, 123.45)
+        self.assertIsNotNone(invoice.invoice_type)
+        assert invoice.invoice_type is not None
+        self.assertEqual(invoice.invoice_type.value, "VAT")
+        self.assertIsNotNone(invoice.invoicing_mode)
+        assert invoice.invoicing_mode is not None
+        self.assertEqual(invoice.invoicing_mode.value, "Online")
+        self.assertIsNotNone(invoice.seller)
+        assert invoice.seller is not None
+        self.assertEqual(invoice.seller.nip, "9876543210")
+        self.assertIsNotNone(invoice.authorized_subject)
+        assert invoice.authorized_subject is not None
+        self.assertEqual(invoice.authorized_subject.nip, "1111111111")
+        self.assertIsNotNone(invoice.third_subjects)
+        assert invoice.third_subjects is not None
+        self.assertEqual(invoice.third_subjects[0].name, "Third subject")
+        self.assertEqual(parsed.continuation_token, "ct-1")
+
     def test_query_invoices_metadata_response_to_dict_serializes_items(self):
         parsed = models.QueryInvoicesMetadataResponse(
             invoices=[
@@ -256,6 +396,8 @@ class ModelsTests(unittest.TestCase):
             ],
             has_more=True,
             is_truncated=True,
+            continuation_token="ct-1",
+            last_permanent_storage_date="2026-01-02T00:00:00Z",
             permanent_storage_hwm_date="2026-01-03T00:00:00Z",
         )
         payload = parsed.to_dict()
@@ -266,6 +408,8 @@ class ModelsTests(unittest.TestCase):
         self.assertEqual(payload["invoices"][0]["invoicingDate"], "2026-01-01")
         self.assertEqual(payload["hasMore"], True)
         self.assertEqual(payload["isTruncated"], True)
+        self.assertEqual(payload["continuationToken"], "ct-1")
+        self.assertEqual(payload["lastPermanentStorageDate"], "2026-01-02T00:00:00Z")
         self.assertEqual(payload["permanentStorageHwmDate"], "2026-01-03T00:00:00Z")
 
     def test_session_invoice_and_collection_to_dict_include_optional_fields_when_requested(self):

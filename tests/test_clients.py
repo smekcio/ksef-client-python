@@ -345,7 +345,14 @@ class ClientsTests(unittest.TestCase):
         self.assertEqual(payload_copy["filters"]["dateRange"]["from"], "a")
 
     def test_invoices_client_query_metadata_serializes_typed_payload_once(self):
-        response = HttpResponse(200, httpx.Headers(), b'{"invoices":[]}')
+        response = HttpResponse(
+            200,
+            httpx.Headers(),
+            (
+                b'{"invoices":[{"ksefNumber":"KSEF-1","currency":"PLN","grossAmount":123.45}],'
+                b'"continuationToken":"ct-1"}'
+            ),
+        )
         http = DummyHttp(response)
         client = InvoicesClient(http)
         invoice_payload = m.InvoiceQueryFilters.from_dict(
@@ -370,7 +377,10 @@ class ClientsTests(unittest.TestCase):
             http.last_request_kwargs["json"]["dateRange"]["to"],
             "2025-01-02T11:15:00+01:00",
         )
-        self.assertEqual(result.invoices, [])
+        self.assertEqual(result.invoices[0].ksef_number, "KSEF-1")
+        self.assertEqual(result.invoices[0].currency, "PLN")
+        self.assertEqual(result.invoices[0].gross_amount, 123.45)
+        self.assertEqual(result.continuation_token, "ct-1")
 
     def test_other_clients(self):
         payload: Any = object()
@@ -728,7 +738,14 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             await invoices.export_invoices(cast(Any, {"filters": {}}), access_token="token")
 
     async def test_async_invoices_client_query_metadata_serializes_typed_payload_once(self):
-        response = HttpResponse(200, httpx.Headers(), b'{"invoices":[]}')
+        response = HttpResponse(
+            200,
+            httpx.Headers(),
+            (
+                b'{"invoices":[{"ksefNumber":"KSEF-1","currency":"PLN","grossAmount":123.45}],'
+                b'"continuationToken":"ct-1"}'
+            ),
+        )
         http = DummyAsyncHttp(response)
         invoices = AsyncInvoicesClient(http)
         invoice_payload = m.InvoiceQueryFilters.from_dict(
@@ -753,7 +770,10 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             http.last_request_kwargs["json"]["dateRange"]["to"],
             "2025-01-02T11:15:00+01:00",
         )
-        self.assertEqual(result.invoices, [])
+        self.assertEqual(result.invoices[0].ksef_number, "KSEF-1")
+        self.assertEqual(result.invoices[0].currency, "PLN")
+        self.assertEqual(result.invoices[0].gross_amount, 123.45)
+        self.assertEqual(result.continuation_token, "ct-1")
 
         payload: Any = object()
         permissions = AsyncPermissionsClient(self.http)
