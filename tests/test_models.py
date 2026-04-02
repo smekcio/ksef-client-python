@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import textwrap
@@ -32,7 +33,11 @@ class ModelsTests(unittest.TestCase):
         for name in unexpected:
             self.assertFalse(hasattr(models, name), msg=f"{name} leaked from ksef_client.models")
 
+    def test_serialize_model_value_returns_plain_values_unchanged(self):
+        self.assertEqual(models._serialize_model_value("plain", omit_none=True), "plain")
+
     def test_models_stub_matches_runtime_wrappers(self):
+        repo_root = Path(__file__).resolve().parents[1]
         mypy_program = textwrap.dedent(
             """
             from ksef_client import models as m
@@ -68,7 +73,11 @@ class ModelsTests(unittest.TestCase):
             [sys.executable, "-m", "mypy", "-c", mypy_program],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).resolve().parents[1],
+            cwd=repo_root,
+            env={
+                **os.environ,
+                "MYPYPATH": str(repo_root / "src"),
+            },
             check=False,
         )
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
@@ -379,6 +388,18 @@ class ModelsTests(unittest.TestCase):
         assert invoice.third_subjects is not None
         self.assertEqual(invoice.third_subjects[0].name, "Third subject")
         self.assertEqual(parsed.continuation_token, "ct-1")
+        payload = invoice.to_dict()
+        self.assertEqual(payload["buyer"]["name"], "Buyer sp. z o.o.")
+        self.assertEqual(payload["currency"], "PLN")
+        self.assertEqual(payload["formCode"]["systemCode"], "FA (3)")
+        self.assertEqual(payload["grossAmount"], 123.45)
+        self.assertEqual(payload["invoiceType"], "VAT")
+        self.assertEqual(payload["invoicingMode"], "Online")
+        self.assertEqual(payload["seller"]["nip"], "9876543210")
+        self.assertEqual(payload["vatAmount"], 23.45)
+        self.assertEqual(payload["authorizedSubject"]["nip"], "1111111111")
+        self.assertEqual(payload["hashOfCorrectedInvoice"], "corr-hash")
+        self.assertEqual(payload["thirdSubjects"][0]["name"], "Third subject")
 
     def test_query_invoices_metadata_response_to_dict_serializes_items(self):
         parsed = models.QueryInvoicesMetadataResponse(

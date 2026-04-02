@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum as _Enum
 from typing import Any
 
 from . import openapi_models as _openapi_models
@@ -49,7 +49,7 @@ PublicKeyCertificateUsage = _openapi_models.PublicKeyCertificateUsage
 
 
 def _serialize_model_value(value: Any, *, omit_none: bool) -> Any:
-    if isinstance(value, Enum):
+    if isinstance(value, _Enum):
         return value.value
     if isinstance(value, list):
         return [_serialize_model_value(item, omit_none=omit_none) for item in value]
@@ -71,7 +71,7 @@ def _parse_optional_model_list(value: Any, model_type: type[Any]) -> list[Any] |
     return [model_type.from_dict(item) for item in value if isinstance(item, dict)]
 
 
-def _parse_optional_enum(value: Any, enum_type: type[Enum]) -> Any | None:
+def _parse_optional_enum(value: Any, enum_type: type[_Enum]) -> Any | None:
     if value is None:
         return None
     return enum_type(value)
@@ -292,26 +292,26 @@ class AuthenticationTokenRefreshResponse:
         return {"accessToken": self.access_token.to_dict(omit_none=omit_none)}
 
 
-class LighthouseKsefStatus(str, Enum):
+class LighthouseKsefStatus(str, _Enum):
     AVAILABLE = "AVAILABLE"
     MAINTENANCE = "MAINTENANCE"
     FAILURE = "FAILURE"
     TOTAL_FAILURE = "TOTAL_FAILURE"
 
 
-class LighthouseMessageCategory(str, Enum):
+class LighthouseMessageCategory(str, _Enum):
     FAILURE = "FAILURE"
     TOTAL_FAILURE = "TOTAL_FAILURE"
     MAINTENANCE = "MAINTENANCE"
 
 
-class LighthouseMessageType(str, Enum):
+class LighthouseMessageType(str, _Enum):
     FAILURE_START = "FAILURE_START"
     FAILURE_END = "FAILURE_END"
     MAINTENANCE_ANNOUNCEMENT = "MAINTENANCE_ANNOUNCEMENT"
 
 
-def _parse_enum(value: Any, enum_type: type[Enum], default: Enum) -> Enum:
+def _parse_enum(value: Any, enum_type: type[_Enum], default: _Enum) -> _Enum:
     try:
         return enum_type(value)
     except Exception:

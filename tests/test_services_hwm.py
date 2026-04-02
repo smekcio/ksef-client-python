@@ -119,6 +119,33 @@ class HwmServiceTests(unittest.TestCase):
         self.assertEqual(ascending_points["seller"], "2024-03-03T00:00:00Z")
         self.assertEqual(descending_points["seller"], "2024-03-03T00:00:00Z")
 
+    def test_update_continuation_point_fallback_accepts_naive_iso_dates(self):
+        points: dict[str, str | None] = {}
+        update_continuation_point(
+            points,
+            "seller",
+            {
+                "isTruncated": True,
+                "invoices": [{"permanentStorageDate": "2024-03-03T00:00:00"}],
+            },
+        )
+        self.assertEqual(points["seller"], "2024-03-03T00:00:00")
+
+    def test_update_continuation_point_fallback_ignores_invalid_dates_in_favor_of_valid_ones(self):
+        points: dict[str, str | None] = {}
+        update_continuation_point(
+            points,
+            "seller",
+            {
+                "isTruncated": True,
+                "invoices": [
+                    {"permanentStorageDate": "not-a-date"},
+                    {"permanentStorageDate": "2024-03-04T00:00:00Z"},
+                ],
+            },
+        )
+        self.assertEqual(points["seller"], "2024-03-04T00:00:00Z")
+
     def test_get_effective_start_date(self):
         points: dict[str, str | None] = {"buyer": "2024-01-01"}
         self.assertEqual(get_effective_start_date(points, "buyer", "2024-02-01"), "2024-01-01")
