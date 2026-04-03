@@ -1275,6 +1275,57 @@ def test_list_invoices_without_subject_type_queries_all_subject_types(monkeypatc
     assert result["continuation_token"] == ""
 
 
+def test_invoice_sort_value_handles_empty_invalid_and_naive_datetime() -> None:
+    assert adapters._normalize_invoice_sort_value(None) == ""
+    assert adapters._normalize_invoice_sort_value("   ") == ""
+    assert adapters._normalize_invoice_sort_value("not-a-date") == "not-a-date"
+    assert adapters._normalize_invoice_sort_value("2026-01-05T12:30:00") == (
+        "2026-01-05T12:30:00+00:00"
+    )
+
+
+def test_invoice_identity_key_falls_back_to_serialized_payload_and_repr() -> None:
+    class _PlainObject:
+        pass
+
+    payload_key = adapters._invoice_identity_key(_ToDictPayload())
+    repr_key = adapters._invoice_identity_key(_PlainObject())
+
+    assert payload_key == '{"value": "ok"}'
+    assert "_PlainObject object" in repr_key
+
+
+def test_query_all_invoice_subject_types_handles_negative_offset_and_unbounded_page_size(
+    monkeypatch,
+) -> None:
+    responses = {
+        ("Subject1", 0): [{"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"}],
+        ("Subject2", 0): [{"ksefNumber": "KSEF-3", "issueDate": "2026-01-03T00:00:00Z"}],
+        ("Subject3", 0): [{"ksefNumber": "KSEF-2", "issueDate": "2026-01-02T00:00:00Z"}],
+        ("SubjectAuthorized", 0): [],
+    }
+
+    def _fake_query_page(**kwargs):
+        subject_type = kwargs["subject_type"].value
+        page_offset = kwargs["page_offset"]
+        return {"invoices": responses[(subject_type, page_offset)]}
+
+    monkeypatch.setattr(adapters, "_query_invoice_metadata_page", _fake_query_page)
+
+    result = adapters._query_all_invoice_subject_types(
+        client=object(),
+        access_token="token",
+        date_type=m.InvoiceQueryDateType.ISSUE,
+        from_iso="2026-01-01T00:00:00Z",
+        to_iso="2026-01-31T23:59:59Z",
+        page_size=0,
+        page_offset=-5,
+        sort_order="Asc",
+    )
+
+    assert [item["ksefNumber"] for item in result] == ["KSEF-1", "KSEF-2", "KSEF-3"]
+
+
 def test_resolve_output_path_for_plain_path_segment() -> None:
     path = adapters._resolve_output_path("artifacts", default_filename="out.xml")
     assert path.as_posix().endswith("artifacts")
