@@ -6,42 +6,123 @@ from enum import Enum as _Enum
 from typing import Any as _Any
 
 from .openapi_models import (
-    AllowedIps,
     AmountType,
+    AuthenticationContextIdentifierType,
+    AuthenticationMethod,
+    AuthenticationMethodCategory,
+    AuthenticationTokenStatus,
+    BuyerIdentifierType,
+    CertificateListItemStatus,
+    CertificateRevocationReason,
+    CertificateSubjectIdentifierType,
+    CommonSessionStatus,
+    CurrencyCode,
+    EntityAuthorizationPermissionType,
+    EntityAuthorizationPermissionsSubjectIdentifierType,
+    EntityAuthorizationsAuthorIdentifierType,
+    EntityAuthorizationsAuthorizedEntityIdentifierType,
+    EntityAuthorizationsAuthorizingEntityIdentifierType,
+    EntityPermissionItemScope,
+    EntityPermissionType,
+    EntityPermissionsContextIdentifierType,
+    EntityPermissionsSubjectIdentifierType,
+    EntityPermissionsSubordinateEntityIdentifierType,
+    EntityRoleType,
+    EntityRolesParentEntityIdentifierType,
+    EntitySubjectByFingerprintDetailsType,
+    EntitySubjectByIdentifierDetailsType,
+    EntitySubjectDetailsType,
+    EuEntityAdministrationPermissionsContextIdentifierType,
+    EuEntityAdministrationPermissionsSubjectIdentifierType,
+    EuEntityPermissionSubjectDetailsType,
+    EuEntityPermissionType,
+    EuEntityPermissionsAuthorIdentifierType,
+    EuEntityPermissionsQueryPermissionType,
+    EuEntityPermissionsSubjectIdentifierType,
+    IndirectPermissionType,
+    IndirectPermissionsSubjectIdentifierType,
+    IndirectPermissionsTargetIdentifierType,
+    InvoicePermissionType,
+    InvoiceQueryDateType,
+    InvoiceQueryFormType,
+    InvoiceQuerySubjectType,
+    InvoiceType,
+    InvoicingMode,
+    KsefCertificateType,
+    PermissionState,
+    PersonIdentifierType,
+    PersonPermissionScope,
+    PersonPermissionSubjectDetailsType,
+    PersonPermissionType,
+    PersonPermissionsAuthorIdentifierType,
+    PersonPermissionsAuthorizedIdentifierType,
+    PersonPermissionsContextIdentifierType,
+    PersonPermissionsQueryType,
+    PersonPermissionsSubjectIdentifierType,
+    PersonPermissionsTargetIdentifierType,
+    PersonSubjectByFingerprintDetailsType,
+    PersonSubjectDetailsType,
+    PersonalPermissionScope,
+    PersonalPermissionType,
+    PersonalPermissionsAuthorizedIdentifierType,
+    PersonalPermissionsContextIdentifierType,
+    PersonalPermissionsTargetIdentifierType,
+    PublicKeyCertificateUsage,
+    QueryType,
+    SessionType,
+    SortOrder,
+    SubjectIdentifierType,
+    SubjectType,
+    SubordinateEntityRoleType,
+    SubordinateRoleSubordinateEntityIdentifierType,
+    SubunitPermissionScope,
+    SubunitPermissionsAuthorIdentifierType,
+    SubunitPermissionsContextIdentifierType,
+    SubunitPermissionsSubjectIdentifierType,
+    SubunitPermissionsSubunitIdentifierType,
+    TestDataAuthenticationContextIdentifierType,
+    TestDataAuthorizedIdentifierType,
+    TestDataContextIdentifierType,
+    TestDataPermissionType,
+    ThirdSubjectIdentifierType,
+    TokenAuthorIdentifierType,
+    TokenContextIdentifierType,
+    TokenPermissionType,
+    Challenge,
+    InternalId,
+    KsefNumber,
+    Nip,
+    NipVatUe,
+    PeppolId,
+    PermissionId,
+    Pesel,
+    ReferenceNumber,
+    RetryAfter,
+    Sha256HashBase64,
+    AllowedIps,
     ApiRateLimitValuesOverride,
     ApiRateLimitsOverride,
     AttachmentPermissionGrantRequest,
     AttachmentPermissionRevokeRequest,
     AuthenticationContextIdentifier,
-    AuthenticationContextIdentifierType,
     AuthenticationListItem,
     AuthenticationListResponse,
-    AuthenticationMethod,
-    AuthenticationMethodCategory,
     AuthenticationMethodInfo,
-    AuthenticationTokenStatus,
     AuthorizationPolicy,
     BatchFileInfo,
     BatchFilePartInfo,
     BatchSessionContextLimitsOverride,
     BatchSessionEffectiveContextLimits,
     BlockContextAuthenticationRequest,
-    BuyerIdentifierType,
     CertificateEffectiveSubjectLimits,
     CertificateEnrollmentDataResponse,
     CertificateEnrollmentStatusResponse,
     CertificateLimit,
     CertificateLimitsResponse,
     CertificateListItem,
-    CertificateListItemStatus,
-    CertificateRevocationReason,
     CertificateSubjectIdentifier,
-    CertificateSubjectIdentifierType,
     CertificateSubjectLimitsOverride,
-    Challenge,
     CheckAttachmentPermissionStatusResponse,
-    CommonSessionStatus,
-    CurrencyCode,
     EffectiveApiRateLimitValues,
     EffectiveApiRateLimits,
     EffectiveContextLimits,
@@ -52,55 +133,33 @@ from .openapi_models import (
     EnrollmentEffectiveSubjectLimits,
     EnrollmentSubjectLimitsOverride,
     EntityAuthorizationGrant,
-    EntityAuthorizationPermissionType,
     EntityAuthorizationPermissionsGrantRequest,
     EntityAuthorizationPermissionsQueryRequest,
     EntityAuthorizationPermissionsSubjectIdentifier,
-    EntityAuthorizationPermissionsSubjectIdentifierType,
     EntityAuthorizationsAuthorIdentifier,
-    EntityAuthorizationsAuthorIdentifierType,
     EntityAuthorizationsAuthorizedEntityIdentifier,
-    EntityAuthorizationsAuthorizedEntityIdentifierType,
     EntityAuthorizationsAuthorizingEntityIdentifier,
-    EntityAuthorizationsAuthorizingEntityIdentifierType,
     EntityByFingerprintDetails,
     EntityDetails,
     EntityPermission,
     EntityPermissionItem,
-    EntityPermissionItemScope,
-    EntityPermissionType,
     EntityPermissionsContextIdentifier,
-    EntityPermissionsContextIdentifierType,
     EntityPermissionsGrantRequest,
     EntityPermissionsQueryRequest,
     EntityPermissionsSubjectIdentifier,
-    EntityPermissionsSubjectIdentifierType,
     EntityPermissionsSubordinateEntityIdentifier,
-    EntityPermissionsSubordinateEntityIdentifierType,
     EntityRole,
-    EntityRoleType,
     EntityRolesParentEntityIdentifier,
-    EntityRolesParentEntityIdentifierType,
-    EntitySubjectByFingerprintDetailsType,
-    EntitySubjectByIdentifierDetailsType,
-    EntitySubjectDetailsType,
     EuEntityAdministrationPermissionsContextIdentifier,
-    EuEntityAdministrationPermissionsContextIdentifierType,
     EuEntityAdministrationPermissionsGrantRequest,
     EuEntityAdministrationPermissionsSubjectIdentifier,
-    EuEntityAdministrationPermissionsSubjectIdentifierType,
     EuEntityDetails,
     EuEntityPermission,
     EuEntityPermissionSubjectDetails,
-    EuEntityPermissionSubjectDetailsType,
-    EuEntityPermissionType,
     EuEntityPermissionsAuthorIdentifier,
-    EuEntityPermissionsAuthorIdentifierType,
     EuEntityPermissionsGrantRequest,
-    EuEntityPermissionsQueryPermissionType,
     EuEntityPermissionsQueryRequest,
     EuEntityPermissionsSubjectIdentifier,
-    EuEntityPermissionsSubjectIdentifierType,
     ExceptionDetails,
     ExceptionInfo,
     ExceptionResponse,
@@ -110,14 +169,10 @@ from .openapi_models import (
     GenerateTokenRequest,
     GenerateTokenResponse,
     IdDocument,
-    IndirectPermissionType,
     IndirectPermissionsGrantRequest,
     IndirectPermissionsSubjectIdentifier,
-    IndirectPermissionsSubjectIdentifierType,
     IndirectPermissionsTargetIdentifier,
-    IndirectPermissionsTargetIdentifierType,
     InitTokenAuthenticationRequest,
-    InternalId,
     InvoiceExportRequest,
     InvoiceExportStatusResponse,
     InvoiceMetadataAuthorizedSubject,
@@ -128,31 +183,18 @@ from .openapi_models import (
     InvoiceMetadataThirdSubjectIdentifier,
     InvoicePackage,
     InvoicePackagePart,
-    InvoicePermissionType,
     InvoiceQueryAmount,
     InvoiceQueryBuyerIdentifier,
     InvoiceQueryDateRange,
-    InvoiceQueryDateType,
     InvoiceQueryFilters,
-    InvoiceQueryFormType,
-    InvoiceQuerySubjectType,
     InvoiceStatusInfo,
-    InvoiceType,
-    InvoicingMode,
-    KsefCertificateType,
-    KsefNumber,
-    Nip,
-    NipVatUe,
     OnlineSessionContextLimitsOverride,
     OnlineSessionEffectiveContextLimits,
     OpenBatchSessionRequest,
     OpenBatchSessionResponse,
     OpenOnlineSessionRequest,
     PartUploadRequest,
-    PeppolId,
     PeppolProvider,
-    PermissionId,
-    PermissionState,
     PermissionsEuEntityDetails,
     PermissionsOperationResponse,
     PermissionsOperationStatusResponse,
@@ -166,40 +208,21 @@ from .openapi_models import (
     PersonCreateRequest,
     PersonDetails,
     PersonIdentifier,
-    PersonIdentifierType,
     PersonPermission,
-    PersonPermissionScope,
     PersonPermissionSubjectDetails,
-    PersonPermissionSubjectDetailsType,
-    PersonPermissionType,
     PersonPermissionsAuthorIdentifier,
-    PersonPermissionsAuthorIdentifierType,
     PersonPermissionsAuthorizedIdentifier,
-    PersonPermissionsAuthorizedIdentifierType,
     PersonPermissionsContextIdentifier,
-    PersonPermissionsContextIdentifierType,
     PersonPermissionsGrantRequest,
     PersonPermissionsQueryRequest,
-    PersonPermissionsQueryType,
     PersonPermissionsSubjectIdentifier,
-    PersonPermissionsSubjectIdentifierType,
     PersonPermissionsTargetIdentifier,
-    PersonPermissionsTargetIdentifierType,
     PersonRemoveRequest,
-    PersonSubjectByFingerprintDetailsType,
-    PersonSubjectDetailsType,
     PersonalPermission,
-    PersonalPermissionScope,
-    PersonalPermissionType,
     PersonalPermissionsAuthorizedIdentifier,
-    PersonalPermissionsAuthorizedIdentifierType,
     PersonalPermissionsContextIdentifier,
-    PersonalPermissionsContextIdentifierType,
     PersonalPermissionsQueryRequest,
     PersonalPermissionsTargetIdentifier,
-    PersonalPermissionsTargetIdentifierType,
-    Pesel,
-    PublicKeyCertificateUsage,
     QueryCertificatesRequest,
     QueryCertificatesResponse,
     QueryEntityAuthorizationPermissionsResponse,
@@ -213,63 +236,40 @@ from .openapi_models import (
     QuerySubunitPermissionsResponse,
     QueryTokensResponse,
     QueryTokensResponseItem,
-    QueryType,
-    ReferenceNumber,
     RetrieveCertificatesListItem,
     RetrieveCertificatesRequest,
     RetrieveCertificatesResponse,
-    RetryAfter,
     RevokeCertificateRequest,
     SendInvoiceRequest,
     SendInvoiceResponse,
     SessionStatusResponse,
-    SessionType,
     SessionsQueryResponse,
     SessionsQueryResponseItem,
     SetRateLimitsRequest,
     SetSessionLimitsRequest,
     SetSubjectLimitsRequest,
-    Sha256HashBase64,
-    SortOrder,
     SubjectCreateRequest,
-    SubjectIdentifierType,
     SubjectRemoveRequest,
-    SubjectType,
     SubordinateEntityRole,
     SubordinateEntityRolesQueryRequest,
-    SubordinateEntityRoleType,
     SubordinateRoleSubordinateEntityIdentifier,
-    SubordinateRoleSubordinateEntityIdentifierType,
     Subunit,
     SubunitPermission,
-    SubunitPermissionScope,
     SubunitPermissionsAuthorIdentifier,
-    SubunitPermissionsAuthorIdentifierType,
     SubunitPermissionsAuthorizedIdentifier,
     SubunitPermissionsContextIdentifier,
-    SubunitPermissionsContextIdentifierType,
     SubunitPermissionsGrantRequest,
     SubunitPermissionsQueryRequest,
     SubunitPermissionsSubjectIdentifier,
-    SubunitPermissionsSubjectIdentifierType,
     SubunitPermissionsSubunitIdentifier,
-    SubunitPermissionsSubunitIdentifierType,
     TestDataAuthenticationContextIdentifier,
-    TestDataAuthenticationContextIdentifierType,
     TestDataAuthorizedIdentifier,
-    TestDataAuthorizedIdentifierType,
     TestDataContextIdentifier,
-    TestDataContextIdentifierType,
     TestDataPermission,
-    TestDataPermissionType,
     TestDataPermissionsGrantRequest,
     TestDataPermissionsRevokeRequest,
-    ThirdSubjectIdentifierType,
-    TokenAuthorIdentifierType,
     TokenAuthorIdentifierTypeIdentifier,
-    TokenContextIdentifierType,
     TokenContextIdentifierTypeIdentifier,
-    TokenPermissionType,
     TokenStatusResponse,
     TooManyRequestsResponse,
     UnauthorizedProblemDetails,
@@ -277,6 +277,11 @@ from .openapi_models import (
     UpoPageResponse,
     UpoResponse,
 )
+
+@_dataclass(frozen=True)
+class BinaryContent:
+    content: bytes
+    sha256_base64: str | None = None
 
 
 @_dataclass(frozen=True)
@@ -292,33 +297,27 @@ class InvoiceContent:
 
 
 @_dataclass(frozen=True)
-class BinaryContent:
-    content: bytes
-    sha256_base64: str | None = None
-
-
-@_dataclass(frozen=True)
 class StatusInfo:
     code: int
     description: str
     details: list[str] | None = None
     extensions: dict[str, _Any] | None = None
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> StatusInfo: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> StatusInfo:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
 class TokenInfo:
     token: str
     valid_until: str | None
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> TokenInfo: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> TokenInfo:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
@@ -327,22 +326,22 @@ class AuthenticationChallengeResponse:
     timestamp: str
     timestamp_ms: int
     client_ip: str | None = None
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> AuthenticationChallengeResponse: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> AuthenticationChallengeResponse:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
 class AuthenticationInitResponse:
     reference_number: str
     authentication_token: TokenInfo
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> AuthenticationInitResponse: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> AuthenticationInitResponse:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
@@ -354,32 +353,32 @@ class AuthenticationOperationStatusResponse:
     is_token_redeemed: bool | None = None
     last_token_refresh_date: str | None = None
     refresh_token_valid_until: str | None = None
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> AuthenticationOperationStatusResponse: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> AuthenticationOperationStatusResponse:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
 class AuthenticationTokensResponse:
     access_token: TokenInfo
     refresh_token: TokenInfo
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> AuthenticationTokensResponse: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> AuthenticationTokensResponse:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
 class AuthenticationTokenRefreshResponse:
     access_token: TokenInfo
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> AuthenticationTokenRefreshResponse: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> AuthenticationTokenRefreshResponse:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 class LighthouseKsefStatus(str, _Enum):
@@ -387,6 +386,25 @@ class LighthouseKsefStatus(str, _Enum):
     MAINTENANCE = ...
     FAILURE = ...
     TOTAL_FAILURE = ...
+
+
+@_dataclass(frozen=True)
+class LighthouseMessage:
+    id: str
+    event_id: int
+    category: LighthouseMessageCategory
+    type: LighthouseMessageType
+    title: str
+    text: str
+    start: str
+    end: str | None
+    version: int
+    published: str
+    @staticmethod
+    def from_dict(data: dict[str, _Any]) -> LighthouseMessage:
+        ...
+    def to_dict(self) -> dict[str, _Any]:
+        ...
 
 
 class LighthouseMessageCategory(str, _Enum):
@@ -402,33 +420,14 @@ class LighthouseMessageType(str, _Enum):
 
 
 @_dataclass(frozen=True)
-class LighthouseMessage:
-    id: str
-    event_id: int
-    category: LighthouseMessageCategory
-    type: LighthouseMessageType
-    title: str
-    text: str
-    start: str
-    end: str | None
-    version: int
-    published: str
-
-    @staticmethod
-    def from_dict(data: dict[str, _Any]) -> LighthouseMessage: ...
-
-    def to_dict(self) -> dict[str, _Any]: ...
-
-
-@_dataclass(frozen=True)
 class LighthouseStatusResponse:
     status: LighthouseKsefStatus
     messages: list[LighthouseMessage] | None = None
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> LighthouseStatusResponse: ...
-
-    def to_dict(self) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> LighthouseStatusResponse:
+        ...
+    def to_dict(self) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
@@ -437,22 +436,22 @@ class PublicKeyCertificate:
     usage: list[PublicKeyCertificateUsage] = ...
     valid_from: str | None = None
     valid_to: str | None = None
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> PublicKeyCertificate: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> PublicKeyCertificate:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
 class OpenOnlineSessionResponse:
     reference_number: str
     valid_until: str | None = None
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> OpenOnlineSessionResponse: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> OpenOnlineSessionResponse:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
@@ -478,11 +477,11 @@ class InvoiceMetadata:
     authorized_subject: InvoiceMetadataAuthorizedSubject | None = None
     hash_of_corrected_invoice: str | None = None
     third_subjects: list[InvoiceMetadataThirdSubject] | None = None
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> InvoiceMetadata: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> InvoiceMetadata:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
@@ -493,11 +492,11 @@ class QueryInvoicesMetadataResponse:
     continuation_token: str | None = None
     last_permanent_storage_date: str | None = None
     permanent_storage_hwm_date: str | None = None
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> QueryInvoicesMetadataResponse: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> QueryInvoicesMetadataResponse:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
@@ -515,22 +514,22 @@ class SessionInvoiceStatusResponse:
     permanent_storage_date: str | None = None
     upo_download_url: str | None = None
     upo_download_url_expiration_date: str | None = None
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> SessionInvoiceStatusResponse: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> SessionInvoiceStatusResponse:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
 class SessionInvoicesResponse:
     invoices: list[SessionInvoiceStatusResponse]
     continuation_token: str | None = None
-
     @staticmethod
-    def from_dict(data: dict[str, _Any]) -> SessionInvoicesResponse: ...
-
-    def to_dict(self, omit_none: bool = True) -> dict[str, _Any]: ...
+    def from_dict(data: dict[str, _Any]) -> SessionInvoicesResponse:
+        ...
+    def to_dict(self, omit_none: bool=True) -> dict[str, _Any]:
+        ...
 
 
 @_dataclass(frozen=True)
@@ -640,15 +639,10 @@ __all__ = [
     "ApiRateLimitsOverride",
     "AttachmentPermissionGrantRequest",
     "AttachmentPermissionRevokeRequest",
-    "AuthenticationChallengeResponse",
     "AuthenticationContextIdentifier",
-    "AuthenticationInitResponse",
     "AuthenticationListItem",
     "AuthenticationListResponse",
     "AuthenticationMethodInfo",
-    "AuthenticationOperationStatusResponse",
-    "AuthenticationTokenRefreshResponse",
-    "AuthenticationTokensResponse",
     "AuthorizationPolicy",
     "BatchFileInfo",
     "BatchFilePartInfo",
@@ -716,7 +710,6 @@ __all__ = [
     "InitTokenAuthenticationRequest",
     "InvoiceExportRequest",
     "InvoiceExportStatusResponse",
-    "InvoiceMetadata",
     "InvoiceMetadataAuthorizedSubject",
     "InvoiceMetadataBuyer",
     "InvoiceMetadataBuyerIdentifier",
@@ -735,7 +728,6 @@ __all__ = [
     "OpenBatchSessionRequest",
     "OpenBatchSessionResponse",
     "OpenOnlineSessionRequest",
-    "OpenOnlineSessionResponse",
     "PartUploadRequest",
     "PeppolProvider",
     "PermissionsEuEntityDetails",
@@ -766,14 +758,12 @@ __all__ = [
     "PersonalPermissionsContextIdentifier",
     "PersonalPermissionsQueryRequest",
     "PersonalPermissionsTargetIdentifier",
-    "PublicKeyCertificate",
     "QueryCertificatesRequest",
     "QueryCertificatesResponse",
     "QueryEntityAuthorizationPermissionsResponse",
     "QueryEntityPermissionsResponse",
     "QueryEntityRolesResponse",
     "QueryEuEntityPermissionsResponse",
-    "QueryInvoicesMetadataResponse",
     "QueryPeppolProvidersResponse",
     "QueryPersonPermissionsResponse",
     "QueryPersonalPermissionsResponse",
@@ -787,15 +777,12 @@ __all__ = [
     "RevokeCertificateRequest",
     "SendInvoiceRequest",
     "SendInvoiceResponse",
-    "SessionInvoiceStatusResponse",
-    "SessionInvoicesResponse",
     "SessionStatusResponse",
     "SessionsQueryResponse",
     "SessionsQueryResponseItem",
     "SetRateLimitsRequest",
     "SetSessionLimitsRequest",
     "SetSubjectLimitsRequest",
-    "StatusInfo",
     "SubjectCreateRequest",
     "SubjectRemoveRequest",
     "SubordinateEntityRole",
@@ -818,7 +805,6 @@ __all__ = [
     "TestDataPermissionsRevokeRequest",
     "TokenAuthorIdentifierTypeIdentifier",
     "TokenContextIdentifierTypeIdentifier",
-    "TokenInfo",
     "TokenStatusResponse",
     "TooManyRequestsResponse",
     "UnauthorizedProblemDetails",
@@ -828,10 +814,23 @@ __all__ = [
     "BinaryContent",
     "FileMetadata",
     "InvoiceContent",
+    "StatusInfo",
+    "TokenInfo",
+    "AuthenticationChallengeResponse",
+    "AuthenticationInitResponse",
+    "AuthenticationOperationStatusResponse",
+    "AuthenticationTokensResponse",
+    "AuthenticationTokenRefreshResponse",
     "LighthouseKsefStatus",
     "LighthouseMessage",
     "LighthouseMessageCategory",
     "LighthouseMessageType",
     "LighthouseStatusResponse",
+    "PublicKeyCertificate",
+    "OpenOnlineSessionResponse",
+    "InvoiceMetadata",
+    "QueryInvoicesMetadataResponse",
+    "SessionInvoiceStatusResponse",
+    "SessionInvoicesResponse",
     "UnknownApiProblem",
 ]

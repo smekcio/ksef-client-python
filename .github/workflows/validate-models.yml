@@ -28,7 +28,7 @@ jobs:
 
       - name: Verify generated models are up to date
         run: |
-          python tools/generate_openapi_models.py --check --input .tmp/openapi.json --output src/ksef_client/openapi_models.py
+          python tools/sync_generated.py --check --input .tmp/openapi.json
 
       - name: Check API Coverage
         run: |

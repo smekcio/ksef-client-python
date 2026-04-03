@@ -76,6 +76,20 @@ def _check_base_install(wheel: Path) -> None:
     python, _, ksef = _create_venv(BUILD_DIR / "venv-base")
     _run(_pip_command(python, "install", str(wheel)))
     _run([str(python), "-c", "import ksef_client.cli"])
+    _run(
+        [
+            str(python),
+            "-c",
+            (
+                "from importlib.util import find_spec; "
+                "from pathlib import Path; "
+                "spec = find_spec('ksef_client'); "
+                "package_dir = Path(spec.origin).parent; "
+                "assert (package_dir / 'py.typed').is_file(); "
+                "assert (package_dir / 'models.pyi').is_file()"
+            ),
+        ]
+    )
 
     result = subprocess.run([str(ksef), "--version"], text=True, capture_output=True, check=False)
     output = f"{result.stdout}{result.stderr}"

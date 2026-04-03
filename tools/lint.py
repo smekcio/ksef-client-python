@@ -6,9 +6,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SNAPSHOT_OPENAPI_PATH = REPO_ROOT / "specs" / "ksef-openapi.snapshot.json"
+
 
 def _run(cmd: list[str]) -> int:
-    proc = subprocess.run(cmd, cwd=Path(__file__).resolve().parents[1])
+    proc = subprocess.run(cmd, cwd=REPO_ROOT)
     return int(proc.returncode)
 
 
@@ -23,6 +26,15 @@ def main() -> int:
 
     rc = 0
 
+    rc |= _run(
+        [
+            sys.executable,
+            "tools/sync_generated.py",
+            "--check",
+            "--input",
+            str(SNAPSHOT_OPENAPI_PATH),
+        ]
+    )
     rc |= _run([sys.executable, "-m", "compileall", "src", "tests"])
     pip_check_rc = _run([sys.executable, "-m", "pip", "check"])
     if pip_check_rc != 0:

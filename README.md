@@ -262,22 +262,23 @@ Uruchomienie testów z kontrolą pokrycia:
 pytest --cov=ksef_client --cov-report=term-missing --cov-fail-under=100
 ```
 
-Regeneracja modeli OpenAPI z aktualnej oficjalnej specyfikacji KSeF:
+Synchronizacja wygenerowanych artefaktów z aktualna oficjalna specyfikacja KSeF:
 
 ```bash
-python tools/generate_openapi_models.py --output src/ksef_client/openapi_models.py
+python tools/sync_generated.py
 ```
 
-Walidacja, że `src/ksef_client/openapi_models.py` jest zgodny z generatorem:
+Walidacja, że `src/ksef_client/openapi_models.py` i `src/ksef_client/models.pyi` sa zgodne z generatorami:
 
 ```bash
-python tools/generate_openapi_models.py --check --output src/ksef_client/openapi_models.py
+python tools/sync_generated.py --check
+python tools/lint.py
 ```
 
 Walidacja strict-live bez fallbacku do snapshotu:
 
 ```bash
-python tools/generate_openapi_models.py --check --no-fallback --output src/ksef_client/openapi_models.py
+python tools/sync_generated.py --check --no-fallback
 python tools/check_coverage.py --no-fallback --src src/ksef_client/clients
 ```
 
