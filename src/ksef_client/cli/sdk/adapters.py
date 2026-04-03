@@ -25,6 +25,22 @@ from .factory import create_client
 
 _TRANSIENT_UPO_CODES = {404, 409, 425}
 _PENDING_STATUS_CODES = {100, 150}
+_DEFAULT_INVOICE_QUERY_SUBJECT_TYPES = (
+    m.InvoiceQuerySubjectType.SUBJECT1,
+    m.InvoiceQuerySubjectType.SUBJECT2,
+    m.InvoiceQuerySubjectType.SUBJECT3,
+    m.InvoiceQuerySubjectType.SUBJECTAUTHORIZED,
+)
+_INVOICE_SORT_DATE_FIELDS = {
+    m.InvoiceQueryDateType.ISSUE.value: (("issue_date", "issueDate"),),
+    m.InvoiceQueryDateType.INVOICING.value: (
+        ("invoicing_date", "invoicingDate"),
+        ("acquisition_date", "acquisitionDate"),
+    ),
+    m.InvoiceQueryDateType.PERMANENTSTORAGE.value: (
+        ("permanent_storage_date", "permanentStorageDate"),
+    ),
+}
 
 
 def _is_transient_polling_http(status_code: int) -> bool:
@@ -257,6 +273,159 @@ def _require_encryption_info(encryption: EncryptionData) -> m.EncryptionInfo:
             "Regenerate encryption data before opening a session or export.",
         )
     return encryption_info
+
+
+def _build_invoice_query_filters(
+    *,
+    subject_type: m.InvoiceQuerySubjectType,
+    date_type: m.InvoiceQueryDateType,
+    from_iso: str,
+    to_iso: str,
+) -> m.InvoiceQueryFilters:
+    return m.InvoiceQueryFilters(
+        subject_type=subject_type,
+        date_range=m.InvoiceQueryDateRange(
+            date_type=date_type,
+            from_=from_iso,
+            to=to_iso,
+        ),
+    )
+
+
+def _extract_invoice_items(response: Any) -> list[Any]:
+    invoices = _get_value(response, "invoices", default=[]) or []
+    if isinstance(response, dict) and not invoices:
+        invoices = response.get("invoiceList") or []
+    return invoices if isinstance(invoices, list) else []
+
+
+def _normalize_invoice_sort_value(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.isoformat()
+
+
+def _invoice_identity_key(invoice: Any) -> str:
+    for attr_name, json_name in (
+        ("ksef_number", "ksefNumber"),
+        ("invoice_hash", "invoiceHash"),
+    ):
+        value = _get_value(invoice, attr_name, json_name)
+        if value:
+            return f"{json_name}:{value}"
+    payload = _to_output_payload(invoice)
+    if isinstance(payload, dict):
+        return json.dumps(payload, ensure_ascii=True, sort_keys=True)
+    return repr(payload)
+
+
+def _invoice_sort_key(invoice: Any, *, date_type: m.InvoiceQueryDateType) -> tuple[str, str, str]:
+    date_value = ""
+    for attr_name, json_name in _INVOICE_SORT_DATE_FIELDS.get(date_type.value, ()):
+        candidate = _get_value(invoice, attr_name, json_name)
+        if candidate:
+            date_value = _normalize_invoice_sort_value(candidate)
+            break
+    reference = str(
+        _get_value(invoice, "ksef_number", "ksefNumber")
+        or _get_value(invoice, "invoice_number", "invoiceNumber")
+        or _get_value(invoice, "invoice_hash", "invoiceHash")
+        or ""
+    )
+    return (
+        date_value,
+        reference,
+        _invoice_identity_key(invoice),
+    )
+
+
+def _query_invoice_metadata_page(
+    *,
+    client: Any,
+    access_token: str,
+    subject_type: m.InvoiceQuerySubjectType,
+    date_type: m.InvoiceQueryDateType,
+    from_iso: str,
+    to_iso: str,
+    page_size: int,
+    page_offset: int,
+    sort_order: str,
+) -> Any:
+    return client.invoices.query_invoice_metadata(
+        _build_invoice_query_filters(
+            subject_type=subject_type,
+            date_type=date_type,
+            from_iso=from_iso,
+            to_iso=to_iso,
+        ),
+        access_token=access_token,
+        page_offset=page_offset,
+        page_size=page_size,
+        sort_order=sort_order,
+    )
+
+
+def _query_all_invoice_subject_types(
+    *,
+    client: Any,
+    access_token: str,
+    date_type: m.InvoiceQueryDateType,
+    from_iso: str,
+    to_iso: str,
+    page_size: int,
+    page_offset: int,
+    sort_order: str,
+) -> list[Any]:
+    batch_size = page_size if page_size > 0 else 0
+    aggregated: list[Any] = []
+
+    for subject_type in _DEFAULT_INVOICE_QUERY_SUBJECT_TYPES:
+        request_offset = 0
+        while True:
+            response = _query_invoice_metadata_page(
+                client=client,
+                access_token=access_token,
+                subject_type=subject_type,
+                date_type=date_type,
+                from_iso=from_iso,
+                to_iso=to_iso,
+                page_size=page_size,
+                page_offset=request_offset,
+                sort_order=sort_order,
+            )
+            invoices = _extract_invoice_items(response)
+            if not invoices:
+                break
+            aggregated.extend(invoices)
+            if batch_size <= 0 or len(invoices) < batch_size:
+                break
+            request_offset += batch_size
+
+    unique_invoices: dict[str, Any] = {}
+    for invoice in aggregated:
+        unique_invoices.setdefault(_invoice_identity_key(invoice), invoice)
+
+    sorted_invoices = sorted(
+        unique_invoices.values(),
+        key=lambda invoice: _invoice_sort_key(invoice, date_type=date_type),
+        reverse=sort_order.casefold() == "desc",
+    )
+    if page_offset < 0:
+        page_offset = 0
+    if page_size <= 0:
+        return sorted_invoices[page_offset:]
+    return sorted_invoices[page_offset : page_offset + page_size]
 
 
 def _load_invoice_xml(path: str) -> bytes:
@@ -569,7 +738,7 @@ def list_invoices(
     base_url: str,
     date_from: str | None,
     date_to: str | None,
-    subject_type: str,
+    subject_type: str | None,
     date_type: str,
     page_size: int,
     page_offset: int,
@@ -577,28 +746,35 @@ def list_invoices(
 ) -> dict[str, Any]:
     access_token = _require_access_token(profile)
     from_iso, to_iso = _normalize_date_range(date_from, date_to)
-    payload = m.InvoiceQueryFilters(
-        subject_type=_require_invoice_query_subject_type(subject_type),
-        date_range=m.InvoiceQueryDateRange(
-            date_type=_require_invoice_query_date_type(date_type),
-            from_=from_iso,
-            to=to_iso,
-        ),
-    )
+    resolved_date_type = _require_invoice_query_date_type(date_type)
 
     with create_client(base_url, access_token=access_token) as client:
-        response = client.invoices.query_invoice_metadata(
-            payload,
-            access_token=access_token,
-            page_offset=page_offset,
-            page_size=page_size,
-            sort_order=sort_order,
-        )
-
-    invoices = _get_value(response, "invoices", default=[]) or []
-    if isinstance(response, dict) and not invoices:
-        invoices = response.get("invoiceList") or []
-    continuation_token = _get_value(response, "continuation_token", "continuationToken", "")
+        continuation_token = ""
+        if subject_type is None:
+            invoices = _query_all_invoice_subject_types(
+                client=client,
+                access_token=access_token,
+                date_type=resolved_date_type,
+                from_iso=from_iso,
+                to_iso=to_iso,
+                page_size=page_size,
+                page_offset=page_offset,
+                sort_order=sort_order,
+            )
+        else:
+            response = _query_invoice_metadata_page(
+                client=client,
+                access_token=access_token,
+                subject_type=_require_invoice_query_subject_type(subject_type),
+                date_type=resolved_date_type,
+                from_iso=from_iso,
+                to_iso=to_iso,
+                page_size=page_size,
+                page_offset=page_offset,
+                sort_order=sort_order,
+            )
+            invoices = _extract_invoice_items(response)
+            continuation_token = _get_value(response, "continuation_token", "continuationToken", "")
     return {
         "count": len(invoices),
         "from": from_iso,

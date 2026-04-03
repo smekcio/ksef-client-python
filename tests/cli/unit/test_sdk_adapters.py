@@ -1214,6 +1214,67 @@ def test_list_invoices_uses_default_from_and_invoice_list_key(monkeypatch) -> No
     assert result["items"][0]["ksefReferenceNumber"] == "KSEF-X"
 
 
+def test_list_invoices_without_subject_type_queries_all_subject_types(monkeypatch) -> None:
+    seen_calls: list[tuple[str, int, int]] = []
+
+    responses = {
+        ("Subject1", 0): {
+            "invoices": [
+                {"ksefNumber": "KSEF-2", "issueDate": "2026-01-03T00:00:00Z"},
+                {"ksefNumber": "KSEF-DUP", "issueDate": "2026-01-02T00:00:00Z"},
+            ]
+        },
+        ("Subject1", 2): {"invoices": []},
+        ("Subject2", 0): {
+            "invoices": [{"ksefNumber": "KSEF-3", "issueDate": "2026-01-04T00:00:00Z"}]
+        },
+        ("Subject3", 0): {
+            "invoices": [{"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"}]
+        },
+        ("SubjectAuthorized", 0): {
+            "invoices": [{"ksefNumber": "KSEF-DUP", "issueDate": "2026-01-02T00:00:00Z"}]
+        },
+    }
+
+    class _Invoices:
+        def query_invoice_metadata(self, payload, **kwargs):
+            subject_type = payload.subject_type.value
+            page_offset = int(kwargs.get("page_offset", 0) or 0)
+            page_size = int(kwargs.get("page_size", 0) or 0)
+            seen_calls.append((subject_type, page_offset, page_size))
+            return responses[(subject_type, page_offset)]
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(invoices=_Invoices()),
+    )
+
+    result = adapters.list_invoices(
+        profile="demo",
+        base_url="https://example.invalid",
+        date_from="2026-01-01",
+        date_to="2026-01-31",
+        subject_type=None,
+        date_type="Issue",
+        page_size=2,
+        page_offset=1,
+        sort_order="Desc",
+    )
+
+    assert seen_calls == [
+        ("Subject1", 0, 2),
+        ("Subject1", 2, 2),
+        ("Subject2", 0, 2),
+        ("Subject3", 0, 2),
+        ("SubjectAuthorized", 0, 2),
+    ]
+    assert result["count"] == 2
+    assert [item["ksefNumber"] for item in result["items"]] == ["KSEF-2", "KSEF-DUP"]
+    assert result["continuation_token"] == ""
+
+
 def test_resolve_output_path_for_plain_path_segment() -> None:
     path = adapters._resolve_output_path("artifacts", default_filename="out.xml")
     assert path.as_posix().endswith("artifacts")
