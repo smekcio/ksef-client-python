@@ -72,8 +72,10 @@ def invoice_list(
     ctx: typer.Context,
     date_from: str | None = typer.Option(None, "--from", help="Start date (YYYY-MM-DD)."),
     date_to: str | None = typer.Option(None, "--to", help="End date (YYYY-MM-DD)."),
-    subject_type: str = typer.Option(
-        "Subject1", "--subject-type", help="KSeF subject type filter."
+    subject_type: str | None = typer.Option(
+        None,
+        "--subject-type",
+        help="KSeF subject type filter. Omit to query all subject types.",
     ),
     date_type: str = typer.Option(
         "Issue", "--date-type", help="Date field used in filter, e.g. Issue."

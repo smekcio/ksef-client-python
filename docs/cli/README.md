@@ -344,13 +344,17 @@ Usage: ksef invoice list [OPTIONS]
 Options:
   --from TEXT
   --to TEXT
-  --subject-type TEXT       [default: Subject1]
+  --subject-type TEXT
   --date-type TEXT          [default: Issue]
   --page-size INTEGER       [default: 10]
   --page-offset INTEGER     [default: 0]
   --sort-order [Asc|Desc]   [default: Desc]
   --base-url TEXT
 ```
+
+Uwagi:
+- bez `--subject-type` CLI agreguje wyniki dla wszystkich typów (`Subject1`, `Subject2`, `Subject3`, `SubjectAuthorized`),
+- podanie `--subject-type` zachowuje poprzednie, jawne filtrowanie do jednego kontekstu podmiotu.
 
 ## `ksef invoice download`
 

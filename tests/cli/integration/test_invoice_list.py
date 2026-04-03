@@ -63,6 +63,21 @@ def test_invoice_list_success(runner, monkeypatch) -> None:
     assert "invoice.list" in result.stdout
 
 
+def test_invoice_list_defaults_to_all_subject_types(runner, monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_list(**kwargs):
+        seen.update(kwargs)
+        return {"count": 0, "items": [], "continuation_token": "", "from": "", "to": ""}
+
+    monkeypatch.setattr(invoice_cmd, "list_invoices", _fake_list)
+
+    result = runner.invoke(app, ["invoice", "list"])
+
+    assert result.exit_code == 0
+    assert seen["subject_type"] is None
+
+
 def test_invoice_list_json_success(runner, monkeypatch) -> None:
     monkeypatch.setattr(
         invoice_cmd,
