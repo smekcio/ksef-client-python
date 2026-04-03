@@ -34,7 +34,7 @@ class ModelsTests(unittest.TestCase):
             self.assertFalse(hasattr(models, name), msg=f"{name} leaked from ksef_client.models")
 
     def test_serialize_model_value_returns_plain_values_unchanged(self):
-        serialize_model_value = getattr(models, "_serialize_model_value")
+        serialize_model_value = models.__dict__["_serialize_model_value"]
         self.assertEqual(serialize_model_value("plain", omit_none=True), "plain")
 
     def test_models_stub_matches_runtime_wrappers(self):
