@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.9.0](https://github.com/smekcio/ksef-client-python/compare/v0.8.0...v0.9.0) (2026-04-03)
+
+
+### Features
+
+* **api:** enforce typed payloads and strict OpenAPI validation ([7d2da52](https://github.com/smekcio/ksef-client-python/commit/7d2da5229251e5b1aee006955a6a28975ba7332a))
+* **api:** move SDK to typed models and harden OpenAPI tooling ([4dbbb97](https://github.com/smekcio/ksef-client-python/commit/4dbbb97baddf0a7e2d45e9c2adde9cfa265fb8a9))
+* **api:** move SDK to typed models and harden OpenAPI tooling ([eac4109](https://github.com/smekcio/ksef-client-python/commit/eac41098e7feaf0fd947e4fa8bfadcf3931ad949))
+
+
+### Bug Fixes
+
+* **api:** resolve typed payload regressions ([9233c97](https://github.com/smekcio/ksef-client-python/commit/9233c97f338b5f3cf7f0a7c9f0f17c58b3ce2907))
+* **ci:** align lint and dependency submission checks ([9f8f263](https://github.com/smekcio/ksef-client-python/commit/9f8f2639a271f7cf7226605c7d067a041fb6047e))
+* **cli:** bootstrap optional CLI dependencies ([93f04f4](https://github.com/smekcio/ksef-client-python/commit/93f04f472eac6b533f9866d30cac84fd7fa09821))
+* **cli:** bootstrap optional CLI dependencies ([81dab12](https://github.com/smekcio/ksef-client-python/commit/81dab120f204f8f245467303dcbd3783b7df3fc1))
+* **cli:** default invoice list to all subject types ([58d2878](https://github.com/smekcio/ksef-client-python/commit/58d287885611eaec6abba519fcccdc1dc5cf8cd0))
+* default invoice list to all subject types ([52b93c0](https://github.com/smekcio/ksef-client-python/commit/52b93c006effc7f23f7bd8900de4b549f13428fa))
+* **invoices:** avoid double serializing typed payloads ([144a924](https://github.com/smekcio/ksef-client-python/commit/144a9243b61aa4bd9368980425face8797820707))
+* **lint:** avoid getattr false-positive in model test ([320d0bc](https://github.com/smekcio/ksef-client-python/commit/320d0bc94323efc97b8ede4a969efafe0cfb4aed))
+* **models:** align typed exports, stubs, and HWM fallback ([6f1006b](https://github.com/smekcio/ksef-client-python/commit/6f1006b1d8595a3fd5fb8f855150a5b727fe0fd0))
+* **models:** preserve typed response fields and test regressions ([8061c03](https://github.com/smekcio/ksef-client-python/commit/8061c03c59b107bc7fcdef081a4d2e91f82063a9))
+* **models:** restore live API compatibility for e2e flows ([1fd9ac9](https://github.com/smekcio/ksef-client-python/commit/1fd9ac9561a955c9e779f47b57e052e8f8e8ae08))
+* **test:** satisfy lint checks ([ea24b15](https://github.com/smekcio/ksef-client-python/commit/ea24b15893e1ec93e8ec217077223f1be130b1f6))
+* **tests:** stabilize model smoke checks in ci ([5cae2d6](https://github.com/smekcio/ksef-client-python/commit/5cae2d659262515cf500b1b43f8f903595fa8240))
+
 ## [0.8.0](https://github.com/smekcio/ksef-client-python/compare/v0.7.1...v0.8.0) (2026-03-19)
 
 
