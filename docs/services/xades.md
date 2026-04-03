@@ -19,8 +19,7 @@ Wczytuje certyfikat z pliku PEM albo DER (`.crt`) oraz klucz prywatny w PEM/DER 
 Przykład użycia w workflow uwierzytelnienia:
 
 ```python
-from ksef_client.services import XadesKeyPair
-from ksef_client.services.workflows import AuthCoordinator
+from ksef_client.services import AuthCoordinator, XadesKeyPair
 
 key_pair = XadesKeyPair.from_pkcs12_file(
     pkcs12_path="cert.pfx",

@@ -18,7 +18,8 @@ Zwraca `BinaryContent` (bytes + opcjonalny hash).
 
 Endpoint: `POST /invoices/query/metadata`
 
-Endpoint służy do wyszukiwania metadanych faktur. `request_payload` zależy od API (filtry typu daty, subject, kierunek itp.).
+Endpoint służy do wyszukiwania metadanych faktur. `request_payload` musi być instancją
+`InvoiceQueryFilters`.
 
 Typowe zastosowanie: synchronizacja historii metadanych i późniejsze pobieranie treści XML po `ksefNumber`.
 
@@ -32,7 +33,9 @@ Endpoint: `POST /invoices/exports`
 
 Startuje eksport asynchroniczny (zwykle `201 Created`, czasem `202 Accepted`). Odpowiedź zawiera `referenceNumber`.
 
-Wymagane minimum w `request_payload`:
+`request_payload` musi być instancją `InvoiceExportRequest`.
+
+Wymagane minimum w modelu:
 - `encryption.encryptedSymmetricKey`
 - `encryption.initializationVector`
 - `filters` (np. `subjectType` + `dateRange`)

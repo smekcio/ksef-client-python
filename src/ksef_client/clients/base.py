@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 from ..http import HttpResponse
 
@@ -11,6 +11,52 @@ class _RequestClient(Protocol):
 
 class _AsyncRequestClient(Protocol):
     async def request(self, *args: Any, **kwargs: Any) -> HttpResponse: ...
+
+
+class _SerializableModel(Protocol):
+    def to_dict(self, omit_none: bool = True) -> dict[str, Any]: ...
+
+
+ModelT = TypeVar("ModelT")
+ModelT_co = TypeVar("ModelT_co", covariant=True)
+
+
+class _ModelType(Protocol[ModelT_co]):
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ModelT_co: ...
+
+
+def _serialize_json_payload(payload: _SerializableModel | None) -> dict[str, Any] | None:
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        to_dict = getattr(payload, "to_dict", None)
+        if callable(to_dict) and type(payload) is not dict:
+            return to_dict()
+        raise TypeError(
+            "Expected typed model payload with to_dict(), got dict. Construct the appropriate "
+            "ksef_client.models.* request model before calling the client."
+        )
+    return payload.to_dict()
+
+
+def _validate_model_payload(payload: Any, *, path: str) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError(f"Expected JSON object response for {path}, got {type(payload).__name__}")
+    return payload
+
+
+def _validate_model_list_payload(payload: Any, *, path: str) -> list[dict[str, Any]]:
+    if not isinstance(payload, list):
+        raise TypeError(f"Expected JSON array response for {path}, got {type(payload).__name__}")
+    items: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise TypeError(
+                f"Expected array of JSON objects for {path}, got item {type(item).__name__}"
+            )
+        items.append(item)
+    return items
 
 
 class BaseApiClient:
@@ -24,7 +70,7 @@ class BaseApiClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | None = None,
+        json: _SerializableModel | None = None,
         access_token: str | None = None,
         refresh_token: str | None = None,
         skip_auth: bool = False,
@@ -35,7 +81,7 @@ class BaseApiClient:
             path,
             params=params,
             headers=headers,
-            json=json,
+            json=_serialize_json_payload(json),
             access_token=access_token,
             refresh_token=refresh_token,
             skip_auth=skip_auth,
@@ -45,6 +91,92 @@ class BaseApiClient:
             return response.json()
         return None
 
+    def _request_model(
+        self,
+        method: str,
+        path: str,
+        *,
+        response_model: _ModelType[ModelT],
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: _SerializableModel | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        skip_auth: bool = False,
+        expected_status: set[int] | None = None,
+    ) -> ModelT:
+        payload = self._request_json(
+            method,
+            path,
+            params=params,
+            headers=headers,
+            json=json,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            skip_auth=skip_auth,
+            expected_status=expected_status,
+        )
+        return response_model.from_dict(_validate_model_payload(payload, path=path))
+
+    def _request_optional_model(
+        self,
+        method: str,
+        path: str,
+        *,
+        response_model: _ModelType[ModelT],
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: _SerializableModel | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        skip_auth: bool = False,
+        expected_status: set[int] | None = None,
+    ) -> ModelT | None:
+        payload = self._request_json(
+            method,
+            path,
+            params=params,
+            headers=headers,
+            json=json,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            skip_auth=skip_auth,
+            expected_status=expected_status,
+        )
+        if payload is None:
+            return None
+        return response_model.from_dict(_validate_model_payload(payload, path=path))
+
+    def _request_model_list(
+        self,
+        method: str,
+        path: str,
+        *,
+        response_model: _ModelType[ModelT],
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: _SerializableModel | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        skip_auth: bool = False,
+        expected_status: set[int] | None = None,
+    ) -> list[ModelT]:
+        payload = self._request_json(
+            method,
+            path,
+            params=params,
+            headers=headers,
+            json=json,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            skip_auth=skip_auth,
+            expected_status=expected_status,
+        )
+        return [
+            response_model.from_dict(item)
+            for item in _validate_model_list_payload(payload, path=path)
+        ]
+
     def _request_bytes(
         self,
         method: str,
@@ -52,7 +184,7 @@ class BaseApiClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | None = None,
+        json: _SerializableModel | None = None,
         data: bytes | None = None,
         access_token: str | None = None,
         skip_auth: bool = False,
@@ -63,7 +195,7 @@ class BaseApiClient:
             path,
             params=params,
             headers=headers,
-            json=json,
+            json=_serialize_json_payload(json),
             data=data,
             access_token=access_token,
             skip_auth=skip_auth,
@@ -78,18 +210,18 @@ class BaseApiClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | None = None,
+        json: _SerializableModel | None = None,
         data: bytes | None = None,
         access_token: str | None = None,
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
-    ):
+    ) -> HttpResponse:
         return self._http.request(
             method,
             path,
             params=params,
             headers=headers,
-            json=json,
+            json=_serialize_json_payload(json),
             data=data,
             access_token=access_token,
             skip_auth=skip_auth,
@@ -108,7 +240,7 @@ class AsyncBaseApiClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | None = None,
+        json: _SerializableModel | None = None,
         access_token: str | None = None,
         refresh_token: str | None = None,
         skip_auth: bool = False,
@@ -119,7 +251,7 @@ class AsyncBaseApiClient:
             path,
             params=params,
             headers=headers,
-            json=json,
+            json=_serialize_json_payload(json),
             access_token=access_token,
             refresh_token=refresh_token,
             skip_auth=skip_auth,
@@ -129,6 +261,92 @@ class AsyncBaseApiClient:
             return response.json()
         return None
 
+    async def _request_model(
+        self,
+        method: str,
+        path: str,
+        *,
+        response_model: _ModelType[ModelT],
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: _SerializableModel | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        skip_auth: bool = False,
+        expected_status: set[int] | None = None,
+    ) -> ModelT:
+        payload = await self._request_json(
+            method,
+            path,
+            params=params,
+            headers=headers,
+            json=json,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            skip_auth=skip_auth,
+            expected_status=expected_status,
+        )
+        return response_model.from_dict(_validate_model_payload(payload, path=path))
+
+    async def _request_optional_model(
+        self,
+        method: str,
+        path: str,
+        *,
+        response_model: _ModelType[ModelT],
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: _SerializableModel | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        skip_auth: bool = False,
+        expected_status: set[int] | None = None,
+    ) -> ModelT | None:
+        payload = await self._request_json(
+            method,
+            path,
+            params=params,
+            headers=headers,
+            json=json,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            skip_auth=skip_auth,
+            expected_status=expected_status,
+        )
+        if payload is None:
+            return None
+        return response_model.from_dict(_validate_model_payload(payload, path=path))
+
+    async def _request_model_list(
+        self,
+        method: str,
+        path: str,
+        *,
+        response_model: _ModelType[ModelT],
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: _SerializableModel | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        skip_auth: bool = False,
+        expected_status: set[int] | None = None,
+    ) -> list[ModelT]:
+        payload = await self._request_json(
+            method,
+            path,
+            params=params,
+            headers=headers,
+            json=json,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            skip_auth=skip_auth,
+            expected_status=expected_status,
+        )
+        return [
+            response_model.from_dict(item)
+            for item in _validate_model_list_payload(payload, path=path)
+        ]
+
     async def _request_bytes(
         self,
         method: str,
@@ -136,7 +354,7 @@ class AsyncBaseApiClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | None = None,
+        json: _SerializableModel | None = None,
         data: bytes | None = None,
         access_token: str | None = None,
         skip_auth: bool = False,
@@ -147,7 +365,7 @@ class AsyncBaseApiClient:
             path,
             params=params,
             headers=headers,
-            json=json,
+            json=_serialize_json_payload(json),
             data=data,
             access_token=access_token,
             skip_auth=skip_auth,
@@ -162,18 +380,18 @@ class AsyncBaseApiClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | None = None,
+        json: _SerializableModel | None = None,
         data: bytes | None = None,
         access_token: str | None = None,
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
-    ):
+    ) -> HttpResponse:
         return await self._http.request(
             method,
             path,
             params=params,
             headers=headers,
-            json=json,
+            json=_serialize_json_payload(json),
             data=data,
             access_token=access_token,
             skip_auth=skip_auth,

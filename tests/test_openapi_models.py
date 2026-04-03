@@ -27,8 +27,29 @@ class OpenApiModelsTests(unittest.TestCase):
         }
         item = m.AuthenticationListItem.from_dict(data)
         _ = m.AuthenticationListItem.from_dict(data)
-        self.assertEqual(item.authenticationMethod.value, method_value)
+        self.assertEqual(item.authentication_method.value, method_value)
         self.assertEqual(item.to_dict()["authenticationMethod"], method_value)
+
+    def test_unknown_enum_value_roundtrips_without_error(self):
+        payload = {
+            "certificate": "pem-1",
+            "usage": ["FutureUsage"],
+            "validFrom": "2026-01-01T00:00:00Z",
+            "validTo": "2026-12-31T23:59:59Z",
+        }
+        parsed = m.PublicKeyCertificate.from_dict(payload)
+        self.assertEqual(parsed.usage[0].value, "FutureUsage")
+        self.assertEqual(parsed.to_dict()["usage"], ["FutureUsage"])
+        self.assertIs(m.PublicKeyCertificateUsage("FutureUsage"), parsed.usage[0])
+
+    def test_unknown_enum_rejects_non_string_value(self):
+        with self.assertRaises(ValueError):
+            m.PublicKeyCertificateUsage._missing_(123)
+
+    def test_unknown_enum_missing_creates_pseudo_member(self):
+        member = m.PublicKeyCertificateUsage._missing_("BrandNewUsage")
+        self.assertEqual(member.value, "BrandNewUsage")
+        self.assertIs(m.PublicKeyCertificateUsage._missing_("BrandNewUsage"), member)
 
     def test_invoice_package_roundtrip(self):
         payload = {
@@ -50,7 +71,7 @@ class OpenApiModelsTests(unittest.TestCase):
             ],
         }
         package = m.InvoicePackage.from_dict(payload)
-        self.assertEqual(package.parts[0].partName, "p1")
+        self.assertEqual(package.parts[0].part_name, "p1")
         serialized = package.to_dict()
         self.assertEqual(serialized["parts"][0]["partName"], "p1")
 
@@ -102,7 +123,7 @@ class OpenApiModelsTests(unittest.TestCase):
             "onlyMetadata": True,
         }
         parsed = m.InvoiceExportRequest.from_dict(payload)
-        self.assertTrue(parsed.onlyMetadata)
+        self.assertTrue(parsed.only_metadata)
         self.assertTrue(parsed.to_dict()["onlyMetadata"])
 
     def test_token_permission_type_contains_introspection(self):
@@ -117,7 +138,7 @@ class OpenApiModelsTests(unittest.TestCase):
             "clientIp": "203.0.113.10",
         }
         parsed = m.AuthenticationChallengeResponse.from_dict(payload)
-        self.assertEqual(parsed.clientIp, "203.0.113.10")
+        self.assertEqual(parsed.client_ip, "203.0.113.10")
         self.assertEqual(parsed.to_dict()["clientIp"], "203.0.113.10")
 
     def test_problem_details_models_roundtrip(self):
@@ -133,7 +154,7 @@ class OpenApiModelsTests(unittest.TestCase):
             "traceId": "trace-1",
         }
         forbidden = m.ForbiddenProblemDetails.from_dict(forbidden_payload)
-        self.assertEqual(forbidden.reasonCode, "missing-permissions")
+        self.assertEqual(forbidden.reason_code, "missing-permissions")
         assert forbidden.security is not None
         self.assertEqual(forbidden.security["presentPermissions"], ["CredentialsRead"])
         self.assertEqual(forbidden.to_dict()["traceId"], "trace-1")

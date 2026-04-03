@@ -10,7 +10,7 @@ Biblioteka udostępnia klasę `ExportWorkflow`, która realizuje krok (2): pobra
 
 ```python
 import time
-from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
+from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment, models as m
 from ksef_client.services import AuthCoordinator, ExportWorkflow, build_encryption_data
 
 KSEF_TOKEN = "<TOKEN_KSEF>"
@@ -18,9 +18,12 @@ CONTEXT_TYPE = "nip"
 CONTEXT_VALUE = "5265877635"
 
 with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as client:
-    certs = client.security.get_public_key_certificates()
-    token_cert = next(c["certificate"] for c in certs if "KsefTokenEncryption" in (c.get("usage") or []))
-    sym_cert = next(c["certificate"] for c in certs if "SymmetricKeyEncryption" in (c.get("usage") or []))
+    token_cert = client.security.get_public_key_certificate_pem(
+        m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
+    )
+    sym_cert = client.security.get_public_key_certificate_pem(
+        m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION,
+    )
 
     access_token = AuthCoordinator(client.auth).authenticate_with_ksef_token(
         token=KSEF_TOKEN,
@@ -29,37 +32,36 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
         context_identifier_value=CONTEXT_VALUE,
         max_attempts=90,
         poll_interval_seconds=2.0,
-    ).tokens.access_token.token
+    ).access_token
 
     encryption = build_encryption_data(sym_cert)
-    export_request = {
-        "encryption": {
-            "encryptedSymmetricKey": encryption.encryption_info.encrypted_symmetric_key,
-            "initializationVector": encryption.encryption_info.initialization_vector,
-        },
-        "onlyMetadata": False,
-        "filters": {
-            "subjectType": "Subject1",
-            "dateRange": {
-                "dateType": "PermanentStorage",
-                "from": "2025-08-28T09:22:13.388+00:00",
-                "to": "2025-09-28T09:22:13.388+00:00",
-                "restrictToPermanentStorageHwmDate": True,
-            },
-        },
-    }
+    assert encryption.encryption_info is not None
+    export_request = m.InvoiceExportRequest(
+        encryption=encryption.encryption_info,
+        only_metadata=False,
+        filters=m.InvoiceQueryFilters(
+            subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
+            date_range=m.InvoiceQueryDateRange(
+                date_type=m.InvoiceQueryDateType.PERMANENTSTORAGE,
+                from_="2025-08-28T09:22:13.388+00:00",
+                to="2025-09-28T09:22:13.388+00:00",
+                restrict_to_permanent_storage_hwm_date=True,
+            ),
+        ),
+    )
 
     start = client.invoices.export_invoices(export_request, access_token=access_token)
-    reference_number = start["referenceNumber"]
+    reference_number = start.reference_number
 
     for _ in range(120):
         status = client.invoices.get_export_status(reference_number, access_token=access_token)
-        code = int(status.get("status", {}).get("code", 0))
+        code = int(status.status.code)
         if code == 200:
-            package = status["package"]
+            package = status.package
+            assert package is not None
             break
         if code not in {100, 150}:
-            raise RuntimeError(status)
+            raise RuntimeError(status.to_dict())
         time.sleep(2)
 
     export = ExportWorkflow(client.invoices, client.http_client)

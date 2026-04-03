@@ -1,15 +1,24 @@
 from __future__ import annotations
 
-from typing import Any
-
+from ..models import EffectiveApiRateLimits
 from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class RateLimitsClient(BaseApiClient):
-    def get_rate_limits(self, access_token: str) -> Any:
-        return self._request_json("GET", "/rate-limits", access_token=access_token)
+    def get_rate_limits(self, access_token: str) -> EffectiveApiRateLimits:
+        return self._request_model(
+            "GET",
+            "/rate-limits",
+            response_model=EffectiveApiRateLimits,
+            access_token=access_token,
+        )
 
 
 class AsyncRateLimitsClient(AsyncBaseApiClient):
-    async def get_rate_limits(self, access_token: str) -> Any:
-        return await self._request_json("GET", "/rate-limits", access_token=access_token)
+    async def get_rate_limits(self, access_token: str) -> EffectiveApiRateLimits:
+        return await self._request_model(
+            "GET",
+            "/rate-limits",
+            response_model=EffectiveApiRateLimits,
+            access_token=access_token,
+        )

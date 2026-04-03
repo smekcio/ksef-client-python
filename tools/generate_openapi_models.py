@@ -1,11 +1,33 @@
 import argparse
-import json
+import difflib
 import keyword
 import re
+import sys
 from pathlib import Path
+from typing import Any
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from tools.openapi_spec import (
+    DEFAULT_KSEF_OPENAPI_FALLBACK_PATH,
+    OpenApiSpecError,
+    load_openapi_document,
+    parse_openapi_json,
+    write_openapi_snapshot,
+)
+
+
+def _to_snake_case(name: str) -> str:
+    normalized = re.sub(r"[^0-9A-Za-z]+", "_", name)
+    normalized = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", normalized)
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized)
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    return normalized.lower() or name.lower()
 
 
 def _sanitize_field_name(name: str, used: set[str]) -> str:
+    name = _to_snake_case(name)
     if keyword.iskeyword(name):
         name = f"{name}_"
     base = name
@@ -93,8 +115,8 @@ def _generate_alias(name: str, schema: dict) -> list[str]:
 
 
 def _generate_enum(name: str, schema: dict) -> list[str]:
-    lines = [f"class {name}(Enum):"]
-    used = set()
+    lines = [f"class {name}(OpenApiEnum):"]
+    used: set[str] = set()
     for value in schema.get("enum", []):
         value_str = str(value)
         member = _enum_member_name(value_str, used)
@@ -140,8 +162,7 @@ def _generate_object(name: str, schema: dict) -> list[str]:
     return lines
 
 
-def generate_models(input_path: Path, output_path: Path) -> None:
-    data = json.loads(input_path.read_text(encoding="utf-8"))
+def render_models(data: dict[str, Any]) -> str:
     schemas = data.get("components", {}).get("schemas", {})
     alias_names = []
     enum_names = []
@@ -157,19 +178,33 @@ def generate_models(input_path: Path, output_path: Path) -> None:
 
     lines: list[str] = [
         "# ruff: noqa",
-        "# Generated from ksef-docs/open-api.json. Do not edit manually.",
+        "# Generated from the official KSeF OpenAPI spec. Do not edit manually.",
         "from __future__ import annotations",
         "",
-        "from dataclasses import MISSING, dataclass, field, fields",
+        "from dataclasses import dataclass, field, fields",
         "from enum import Enum",
         "import sys",
-        "from typing import Any, Optional, TypeAlias, TypeVar",
+        "from typing import Any, Optional, TypeAlias, TypeVar, cast",
         "from typing import get_args, get_origin, get_type_hints",
         "",
         "JsonValue: TypeAlias = Any",
         "",
         'T = TypeVar("T", bound="OpenApiModel")',
         "_TYPE_CACHE: dict[type, dict[str, Any]] = {}",
+        "",
+        "class OpenApiEnum(str, Enum):",
+        "    @classmethod",
+        "    def _missing_(cls, value: object) -> OpenApiEnum:",
+        "        if not isinstance(value, str):",
+        '            raise ValueError(f"{value!r} is not a valid {cls.__name__}")',
+        "        existing = cast(OpenApiEnum | None, cls._value2member_map_.get(value))",
+        "        if existing is not None:",
+        "            return existing",
+        "        pseudo_member = str.__new__(cls, value)",
+        '        pseudo_member._name_ = f"UNKNOWN__{len(cls._value2member_map_) + 1}"',
+        "        pseudo_member._value_ = value",
+        "        cls._value2member_map_[value] = pseudo_member",
+        "        return pseudo_member",
         "",
         "def _get_type_map(cls: type) -> dict[str, Any]:",
         "    cached = _TYPE_CACHE.get(cls)",
@@ -253,26 +288,100 @@ def generate_models(input_path: Path, output_path: Path) -> None:
         lines.extend(_generate_object(name, schemas[name]))
         lines.append("")
 
-    with output_path.open("w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(lines).rstrip() + "\n")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def generate_models(
+    input_path: Path | None,
+    output_path: Path,
+    *,
+    snapshot_path: Path = DEFAULT_KSEF_OPENAPI_FALLBACK_PATH,
+    allow_fallback: bool = True,
+) -> None:
+    document = load_openapi_document(
+        input_path=input_path,
+        fallback_path=snapshot_path,
+        allow_fallback=allow_fallback,
+    )
+    data = parse_openapi_json(document)
+    rendered = render_models(data)
+    output_path.write_text(rendered, encoding="utf-8", newline="\n")
+    if input_path is None and not document.used_fallback:
+        write_openapi_snapshot(document.text, snapshot_path=snapshot_path)
+
+
+def check_generated_models(
+    input_path: Path | None,
+    output_path: Path,
+    *,
+    allow_fallback: bool = True,
+) -> str | None:
+    document = load_openapi_document(input_path=input_path, allow_fallback=allow_fallback)
+    data = parse_openapi_json(document)
+    rendered = render_models(data)
+    try:
+        existing = output_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise OpenApiSpecError(
+            f"Failed to read generated models from {output_path}: {exc}"
+        ) from exc
+    if existing == rendered:
+        return None
+    diff = difflib.unified_diff(
+        existing.splitlines(),
+        rendered.splitlines(),
+        fromfile=str(output_path),
+        tofile="generated-openapi-models",
+        lineterm="",
+    )
+    return "\n".join(diff) + "\n"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input",
-        default=Path("ksef-docs/open-api.json"),
         type=Path,
-        help="Path to OpenAPI JSON file.",
+        help="Optional path to a local OpenAPI JSON file. Defaults to the official KSeF endpoint.",
     )
     parser.add_argument(
         "--output",
-        default=Path("ksef-client-python/src/ksef_client/openapi_models.py"),
+        default=Path("src/ksef_client/openapi_models.py"),
         type=Path,
         help="Path to output Python file.",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Fail if the generated content differs from --output instead of writing the file.",
+    )
+    parser.add_argument(
+        "--no-fallback",
+        action="store_true",
+        help="Require the live OpenAPI spec when --input is not provided.",
+    )
     args = parser.parse_args()
-    generate_models(args.input, args.output)
+    try:
+        if args.check:
+            diff = check_generated_models(
+                args.input,
+                args.output,
+                allow_fallback=not args.no_fallback,
+            )
+            if diff is not None:
+                print(diff, end="")
+                raise SystemExit(
+                    "Generated models are out of date. "
+                    "Run tools/generate_openapi_models.py and commit the result."
+                )
+            return
+        generate_models(
+            args.input,
+            args.output,
+            allow_fallback=not args.no_fallback,
+        )
+    except OpenApiSpecError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
 
-      - name: Lint and typecheck
+      - name: Validate generated artifacts, lint and typecheck
         run: |
           python tools/lint.py --strict
 

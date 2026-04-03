@@ -11,10 +11,18 @@ Endpoint: `GET /security/public-key-certificates`
 Zwraca listę certyfikatów i ich `usage`. Typowy sposób użycia to wybór certyfikatów po `usage`:
 
 ```python
-certs = client.security.get_public_key_certificates()
-token_cert = next(c["certificate"] for c in certs if "KsefTokenEncryption" in (c.get("usage") or []))
-sym_cert = next(c["certificate"] for c in certs if "SymmetricKeyEncryption" in (c.get("usage") or []))
+from ksef_client import models as m
+
+token_cert = client.security.get_public_key_certificate(
+    m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
+).certificate
+sym_cert = client.security.get_public_key_certificate(
+    m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION,
+).certificate
 ```
+
+Jeśli potrzebujesz pełnej listy, nadal możesz użyć `get_public_key_certificates()`. W typowych scenariuszach
+czytelniejsze jest jednak `get_public_key_certificate(...)`.
 
 ## `get_public_key_pem()`
 

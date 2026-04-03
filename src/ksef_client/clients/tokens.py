@@ -2,14 +2,23 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..models import (
+    GenerateTokenRequest,
+    GenerateTokenResponse,
+    QueryTokensResponse,
+    TokenStatusResponse,
+)
 from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class TokensClient(BaseApiClient):
-    def generate_token(self, request_payload: dict[str, Any], *, access_token: str) -> Any:
-        return self._request_json(
+    def generate_token(
+        self, request_payload: GenerateTokenRequest, *, access_token: str
+    ) -> GenerateTokenResponse:
+        return self._request_model(
             "POST",
             "/tokens",
+            response_model=GenerateTokenResponse,
             json=request_payload,
             access_token=access_token,
             expected_status={202},
@@ -25,7 +34,7 @@ class TokensClient(BaseApiClient):
         author_identifier_type: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
-    ) -> Any:
+    ) -> QueryTokensResponse:
         params: dict[str, Any] = {}
         if statuses:
             params["status"] = statuses
@@ -42,18 +51,20 @@ class TokensClient(BaseApiClient):
         if continuation_token:
             headers["x-continuation-token"] = continuation_token
 
-        return self._request_json(
+        return self._request_model(
             "GET",
             "/tokens",
+            response_model=QueryTokensResponse,
             params=params or None,
             headers=headers or None,
             access_token=access_token,
         )
 
-    def get_token_status(self, reference_number: str, *, access_token: str) -> Any:
-        return self._request_json(
+    def get_token_status(self, reference_number: str, *, access_token: str) -> TokenStatusResponse:
+        return self._request_model(
             "GET",
             f"/tokens/{reference_number}",
+            response_model=TokenStatusResponse,
             access_token=access_token,
         )
 
@@ -67,10 +78,13 @@ class TokensClient(BaseApiClient):
 
 
 class AsyncTokensClient(AsyncBaseApiClient):
-    async def generate_token(self, request_payload: dict[str, Any], *, access_token: str) -> Any:
-        return await self._request_json(
+    async def generate_token(
+        self, request_payload: GenerateTokenRequest, *, access_token: str
+    ) -> GenerateTokenResponse:
+        return await self._request_model(
             "POST",
             "/tokens",
+            response_model=GenerateTokenResponse,
             json=request_payload,
             access_token=access_token,
             expected_status={202},
@@ -86,7 +100,7 @@ class AsyncTokensClient(AsyncBaseApiClient):
         author_identifier_type: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
-    ) -> Any:
+    ) -> QueryTokensResponse:
         params: dict[str, Any] = {}
         if statuses:
             params["status"] = statuses
@@ -103,18 +117,22 @@ class AsyncTokensClient(AsyncBaseApiClient):
         if continuation_token:
             headers["x-continuation-token"] = continuation_token
 
-        return await self._request_json(
+        return await self._request_model(
             "GET",
             "/tokens",
+            response_model=QueryTokensResponse,
             params=params or None,
             headers=headers or None,
             access_token=access_token,
         )
 
-    async def get_token_status(self, reference_number: str, *, access_token: str) -> Any:
-        return await self._request_json(
+    async def get_token_status(
+        self, reference_number: str, *, access_token: str
+    ) -> TokenStatusResponse:
+        return await self._request_model(
             "GET",
             f"/tokens/{reference_number}",
+            response_model=TokenStatusResponse,
             access_token=access_token,
         )
 

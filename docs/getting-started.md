@@ -28,37 +28,34 @@ Typowy przebieg:
 3) uruchomienie workflow `AuthCoordinator`.
 
 ```python
-from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
+from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment, models as m
 from ksef_client.services import AuthCoordinator
 
 with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as client:
-    certs = client.security.get_public_key_certificates()
-    token_cert_pem = next(
-        c["certificate"]
-        for c in certs
-        if "KsefTokenEncryption" in (c.get("usage") or [])
+    token_cert_pem = client.security.get_public_key_certificate_pem(
+        m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
     )
 
-    result = AuthCoordinator(client.auth).authenticate_with_ksef_token(
+    access_token = AuthCoordinator(client.auth).authenticate_with_ksef_token(
         token="<TOKEN_KSEF>",
         public_certificate=token_cert_pem,
         context_identifier_type="nip",
         context_identifier_value="5265877635",
         max_attempts=90,
         poll_interval_seconds=2.0,
-    )
-    access_token = result.tokens.access_token.token
+    ).access_token
 ```
 
 ## 3) Pierwsze wywołanie API
 
 ```python
-metadata = client.invoices.query_invoice_metadata(
-    {"subjectType": "Subject1", "dateRange": {"dateType": "Issue", "from": "...", "to": "..."}},
+metadata = client.invoices.query_invoice_metadata_by_date_range(
+    subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
+    date_type=m.InvoiceQueryDateType.ISSUE,
+    date_from="...",
+    date_to="...",
     access_token=access_token,
-    page_offset=0,
     page_size=10,
-    sort_order="Asc",
 )
 ```
 

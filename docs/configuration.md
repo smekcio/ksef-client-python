@@ -115,12 +115,35 @@ Dostępne są dwa sposoby przekazywania `access_token`:
 1) Przekazanie tokena w konstruktorze klienta:
 
 ```python
+from ksef_client import models as m
+
 client = KsefClient(options, access_token=access_token)
-client.invoices.query_invoice_metadata({...})
+client.invoices.query_invoice_metadata(
+    m.InvoiceQueryFilters(
+        subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
+        date_range=m.InvoiceQueryDateRange(
+            date_type=m.InvoiceQueryDateType.ISSUE,
+            from_="2026-01-01T00:00:00Z",
+            to="2026-01-31T23:59:59Z",
+        ),
+    )
+)
 ```
 
 2) Przekazywanie `access_token` per-call (przydatne w przypadku obsługi wielu kontekstów):
 
 ```python
-client.invoices.query_invoice_metadata({...}, access_token=access_token)
+from ksef_client import models as m
+
+client.invoices.query_invoice_metadata(
+    m.InvoiceQueryFilters(
+        subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
+        date_range=m.InvoiceQueryDateRange(
+            date_type=m.InvoiceQueryDateType.ISSUE,
+            from_="2026-01-01T00:00:00Z",
+            to="2026-01-31T23:59:59Z",
+        ),
+    ),
+    access_token=access_token,
+)
 ```

@@ -12,14 +12,14 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.padding import PKCS7
 
-from ..models import EncryptionInfo, FileMetadata
+from ..models import EncryptionInfo, FileMetadata, SendInvoiceRequest
 
 
 @dataclass(frozen=True)
 class EncryptionData:
     key: bytes
     iv: bytes
-    encryption_info: EncryptionInfo
+    encryption_info: EncryptionInfo | None
 
 
 def _load_certificate(cert_data: str | bytes) -> x509.Certificate:
@@ -179,22 +179,19 @@ def build_send_invoice_request(
     *,
     offline_mode: bool | None = None,
     hash_of_corrected_invoice: str | None = None,
-) -> dict[str, object]:
+) -> SendInvoiceRequest:
     invoice_hash = sha256_base64(invoice_xml)
     encrypted_content = encrypt_aes_cbc_pkcs7(invoice_xml, key, iv)
     encrypted_hash = sha256_base64(encrypted_content)
-    request: dict[str, object] = {
-        "invoiceHash": invoice_hash,
-        "invoiceSize": len(invoice_xml),
-        "encryptedInvoiceHash": encrypted_hash,
-        "encryptedInvoiceSize": len(encrypted_content),
-        "encryptedInvoiceContent": base64.b64encode(encrypted_content).decode("ascii"),
-    }
-    if offline_mode is not None:
-        request["offlineMode"] = offline_mode
-    if hash_of_corrected_invoice:
-        request["hashOfCorrectedInvoice"] = hash_of_corrected_invoice
-    return request
+    return SendInvoiceRequest(
+        invoice_hash=invoice_hash,
+        invoice_size=len(invoice_xml),
+        encrypted_invoice_hash=encrypted_hash,
+        encrypted_invoice_size=len(encrypted_content),
+        encrypted_invoice_content=base64.b64encode(encrypted_content).decode("ascii"),
+        offline_mode=offline_mode,
+        hash_of_corrected_invoice=hash_of_corrected_invoice,
+    )
 
 
 def sign_path_rsa_pss(private_key: rsa.RSAPrivateKey, data: bytes) -> bytes:

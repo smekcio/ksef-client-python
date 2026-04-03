@@ -8,7 +8,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, TypeVar
+from typing import TypeVar
 
 import pytest
 from cryptography import x509
@@ -16,12 +16,13 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import load_der_private_key, load_pem_private_key
 
 from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
+from ksef_client import models as m
 from ksef_client.exceptions import KsefHttpError, KsefRateLimitError
 from ksef_client.services import AuthCoordinator, OnlineSessionWorkflow
 
 pytestmark = pytest.mark.e2e
 
-FORM_CODE = {"systemCode": "FA (3)", "schemaVersion": "1-0E", "value": "FA"}
+FORM_CODE = m.FormCode(system_code="FA (3)", schema_version="1-0E", value="FA")
 ENABLED_VALUES = {"1", "true", "yes"}
 AUTH_MODE_TOKEN = "token"
 AUTH_MODE_XADES = "xades"
@@ -100,11 +101,11 @@ def _load_demo_token_config() -> E2EConfig:
     )
 
 
-def _select_certificate(certs: list[dict[str, Any]], usage_name: str) -> str:
+def _select_certificate(certs: list[m.PublicKeyCertificate], usage_name: str) -> str:
     for cert in certs:
-        usage = cert.get("usage") or []
-        if usage_name in usage and cert.get("certificate"):
-            return str(cert["certificate"])
+        usage = [item.value for item in cert.usage]
+        if usage_name in usage and cert.certificate:
+            return cert.certificate
     raise RuntimeError(f"Missing public cert usage: {usage_name}")
 
 
@@ -137,9 +138,9 @@ def _poll_for_ksef_number(
                 access_token=access_token,
             )
         )
-        code = int((status.get("status") or {}).get("code", 0))
+        code = int(status.status.code)
         if code == 200:
-            ksef_number = status.get("ksefNumber")
+            ksef_number = status.ksef_number
             if isinstance(ksef_number, str) and ksef_number:
                 return ksef_number
             raise AssertionError("Invoice accepted but ksefNumber is missing.")
@@ -166,14 +167,16 @@ def _poll_for_upo(fetch: Callable[[], bytes]) -> bytes:
     raise TimeoutError("Invoice UPO was not available within max_attempts.")
 
 
-def _extract_ksef_number(invoice: dict[str, Any]) -> str | None:
-    value = invoice.get("ksefNumber")
+def _extract_ksef_number(
+    invoice: m.InvoiceMetadata | m.SessionInvoiceStatusResponse,
+) -> str | None:
+    value = invoice.ksef_number
     if isinstance(value, str) and value:
         return value
     return None
 
 
-def _first_ksef_number(invoices: list[dict[str, Any]]) -> str:
+def _first_ksef_number(invoices: list[m.InvoiceMetadata]) -> str:
     for invoice in invoices:
         ksef_number = _extract_ksef_number(invoice)
         if ksef_number:
@@ -224,8 +227,7 @@ def _required_certificate_pem(
         return cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
     raise RuntimeError(
-        "Missing certificate value in env vars: "
-        + ", ".join((*plain_names, *b64_names))
+        "Missing certificate value in env vars: " + ", ".join((*plain_names, *b64_names))
     )
 
 
@@ -243,8 +245,7 @@ def _required_private_key_pem(
         b64_value = _optional_any(*b64_names)
         if not b64_value:
             raise RuntimeError(
-                "Missing PEM value in env vars: "
-                + ", ".join((*plain_names, *b64_names))
+                "Missing PEM value in env vars: " + ", ".join((*plain_names, *b64_names))
             )
         decoded = _decode_b64(b64_value)
         if b"BEGIN" in decoded:
@@ -349,17 +350,19 @@ def _query_invoice_metadata(
     *,
     access_token: str,
     subject_type: str,
-) -> list[dict[str, Any]]:
+) -> list[m.InvoiceMetadata]:
     now = datetime.now(timezone.utc)
     lookback_days = _env_int("KSEF_E2E_LOOKBACK_DAYS", 30)
-    request_payload = {
-        "subjectType": subject_type,
-        "dateRange": {
-            "dateType": "Issue",
-            "from": _utc_z(now - timedelta(days=lookback_days)),
-            "to": _utc_z(now + timedelta(minutes=10)),
-        },
-    }
+    request_payload = m.InvoiceQueryFilters.from_dict(
+        {
+            "subjectType": subject_type,
+            "dateRange": {
+                "dateType": "Issue",
+                "from": _utc_z(now - timedelta(days=lookback_days)),
+                "to": _utc_z(now + timedelta(minutes=10)),
+            },
+        }
+    )
     response = _with_rate_limit_retry(
         lambda: client.invoices.query_invoice_metadata(
             request_payload,
@@ -369,8 +372,7 @@ def _query_invoice_metadata(
             sort_order="Desc",
         )
     )
-    invoices = response.get("invoices") or response.get("invoiceList") or []
-    return [invoice for invoice in invoices if isinstance(invoice, dict)]
+    return response.invoices
 
 
 def _poll_metadata_until_contains(
@@ -379,7 +381,7 @@ def _poll_metadata_until_contains(
     access_token: str,
     subject_type: str,
     expected_ksef_number: str,
-) -> list[dict[str, Any]]:
+) -> list[m.InvoiceMetadata]:
     max_attempts = _env_int("KSEF_E2E_METADATA_MAX_ATTEMPTS", 45)
     poll_interval = _env_float("KSEF_E2E_POLL_INTERVAL_SECONDS", 2.0)
 
@@ -587,7 +589,7 @@ def _run_full_e2e_flow(config: E2EConfig) -> None:
                     access_token=access_token,
                 )
             )
-            invoice_reference_number = send_result.get("referenceNumber")
+            invoice_reference_number = send_result.reference_number
             assert isinstance(invoice_reference_number, str) and invoice_reference_number, (
                 "Missing invoice reference number after send."
             )
@@ -615,11 +617,9 @@ def _run_full_e2e_flow(config: E2EConfig) -> None:
                     page_size=20,
                 )
             )
-            invoices_in_session = session_invoices.get("invoices") or []
+            invoices_in_session = session_invoices.invoices
             assert any(
-                _extract_ksef_number(invoice) == ksef_number
-                for invoice in invoices_in_session
-                if isinstance(invoice, dict)
+                _extract_ksef_number(invoice) == ksef_number for invoice in invoices_in_session
             ), "Sent invoice not found in session invoice list."
 
             metadata_invoices = _poll_metadata_until_contains(

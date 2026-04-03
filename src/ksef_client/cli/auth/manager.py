@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ksef_client import models as m
 from ksef_client.config import KsefClientOptions, KsefEnvironment, KsefLighthouseEnvironment
 from ksef_client.services.workflows import AuthCoordinator
 from ksef_client.services.xades import XadesKeyPair
@@ -15,11 +16,19 @@ from .keyring_store import clear_tokens, get_tokens, save_tokens
 from .token_cache import clear_cached_metadata, get_cached_metadata, set_cached_metadata
 
 
-def _select_certificate(certs: list[dict[str, Any]], usage_name: str) -> str:
+def _select_certificate(certs: list[Any], usage_name: str) -> str:
     for cert in certs:
-        usage = cert.get("usage") or []
-        if usage_name in usage and cert.get("certificate"):
-            return str(cert["certificate"])
+        if isinstance(cert, dict):
+            usage = cert.get("usage")
+            certificate = cert.get("certificate")
+        else:
+            usage = getattr(cert, "usage", None)
+            certificate = getattr(cert, "certificate", None)
+        usage_values = (
+            [str(getattr(item, "value", item)) for item in usage] if isinstance(usage, list) else []
+        )
+        if usage_name in usage_values and certificate:
+            return str(certificate)
     raise CliError(
         f"Missing KSeF public certificate usage: {usage_name}.",
         ExitCode.API_ERROR,
@@ -293,16 +302,26 @@ def refresh_access_token(*, profile: str, base_url: str, save: bool = True) -> d
     with create_client(base_url) as client:
         refreshed = client.auth.refresh_access_token(refresh_token)
 
-    access_data = refreshed.get("accessToken") or {}
-    new_access_token = access_data.get("token")
+    if isinstance(refreshed, dict):
+        access_data = refreshed.get("accessToken") or {}
+        new_access_token = access_data.get("token")
+        access_valid_until = access_data.get("validUntil")
+    else:
+        if not isinstance(refreshed, m.AuthenticationTokenRefreshResponse):
+            raise CliError(
+                "Refresh response is invalid.",
+                ExitCode.API_ERROR,
+                "Try login again with `ksef auth login-token`.",
+            )
+        new_access_token = refreshed.access_token.token
+        access_valid_until = refreshed.access_token.valid_until
+
     if not isinstance(new_access_token, str) or not new_access_token:
         raise CliError(
             "Refresh response does not contain access token.",
             ExitCode.API_ERROR,
             "Try login again with `ksef auth login-token`.",
         )
-
-    access_valid_until = access_data.get("validUntil")
     if save:
         save_tokens(profile, new_access_token, refresh_token)
         metadata = get_cached_metadata(profile) or {}

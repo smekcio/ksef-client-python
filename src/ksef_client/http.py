@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ipaddress
+import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -9,6 +12,13 @@ import httpx
 
 from .config import KsefClientOptions
 from .exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
+from .models import (
+    ExceptionResponse,
+    ForbiddenProblemDetails,
+    TooManyRequestsResponse,
+    UnauthorizedProblemDetails,
+    UnknownApiProblem,
+)
 
 
 def _merge_headers(base: dict[str, str], extra: dict[str, str] | None) -> dict[str, str]:
@@ -91,6 +101,65 @@ def _validate_presigned_url_security(options: KsefClientOptions, url: str) -> No
             "Rejected insecure presigned URL: host is not in allowed_presigned_hosts "
             "for skip_auth requests."
         )
+
+
+def _parse_retry_after(value: str | None) -> int | None:
+    if value is None:
+        return None
+    normalized_value = value.strip()
+    if not normalized_value:
+        return None
+    try:
+        return int(normalized_value)
+    except ValueError:
+        try:
+            retry_after_dt = parsedate_to_datetime(normalized_value)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+        if retry_after_dt.tzinfo is None:
+            retry_after_dt = retry_after_dt.replace(tzinfo=timezone.utc)
+        delta_seconds = (retry_after_dt - datetime.now(timezone.utc)).total_seconds()
+        return max(0, math.ceil(delta_seconds))
+
+
+def _coerce_problem_status(value: Any, fallback_status: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback_status
+
+
+def _parse_api_problem(status_code: int, body: Any) -> Any | None:
+    if not isinstance(body, dict):
+        return None
+
+    try:
+        if status_code == 429:
+            return TooManyRequestsResponse.from_dict(body)
+        if status_code == 401:
+            return UnauthorizedProblemDetails.from_dict(body)
+        if status_code == 403 and "reasonCode" in body:
+            return ForbiddenProblemDetails.from_dict(body)
+        if "exception" in body:
+            return ExceptionResponse.from_dict(body)
+    except (TypeError, ValueError, KeyError):
+        pass
+
+    if "status" in body or "title" in body or "detail" in body:
+        return UnknownApiProblem(
+            status=_coerce_problem_status(body.get("status"), status_code),
+            title=str(body.get("title", "API error")),
+            detail=str(body["detail"]) if body.get("detail") is not None else None,
+            raw=body,
+        )
+    if body:
+        return UnknownApiProblem(
+            status=status_code,
+            title="API error",
+            detail=None,
+            raw=body,
+        )
+    return None
 
 
 @dataclass
@@ -188,12 +257,16 @@ class BaseHttpClient:
             except ValueError:
                 body = None
 
+        problem = _parse_api_problem(response.status_code, body)
+
         if response.status_code == 429:
             raise KsefRateLimitError(
                 status_code=response.status_code,
                 message="Too Many Requests",
                 response_body=body,
-                retry_after=retry_after,
+                problem=problem,
+                retry_after=_parse_retry_after(retry_after),
+                retry_after_raw=retry_after,
             )
 
         if body is not None:
@@ -201,13 +274,15 @@ class BaseHttpClient:
                 status_code=response.status_code,
                 message="API error",
                 response_body=body,
-                exception_response=body,
+                problem=problem,
+                exception_response=problem if isinstance(problem, ExceptionResponse) else None,
             )
 
         raise KsefHttpError(
             status_code=response.status_code,
             message=response.text,
             response_body=None,
+            problem=None,
         )
 
 
@@ -296,12 +371,16 @@ class AsyncBaseHttpClient:
             except ValueError:
                 body = None
 
+        problem = _parse_api_problem(response.status_code, body)
+
         if response.status_code == 429:
             raise KsefRateLimitError(
                 status_code=response.status_code,
                 message="Too Many Requests",
                 response_body=body,
-                retry_after=retry_after,
+                problem=problem,
+                retry_after=_parse_retry_after(retry_after),
+                retry_after_raw=retry_after,
             )
 
         if body is not None:
@@ -309,11 +388,13 @@ class AsyncBaseHttpClient:
                 status_code=response.status_code,
                 message="API error",
                 response_body=body,
-                exception_response=body,
+                problem=problem,
+                exception_response=problem if isinstance(problem, ExceptionResponse) else None,
             )
 
         raise KsefHttpError(
             status_code=response.status_code,
             message=response.text,
             response_body=None,
+            problem=None,
         )

@@ -45,7 +45,14 @@ def _extract_python_openapi_operations() -> set[tuple[str, str]]:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
                 continue
-            if node.func.attr not in {"_request_json", "_request_bytes", "_request_raw"}:
+            if node.func.attr not in {
+                "_request_json",
+                "_request_bytes",
+                "_request_raw",
+                "_request_model",
+                "_request_optional_model",
+                "_request_model_list",
+            }:
                 continue
             if len(node.args) < 2:
                 continue

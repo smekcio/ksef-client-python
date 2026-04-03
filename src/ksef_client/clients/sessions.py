@@ -2,6 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..models import (
+    OpenBatchSessionRequest,
+    OpenBatchSessionResponse,
+    OpenOnlineSessionRequest,
+    OpenOnlineSessionResponse,
+    SendInvoiceRequest,
+    SendInvoiceResponse,
+    SessionInvoicesResponse,
+    SessionInvoiceStatusResponse,
+    SessionsQueryResponse,
+    SessionStatusResponse,
+)
 from .base import AsyncBaseApiClient, BaseApiClient
 
 
@@ -21,7 +33,7 @@ class SessionsClient(BaseApiClient):
         date_modified_to: str | None = None,
         statuses: list[str] | None = None,
         access_token: str | None = None,
-    ) -> Any:
+    ) -> SessionsQueryResponse:
         params: dict[str, Any] = {"sessionType": session_type}
         if page_size is not None:
             params["pageSize"] = page_size
@@ -46,9 +58,10 @@ class SessionsClient(BaseApiClient):
         if continuation_token:
             headers["x-continuation-token"] = continuation_token
 
-        return self._request_json(
+        return self._request_model(
             "GET",
             "/sessions",
+            response_model=SessionsQueryResponse,
             params=params,
             headers=headers or None,
             access_token=access_token,
@@ -56,17 +69,18 @@ class SessionsClient(BaseApiClient):
 
     def open_online_session(
         self,
-        request_payload: dict[str, Any],
+        request_payload: OpenOnlineSessionRequest,
         *,
         access_token: str,
         upo_v43: bool = False,
-    ) -> Any:
+    ) -> OpenOnlineSessionResponse:
         headers = {}
         if upo_v43:
             headers["X-KSeF-Feature"] = "upo-v4-3"
-        return self._request_json(
+        return self._request_model(
             "POST",
             "/sessions/online",
+            response_model=OpenOnlineSessionResponse,
             json=request_payload,
             headers=headers or None,
             access_token=access_token,
@@ -84,13 +98,14 @@ class SessionsClient(BaseApiClient):
     def send_online_invoice(
         self,
         reference_number: str,
-        request_payload: dict[str, Any],
+        request_payload: SendInvoiceRequest,
         *,
         access_token: str,
-    ) -> Any:
-        return self._request_json(
+    ) -> SendInvoiceResponse:
+        return self._request_model(
             "POST",
             f"/sessions/online/{reference_number}/invoices",
+            response_model=SendInvoiceResponse,
             json=request_payload,
             access_token=access_token,
             expected_status={202},
@@ -98,17 +113,18 @@ class SessionsClient(BaseApiClient):
 
     def open_batch_session(
         self,
-        request_payload: dict[str, Any],
+        request_payload: OpenBatchSessionRequest,
         *,
         access_token: str,
         upo_v43: bool = False,
-    ) -> Any:
+    ) -> OpenBatchSessionResponse:
         headers = {}
         if upo_v43:
             headers["X-KSeF-Feature"] = "upo-v4-3"
-        return self._request_json(
+        return self._request_model(
             "POST",
             "/sessions/batch",
+            response_model=OpenBatchSessionResponse,
             json=request_payload,
             headers=headers or None,
             access_token=access_token,
@@ -123,10 +139,11 @@ class SessionsClient(BaseApiClient):
             expected_status={204},
         )
 
-    def get_session_status(self, reference_number: str, access_token: str) -> Any:
-        return self._request_json(
+    def get_session_status(self, reference_number: str, access_token: str) -> SessionStatusResponse:
+        return self._request_model(
             "GET",
             f"/sessions/{reference_number}",
+            response_model=SessionStatusResponse,
             access_token=access_token,
         )
 
@@ -137,16 +154,17 @@ class SessionsClient(BaseApiClient):
         page_size: int | None = None,
         continuation_token: str | None = None,
         access_token: str,
-    ) -> Any:
+    ) -> SessionInvoicesResponse:
         headers = {}
         if continuation_token:
             headers["x-continuation-token"] = continuation_token
         params = {}
         if page_size is not None:
             params["pageSize"] = page_size
-        return self._request_json(
+        return self._request_model(
             "GET",
             f"/sessions/{reference_number}/invoices",
+            response_model=SessionInvoicesResponse,
             headers=headers or None,
             params=params or None,
             access_token=access_token,
@@ -159,16 +177,17 @@ class SessionsClient(BaseApiClient):
         page_size: int | None = None,
         continuation_token: str | None = None,
         access_token: str,
-    ) -> Any:
+    ) -> SessionInvoicesResponse:
         headers = {}
         if continuation_token:
             headers["x-continuation-token"] = continuation_token
         params = {}
         if page_size is not None:
             params["pageSize"] = page_size
-        return self._request_json(
+        return self._request_model(
             "GET",
             f"/sessions/{reference_number}/invoices/failed",
+            response_model=SessionInvoicesResponse,
             headers=headers or None,
             params=params or None,
             access_token=access_token,
@@ -180,10 +199,11 @@ class SessionsClient(BaseApiClient):
         invoice_reference_number: str,
         *,
         access_token: str,
-    ) -> Any:
-        return self._request_json(
+    ) -> SessionInvoiceStatusResponse:
+        return self._request_model(
             "GET",
             f"/sessions/{reference_number}/invoices/{invoice_reference_number}",
+            response_model=SessionInvoiceStatusResponse,
             access_token=access_token,
         )
 
@@ -243,7 +263,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         date_modified_to: str | None = None,
         statuses: list[str] | None = None,
         access_token: str | None = None,
-    ) -> Any:
+    ) -> SessionsQueryResponse:
         params: dict[str, Any] = {"sessionType": session_type}
         if page_size is not None:
             params["pageSize"] = page_size
@@ -268,9 +288,10 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         if continuation_token:
             headers["x-continuation-token"] = continuation_token
 
-        return await self._request_json(
+        return await self._request_model(
             "GET",
             "/sessions",
+            response_model=SessionsQueryResponse,
             params=params,
             headers=headers or None,
             access_token=access_token,
@@ -278,17 +299,18 @@ class AsyncSessionsClient(AsyncBaseApiClient):
 
     async def open_online_session(
         self,
-        request_payload: dict[str, Any],
+        request_payload: OpenOnlineSessionRequest,
         *,
         access_token: str,
         upo_v43: bool = False,
-    ) -> Any:
+    ) -> OpenOnlineSessionResponse:
         headers = {}
         if upo_v43:
             headers["X-KSeF-Feature"] = "upo-v4-3"
-        return await self._request_json(
+        return await self._request_model(
             "POST",
             "/sessions/online",
+            response_model=OpenOnlineSessionResponse,
             json=request_payload,
             headers=headers or None,
             access_token=access_token,
@@ -306,13 +328,14 @@ class AsyncSessionsClient(AsyncBaseApiClient):
     async def send_online_invoice(
         self,
         reference_number: str,
-        request_payload: dict[str, Any],
+        request_payload: SendInvoiceRequest,
         *,
         access_token: str,
-    ) -> Any:
-        return await self._request_json(
+    ) -> SendInvoiceResponse:
+        return await self._request_model(
             "POST",
             f"/sessions/online/{reference_number}/invoices",
+            response_model=SendInvoiceResponse,
             json=request_payload,
             access_token=access_token,
             expected_status={202},
@@ -320,17 +343,18 @@ class AsyncSessionsClient(AsyncBaseApiClient):
 
     async def open_batch_session(
         self,
-        request_payload: dict[str, Any],
+        request_payload: OpenBatchSessionRequest,
         *,
         access_token: str,
         upo_v43: bool = False,
-    ) -> Any:
+    ) -> OpenBatchSessionResponse:
         headers = {}
         if upo_v43:
             headers["X-KSeF-Feature"] = "upo-v4-3"
-        return await self._request_json(
+        return await self._request_model(
             "POST",
             "/sessions/batch",
+            response_model=OpenBatchSessionResponse,
             json=request_payload,
             headers=headers or None,
             access_token=access_token,
@@ -345,10 +369,13 @@ class AsyncSessionsClient(AsyncBaseApiClient):
             expected_status={204},
         )
 
-    async def get_session_status(self, reference_number: str, access_token: str) -> Any:
-        return await self._request_json(
+    async def get_session_status(
+        self, reference_number: str, access_token: str
+    ) -> SessionStatusResponse:
+        return await self._request_model(
             "GET",
             f"/sessions/{reference_number}",
+            response_model=SessionStatusResponse,
             access_token=access_token,
         )
 
@@ -359,16 +386,17 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         page_size: int | None = None,
         continuation_token: str | None = None,
         access_token: str,
-    ) -> Any:
+    ) -> SessionInvoicesResponse:
         headers = {}
         if continuation_token:
             headers["x-continuation-token"] = continuation_token
         params = {}
         if page_size is not None:
             params["pageSize"] = page_size
-        return await self._request_json(
+        return await self._request_model(
             "GET",
             f"/sessions/{reference_number}/invoices",
+            response_model=SessionInvoicesResponse,
             headers=headers or None,
             params=params or None,
             access_token=access_token,
@@ -381,16 +409,17 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         page_size: int | None = None,
         continuation_token: str | None = None,
         access_token: str,
-    ) -> Any:
+    ) -> SessionInvoicesResponse:
         headers = {}
         if continuation_token:
             headers["x-continuation-token"] = continuation_token
         params = {}
         if page_size is not None:
             params["pageSize"] = page_size
-        return await self._request_json(
+        return await self._request_model(
             "GET",
             f"/sessions/{reference_number}/invoices/failed",
+            response_model=SessionInvoicesResponse,
             headers=headers or None,
             params=params or None,
             access_token=access_token,
@@ -402,10 +431,11 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         invoice_reference_number: str,
         *,
         access_token: str,
-    ) -> Any:
-        return await self._request_json(
+    ) -> SessionInvoiceStatusResponse:
+        return await self._request_model(
             "GET",
             f"/sessions/{reference_number}/invoices/{invoice_reference_number}",
+            response_model=SessionInvoiceStatusResponse,
             access_token=access_token,
         )
 

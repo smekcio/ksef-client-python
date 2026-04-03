@@ -1,8 +1,10 @@
 import unittest
+from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 
+from ksef_client import models
 from ksef_client.config import KsefClientOptions
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 from ksef_client.http import (
@@ -12,6 +14,8 @@ from ksef_client.http import (
     _host_allowed,
     _is_json_content_type,
     _merge_headers,
+    _parse_api_problem,
+    _parse_retry_after,
     _validate_presigned_url_security,
 )
 
@@ -88,7 +92,8 @@ class HttpTests(unittest.TestCase):
         response = httpx.Response(429, headers={"Retry-After": "5"}, json={"error": "limit"})
         with self.assertRaises(KsefRateLimitError) as ctx:
             client._raise_for_status(response)
-        self.assertEqual(ctx.exception.retry_after, "5")
+        self.assertEqual(ctx.exception.retry_after, 5)
+        self.assertEqual(ctx.exception.retry_after_raw, "5")
 
     def test_raise_for_status_api_error(self):
         options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
@@ -114,6 +119,9 @@ class HttpTests(unittest.TestCase):
             client._raise_for_status(response)
         assert isinstance(ctx.exception.response_body, dict)
         self.assertEqual(ctx.exception.response_body["reasonCode"], "missing-permissions")
+        assert ctx.exception.problem is not None
+        assert isinstance(ctx.exception.problem, models.ForbiddenProblemDetails)
+        self.assertEqual(ctx.exception.problem.reason_code, "missing-permissions")
 
     def test_raise_for_status_http_error(self):
         options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
@@ -237,6 +245,83 @@ class HttpTests(unittest.TestCase):
         options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
         with self.assertRaisesRegex(ValueError, "host is missing"):
             _validate_presigned_url_security(options, "https:///no-host")
+
+    def test_parse_retry_after_variants(self):
+        self.assertIsNone(_parse_retry_after(None))
+        self.assertIsNone(_parse_retry_after("   "))
+        self.assertEqual(_parse_retry_after("5"), 5)
+        self.assertIsNone(_parse_retry_after("bad"))
+        parsed_http_date = _parse_retry_after("Wed, 01 Jan 2099 00:00:00 GMT")
+        self.assertIsNotNone(parsed_http_date)
+        assert parsed_http_date is not None
+        self.assertGreater(parsed_http_date, 0)
+
+    def test_parse_retry_after_assigns_utc_to_naive_http_date(self):
+        with patch(
+            "ksef_client.http.parsedate_to_datetime",
+            return_value=datetime(2099, 1, 1, 0, 0, 0),
+        ):
+            parsed_http_date = _parse_retry_after("Wed, 01 Jan 2099 00:00:00")
+        self.assertIsNotNone(parsed_http_date)
+        assert parsed_http_date is not None
+        self.assertGreater(parsed_http_date, 0)
+
+    def test_parse_api_problem_variants(self):
+        self.assertIsNone(_parse_api_problem(400, []))
+
+        exception_problem = _parse_api_problem(400, {"exception": {}})
+        self.assertIsInstance(exception_problem, models.ExceptionResponse)
+
+        forbidden = _parse_api_problem(
+            403,
+            {
+                "title": "Forbidden",
+                "status": 403,
+                "detail": "Missing permissions",
+                "reasonCode": "missing-permissions",
+            },
+        )
+        self.assertIsInstance(forbidden, models.ForbiddenProblemDetails)
+
+        unauthorized = _parse_api_problem(
+            401,
+            {"title": "Unauthorized", "status": 401, "detail": "Missing bearer token"},
+        )
+        self.assertIsInstance(unauthorized, models.UnauthorizedProblemDetails)
+
+        unknown = _parse_api_problem(400, {"title": "Bad", "detail": "x"})
+        self.assertIsInstance(unknown, models.UnknownApiProblem)
+        self.assertIsNotNone(unknown)
+        assert unknown is not None
+        self.assertEqual(unknown.title, "Bad")
+
+        raw_unknown = _parse_api_problem(400, {"error": "bad"})
+        self.assertIsInstance(raw_unknown, models.UnknownApiProblem)
+        self.assertIsNotNone(raw_unknown)
+        assert raw_unknown is not None
+        self.assertEqual(raw_unknown.status, 400)
+
+        invalid_status_unknown = _parse_api_problem(400, {"title": "Bad", "status": "oops"})
+        self.assertIsInstance(invalid_status_unknown, models.UnknownApiProblem)
+        self.assertIsNotNone(invalid_status_unknown)
+        assert invalid_status_unknown is not None
+        self.assertEqual(invalid_status_unknown.status, 400)
+
+        self.assertIsNone(_parse_api_problem(400, {}))
+
+    def test_raise_for_status_rate_limit_http_date(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        response = httpx.Response(
+            429,
+            headers={"Retry-After": "Wed, 01 Jan 2099 00:00:00 GMT"},
+            json={"error": "limit"},
+        )
+        with self.assertRaises(KsefRateLimitError) as ctx:
+            client._raise_for_status(response)
+        self.assertIsNotNone(ctx.exception.retry_after)
+        assert ctx.exception.retry_after is not None
+        self.assertGreater(ctx.exception.retry_after, 0)
 
 
 class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):

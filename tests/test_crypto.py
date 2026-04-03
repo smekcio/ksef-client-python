@@ -29,8 +29,8 @@ class CryptoTests(unittest.TestCase):
         iv = generate_iv()
         payload = b"<Invoice></Invoice>"
         request = build_send_invoice_request(payload, key, iv)
-        self.assertIn("encryptedInvoiceContent", request)
-        self.assertEqual(request["invoiceSize"], len(payload))
+        self.assertTrue(request.encrypted_invoice_content)
+        self.assertEqual(request.invoice_size, len(payload))
 
     def test_generate_lengths(self):
         self.assertEqual(len(generate_symmetric_key()), 32)
@@ -116,7 +116,10 @@ class CryptoTests(unittest.TestCase):
         encryption = crypto.build_encryption_data(rsa_cert.certificate_pem)
         self.assertEqual(len(encryption.key), 32)
         self.assertEqual(len(encryption.iv), 16)
-        self.assertTrue(encryption.encryption_info.encrypted_symmetric_key)
+        encryption_info = encryption.encryption_info
+        self.assertIsNotNone(encryption_info)
+        assert encryption_info is not None
+        self.assertTrue(encryption_info.encrypted_symmetric_key)
 
     def test_encrypt_rsa_oaep(self):
         rsa_cert = generate_rsa_cert()
@@ -158,8 +161,8 @@ class CryptoTests(unittest.TestCase):
             offline_mode=True,
             hash_of_corrected_invoice="hash",
         )
-        self.assertTrue(request["offlineMode"])
-        self.assertEqual(request["hashOfCorrectedInvoice"], "hash")
+        self.assertTrue(request.offline_mode)
+        self.assertEqual(request.hash_of_corrected_invoice, "hash")
 
     def test_signatures(self):
         rsa_cert = generate_rsa_cert()

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from ksef_client import models as m
 from ksef_client.cli.auth import manager
 from ksef_client.cli.config.schema import CliConfig, ProfileConfig
 from ksef_client.cli.errors import CliError
@@ -196,6 +197,19 @@ def test_select_certificate_and_require_non_empty_errors() -> None:
     with pytest.raises(CliError) as value_error:
         manager._require_non_empty("  ", "msg", "hint")
     assert value_error.value.code == ExitCode.VALIDATION_ERROR
+
+
+def test_select_certificate_supports_object_payloads() -> None:
+    cert = manager._select_certificate(
+        [
+            SimpleNamespace(
+                usage=[SimpleNamespace(value="KsefTokenEncryption")],
+                certificate="CERT-OBJ",
+            )
+        ],
+        "KsefTokenEncryption",
+    )
+    assert cert == "CERT-OBJ"
 
 
 def test_resolve_base_url_prefers_provided_value() -> None:
@@ -601,3 +615,55 @@ def test_refresh_access_token_success_without_save(monkeypatch) -> None:
         save=False,
     )
     assert result["saved"] is False
+
+
+def test_refresh_access_token_accepts_typed_response(monkeypatch) -> None:
+    class _FakeTypedClient:
+        def __init__(self) -> None:
+            self.auth = SimpleNamespace(
+                refresh_access_token=lambda refresh: m.AuthenticationTokenRefreshResponse.from_dict(
+                    {"accessToken": {"token": "typed-new", "validUntil": "typed-v2"}}
+                )
+            )
+
+        def __enter__(self) -> _FakeTypedClient:
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            _ = (exc_type, exc, tb)
+
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeTypedClient())
+    monkeypatch.setattr(manager, "save_tokens", lambda profile, access, refresh: None)
+    monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {"method": "token"})
+    monkeypatch.setattr(manager, "set_cached_metadata", lambda profile, metadata: None)
+
+    result = manager.refresh_access_token(
+        profile="demo",
+        base_url="https://api-demo.ksef.mf.gov.pl",
+        save=True,
+    )
+    assert result["access_valid_until"] == "typed-v2"
+
+
+def test_refresh_access_token_rejects_unexpected_typed_response(monkeypatch) -> None:
+    class _FakeInvalidClient:
+        def __init__(self) -> None:
+            self.auth = SimpleNamespace(refresh_access_token=lambda refresh: SimpleNamespace())
+
+        def __enter__(self) -> _FakeInvalidClient:
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            _ = (exc_type, exc, tb)
+
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeInvalidClient())
+
+    with pytest.raises(CliError) as exc:
+        manager.refresh_access_token(
+            profile="demo",
+            base_url="https://api-demo.ksef.mf.gov.pl",
+            save=False,
+        )
+    assert exc.value.code == ExitCode.API_ERROR

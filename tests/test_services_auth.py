@@ -38,10 +38,11 @@ class AuthServiceTests(unittest.TestCase):
             context_identifier_type="nip",
             context_identifier_value="123",
             encrypted_token_base64="enc",
-            authorization_policy={"a": 1},
+            authorization_policy=None,
         )
-        self.assertIn("authorizationPolicy", payload)
-        self.assertEqual(payload["encryptedToken"], "enc")
+        self.assertEqual(payload.encrypted_token, "enc")
+        self.assertEqual(payload.challenge, "c")
+        self.assertEqual(payload.context_identifier.value, "123")
 
     def test_encrypt_ksef_token(self):
         rsa_cert = generate_rsa_cert()

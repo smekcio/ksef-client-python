@@ -48,6 +48,9 @@ Token może zostać przekazany na dwa sposoby:
 
 Wariant per-call jest preferowany w przypadku obsługi wielu kontekstów.
 
+Ważne: payloady requestów w SDK są typed-only. Do metod klientów przekazuj modele z
+`ksef_client.models`, a nie surowe `dict`.
+
 ## Zamykanie połączeń
 
 - `KsefClient.close()` – zamyka wewnętrznego `httpx.Client`
