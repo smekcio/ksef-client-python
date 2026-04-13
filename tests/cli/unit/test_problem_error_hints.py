@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 import typer
 from click import Command
@@ -13,6 +15,7 @@ from ksef_client.cli.commands import (
     send_cmd,
     upo_cmd,
 )
+from ksef_client.cli.commands._error_utils import build_problem_hint
 from ksef_client.cli.context import CliContext
 from ksef_client.cli.exit_codes import ExitCode
 from ksef_client.exceptions import KsefApiError, KsefRateLimitError
@@ -133,3 +136,34 @@ def test_render_error_rate_limit_problem_hint_includes_detail_and_retry_after(
     assert "Detail: Retry later." in hint
     assert "Trace ID: trace-429" in hint
     assert "Retry-After: 5" in hint
+
+
+def test_build_problem_hint_reads_reason_code_from_raw_payload() -> None:
+    problem = SimpleNamespace(
+        detail="Missing permissions",
+        reason_code=None,
+        errors=None,
+        trace_id=None,
+        instance=None,
+        raw={"reasonCode": "missing-permissions"},
+    )
+
+    hint = build_problem_hint(problem, default_hint="Check request.")
+
+    assert hint is not None
+    assert "Detail: Missing permissions" in hint
+    assert "Reason: missing-permissions" in hint
+    assert hint.endswith("Check request.")
+
+
+def test_build_problem_hint_ignores_unrenderable_error_items() -> None:
+    problem = SimpleNamespace(
+        detail=None,
+        reason_code=None,
+        errors=[SimpleNamespace(code=None, description=None, details=None)],
+        trace_id=None,
+        instance=None,
+        raw=None,
+    )
+
+    assert build_problem_hint(problem, default_hint=None) is None

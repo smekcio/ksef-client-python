@@ -471,6 +471,20 @@ class HttpTests(unittest.TestCase):
         assert invalid_status_unknown is not None
         self.assertEqual(invalid_status_unknown.status, 400)
 
+        parse_error_unknown = _parse_api_problem(
+            403,
+            {
+                "title": "Forbidden",
+                "status": 403,
+                "detail": "Missing permissions",
+                "reasonCode": ["invalid-type"],
+            },
+        )
+        self.assertIsInstance(parse_error_unknown, models.UnknownApiProblem)
+        self.assertIsNotNone(parse_error_unknown)
+        assert parse_error_unknown is not None
+        self.assertEqual(parse_error_unknown.title, "Forbidden")
+
         self.assertIsNone(_parse_api_problem(400, {}))
 
     def test_raise_for_status_rate_limit_http_date(self):
