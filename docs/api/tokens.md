@@ -34,5 +34,6 @@ Endpoint: `DELETE /tokens/{referenceNumber}` (204)
 Od KSeF API 2.4.0 można unieważnić token użyty do bieżącego uwierzytelnienia bez uprawnienia
 `CredentialsManage`.
 
-W CLI odpowiada temu komenda `ksef auth revoke-self-token`, która używa numeru referencyjnego
-zapamiętanego podczas `ksef auth login-token`.
+W CLI odpowiada temu komenda `ksef auth revoke-self-token`, która w pierwszej kolejności używa
+numeru referencyjnego zapamiętanego podczas `ksef auth login-token`, a dla starszych zapisanych
+sesji potrafi odzyskać numer bieżącego tokenu przez `GET /tokens`.
