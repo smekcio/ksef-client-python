@@ -16,6 +16,13 @@ from .keyring_store import clear_tokens, get_tokens, save_tokens
 from .token_cache import clear_cached_metadata, get_cached_metadata, set_cached_metadata
 
 
+def _extract_ksef_token_reference_number(token: str) -> str | None:
+    reference_number, separator, _ = token.partition("|")
+    if not separator or not reference_number:
+        return None
+    return reference_number
+
+
 def _select_certificate(certs: list[Any], usage_name: str) -> str:
     for cert in certs:
         if isinstance(cert, dict):
@@ -121,6 +128,7 @@ def login_with_token(
         )
 
     if save:
+        token_reference_number = _extract_ksef_token_reference_number(safe_token) or ""
         save_tokens(
             profile,
             result.tokens.access_token.token,
@@ -133,6 +141,7 @@ def login_with_token(
                 "access_valid_until": result.tokens.access_token.valid_until or "",
                 "refresh_valid_until": result.tokens.refresh_token.valid_until or "",
                 "auth_reference_number": result.reference_number,
+                "ksef_token_reference_number": token_reference_number,
             },
         )
 
@@ -337,6 +346,45 @@ def refresh_access_token(*, profile: str, base_url: str, save: bool = True) -> d
         "profile": profile,
         "access_valid_until": str(access_valid_until or ""),
         "saved": save,
+    }
+
+
+def revoke_self_token(*, profile: str, base_url: str) -> dict[str, Any]:
+    tokens = get_tokens(profile)
+    if not tokens:
+        raise CliError(
+            "No stored tokens for selected profile.",
+            ExitCode.AUTH_ERROR,
+            "Run `ksef auth login-token` first.",
+        )
+
+    access_token, _refresh_token = tokens
+    metadata = get_cached_metadata(profile) or {}
+    if metadata.get("method") != "token":
+        raise CliError(
+            "Self-revoke is available only for sessions authenticated with KSeF token.",
+            ExitCode.AUTH_ERROR,
+            "Run `ksef auth login-token` first.",
+        )
+
+    reference_number = metadata.get("ksef_token_reference_number", "").strip()
+    if not reference_number:
+        raise CliError(
+            "Missing KSeF token reference number for the current profile.",
+            ExitCode.AUTH_ERROR,
+            "Login again with `ksef auth login-token` to refresh cached token metadata.",
+        )
+
+    with create_client(base_url) as client:
+        client.tokens.revoke_token(reference_number, access_token=access_token)
+
+    clear_tokens(profile)
+    clear_cached_metadata(profile)
+    return {
+        "profile": profile,
+        "reference_number": reference_number,
+        "revoked": True,
+        "logged_out": True,
     }
 
 

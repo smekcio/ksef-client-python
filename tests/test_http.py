@@ -95,6 +95,40 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(ctx.exception.retry_after, 5)
         self.assertEqual(ctx.exception.retry_after_raw, "5")
 
+    def test_raise_for_status_legacy_rate_limit_problem(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        response = httpx.Response(
+            429,
+            headers={"Retry-After": "5"},
+            json={
+                "status": {
+                    "code": 429,
+                    "description": "Too Many Requests",
+                    "details": ["Retry later."],
+                }
+            },
+        )
+        with self.assertRaises(KsefRateLimitError) as ctx:
+            client._raise_for_status(response)
+        self.assertEqual(ctx.exception.retry_after, 5)
+        assert isinstance(ctx.exception.problem, models.TooManyRequestsResponse)
+        self.assertEqual(ctx.exception.problem.status["code"], 429)
+
+    def test_raise_for_status_unknown_rate_limit_problem(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        response = httpx.Response(
+            429,
+            headers={"Retry-After": "5"},
+            json={"error": "limit"},
+        )
+        with self.assertRaises(KsefRateLimitError) as ctx:
+            client._raise_for_status(response)
+        self.assertEqual(ctx.exception.retry_after, 5)
+        assert isinstance(ctx.exception.problem, models.UnknownApiProblem)
+        self.assertEqual(ctx.exception.problem.status, 429)
+
     def test_raise_for_status_api_error(self):
         options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
         client = BaseHttpClient(options)
@@ -113,6 +147,7 @@ class HttpTests(unittest.TestCase):
                 "status": 403,
                 "detail": "Missing permissions",
                 "reasonCode": "missing-permissions",
+                "timestamp": "2026-04-13T10:00:00Z",
             },
         )
         with self.assertRaises(KsefApiError) as ctx:
@@ -122,6 +157,74 @@ class HttpTests(unittest.TestCase):
         assert ctx.exception.problem is not None
         assert isinstance(ctx.exception.problem, models.ForbiddenProblemDetails)
         self.assertEqual(ctx.exception.problem.reason_code, "missing-permissions")
+
+    def test_raise_for_status_bad_request_problem_details(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        response = httpx.Response(
+            400,
+            headers={"Content-Type": "application/problem+json"},
+            json={
+                "title": "Bad Request",
+                "status": 400,
+                "instance": "/tokens",
+                "detail": "Request is invalid.",
+                "errors": [
+                    {
+                        "code": 21405,
+                        "description": "Validation error.",
+                        "details": ["Field X is required."],
+                    }
+                ],
+                "timestamp": "2026-04-13T10:00:00Z",
+                "traceId": "trace-400",
+            },
+        )
+        with self.assertRaises(KsefApiError) as ctx:
+            client._raise_for_status(response)
+        assert isinstance(ctx.exception.problem, models.BadRequestProblemDetails)
+        self.assertEqual(ctx.exception.problem.errors[0].code, 21405)
+
+    def test_raise_for_status_problem_rate_limit(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        response = httpx.Response(
+            429,
+            headers={"Retry-After": "5", "Content-Type": "application/problem+json"},
+            json={
+                "title": "Too Many Requests",
+                "status": 429,
+                "instance": "/invoices/exports",
+                "detail": "Retry later.",
+                "timestamp": "2026-04-13T10:00:00Z",
+                "traceId": "trace-429",
+            },
+        )
+        with self.assertRaises(KsefRateLimitError) as ctx:
+            client._raise_for_status(response)
+        self.assertEqual(ctx.exception.retry_after, 5)
+        assert isinstance(ctx.exception.problem, models.TooManyRequestsProblemDetails)
+        self.assertEqual(ctx.exception.problem.trace_id, "trace-429")
+
+    def test_raise_for_status_gone_problem(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        response = httpx.Response(
+            410,
+            headers={"Content-Type": "application/problem+json"},
+            json={
+                "title": "Gone",
+                "status": 410,
+                "instance": "/auth/ref-1",
+                "detail": "Operation expired.",
+                "timestamp": "2026-04-13T10:00:00Z",
+                "traceId": "trace-410",
+            },
+        )
+        with self.assertRaises(KsefApiError) as ctx:
+            client._raise_for_status(response)
+        assert isinstance(ctx.exception.problem, models.GoneProblemDetails)
+        self.assertEqual(ctx.exception.problem.status, 410)
 
     def test_raise_for_status_http_error(self):
         options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
@@ -272,6 +375,20 @@ class HttpTests(unittest.TestCase):
         exception_problem = _parse_api_problem(400, {"exception": {}})
         self.assertIsInstance(exception_problem, models.ExceptionResponse)
 
+        bad_request = _parse_api_problem(
+            400,
+            {
+                "title": "Bad Request",
+                "status": 400,
+                "instance": "/tokens",
+                "detail": "Request is invalid.",
+                "errors": [{"code": 21405, "description": "Validation error."}],
+                "timestamp": "2026-04-13T10:00:00Z",
+                "traceId": "trace-400",
+            },
+        )
+        self.assertIsInstance(bad_request, models.BadRequestProblemDetails)
+
         forbidden = _parse_api_problem(
             403,
             {
@@ -279,15 +396,62 @@ class HttpTests(unittest.TestCase):
                 "status": 403,
                 "detail": "Missing permissions",
                 "reasonCode": "missing-permissions",
+                "timestamp": "2026-04-13T10:00:00Z",
             },
         )
         self.assertIsInstance(forbidden, models.ForbiddenProblemDetails)
 
         unauthorized = _parse_api_problem(
             401,
-            {"title": "Unauthorized", "status": 401, "detail": "Missing bearer token"},
+            {
+                "title": "Unauthorized",
+                "status": 401,
+                "detail": "Missing bearer token",
+                "timestamp": "2026-04-13T10:00:00Z",
+            },
         )
         self.assertIsInstance(unauthorized, models.UnauthorizedProblemDetails)
+
+        rate_limit_problem = _parse_api_problem(
+            429,
+            {
+                "title": "Too Many Requests",
+                "status": 429,
+                "instance": "/invoices/exports",
+                "detail": "Retry later.",
+                "timestamp": "2026-04-13T10:00:00Z",
+                "traceId": "trace-429",
+            },
+        )
+        self.assertIsInstance(rate_limit_problem, models.TooManyRequestsProblemDetails)
+
+        legacy_rate_limit_problem = _parse_api_problem(
+            429,
+            {
+                "status": {
+                    "code": 429,
+                    "description": "Too Many Requests",
+                    "details": ["Retry later."],
+                }
+            },
+        )
+        self.assertIsInstance(legacy_rate_limit_problem, models.TooManyRequestsResponse)
+
+        unknown_rate_limit_problem = _parse_api_problem(429, {"error": "limit"})
+        self.assertIsInstance(unknown_rate_limit_problem, models.UnknownApiProblem)
+
+        gone_problem = _parse_api_problem(
+            410,
+            {
+                "title": "Gone",
+                "status": 410,
+                "instance": "/auth/ref-1",
+                "detail": "Operation expired.",
+                "timestamp": "2026-04-13T10:00:00Z",
+                "traceId": "trace-410",
+            },
+        )
+        self.assertIsInstance(gone_problem, models.GoneProblemDetails)
 
         unknown = _parse_api_problem(400, {"title": "Bad", "detail": "x"})
         self.assertIsInstance(unknown, models.UnknownApiProblem)
@@ -404,6 +568,7 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
                 "title": "Unauthorized",
                 "status": 401,
                 "detail": "Missing bearer token",
+                "timestamp": "2026-04-13T10:00:00Z",
             },
         )
         with self.assertRaises(KsefApiError):

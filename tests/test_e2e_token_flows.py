@@ -8,6 +8,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from typing import TypeVar
 
 import pytest
@@ -120,6 +121,70 @@ def _with_rate_limit_retry(call: Callable[[], T]) -> T:
                 raise
             time.sleep(delay)
     raise RuntimeError("Rate limit retry loop terminated unexpectedly.")
+
+
+def _extract_token_reference_number(token: str) -> str:
+    reference_number, separator, _ = token.partition("|")
+    if not separator or not reference_number:
+        raise RuntimeError(
+            "KSeF token does not contain an embedded referenceNumber prefix."
+        )
+    return reference_number
+
+
+def _assert_current_token_visibility(
+    client: KsefClient,
+    *,
+    access_token: str,
+    config: E2EConfig,
+) -> None:
+    if not config.token:
+        raise RuntimeError("Missing token for token visibility assertion.")
+    current_reference_number = _extract_token_reference_number(config.token)
+
+    continuation_token: str | None = None
+    current_item = None
+    visible_tokens_found = False
+    seen_continuation_tokens: set[str] = set()
+
+    while True:
+        listed = _with_rate_limit_retry(
+            partial(
+                client.tokens.list_tokens,
+                access_token=access_token,
+                continuation_token=continuation_token,
+            )
+        )
+        if listed.tokens:
+            visible_tokens_found = True
+        current_item = next(
+            (item for item in listed.tokens if item.reference_number == current_reference_number),
+            None,
+        )
+        if current_item is not None:
+            break
+
+        continuation_token = listed.continuation_token
+        if not continuation_token:
+            break
+        if continuation_token in seen_continuation_tokens:
+            raise RuntimeError("GET /tokens returned a repeated continuation token.")
+        seen_continuation_tokens.add(continuation_token)
+
+    assert visible_tokens_found, "GET /tokens did not return any visible token entries."
+    assert current_item is not None, (
+        "GET /tokens did not return the token used for the current authentication."
+    )
+
+    status = _with_rate_limit_retry(
+        lambda: client.tokens.get_token_status(
+            current_reference_number,
+            access_token=access_token,
+        )
+    )
+    assert status.reference_number == current_reference_number
+    assert status.context_identifier.value == config.context_value
+    assert status.context_identifier.type.value.lower() == config.context_type.lower()
 
 
 def _poll_for_ksef_number(
@@ -569,6 +634,12 @@ def _run_full_e2e_flow(config: E2EConfig) -> None:
             token_cert=token_cert,
         )
         assert access_token, "Authentication did not return access token."
+        if config.auth_mode == AUTH_MODE_TOKEN:
+            _assert_current_token_visibility(
+                client,
+                access_token=access_token,
+                config=config,
+            )
 
         workflow = OnlineSessionWorkflow(client.sessions)
         session = workflow.open_session(

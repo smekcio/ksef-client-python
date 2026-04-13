@@ -15,11 +15,13 @@ from ..auth.manager import (
     logout,
     refresh_access_token,
     resolve_base_url,
+    revoke_self_token,
 )
 from ..context import profile_label, require_context, require_profile
 from ..errors import CliError
 from ..exit_codes import ExitCode
 from ..output import get_renderer
+from ._error_utils import build_api_error_hint, build_rate_limit_hint
 
 app = typer.Typer(help="Authenticate and manage tokens.")
 
@@ -92,7 +94,7 @@ def _render_error(ctx: typer.Context, command: str, exc: Exception) -> None:
         raise typer.Exit(int(exc.code))
 
     if isinstance(exc, KsefRateLimitError):
-        hint = f"Retry-After: {exc.retry_after}" if exc.retry_after else "Wait and retry."
+        hint = build_rate_limit_hint(exc, default_hint="Wait and retry.")
         renderer.error(
             command=command,
             profile=profile_label(cli_ctx),
@@ -108,7 +110,10 @@ def _render_error(ctx: typer.Context, command: str, exc: Exception) -> None:
             profile=profile_label(cli_ctx),
             code="API_ERROR",
             message=str(exc),
-            hint="Inspect response details and verify input data.",
+            hint=build_api_error_hint(
+                exc,
+                default_hint="Inspect response details and verify input data.",
+            ),
         )
         raise typer.Exit(int(ExitCode.API_ERROR))
 
@@ -361,4 +366,30 @@ def auth_logout(ctx: typer.Context) -> None:
         profile=profile,
         data=result,
         message="Stored tokens removed.",
+    )
+
+
+@app.command("revoke-self-token")
+def auth_revoke_self_token(
+    ctx: typer.Context,
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Override KSeF base URL for this command."
+    ),
+) -> None:
+    cli_ctx = require_context(ctx)
+    renderer = get_renderer(cli_ctx)
+    profile = profile_label(cli_ctx)
+    try:
+        profile = require_profile(cli_ctx)
+        result = revoke_self_token(
+            profile=profile,
+            base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
+        )
+    except Exception as exc:
+        _render_error(ctx, "auth.revoke-self-token", exc)
+    renderer.success(
+        command="auth.revoke-self-token",
+        profile=profile,
+        data=result,
+        message="Current KSeF token revoked and stored tokens removed.",
     )

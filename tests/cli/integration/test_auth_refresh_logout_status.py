@@ -12,6 +12,16 @@ def test_auth_status_and_logout_success(runner) -> None:
     assert runner.invoke(app, ["auth", "logout"]).exit_code == 0
 
 
+def test_auth_revoke_self_token_success(runner, monkeypatch) -> None:
+    monkeypatch.setattr(
+        auth_cmd,
+        "revoke_self_token",
+        lambda **kwargs: {"profile": "demo", "reference_number": "REF-123", "revoked": True},
+    )
+    result = runner.invoke(app, ["auth", "revoke-self-token"])
+    assert result.exit_code == 0
+
+
 def test_auth_refresh_error_without_tokens(runner) -> None:
     clear_tokens("demo")
     result = runner.invoke(app, ["auth", "refresh"])
@@ -42,7 +52,13 @@ def test_auth_status_refresh_logout_error_paths(runner, monkeypatch) -> None:
     monkeypatch.setattr(
         auth_cmd, "logout", lambda profile: (_ for _ in ()).throw(CliError("x", ExitCode.API_ERROR))
     )
+    monkeypatch.setattr(
+        auth_cmd,
+        "revoke_self_token",
+        lambda **kwargs: (_ for _ in ()).throw(CliError("x", ExitCode.API_ERROR)),
+    )
 
     assert runner.invoke(app, ["auth", "status"]).exit_code == int(ExitCode.API_ERROR)
     assert runner.invoke(app, ["auth", "refresh"]).exit_code == int(ExitCode.API_ERROR)
     assert runner.invoke(app, ["auth", "logout"]).exit_code == int(ExitCode.API_ERROR)
+    assert runner.invoke(app, ["auth", "revoke-self-token"]).exit_code == int(ExitCode.API_ERROR)
