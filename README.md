@@ -12,10 +12,19 @@ Projekt odwzorowuje oficjalne przepływy KSeF i zapewnia spójny model pracy w d
 
 ## 🔄 Kompatybilność
 
-Aktualna kompatybilność: **KSeF API `v2.3.0`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.3.0/api-changelog.md)).
+Aktualna kompatybilność: **KSeF API `v2.4.0`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.4.0/api-changelog.md#wersja-240)).
 
 Od tej wersji publiczne payloady requestów SDK są **typed-only**. Do metod klientów przekazuj
 obiekty `ksef_client.models.*`, a nie surowe `dict`.
+
+Zaostrzenie walidacji XML w KSeF API 2.4.0 obowiązuje po stronie serwera KSeF. SDK nie dodaje
+lokalnego walidatora XML i pozostaje cienką warstwą transportową nad oficjalnym API.
+
+> [!WARNING]
+> **Breaking change:** gałąź `feat/typed-model-api` zmienia publiczny kontrakt SDK.
+> Request payloady do klientów są `typed-only`, a wiele odpowiedzi jest teraz zwracanych jako modele
+> zamiast surowych `dict`. Jeśli integracja buduje requesty jako słowniki albo czyta odpowiedzi przez
+> `response["field"]`, wymaga migracji. Szczegóły i przykłady: [`docs/migration-typed-model-api.md`](docs/migration-typed-model-api.md).
 
 ## 🧭 Spis treści
 
@@ -25,6 +34,7 @@ obiekty `ksef_client.models.*`, a nie surowe `dict`.
 - [Szybki start: SDK](#szybki-start-sdk)
 - [Najważniejsze scenariusze SDK](#najważniejsze-scenariusze-sdk)
 - [Dokumentacja](#dokumentacja)
+- [Migracja typed model API](#migracja-typed-model-api)
 - [Testy i jakość](#testy-i-jakość)
 - [Kontrybucja](#kontrybucja)
 
@@ -108,7 +118,7 @@ ksef invoice download --ksef-number <KSEF_NUMBER> --out ./out/
 
 Najważniejsze grupy komend:
 - onboarding/profiles: `init`, `profile ...`
-- auth: `auth login-token`, `auth login-xades`, `auth status`, `auth refresh`, `auth logout`
+- auth: `auth login-token`, `auth login-xades`, `auth status`, `auth refresh`, `auth revoke-self-token`, `auth logout`
 - operacje: `invoice ...`, `send ...`, `upo ...`, `export ...`
 - diagnostyka: `health check`
 - latarnia: `lighthouse status`, `lighthouse messages`
@@ -232,10 +242,16 @@ Dokumentacja SDK znajduje się w `docs/`:
 - konfiguracja: [`docs/configuration.md`](docs/configuration.md)
 - błędy i retry: [`docs/errors.md`](docs/errors.md)
 - API: [`docs/api/README.md`](docs/api/README.md)
+- migracja typed model API: [`docs/migration-typed-model-api.md`](docs/migration-typed-model-api.md)
 - workflows: [`docs/workflows/README.md`](docs/workflows/README.md)
 - usługi: [`docs/services/README.md`](docs/services/README.md)
 - utils: [`docs/utils/README.md`](docs/utils/README.md)
 - przykłady: [`docs/examples/README.md`](docs/examples/README.md)
+
+## 🔁 Migracja typed model API
+
+Jeśli przechodzisz ze starszej integracji opartej o `dict`, zacznij od krótkiego przewodnika:
+[`docs/migration-typed-model-api.md`](docs/migration-typed-model-api.md).
 
 ## 🧪 Testy i jakość
 

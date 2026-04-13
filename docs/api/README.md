@@ -2,9 +2,13 @@
 
 Ta część dokumentacji opisuje metody dostępne w podklientach `KsefClient` / `AsyncKsefClient`.
 
-Metody stanowią cienką warstwę nad HTTP: wysyłają żądania i zwracają **surowy JSON** (zwykle `dict[str, Any]`). Wyjątki dotyczą endpointów zwracających treści binarne lub nietypowe nagłówki (np. `InvoicesClient.get_invoice()` → `InvoiceContent`).
+Metody stanowią cienką warstwę nad HTTP: przyjmują typowane payloady z `ksef_client.models` tam, gdzie
+endpoint oczekuje body JSON, a w wielu przypadkach zwracają modele odpowiedzi. Wyjątki dotyczą endpointów
+zwracających treści binarne lub nietypowe nagłówki (np. `InvoicesClient.get_invoice()` → `InvoiceContent`).
 
 Dla `AsyncKsefClient` zestaw metod jest taki sam – różni się tylko sposób wywołania (`await`).
+
+Jeśli migrujesz starszy kod oparty o `dict`, zobacz [`../migration-typed-model-api.md`](../migration-typed-model-api.md).
 
 ## Strony
 
