@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.10.0](https://github.com/smekcio/ksef-client-python/compare/v0.9.0...v0.10.0) (2026-04-13)
+
+
+### Features
+
+* add KSeF 2.4 problem details and self-revoke support ([6fffbf8](https://github.com/smekcio/ksef-client-python/commit/6fffbf84244337bdcc963713e41f1c70bf7c8a68))
+* **api:** handle KSeF 2.4 problem details and self-revoke ([701e91f](https://github.com/smekcio/ksef-client-python/commit/701e91f6088d866659ffac9ab1bc786c01f27133))
+
+
+### Bug Fixes
+
+* **cli:** enable problem-details by default ([cf76f28](https://github.com/smekcio/ksef-client-python/commit/cf76f28dd19a7bceaf81aa1b32391022aa4642ce))
+* **cli:** recover self-revoke token reference ([a362399](https://github.com/smekcio/ksef-client-python/commit/a362399905b294fb8ed34c4b15d24bf27fad2869))
+
+
+### Documentation
+
+* describe KSeF 2.4 changes and typed model migration ([3a9dde4](https://github.com/smekcio/ksef-client-python/commit/3a9dde4ddaa422fe0270fefa781aad70acf83e3a))
+* **tokens:** clarify self-revoke fallback ([2762c7a](https://github.com/smekcio/ksef-client-python/commit/2762c7a9f8ccfe87f4409255c4e5764611b0adae))
+
 ## [0.9.0](https://github.com/smekcio/ksef-client-python/compare/v0.8.0...v0.9.0) (2026-04-03)
 
 
