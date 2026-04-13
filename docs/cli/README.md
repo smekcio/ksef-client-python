@@ -7,6 +7,9 @@ Ten dokument opisuje aktualne CLI 1:1 wobec implementacji w `src/ksef_client/cli
 CLI ma skracac droge od instalacji do pierwszej realnej operacji KSeF:
 `init -> auth -> invoice/send/upo`.
 
+CLI wysyla domyslnie naglowek `X-Error-Format: problem-details`, dzieki czemu bledy `400` i `429`
+sa renderowane z bogatszymi hintami, jesli KSeF zwroci `application/problem+json`.
+
 ## Co jest zaimplementowane
 
 - onboarding i profile:

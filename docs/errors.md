@@ -46,7 +46,11 @@ SDK mapuje `exc.problem` do jednego z modeli:
 
 `410 Gone` pojawia się m.in. po wygaśnięciu retencji technicznych statusów operacji asynchronicznych.
 
-Jeżeli chcesz wymusić bogatszy format błędów dla `400` i `429`, ustaw nagłówek:
+CLI ustawia ten nagłówek domyślnie dla klientów tworzonych przez warstwę `ksef ...`,
+więc bogatsze hinty oparte o `exc.problem` działają bez dodatkowej konfiguracji.
+
+Jeżeli używasz bezpośrednio SDK i chcesz wymusić bogatszy format błędów dla `400` i `429`,
+ustaw nagłówek:
 
 ```python
 from ksef_client import KsefClientOptions
@@ -57,7 +61,8 @@ options = KsefClientOptions(
 )
 ```
 
-SDK nie dodaje osobnego parametru do tego nagłówka; używa istniejącego `custom_headers`.
+Publiczne API SDK nie dodaje osobnego parametru do tego nagłówka; używa istniejącego
+`custom_headers`.
 
 ## Przykładowa obsługa 429 z `Retry-After`
 
