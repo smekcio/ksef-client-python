@@ -17,11 +17,8 @@ Aktualna kompatybilność: **KSeF API `v2.4.0`** ([api-changelog.md](https://git
 Od tej wersji publiczne payloady requestów SDK są **typed-only**. Do metod klientów przekazuj
 obiekty `ksef_client.models.*`, a nie surowe `dict`.
 
-Zaostrzenie walidacji XML w KSeF API 2.4.0 obowiązuje po stronie serwera KSeF. SDK nie dodaje
-lokalnego walidatora XML i pozostaje cienką warstwą transportową nad oficjalnym API.
-
 > [!WARNING]
-> **Breaking change:** gałąź `feat/typed-model-api` zmienia publiczny kontrakt SDK.
+> **Breaking change:** domyślna gałąź repo zawiera już zmianę publicznego kontraktu SDK.
 > Request payloady do klientów są `typed-only`, a wiele odpowiedzi jest teraz zwracanych jako modele
 > zamiast surowych `dict`. Jeśli integracja buduje requesty jako słowniki albo czyta odpowiedzi przez
 > `response["field"]`, wymaga migracji. Szczegóły i przykłady: [`docs/migration-typed-model-api.md`](docs/migration-typed-model-api.md).

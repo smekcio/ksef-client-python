@@ -6,11 +6,8 @@ Opis kontraktu API (OpenAPI) oraz dokumenty procesowe i ograniczenia systemu zna
 
 Kompatybilność SDK: **KSeF API `v2.4.0`**.
 
-Zaostrzenie walidacji XML wprowadzone w KSeF API 2.4.0 jest egzekwowane przez KSeF po stronie
-serwera. SDK nie implementuje osobnego lokalnego walidatora XML.
-
 > [!WARNING]
-> Publiczny kontrakt SDK na tej gałęzi używa typowanych modeli `ksef_client.models`.
+> Publiczny kontrakt SDK na domyślnej gałęzi repo używa typowanych modeli `ksef_client.models`.
 > Payloady requestów są `typed-only`, a wiele metod klientów zwraca modele odpowiedzi zamiast surowych
 > `dict`. Jeśli migrujesz starszą integrację, zobacz [`migration-typed-model-api.md`](migration-typed-model-api.md).
 
