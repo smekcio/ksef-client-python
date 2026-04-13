@@ -12,6 +12,9 @@ Tworzy nowy token. Operacja jest asynchroniczna – odpowiedź zawiera numer ref
 
 Endpoint: `GET /tokens`
 
+Od KSeF API 2.4.0 endpoint zwraca też informacje o tokenie użytym do bieżącego uwierzytelnienia,
+nawet jeśli nie ma on uprawnień `CredentialsManage` / `CredentialsRead`.
+
 Parametry:
 - `statuses` – filtr statusów (lista)
 - `description`, `author_identifier`, `author_identifier_type`
@@ -21,6 +24,16 @@ Parametry:
 
 Endpoint: `GET /tokens/{referenceNumber}`
 
+Od KSeF API 2.4.0 można pobrać status tokenu użytego do bieżącego uwierzytelnienia także bez
+dodatkowych uprawnień do zarządzania tokenami.
+
 ## `revoke_token(reference_number, access_token)`
 
 Endpoint: `DELETE /tokens/{referenceNumber}` (204)
+
+Od KSeF API 2.4.0 można unieważnić token użyty do bieżącego uwierzytelnienia bez uprawnienia
+`CredentialsManage`.
+
+W CLI odpowiada temu komenda `ksef auth revoke-self-token`, która w pierwszej kolejności używa
+numeru referencyjnego zapamiętanego podczas `ksef auth login-token`, a dla starszych zapisanych
+sesji potrafi odzyskać numer bieżącego tokenu przez `GET /tokens`.

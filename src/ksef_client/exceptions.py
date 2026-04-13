@@ -4,16 +4,22 @@ from dataclasses import dataclass
 from typing import Any, TypeAlias
 
 from .models import (
+    BadRequestProblemDetails,
     ExceptionResponse,
     ForbiddenProblemDetails,
+    GoneProblemDetails,
+    TooManyRequestsProblemDetails,
     TooManyRequestsResponse,
     UnauthorizedProblemDetails,
     UnknownApiProblem,
 )
 
 ApiProblem: TypeAlias = (
-    ExceptionResponse
+    BadRequestProblemDetails
+    | ExceptionResponse
     | ForbiddenProblemDetails
+    | GoneProblemDetails
+    | TooManyRequestsProblemDetails
     | TooManyRequestsResponse
     | UnauthorizedProblemDetails
     | UnknownApiProblem

@@ -13,8 +13,11 @@ import httpx
 from .config import KsefClientOptions
 from .exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 from .models import (
+    BadRequestProblemDetails,
     ExceptionResponse,
     ForbiddenProblemDetails,
+    GoneProblemDetails,
+    TooManyRequestsProblemDetails,
     TooManyRequestsResponse,
     UnauthorizedProblemDetails,
     UnknownApiProblem,
@@ -129,19 +132,30 @@ def _coerce_problem_status(value: Any, fallback_status: int) -> int:
         return fallback_status
 
 
+def _looks_like_problem_details(body: dict[str, Any]) -> bool:
+    return any(key in body for key in ("status", "title", "detail", "traceId", "timestamp"))
+
+
 def _parse_api_problem(status_code: int, body: Any) -> Any | None:
     if not isinstance(body, dict):
         return None
 
     try:
+        if "exception" in body:
+            return ExceptionResponse.from_dict(body)
+        if status_code == 400 and "errors" in body:
+            return BadRequestProblemDetails.from_dict(body)
         if status_code == 429:
-            return TooManyRequestsResponse.from_dict(body)
+            if isinstance(body.get("status"), dict):
+                return TooManyRequestsResponse.from_dict(body)
+            if _looks_like_problem_details(body):
+                return TooManyRequestsProblemDetails.from_dict(body)
+        if status_code == 410 and _looks_like_problem_details(body):
+            return GoneProblemDetails.from_dict(body)
         if status_code == 401:
             return UnauthorizedProblemDetails.from_dict(body)
         if status_code == 403 and "reasonCode" in body:
             return ForbiddenProblemDetails.from_dict(body)
-        if "exception" in body:
-            return ExceptionResponse.from_dict(body)
     except (TypeError, ValueError, KeyError):
         pass
 

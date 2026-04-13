@@ -12,6 +12,7 @@ from ..errors import CliError
 from ..exit_codes import ExitCode
 from ..output import get_renderer
 from ..sdk.adapters import get_send_status, send_batch_invoices, send_online_invoice
+from ._error_utils import build_api_error_hint, build_rate_limit_hint
 
 app = typer.Typer(help="Send invoices in online and batch modes.")
 
@@ -31,7 +32,7 @@ def _render_error(ctx: typer.Context, command: str, exc: Exception) -> None:
         raise typer.Exit(int(exc.code))
 
     if isinstance(exc, KsefRateLimitError):
-        hint = f"Retry-After: {exc.retry_after}" if exc.retry_after else "Wait and retry."
+        hint = build_rate_limit_hint(exc, default_hint="Wait and retry.")
         renderer.error(
             command=command,
             profile=profile_label(cli_ctx),
@@ -42,12 +43,17 @@ def _render_error(ctx: typer.Context, command: str, exc: Exception) -> None:
         raise typer.Exit(int(ExitCode.RETRY_EXHAUSTED))
 
     if isinstance(exc, (KsefApiError, KsefHttpError)):
+        hint = (
+            build_api_error_hint(exc, default_hint="Check KSeF response and request parameters.")
+            if isinstance(exc, KsefApiError)
+            else "Check KSeF response and request parameters."
+        )
         renderer.error(
             command=command,
             profile=profile_label(cli_ctx),
             code="API_ERROR",
             message=str(exc),
-            hint="Check KSeF response and request parameters.",
+            hint=hint,
         )
         raise typer.Exit(int(ExitCode.API_ERROR))
 

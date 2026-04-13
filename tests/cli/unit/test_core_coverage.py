@@ -113,6 +113,9 @@ def test_factory_create_client() -> None:
     try:
         assert isinstance(client, KsefClient)
         assert client.lighthouse is not None
+        assert client.http_client._options.custom_headers == {
+            "X-Error-Format": "problem-details"
+        }
     finally:
         client.close()
 

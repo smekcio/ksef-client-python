@@ -25,6 +25,9 @@ class _FakeClient:
                 "accessToken": {"token": "new", "validUntil": "v2"}
             }
         )
+        self.tokens = SimpleNamespace(
+            revoke_token=lambda reference_number, access_token: None
+        )
 
     def __enter__(self) -> _FakeClient:
         return self
@@ -70,6 +73,30 @@ class _FakeAuthCoordinator:
         )
 
 
+def _token_list_item(
+    *,
+    reference_number: str,
+    context_type: str = "Nip",
+    context_value: str = "5265877635",
+) -> m.QueryTokensResponseItem:
+    return m.QueryTokensResponseItem(
+        author_identifier=m.TokenAuthorIdentifierTypeIdentifier(
+            type=m.TokenAuthorIdentifierType.NIP,
+            value="5265877635",
+        ),
+        context_identifier=m.TokenContextIdentifierTypeIdentifier(
+            type=m.TokenContextIdentifierType(context_type),
+            value=context_value,
+        ),
+        date_created="2026-04-13T10:00:00Z",
+        description="Current token",
+        reference_number=reference_number,
+        requested_permissions=[],
+        status=m.AuthenticationTokenStatus.ACTIVE,
+        last_use_date="2026-04-13T10:01:00Z",
+    )
+
+
 def test_login_with_token_success(monkeypatch) -> None:
     monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
     monkeypatch.setattr(manager, "AuthCoordinator", _FakeAuthCoordinator)
@@ -100,6 +127,113 @@ def test_login_with_token_success(monkeypatch) -> None:
     assert result["reference_number"] == "ref-1"
     assert saved["profile"] == "demo"
     assert saved["access"] == "acc"
+    assert saved["ksef_token_reference_number"] == ""
+
+
+def test_discover_current_token_reference_number_skips_mismatched_context(monkeypatch) -> None:
+    client = SimpleNamespace(
+        tokens=SimpleNamespace(
+            list_tokens=lambda **kwargs: m.QueryTokensResponse(
+                tokens=[
+                    _token_list_item(reference_number="REF-OTHER", context_value="1111111111"),
+                    _token_list_item(reference_number="REF-123"),
+                ],
+                continuation_token=None,
+            )
+        )
+    )
+    monkeypatch.setattr(
+        manager,
+        "_profile_context",
+        lambda profile: ("https://api-demo.ksef.mf.gov.pl", "Nip", "5265877635"),
+    )
+
+    result = manager._discover_current_token_reference_number(
+        client=client,
+        access_token="acc",
+        profile="demo",
+    )
+
+    assert result == "REF-123"
+
+
+def test_discover_current_token_reference_number_returns_none_for_multiple_matches(
+    monkeypatch,
+) -> None:
+    client = SimpleNamespace(
+        tokens=SimpleNamespace(
+            list_tokens=lambda **kwargs: m.QueryTokensResponse(
+                tokens=[
+                    _token_list_item(reference_number="REF-123"),
+                    _token_list_item(reference_number="REF-456"),
+                ],
+                continuation_token=None,
+            )
+        )
+    )
+    monkeypatch.setattr(
+        manager,
+        "_profile_context",
+        lambda profile: ("https://api-demo.ksef.mf.gov.pl", "Nip", "5265877635"),
+    )
+
+    result = manager._discover_current_token_reference_number(
+        client=client,
+        access_token="acc",
+        profile="demo",
+    )
+
+    assert result is None
+
+
+def test_discover_current_token_reference_number_stops_on_repeated_continuation_token(
+    monkeypatch,
+) -> None:
+    calls: list[str | None] = []
+
+    def _list_tokens(**kwargs) -> m.QueryTokensResponse:
+        calls.append(kwargs.get("continuation_token"))
+        return m.QueryTokensResponse(tokens=[], continuation_token="next")
+
+    client = SimpleNamespace(tokens=SimpleNamespace(list_tokens=_list_tokens))
+    monkeypatch.setattr(
+        manager,
+        "_profile_context",
+        lambda profile: ("https://api-demo.ksef.mf.gov.pl", "Nip", "5265877635"),
+    )
+
+    result = manager._discover_current_token_reference_number(
+        client=client,
+        access_token="acc",
+        profile="demo",
+    )
+
+    assert result is None
+    assert calls == [None, "next"]
+
+
+def test_login_with_token_caches_ksef_reference_number(monkeypatch) -> None:
+    monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
+    monkeypatch.setattr(manager, "AuthCoordinator", _FakeAuthCoordinator)
+
+    saved: dict[str, str] = {}
+    monkeypatch.setattr(manager, "save_tokens", lambda profile, access, refresh: None)
+    monkeypatch.setattr(
+        manager, "set_cached_metadata", lambda profile, metadata: saved.update(metadata)
+    )
+
+    manager.login_with_token(
+        profile="demo",
+        base_url="https://api-demo.ksef.mf.gov.pl",
+        token="REF-123|internalId-5265877635-12345|secret",
+        context_type="nip",
+        context_value="5265877635",
+        poll_interval=0.0,
+        max_attempts=1,
+        save=True,
+    )
+
+    assert saved["ksef_token_reference_number"] == "REF-123"
 
 
 def test_login_with_token_uses_profile_context_fallback(monkeypatch) -> None:
@@ -667,3 +801,130 @@ def test_refresh_access_token_rejects_unexpected_typed_response(monkeypatch) -> 
             save=False,
         )
     assert exc.value.code == ExitCode.API_ERROR
+
+
+def test_revoke_self_token_success(monkeypatch) -> None:
+    revoked: dict[str, str] = {}
+    cleared = {"tokens": False, "cache": False}
+
+    class _FakeRevokeClient(_FakeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tokens = SimpleNamespace(
+                revoke_token=lambda reference_number, access_token: revoked.update(
+                    {"reference_number": reference_number, "access_token": access_token}
+                )
+            )
+
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        manager,
+        "get_cached_metadata",
+        lambda profile: {
+            "method": "token",
+            "ksef_token_reference_number": "REF-123",
+        },
+    )
+    monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeRevokeClient())
+    monkeypatch.setattr(
+        manager, "clear_tokens", lambda profile: cleared.__setitem__("tokens", True)
+    )
+    monkeypatch.setattr(
+        manager, "clear_cached_metadata", lambda profile: cleared.__setitem__("cache", True)
+    )
+
+    result = manager.revoke_self_token(
+        profile="demo",
+        base_url="https://api-demo.ksef.mf.gov.pl",
+    )
+
+    assert revoked == {"reference_number": "REF-123", "access_token": "acc"}
+    assert result["revoked"] is True
+    assert cleared["tokens"] is True
+    assert cleared["cache"] is True
+
+
+def test_revoke_self_token_falls_back_to_listing_current_token(monkeypatch) -> None:
+    revoked: dict[str, str] = {}
+
+    class _FakeListClient(_FakeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tokens = SimpleNamespace(
+                list_tokens=lambda **kwargs: m.QueryTokensResponse(
+                    tokens=[_token_list_item(reference_number="REF-123")],
+                    continuation_token=None,
+                ),
+                revoke_token=lambda reference_number, access_token: revoked.update(
+                    {
+                        "reference_number": reference_number,
+                        "access_token": access_token,
+                    }
+                ),
+            )
+
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        manager,
+        "get_cached_metadata",
+        lambda profile: {"method": "token"},
+    )
+    monkeypatch.setattr(
+        manager,
+        "_profile_context",
+        lambda profile: ("https://api-demo.ksef.mf.gov.pl", "Nip", "5265877635"),
+    )
+    monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeListClient())
+    monkeypatch.setattr(manager, "clear_tokens", lambda profile: None)
+    monkeypatch.setattr(manager, "clear_cached_metadata", lambda profile: None)
+
+    result = manager.revoke_self_token(
+        profile="demo",
+        base_url="https://api-demo.ksef.mf.gov.pl",
+    )
+
+    assert revoked == {"reference_number": "REF-123", "access_token": "acc"}
+    assert result["reference_number"] == "REF-123"
+
+
+def test_revoke_self_token_requires_stored_tokens(monkeypatch) -> None:
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: None)
+
+    with pytest.raises(CliError) as exc:
+        manager.revoke_self_token(
+            profile="demo",
+            base_url="https://api-demo.ksef.mf.gov.pl",
+        )
+
+    assert exc.value.code == ExitCode.AUTH_ERROR
+
+
+def test_revoke_self_token_requires_token_auth_method(monkeypatch) -> None:
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {"method": "xades"})
+
+    with pytest.raises(CliError) as exc:
+        manager.revoke_self_token(
+            profile="demo",
+            base_url="https://api-demo.ksef.mf.gov.pl",
+        )
+
+    assert exc.value.code == ExitCode.AUTH_ERROR
+
+
+def test_revoke_self_token_requires_unambiguous_reference_number(monkeypatch) -> None:
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {"method": "token"})
+    monkeypatch.setattr(
+        manager,
+        "_discover_current_token_reference_number",
+        lambda **kwargs: None,
+    )
+
+    with pytest.raises(CliError) as exc:
+        manager.revoke_self_token(
+            profile="demo",
+            base_url="https://api-demo.ksef.mf.gov.pl",
+        )
+
+    assert exc.value.code == ExitCode.AUTH_ERROR

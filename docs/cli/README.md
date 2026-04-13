@@ -7,6 +7,9 @@ Ten dokument opisuje aktualne CLI 1:1 wobec implementacji w `src/ksef_client/cli
 CLI ma skracac droge od instalacji do pierwszej realnej operacji KSeF:
 `init -> auth -> invoice/send/upo`.
 
+CLI wysyla domyslnie naglowek `X-Error-Format: problem-details`, dzieki czemu bledy `400` i `429`
+sa renderowane z bogatszymi hintami, jesli KSeF zwroci `application/problem+json`.
+
 ## Co jest zaimplementowane
 
 - onboarding i profile:
@@ -17,6 +20,7 @@ CLI ma skracac droge od instalacji do pierwszej realnej operacji KSeF:
   - `auth login-xades`
   - `auth status`
   - `auth refresh`
+  - `auth revoke-self-token`
   - `auth logout`
 - diagnostyka:
   - `health check`
@@ -297,6 +301,20 @@ Usage: ksef auth logout [OPTIONS]
 Kiedy uzywac:
 - gdy chcesz usunac lokalnie zapisane tokeny dla biezacego profilu,
 - przed przelaczeniem konta lub kontekstu autoryzacji.
+
+## `ksef auth revoke-self-token`
+
+```text
+Usage: ksef auth revoke-self-token [OPTIONS]
+```
+
+Kiedy uzywac:
+- gdy chcesz uniewaznic token KSeF, ktorym wykonano `auth login-token`,
+- gdy po uniewaznieniu chcesz od razu wyczyscic lokalnie zapisane `accessToken` i `refreshToken`.
+
+Uwagi:
+- komenda wymaga sesji zalogowanej przez `auth login-token`,
+- numer referencyjny tokenu jest pobierany z cache zapisanego podczas logowania.
 
 ## `ksef health check`
 

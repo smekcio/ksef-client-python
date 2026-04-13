@@ -9,6 +9,10 @@ def create_client(
     base_lighthouse_url: str | None = None,
 ) -> KsefClient:
     return KsefClient(
-        KsefClientOptions(base_url=base_url, base_lighthouse_url=base_lighthouse_url),
+        KsefClientOptions(
+            base_url=base_url,
+            base_lighthouse_url=base_lighthouse_url,
+            custom_headers={"X-Error-Format": "problem-details"},
+        ),
         access_token=access_token,
     )

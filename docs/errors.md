@@ -20,14 +20,49 @@ Bazowy błąd HTTP.
 
 Występuje, gdy odpowiedź ma `Content-Type: application/json` i status >= 400.
 
-- `exception_response`: surowy JSON zwrócony przez API (zwykle zawiera kody i detale)
+- `exception_response`: legacy `ExceptionResponse`, jeśli API zwróci klasyczny format `application/json`
+- `problem`: zmapowany model błędu, jeśli odpowiedź daje się rozpoznać
 
 ### `KsefRateLimitError`
 
 Specjalny przypadek dla `429 Too Many Requests`.
 
-- `retry_after`: wartość nagłówka `Retry-After` (zwykle sekundy jako string)
-- `response_body`: model błędu z API (jeśli był JSON)
+- `retry_after`: wartość nagłówka `Retry-After`
+- `problem`: `TooManyRequestsResponse` albo `TooManyRequestsProblemDetails`
+
+## Problem Details i `exc.problem`
+
+KSeF API 2.4.0 rozszerza odpowiedzi błędów o format `application/problem+json`.
+
+SDK mapuje `exc.problem` do jednego z modeli:
+
+- `BadRequestProblemDetails` dla `400 application/problem+json`
+- `UnauthorizedProblemDetails` dla `401 application/problem+json`
+- `ForbiddenProblemDetails` dla `403 application/problem+json`
+- `TooManyRequestsProblemDetails` albo legacy `TooManyRequestsResponse` dla `429`
+- `GoneProblemDetails` dla `410 application/problem+json`
+- `ExceptionResponse` dla klasycznego formatu błędu KSeF
+- `UnknownApiProblem`, gdy odpowiedź JSON nie pasuje do znanego modelu
+
+`410 Gone` pojawia się m.in. po wygaśnięciu retencji technicznych statusów operacji asynchronicznych.
+
+CLI ustawia ten nagłówek domyślnie dla klientów tworzonych przez warstwę `ksef ...`,
+więc bogatsze hinty oparte o `exc.problem` działają bez dodatkowej konfiguracji.
+
+Jeżeli używasz bezpośrednio SDK i chcesz wymusić bogatszy format błędów dla `400` i `429`,
+ustaw nagłówek:
+
+```python
+from ksef_client import KsefClientOptions
+
+options = KsefClientOptions(
+    base_url="https://api-test.ksef.mf.gov.pl",
+    custom_headers={"X-Error-Format": "problem-details"},
+)
+```
+
+Publiczne API SDK nie dodaje osobnego parametru do tego nagłówka; używa istniejącego
+`custom_headers`.
 
 ## Przykładowa obsługa 429 z `Retry-After`
 

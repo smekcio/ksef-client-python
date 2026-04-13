@@ -4,7 +4,15 @@ Dokumentacja opisuje **publiczne API** biblioteki `ksef-client-python` (import: 
 
 Opis kontraktu API (OpenAPI) oraz dokumenty procesowe i ograniczenia systemu znajdują się w `ksef-docs/`.
 
-Kompatybilność SDK: **KSeF API `v2.3.0`**.
+Kompatybilność SDK: **KSeF API `v2.4.0`**.
+
+Zaostrzenie walidacji XML wprowadzone w KSeF API 2.4.0 jest egzekwowane przez KSeF po stronie
+serwera. SDK nie implementuje osobnego lokalnego walidatora XML.
+
+> [!WARNING]
+> Publiczny kontrakt SDK na tej gałęzi używa typowanych modeli `ksef_client.models`.
+> Payloady requestów są `typed-only`, a wiele metod klientów zwraca modele odpowiedzi zamiast surowych
+> `dict`. Jeśli migrujesz starszą integrację, zobacz [`migration-typed-model-api.md`](migration-typed-model-api.md).
 
 ## Wymagania
 
@@ -36,12 +44,13 @@ albo pełnego zestawu extras.
 
 Biblioteka udostępnia dwa poziomy użycia:
 
-1) **Klient API (cienka warstwa)** – `KsefClient` / `AsyncKsefClient` oraz podklienci (`.auth`, `.sessions`, …). Metody odpowiadają endpointom KSeF i zwracają głównie surowy JSON (`dict`).
+1) **Klient API (cienka warstwa)** – `KsefClient` / `AsyncKsefClient` oraz podklienci (`.auth`, `.sessions`, …). Metody odpowiadają endpointom KSeF, przyjmują typowane modele requestów z `ksef_client.models` i w wielu przypadkach zwracają typowane modele odpowiedzi. Wyjątki dotyczą endpointów binarnych lub pomocniczych.
 2) **Scenariusze (workflow)** – klasy z `ksef_client.services`, m.in. `AuthCoordinator`, `OnlineSessionWorkflow`, `BatchSessionWorkflow`, `ExportWorkflow`. Warstwa workflow łączy kilka wywołań API z operacjami lokalnymi (szyfrowanie, ZIP) i porządkuje typowe przepływy.
 
 ## Nawigacja
 
 - [Start](getting-started.md)
+- [Migracja typed model API](migration-typed-model-api.md)
 - [Konfiguracja klienta](configuration.md)
 - [Błędy i retry](errors.md)
 

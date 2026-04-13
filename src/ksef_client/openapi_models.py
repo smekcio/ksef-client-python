@@ -725,6 +725,12 @@ class AllowedIps(OpenApiModel):
     ip4_ranges: Optional[list[str]] = field(default=None, metadata={"json_key": "ip4Ranges"})
 
 @dataclass(frozen=True)
+class ApiError(OpenApiModel):
+    code: int
+    description: str
+    details: Optional[list[str]] = None
+
+@dataclass(frozen=True)
 class ApiRateLimitValuesOverride(OpenApiModel):
     per_hour: int = field(metadata={"json_key": "perHour"})
     per_minute: int = field(metadata={"json_key": "perMinute"})
@@ -816,6 +822,16 @@ class AuthenticationTokensResponse(OpenApiModel):
 @dataclass(frozen=True)
 class AuthorizationPolicy(OpenApiModel):
     allowed_ips: Optional[AllowedIps] = field(default=None, metadata={"json_key": "allowedIps"})
+
+@dataclass(frozen=True)
+class BadRequestProblemDetails(OpenApiModel):
+    detail: str
+    errors: list[ApiError]
+    instance: str
+    status: int
+    timestamp: str
+    title: str
+    trace_id: str = field(metadata={"json_key": "traceId"})
 
 @dataclass(frozen=True)
 class BatchFileInfo(OpenApiModel):
@@ -1162,6 +1178,7 @@ class ForbiddenProblemDetails(OpenApiModel):
     detail: str
     reason_code: str = field(metadata={"json_key": "reasonCode"})
     status: int
+    timestamp: str
     title: str
     instance: Optional[str] = None
     security: Optional[dict[str, Optional[Any]]] = None
@@ -1182,6 +1199,15 @@ class GenerateTokenRequest(OpenApiModel):
 class GenerateTokenResponse(OpenApiModel):
     reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
     token: str
+
+@dataclass(frozen=True)
+class GoneProblemDetails(OpenApiModel):
+    detail: str
+    instance: str
+    status: int
+    timestamp: str
+    title: str
+    trace_id: str = field(metadata={"json_key": "traceId"})
 
 @dataclass(frozen=True)
 class IdDocument(OpenApiModel):
@@ -1910,6 +1936,15 @@ class TokenStatusResponse(OpenApiModel):
     status_details: Optional[list[str]] = field(default=None, metadata={"json_key": "statusDetails"})
 
 @dataclass(frozen=True)
+class TooManyRequestsProblemDetails(OpenApiModel):
+    detail: str
+    instance: str
+    status: int
+    timestamp: str
+    title: str
+    trace_id: str = field(metadata={"json_key": "traceId"})
+
+@dataclass(frozen=True)
 class TooManyRequestsResponse(OpenApiModel):
     status: dict[str, Any]
 
@@ -1917,6 +1952,7 @@ class TooManyRequestsResponse(OpenApiModel):
 class UnauthorizedProblemDetails(OpenApiModel):
     detail: str
     status: int
+    timestamp: str
     title: str
     instance: Optional[str] = None
     trace_id: Optional[str] = field(default=None, metadata={"json_key": "traceId"})

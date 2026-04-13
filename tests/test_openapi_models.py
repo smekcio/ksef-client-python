@@ -142,6 +142,25 @@ class OpenApiModelsTests(unittest.TestCase):
         self.assertEqual(parsed.to_dict()["clientIp"], "203.0.113.10")
 
     def test_problem_details_models_roundtrip(self):
+        bad_request_payload = {
+            "detail": "Request is invalid.",
+            "errors": [
+                {
+                    "code": 21405,
+                    "description": "Validation error.",
+                    "details": ["Field X is required."],
+                }
+            ],
+            "instance": "/tokens",
+            "status": 400,
+            "timestamp": "2026-04-13T10:00:00Z",
+            "title": "Bad Request",
+            "traceId": "trace-400",
+        }
+        bad_request = m.BadRequestProblemDetails.from_dict(bad_request_payload)
+        self.assertEqual(bad_request.errors[0].code, 21405)
+        self.assertEqual(bad_request.to_dict()["traceId"], "trace-400")
+
         forbidden_payload = {
             "detail": "Missing permissions",
             "reasonCode": "missing-permissions",
@@ -151,6 +170,7 @@ class OpenApiModelsTests(unittest.TestCase):
                 "requiredAnyOfPermissions": ["InvoiceWrite"],
                 "presentPermissions": ["CredentialsRead"],
             },
+            "timestamp": "2026-04-13T10:00:00Z",
             "traceId": "trace-1",
         }
         forbidden = m.ForbiddenProblemDetails.from_dict(forbidden_payload)
@@ -158,16 +178,43 @@ class OpenApiModelsTests(unittest.TestCase):
         assert forbidden.security is not None
         self.assertEqual(forbidden.security["presentPermissions"], ["CredentialsRead"])
         self.assertEqual(forbidden.to_dict()["traceId"], "trace-1")
+        self.assertEqual(forbidden.to_dict()["timestamp"], "2026-04-13T10:00:00Z")
 
         unauthorized_payload = {
             "detail": "Missing bearer token",
             "status": 401,
+            "timestamp": "2026-04-13T10:00:00Z",
             "title": "Unauthorized",
             "instance": "/auth/challenge",
         }
         unauthorized = m.UnauthorizedProblemDetails.from_dict(unauthorized_payload)
         self.assertEqual(unauthorized.status, 401)
         self.assertEqual(unauthorized.to_dict()["instance"], "/auth/challenge")
+        self.assertEqual(unauthorized.to_dict()["timestamp"], "2026-04-13T10:00:00Z")
+
+        too_many_requests_payload = {
+            "detail": "Retry later.",
+            "instance": "/invoices/exports",
+            "status": 429,
+            "timestamp": "2026-04-13T10:00:00Z",
+            "title": "Too Many Requests",
+            "traceId": "trace-429",
+        }
+        too_many_requests = m.TooManyRequestsProblemDetails.from_dict(
+            too_many_requests_payload
+        )
+        self.assertEqual(too_many_requests.to_dict()["traceId"], "trace-429")
+
+        gone_payload = {
+            "detail": "Operation expired.",
+            "instance": "/auth/ref-1",
+            "status": 410,
+            "timestamp": "2026-04-13T10:00:00Z",
+            "title": "Gone",
+            "traceId": "trace-410",
+        }
+        gone = m.GoneProblemDetails.from_dict(gone_payload)
+        self.assertEqual(gone.to_dict()["traceId"], "trace-410")
 
     def test_token_permission_type_matches_openapi_when_available(self):
         repo_root = Path(__file__).resolve().parents[2]

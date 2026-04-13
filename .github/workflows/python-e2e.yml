@@ -25,10 +25,10 @@ jobs:
     timeout-minutes: 35
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -94,10 +94,10 @@ jobs:
     timeout-minutes: 40
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -185,10 +185,10 @@ jobs:
     timeout-minutes: 35
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -254,10 +254,10 @@ jobs:
     timeout-minutes: 40
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -350,7 +350,7 @@ jobs:
 
     steps:
       - name: Create or update GitHub issue
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           RESULT_TEST_TOKEN: ${{ needs.e2e-test-token.result }}
           RESULT_TEST_XADES: ${{ needs.e2e-test-xades.result }}
