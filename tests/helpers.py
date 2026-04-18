@@ -70,7 +70,9 @@ def _serialize_cert_pem(cert: x509.Certificate) -> str:
     return cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
 
 
-def generate_rsa_cert(*, private_key_password: str | None = None) -> GeneratedCert[rsa.RSAPrivateKey]:
+def generate_rsa_cert(
+    *, private_key_password: str | None = None
+) -> GeneratedCert[rsa.RSAPrivateKey]:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     cert = _self_signed_cert(private_key)
     cert_der = cert.public_bytes(serialization.Encoding.DER)

@@ -110,6 +110,30 @@ class VerificationLinkTests(unittest.TestCase):
                 private_key_password="wrong-password",
             )
 
+    def test_sign_path_error_when_password_is_given_for_unencrypted_key(self):
+        rsa_cert = generate_rsa_cert()
+        with self.assertRaisesRegex(ValueError, "Omit `private_key_password`"):
+            _sign_path(
+                "path",
+                None,
+                rsa_cert.private_key_pem,
+                "p1363",
+                private_key_password="unused-password",
+            )
+
+    def test_sign_path_error_for_invalid_private_key_format(self):
+        with self.assertRaisesRegex(
+            ValueError, "Unsupported private key format, encryption, or type"
+        ):
+            _sign_path("path", None, "not-a-private-key", "p1363")
+
+    def test_sign_path_error_for_unknown_type_error_from_private_key_loader(self):
+        with patch(
+            "ksef_client.services.verification_link.load_private_key",
+            side_effect=TypeError("unexpected private key loader failure"),
+        ), self.assertRaisesRegex(ValueError, "Invalid private key password configuration"):
+            _sign_path("path", None, "ignored-private-key", "p1363")
+
     def test_sign_path_ec(self):
         ec_cert = generate_ec_cert()
         signature = _sign_path("path", None, ec_cert.private_key_pem, "der")
