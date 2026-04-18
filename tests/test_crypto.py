@@ -16,6 +16,8 @@ from tests.helpers import generate_ec_cert, generate_rsa_cert
 
 
 class CryptoTests(unittest.TestCase):
+    ENCRYPTED_KEY_PASSWORD = "secret-password"
+
     def test_encrypt_decrypt_roundtrip(self):
         key = generate_symmetric_key()
         iv = generate_iv()
@@ -111,6 +113,21 @@ class CryptoTests(unittest.TestCase):
         key_from_der = crypto._load_private_key(base64.b64encode(der).decode("ascii"))
         self.assertEqual(key_from_der.key_size, rsa_cert.private_key.key_size)
 
+        encrypted_rsa_cert = generate_rsa_cert(private_key_password=self.ENCRYPTED_KEY_PASSWORD)
+        encrypted_key = crypto._load_private_key(
+            encrypted_rsa_cert.private_key_pem,
+            password=self.ENCRYPTED_KEY_PASSWORD,
+        )
+        self.assertEqual(encrypted_key.key_size, encrypted_rsa_cert.private_key.key_size)
+        encrypted_key_from_bytes_password = crypto._load_private_key(
+            encrypted_rsa_cert.private_key_pem,
+            password=self.ENCRYPTED_KEY_PASSWORD.encode("utf-8"),
+        )
+        self.assertEqual(
+            encrypted_key_from_bytes_password.key_size,
+            encrypted_rsa_cert.private_key.key_size,
+        )
+
     def test_build_encryption_data(self):
         rsa_cert = generate_rsa_cert()
         encryption = crypto.build_encryption_data(rsa_cert.certificate_pem)
@@ -178,6 +195,13 @@ class CryptoTests(unittest.TestCase):
         rsa_cert = generate_rsa_cert()
         key = crypto.load_private_key(rsa_cert.private_key_pem)
         self.assertEqual(key.key_size, rsa_cert.private_key.key_size)
+
+        encrypted_rsa_cert = generate_rsa_cert(private_key_password=self.ENCRYPTED_KEY_PASSWORD)
+        encrypted_key = crypto.load_private_key(
+            encrypted_rsa_cert.private_key_pem,
+            password=self.ENCRYPTED_KEY_PASSWORD,
+        )
+        self.assertEqual(encrypted_key.key_size, encrypted_rsa_cert.private_key.key_size)
 
 
 if __name__ == "__main__":

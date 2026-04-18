@@ -50,11 +50,19 @@ def _self_signed_cert(
 
 def _serialize_private_key(
     private_key: PrivateKeyT,
+    *,
+    password: str | None = None,
 ) -> str:
+    if password is None:
+        encryption_algorithm: serialization.KeySerializationEncryption = (
+            serialization.NoEncryption()
+        )
+    else:
+        encryption_algorithm = serialization.BestAvailableEncryption(password.encode("utf-8"))
     return private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
+        encryption_algorithm=encryption_algorithm,
     ).decode("ascii")
 
 
@@ -62,27 +70,29 @@ def _serialize_cert_pem(cert: x509.Certificate) -> str:
     return cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
 
 
-def generate_rsa_cert() -> GeneratedCert[rsa.RSAPrivateKey]:
+def generate_rsa_cert(*, private_key_password: str | None = None) -> GeneratedCert[rsa.RSAPrivateKey]:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     cert = _self_signed_cert(private_key)
     cert_der = cert.public_bytes(serialization.Encoding.DER)
     return GeneratedCert(
         private_key=private_key,
         certificate=cert,
-        private_key_pem=_serialize_private_key(private_key),
+        private_key_pem=_serialize_private_key(private_key, password=private_key_password),
         certificate_pem=_serialize_cert_pem(cert),
         certificate_der_b64=base64.b64encode(cert_der).decode("ascii"),
     )
 
 
-def generate_ec_cert() -> GeneratedCert[ec.EllipticCurvePrivateKey]:
+def generate_ec_cert(
+    *, private_key_password: str | None = None
+) -> GeneratedCert[ec.EllipticCurvePrivateKey]:
     private_key = ec.generate_private_key(ec.SECP256R1())
     cert = _self_signed_cert(private_key)
     cert_der = cert.public_bytes(serialization.Encoding.DER)
     return GeneratedCert(
         private_key=private_key,
         certificate=cert,
-        private_key_pem=_serialize_private_key(private_key),
+        private_key_pem=_serialize_private_key(private_key, password=private_key_password),
         certificate_pem=_serialize_cert_pem(cert),
         certificate_der_b64=base64.b64encode(cert_der).decode("ascii"),
     )

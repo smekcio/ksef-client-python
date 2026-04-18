@@ -38,6 +38,7 @@ class VerificationLinkService:
         invoice_hash: str,
         signing_certificate_pem: str | None = None,
         private_key_pem: str | None = None,
+        private_key_password: str | bytes | None = None,
         signature_format: str = "p1363",
     ) -> str:
         hash_bytes = _decode_base64_or_url(invoice_hash)
@@ -57,7 +58,11 @@ class VerificationLinkService:
         path_to_sign = path.replace("https://", "").replace("http://", "")
 
         signature = _sign_path(
-            path_to_sign, signing_certificate_pem, private_key_pem, signature_format
+            path_to_sign,
+            signing_certificate_pem,
+            private_key_pem,
+            signature_format,
+            private_key_password=private_key_password,
         )
         signature_url = b64url_encode(signature)
         return f"{path}/{signature_url}"
@@ -75,11 +80,47 @@ def _sign_path(
     certificate_pem: str | None,
     private_key_pem: str | None,
     signature_format: str,
+    private_key_password: str | bytes | None = None,
 ) -> bytes:
     if not private_key_pem:
         raise ValueError("private_key_pem is required for signing")
 
-    private_key = load_private_key(private_key_pem)
+    try:
+        private_key = load_private_key(private_key_pem, password=private_key_password)
+    except TypeError as exc:
+        message = str(exc)
+        if "Password was not given but private key is encrypted" in message:
+            raise ValueError(
+                "Unable to load the private key for verification link signing. "
+                "The private key is encrypted; provide `private_key_password`."
+            ) from exc
+        if "Password was given but private key is not encrypted" in message:
+            raise ValueError(
+                "Invalid private key password configuration for verification link signing. "
+                "Omit `private_key_password` for an unencrypted private key."
+            ) from exc
+        raise ValueError(
+            "Invalid private key password configuration for verification link signing."
+        ) from exc
+    except ValueError as exc:
+        message = str(exc).lower()
+        if any(
+            text in message
+            for text in (
+                "incorrect password",
+                "bad decrypt",
+                "could not decrypt",
+                "bad password read",
+            )
+        ):
+            raise ValueError(
+                "Unable to load the private key for verification link signing. "
+                "`private_key_password` is incorrect."
+            ) from exc
+        raise ValueError(
+            "Unable to load the private key for verification link signing. "
+            "Unsupported private key format, encryption, or type."
+        ) from exc
 
     data = path_to_sign.encode("utf-8")
     digest = hashes.Hash(hashes.SHA256())
