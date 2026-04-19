@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.1](https://github.com/smekcio/ksef-client-python/compare/v0.10.0...v0.10.1) (2026-04-19)
+
+
+### Bug Fixes
+
+* support encrypted private key passwords in verification link ([fafc0ec](https://github.com/smekcio/ksef-client-python/commit/fafc0ece6a2d333c570c252342dc8c39597db4d2))
+* **verification-link:** support encrypted private key passwords ([e4c6989](https://github.com/smekcio/ksef-client-python/commit/e4c69899f9f688b23472e9f263cbe3142b63e776))
+
+
+### Documentation
+
+* **readme:** clarify typed-model rollout ([6eb1ffb](https://github.com/smekcio/ksef-client-python/commit/6eb1ffbe258931a3274cdb59d63b138cc306a3b4))
+* **readme:** clarify typed-model rollout ([45a2e76](https://github.com/smekcio/ksef-client-python/commit/45a2e764c8c2ffc0b5658b837f03190d7b2156c2))
+
 ## [0.10.0](https://github.com/smekcio/ksef-client-python/compare/v0.9.0...v0.10.0) (2026-04-13)
 
 
