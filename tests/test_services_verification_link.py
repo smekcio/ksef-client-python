@@ -13,6 +13,8 @@ from tests.helpers import generate_ec_cert, generate_ed25519_key_pem, generate_r
 
 
 class VerificationLinkTests(unittest.TestCase):
+    ENCRYPTED_KEY_PASSWORD = "secret-password"
+
     def test_decode_base64_or_url(self):
         payload = b"data"
         b64 = base64.b64encode(payload).decode("ascii")
@@ -46,6 +48,40 @@ class VerificationLinkTests(unittest.TestCase):
         )
         self.assertIn("/certificate/", url)
 
+    def test_certificate_verification_url_rsa_accepts_password_as_str(self):
+        options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
+        service = VerificationLinkService(options)
+        rsa_cert = generate_rsa_cert(private_key_password=self.ENCRYPTED_KEY_PASSWORD)
+        url = service.build_certificate_verification_url(
+            seller_nip="123",
+            context_identifier_type="nip",
+            context_identifier_value="123",
+            certificate_serial="1",
+            invoice_hash="YQ==",
+            signing_certificate_pem=rsa_cert.certificate_pem,
+            private_key_pem=rsa_cert.private_key_pem,
+            private_key_password=self.ENCRYPTED_KEY_PASSWORD,
+            signature_format="p1363",
+        )
+        self.assertIn("/certificate/", url)
+
+    def test_certificate_verification_url_rsa_accepts_password_as_bytes(self):
+        options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
+        service = VerificationLinkService(options)
+        rsa_cert = generate_rsa_cert(private_key_password=self.ENCRYPTED_KEY_PASSWORD)
+        url = service.build_certificate_verification_url(
+            seller_nip="123",
+            context_identifier_type="nip",
+            context_identifier_value="123",
+            certificate_serial="1",
+            invoice_hash="YQ==",
+            signing_certificate_pem=rsa_cert.certificate_pem,
+            private_key_pem=rsa_cert.private_key_pem,
+            private_key_password=self.ENCRYPTED_KEY_PASSWORD.encode("utf-8"),
+            signature_format="p1363",
+        )
+        self.assertIn("/certificate/", url)
+
     def test_sign_path_errors(self):
         with self.assertRaises(ValueError):
             _sign_path("path", None, None, "p1363")
@@ -57,6 +93,46 @@ class VerificationLinkTests(unittest.TestCase):
         rsa_cert = generate_rsa_cert()
         with self.assertRaises(ValueError):
             _sign_path("path", rsa_cert.certificate_pem, ed_key, "p1363")
+
+    def test_sign_path_error_for_encrypted_key_without_password(self):
+        rsa_cert = generate_rsa_cert(private_key_password=self.ENCRYPTED_KEY_PASSWORD)
+        with self.assertRaisesRegex(ValueError, "provide `private_key_password`"):
+            _sign_path("path", None, rsa_cert.private_key_pem, "p1363")
+
+    def test_sign_path_error_for_encrypted_key_with_wrong_password(self):
+        rsa_cert = generate_rsa_cert(private_key_password=self.ENCRYPTED_KEY_PASSWORD)
+        with self.assertRaisesRegex(ValueError, "`private_key_password` is incorrect"):
+            _sign_path(
+                "path",
+                None,
+                rsa_cert.private_key_pem,
+                "p1363",
+                private_key_password="wrong-password",
+            )
+
+    def test_sign_path_error_when_password_is_given_for_unencrypted_key(self):
+        rsa_cert = generate_rsa_cert()
+        with self.assertRaisesRegex(ValueError, "Omit `private_key_password`"):
+            _sign_path(
+                "path",
+                None,
+                rsa_cert.private_key_pem,
+                "p1363",
+                private_key_password="unused-password",
+            )
+
+    def test_sign_path_error_for_invalid_private_key_format(self):
+        with self.assertRaisesRegex(
+            ValueError, "Unsupported private key format, encryption, or type"
+        ):
+            _sign_path("path", None, "not-a-private-key", "p1363")
+
+    def test_sign_path_error_for_unknown_type_error_from_private_key_loader(self):
+        with patch(
+            "ksef_client.services.verification_link.load_private_key",
+            side_effect=TypeError("unexpected private key loader failure"),
+        ), self.assertRaisesRegex(ValueError, "Invalid private key password configuration"):
+            _sign_path("path", None, "ignored-private-key", "p1363")
 
     def test_sign_path_ec(self):
         ec_cert = generate_ec_cert()

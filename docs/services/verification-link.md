@@ -23,6 +23,24 @@ Parametry, które mają największe znaczenie:
 - `certificate_serial`
 - `invoice_hash` (Base64 lub Base64Url)
 - `private_key_pem` – wymagany (podpis URL jest wykonywany lokalnie)
+- `private_key_password` – opcjonalny; wymagany, jeśli `private_key_pem` jest zaszyfrowany
 - `signature_format`: `"p1363"` (domyślnie) albo `"der"` dla ECDSA
+
+Przykład z zaszyfrowanym PEM:
+
+```python
+url = service.build_certificate_verification_url(
+    seller_nip="1234567890",
+    context_identifier_type="nip",
+    context_identifier_value="1234567890",
+    certificate_serial="1",
+    invoice_hash="YQ==",
+    signing_certificate_pem=certificate_pem,
+    private_key_pem=private_key_pem,
+    private_key_password="tajne-haslo",
+)
+```
+
+Jeżeli korzystasz już z `XadesKeyPair.from_pem_files(...)` albo `XadesKeyPair.from_pkcs12_file(...)`, możesz też najpierw znormalizować klucz do niezaszyfrowanego PKCS#8 PEM, a następnie przekazać wynikowe `certificate_pem` i `private_key_pem` do `VerificationLinkService`.
 
 Powiązane: [QR PNG](qr.md).

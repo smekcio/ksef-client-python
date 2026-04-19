@@ -38,13 +38,20 @@ def _load_public_key_from_cert(cert_data: str | bytes):
     return cert.public_key()
 
 
-def _load_private_key(key_data: str | bytes, password: bytes | None = None):
+def _normalize_private_key_password(password: str | bytes | None) -> bytes | None:
+    if password is None or isinstance(password, bytes):
+        return password
+    return password.encode("utf-8")
+
+
+def _load_private_key(key_data: str | bytes, password: str | bytes | None = None):
     if isinstance(key_data, str):
         key_data = key_data.encode("ascii")
+    password_bytes = _normalize_private_key_password(password)
     if b"BEGIN" in key_data:
-        return serialization.load_pem_private_key(key_data, password=password)
+        return serialization.load_pem_private_key(key_data, password=password_bytes)
     der = base64.b64decode(key_data)
-    return serialization.load_der_private_key(der, password=password)
+    return serialization.load_der_private_key(der, password=password_bytes)
 
 
 def generate_symmetric_key() -> bytes:
@@ -217,5 +224,5 @@ def sign_path_ecdsa(
     return r.to_bytes(size, "big") + s.to_bytes(size, "big")
 
 
-def load_private_key(private_key_data: str | bytes, password: bytes | None = None):
+def load_private_key(private_key_data: str | bytes, password: str | bytes | None = None):
     return _load_private_key(private_key_data, password=password)
