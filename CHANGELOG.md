@@ -6,6 +6,28 @@
 
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
 
+## [0.11.0](https://github.com/smekcio/ksef-client-python/compare/v0.10.2...v0.11.0) (2026-04-20)
+
+
+### Features
+
+* **cli/export:** support incremental HWM options and enforce Asc sort ([5b71efb](https://github.com/smekcio/ksef-client-python/commit/5b71efbb87fdc903ff27edcc4fdfb54b59bfc98a))
+* **cli/invoice-list:** stream multi-subject merge and expose metadata flags ([7787b41](https://github.com/smekcio/ksef-client-python/commit/7787b41ed6807d76bbe38c82f63746a54e453a0b))
+
+
+### Bug Fixes
+
+* **cli/auth:** make self token revoke deterministic and safe ([c02983f](https://github.com/smekcio/ksef-client-python/commit/c02983f0a2e4b7e634584cd44160a65f9073eec7))
+* **cli/invoice-list:** enforce date-range and page-size constraints ([4392d69](https://github.com/smekcio/ksef-client-python/commit/4392d698df8a613f6b1f90aa4bef68f959a6e2ec))
+* **cli/invoices:** validate page offset and harden HWM merge ([cddafbc](https://github.com/smekcio/ksef-client-python/commit/cddafbc87e1c9450b8b528ee94a66671bad9c65b))
+* **cli:** remove export sort-order no-op and harden invoice list aggregation ([970c98d](https://github.com/smekcio/ksef-client-python/commit/970c98d1b4c7f1d849d86a6b45a9d292d92a2e7b))
+* **cli:** remove export sort-order no-op and tighten invoice aggregation semantics ([901602d](https://github.com/smekcio/ksef-client-python/commit/901602d5fe89625d5ef2439521799d5d81c836d9))
+
+
+### Documentation
+
+* **cli:** align invoice/export docs with new behavior ([7ea8eaa](https://github.com/smekcio/ksef-client-python/commit/7ea8eaa627c91c5bbdfcc53b1a8e89b3696f5dd9))
+
 ## [0.10.2](https://github.com/smekcio/ksef-client-python/compare/v0.10.1...v0.10.2) (2026-04-20)
 
 
