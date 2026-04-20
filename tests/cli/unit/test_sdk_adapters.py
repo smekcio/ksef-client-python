@@ -1490,6 +1490,16 @@ def test_merge_permanent_storage_hwm_date_prefers_valid_iso_candidate() -> None:
     )
 
 
+def test_merge_permanent_storage_hwm_date_keeps_current_when_both_invalid() -> None:
+    assert (
+        adapters._merge_permanent_storage_hwm_date(
+            "not-a-date-current",
+            "1000-not-date-candidate",
+        )
+        == "not-a-date-current"
+    )
+
+
 def test_invoice_sort_value_handles_empty_invalid_and_naive_datetime() -> None:
     assert adapters._normalize_invoice_sort_value(None) == ""
     assert adapters._normalize_invoice_sort_value("   ") == ""
