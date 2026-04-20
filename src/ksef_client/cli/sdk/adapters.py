@@ -264,6 +264,16 @@ def _require_invoice_query_date_type(value: str) -> m.InvoiceQueryDateType:
     )
 
 
+def _require_export_sort_order(value: str) -> str:
+    if value == "Asc":
+        return value
+    raise CliError(
+        "Invalid sort order for export.",
+        ExitCode.VALIDATION_ERROR,
+        "For `ksef export run` use --sort-order Asc.",
+    )
+
+
 def _require_encryption_info(encryption: EncryptionData) -> m.EncryptionInfo:
     encryption_info = getattr(encryption, "encryption_info", None)
     if encryption_info is None:
@@ -1246,7 +1256,10 @@ def run_export(
     base_url: str,
     date_from: str | None,
     date_to: str | None,
+    date_type: str = m.InvoiceQueryDateType.ISSUE.value,
+    sort_order: str = "Asc",
     subject_type: str,
+    restrict_to_permanent_storage_hwm_date: bool = False,
     only_metadata: bool = False,
     poll_interval: float,
     max_attempts: int,
@@ -1255,6 +1268,8 @@ def run_export(
     access_token = _require_access_token(profile)
     _validate_polling_options(poll_interval, max_attempts)
     from_iso, to_iso = _normalize_date_range(date_from, date_to)
+    date_type_enum = _require_invoice_query_date_type(date_type)
+    normalized_sort_order = _require_export_sort_order(sort_order)
     out_dir = Path(out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1272,9 +1287,10 @@ def run_export(
             filters=m.InvoiceQueryFilters(
                 subject_type=_require_invoice_query_subject_type(subject_type),
                 date_range=m.InvoiceQueryDateRange(
-                    date_type=m.InvoiceQueryDateType.ISSUE,
+                    date_type=date_type_enum,
                     from_=from_iso,
                     to=to_iso,
+                    restrict_to_permanent_storage_hwm_date=restrict_to_permanent_storage_hwm_date,
                 ),
             ),
         )
@@ -1336,6 +1352,9 @@ def run_export(
         "out_dir": str(out_dir),
         "from": from_iso,
         "to": to_iso,
+        "date_type": date_type_enum.value,
+        "sort_order": normalized_sort_order,
+        "restrict_to_permanent_storage_hwm_date": restrict_to_permanent_storage_hwm_date,
     }
 
 

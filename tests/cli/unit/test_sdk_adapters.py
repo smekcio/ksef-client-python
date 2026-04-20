@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from ksef_client import models as m
+from ksef_client.cli.commands import export_cmd
 from ksef_client.cli.errors import CliError
 from ksef_client.cli.exit_codes import ExitCode
 from ksef_client.cli.sdk import adapters
@@ -2186,9 +2188,14 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
     assert result["reference_number"] == "EXP-OK"
     assert result["metadata_count"] == 1
     assert result["only_metadata"] is False
+    assert result["date_type"] == "Issue"
+    assert result["sort_order"] == "Asc"
+    assert result["restrict_to_permanent_storage_hwm_date"] is False
     payload = seen["payload"]
     assert isinstance(payload, m.InvoiceExportRequest)
     assert payload.only_metadata is False
+    assert payload.filters.date_range.date_type == m.InvoiceQueryDateType.ISSUE
+    assert payload.filters.date_range.restrict_to_permanent_storage_hwm_date is False
     assert (tmp_path / "_metadata.json").exists()
     assert (tmp_path / "a.xml").read_text(encoding="utf-8") == "<xml/>"
 
@@ -2278,11 +2285,148 @@ def test_run_export_only_metadata_success(monkeypatch, tmp_path) -> None:
     assert result["metadata_count"] == 1
     assert result["xml_files_count"] == 0
     assert result["only_metadata"] is True
+    assert result["sort_order"] == "Asc"
     payload = seen["payload"]
     assert isinstance(payload, m.InvoiceExportRequest)
     assert payload.only_metadata is True
     assert (tmp_path / "_metadata.json").exists()
     assert list(tmp_path.glob("*.xml")) == []
+
+
+def test_run_export_incremental_hwm_filters(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    class _Security:
+        def get_public_key_certificates(self):
+            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+
+    class _Invoices:
+        def export_invoices(self, payload, access_token):
+            seen["payload"] = payload
+            seen["access_token"] = access_token
+            return {"referenceNumber": "EXP-HWM"}
+
+        def get_export_status(self, reference_number, access_token):
+            _ = (reference_number, access_token)
+            return {
+                "status": {"code": 200, "description": "Done"},
+                "package": {
+                    "invoiceCount": 0,
+                    "size": 0,
+                    "isTruncated": False,
+                    "parts": [],
+                },
+            }
+
+    class _FakeExportWorkflow:
+        def __init__(self, invoices_client, http_client):
+            _ = (invoices_client, http_client)
+
+        def download_and_process_package(self, package, encryption_data):
+            _ = (package, encryption_data)
+            return SimpleNamespace(metadata_summaries=[], invoice_xml_files={})
+
+    fake_encryption = SimpleNamespace(
+        key=b"k",
+        iv=b"i",
+        encryption_info=SimpleNamespace(
+            encrypted_symmetric_key="enc",
+            initialization_vector="iv",
+        ),
+    )
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(
+            invoices=_Invoices(), security=_Security(), http_client=SimpleNamespace()
+        ),
+    )
+    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert: fake_encryption)
+    monkeypatch.setattr(adapters, "ExportWorkflow", _FakeExportWorkflow)
+    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+
+    out_dir = Path("build_test_export_hwm")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    result = adapters.run_export(
+        profile="demo",
+        base_url="https://example.invalid",
+        date_from="2026-01-01",
+        date_to="2026-01-31",
+        date_type="PermanentStorage",
+        sort_order="Asc",
+        subject_type="Subject1",
+        restrict_to_permanent_storage_hwm_date=True,
+        poll_interval=0.01,
+        max_attempts=2,
+        out=str(out_dir),
+    )
+
+    assert result["reference_number"] == "EXP-HWM"
+    assert result["date_type"] == "PermanentStorage"
+    assert result["sort_order"] == "Asc"
+    assert result["restrict_to_permanent_storage_hwm_date"] is True
+    payload = seen["payload"]
+    assert isinstance(payload, m.InvoiceExportRequest)
+    assert payload.filters.date_range.date_type == m.InvoiceQueryDateType.PERMANENTSTORAGE
+    assert payload.filters.date_range.restrict_to_permanent_storage_hwm_date is True
+
+
+def test_run_export_rejects_sort_order_other_than_asc(monkeypatch) -> None:
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    with pytest.raises(CliError) as exc:
+        adapters.run_export(
+            profile="demo",
+            base_url="https://example.invalid",
+            date_from="2026-01-01",
+            date_to="2026-01-31",
+            date_type="Issue",
+            sort_order="Desc",
+            subject_type="Subject1",
+            poll_interval=0.01,
+            max_attempts=1,
+            out=".",
+        )
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+
+
+def test_export_run_cli_passes_incremental_options(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    class _Renderer:
+        def success(self, *, command, profile, data):
+            seen["result"] = {"command": command, "profile": profile, "data": data}
+
+    monkeypatch.setattr(export_cmd, "require_context", lambda ctx: SimpleNamespace(profile="demo"))
+    monkeypatch.setattr(export_cmd, "get_renderer", lambda cli_ctx: _Renderer())
+    monkeypatch.setattr(export_cmd, "profile_label", lambda cli_ctx: "demo")
+    monkeypatch.setattr(export_cmd, "require_profile", lambda cli_ctx: "demo")
+    monkeypatch.setattr(export_cmd, "resolve_base_url", lambda value, profile: value or "https://example.invalid")
+    monkeypatch.setattr(
+        export_cmd,
+        "run_export",
+        lambda **kwargs: seen.setdefault("kwargs", kwargs) or {"ok": True},
+    )
+
+    export_cmd.export_run(
+        ctx=SimpleNamespace(),
+        date_from="2026-01-01",
+        date_to="2026-01-31",
+        date_type="PermanentStorage",
+        sort_order="Asc",
+        subject_type="Subject1",
+        restrict_to_permanent_storage_hwm_date=True,
+        only_metadata=False,
+        poll_interval=1.0,
+        max_attempts=10,
+        out=".",
+        base_url="https://example.invalid",
+    )
+
+    assert seen["kwargs"]["date_type"] == "PermanentStorage"
+    assert seen["kwargs"]["sort_order"] == "Asc"
+    assert seen["kwargs"]["restrict_to_permanent_storage_hwm_date"] is True
 
 
 def test_run_export_missing_reference_and_package(monkeypatch, tmp_path) -> None:
