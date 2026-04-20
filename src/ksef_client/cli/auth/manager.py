@@ -29,6 +29,22 @@ def _discover_current_token_reference_number(
     access_token: str,
     profile: str,
 ) -> str | None:
+    matched_references = _collect_active_token_reference_numbers(
+        client=client,
+        access_token=access_token,
+        profile=profile,
+    )
+    if len(matched_references) == 1:
+        return next(iter(matched_references))
+    return None
+
+
+def _collect_active_token_reference_numbers(
+    *,
+    client: Any,
+    access_token: str,
+    profile: str,
+) -> set[str]:
     continuation_token: str | None = None
     seen_continuation_tokens: set[str] = set()
     matched_references: set[str] = set()
@@ -60,8 +76,6 @@ def _discover_current_token_reference_number(
             ):
                 continue
             matched_references.add(str(item.reference_number))
-            if len(matched_references) > 1:
-                return None
 
         continuation_token = listed.continuation_token
         if not continuation_token:
@@ -70,9 +84,7 @@ def _discover_current_token_reference_number(
             break
         seen_continuation_tokens.add(continuation_token)
 
-    if len(matched_references) == 1:
-        return next(iter(matched_references))
-    return None
+    return matched_references
 
 
 def _select_certificate(certs: list[Any], usage_name: str) -> str:
@@ -422,11 +434,21 @@ def revoke_self_token(*, profile: str, base_url: str) -> dict[str, Any]:
     with create_client(base_url) as client:
         reference_number = metadata.get("ksef_token_reference_number", "").strip()
         if not reference_number:
-            reference_number = _discover_current_token_reference_number(
+            matched_references = _collect_active_token_reference_numbers(
                 client=client,
                 access_token=access_token,
                 profile=profile,
-            ) or ""
+            )
+            if len(matched_references) > 1:
+                formatted_references = ", ".join(sorted(matched_references))
+                raise CliError(
+                    "Cannot safely identify current KSeF token reference number: "
+                    f"multiple active tokens match the profile context ({formatted_references}).",
+                    ExitCode.AUTH_ERROR,
+                    "Set `ksef_token_reference_number` in profile metadata or login again "
+                    "with the exact token intended for self-revoke.",
+                )
+            reference_number = next(iter(matched_references), "")
         if not reference_number:
             raise CliError(
                 "Missing KSeF token reference number for the current profile.",

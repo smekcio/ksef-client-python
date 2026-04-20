@@ -186,6 +186,43 @@ def test_discover_current_token_reference_number_returns_none_for_multiple_match
     assert result is None
 
 
+def test_collect_active_token_reference_numbers_uses_pagination_without_early_stop(
+    monkeypatch,
+) -> None:
+    calls: list[str | None] = []
+
+    def _list_tokens(**kwargs) -> m.QueryTokensResponse:
+        continuation_token = kwargs.get("continuation_token")
+        calls.append(continuation_token)
+        if continuation_token is None:
+            return m.QueryTokensResponse(
+                tokens=[_token_list_item(reference_number="REF-123")],
+                continuation_token="next",
+            )
+        if continuation_token == "next":
+            return m.QueryTokensResponse(
+                tokens=[_token_list_item(reference_number="REF-456")],
+                continuation_token=None,
+            )
+        raise AssertionError(f"Unexpected continuation_token: {continuation_token}")
+
+    client = SimpleNamespace(tokens=SimpleNamespace(list_tokens=_list_tokens))
+    monkeypatch.setattr(
+        manager,
+        "_profile_context",
+        lambda profile: ("https://api-demo.ksef.mf.gov.pl", "Nip", "5265877635"),
+    )
+
+    result = manager._collect_active_token_reference_numbers(
+        client=client,
+        access_token="acc",
+        profile="demo",
+    )
+
+    assert result == {"REF-123", "REF-456"}
+    assert calls == [None, "next"]
+
+
 def test_discover_current_token_reference_number_stops_on_repeated_continuation_token(
     monkeypatch,
 ) -> None:
@@ -917,9 +954,10 @@ def test_revoke_self_token_requires_unambiguous_reference_number(monkeypatch) ->
     monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {"method": "token"})
     monkeypatch.setattr(
         manager,
-        "_discover_current_token_reference_number",
-        lambda **kwargs: None,
+        "_collect_active_token_reference_numbers",
+        lambda **kwargs: set(),
     )
+    monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
 
     with pytest.raises(CliError) as exc:
         manager.revoke_self_token(
@@ -928,3 +966,44 @@ def test_revoke_self_token_requires_unambiguous_reference_number(monkeypatch) ->
         )
 
     assert exc.value.code == ExitCode.AUTH_ERROR
+
+
+def test_revoke_self_token_raises_explicit_error_for_multiple_matching_tokens(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {"method": "token"})
+
+    class _FakeListClient(_FakeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tokens = SimpleNamespace(
+                list_tokens=lambda **kwargs: m.QueryTokensResponse(
+                    tokens=[
+                        _token_list_item(reference_number="REF-123"),
+                        _token_list_item(reference_number="REF-456"),
+                    ],
+                    continuation_token=None,
+                ),
+                revoke_token=lambda reference_number, access_token: pytest.fail(
+                    "revoke_token should not be called for ambiguous references"
+                ),
+            )
+
+    monkeypatch.setattr(
+        manager,
+        "_profile_context",
+        lambda profile: ("https://api-demo.ksef.mf.gov.pl", "Nip", "5265877635"),
+    )
+    monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeListClient())
+
+    with pytest.raises(CliError) as exc:
+        manager.revoke_self_token(
+            profile="demo",
+            base_url="https://api-demo.ksef.mf.gov.pl",
+        )
+
+    assert exc.value.code == ExitCode.AUTH_ERROR
+    assert "multiple active tokens match the profile context" in str(exc.value)
+    assert "REF-123" in str(exc.value)
+    assert "REF-456" in str(exc.value)
