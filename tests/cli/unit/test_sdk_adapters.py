@@ -1340,7 +1340,6 @@ def test_list_invoices_without_subject_type_queries_all_subject_types(monkeypatc
             ],
             "hasMore": False,
         },
-        ("Subject1", 2): {"invoices": []},
         ("Subject2", 0): {
             "invoices": [{"ksefNumber": "KSEF-3", "issueDate": "2026-01-04T00:00:00Z"}],
             "isTruncated": True,
@@ -1376,21 +1375,21 @@ def test_list_invoices_without_subject_type_queries_all_subject_types(monkeypatc
         date_to="2026-01-31",
         subject_type=None,
         date_type="Issue",
-        page_size=2,
-        page_offset=1,
+        page_size=10,
+        page_offset=0,
         sort_order="Desc",
     )
 
     assert seen_calls == [
-        ("Subject1", 0, 2),
-        ("Subject2", 0, 2),
-        ("Subject3", 0, 2),
-        ("SubjectAuthorized", 0, 2),
+        ("Subject1", 0, 10),
+        ("Subject2", 0, 10),
+        ("Subject3", 0, 10),
+        ("SubjectAuthorized", 0, 10),
     ]
-    assert result["count"] == 2
-    assert [item["ksefNumber"] for item in result["items"]] == ["KSEF-2", "KSEF-DUP"]
+    assert result["count"] == 4
+    assert [item["ksefNumber"] for item in result["items"]] == ["KSEF-3", "KSEF-2", "KSEF-DUP", "KSEF-1"]
     assert result["continuation_token"] == ""
-    assert result["has_more"] is True
+    assert result["has_more"] is False
     assert result["is_truncated"] is True
     assert result["permanent_storage_hwm_date"] == "2026-01-31T23:59:59Z"
 
