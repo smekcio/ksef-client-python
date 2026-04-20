@@ -142,6 +142,16 @@ def _require_invoice_query_page_size(value: int) -> int:
     )
 
 
+def _require_non_negative_page_offset(value: int) -> int:
+    if value >= 0:
+        return value
+    raise CliError(
+        "Invalid page offset.",
+        ExitCode.VALIDATION_ERROR,
+        "--page-offset must be 0 or greater.",
+    )
+
+
 def _resolve_output_path(
     out: str,
     *,
@@ -355,6 +365,16 @@ def _merge_permanent_storage_hwm_date(current: str, candidate: str) -> str:
     current_normalized = _normalize_invoice_sort_value(current_value)
     candidate_normalized = _normalize_invoice_sort_value(candidate_value)
 
+    current_valid = _is_iso_datetime(current_value)
+    candidate_valid = _is_iso_datetime(candidate_value)
+
+    if current_valid and not candidate_valid:
+        return current_value
+    if candidate_valid and not current_valid:
+        return candidate_value
+    if not current_valid and not candidate_valid:
+        return current_value
+
     if candidate_normalized < current_normalized:
         return candidate_value
     return current_value
@@ -375,6 +395,14 @@ def _normalize_invoice_sort_value(value: Any) -> str:
     else:
         parsed = parsed.astimezone(timezone.utc)
     return parsed.isoformat()
+
+
+def _is_iso_datetime(value: str) -> bool:
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
 
 
 def _invoice_identity_key(invoice: Any) -> str:
@@ -883,6 +911,7 @@ def list_invoices(
 ) -> dict[str, Any]:
     access_token = _require_access_token(profile)
     normalized_page_size = _require_invoice_query_page_size(page_size)
+    normalized_page_offset = _require_non_negative_page_offset(page_offset)
     from_iso, to_iso = _normalize_date_range(date_from, date_to)
     resolved_date_type = _require_invoice_query_date_type(date_type)
 
@@ -899,7 +928,7 @@ def list_invoices(
                 from_iso=from_iso,
                 to_iso=to_iso,
                 page_size=normalized_page_size,
-                page_offset=page_offset,
+                page_offset=normalized_page_offset,
                 sort_order=sort_order,
             )
             invoices = aggregated["items"]
@@ -915,7 +944,7 @@ def list_invoices(
                 from_iso=from_iso,
                 to_iso=to_iso,
                 page_size=normalized_page_size,
-                page_offset=page_offset,
+                page_offset=normalized_page_offset,
                 sort_order=sort_order,
             )
             invoices = _extract_invoice_items(response)

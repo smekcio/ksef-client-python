@@ -140,3 +140,8 @@ def test_invoice_list_rejects_page_size_below_openapi_min(runner) -> None:
 def test_invoice_list_rejects_page_size_above_openapi_max(runner) -> None:
     result = runner.invoke(app, ["invoice", "list", "--page-size", "251"])
     assert result.exit_code == 2
+
+
+def test_invoice_list_rejects_negative_page_offset(runner) -> None:
+    result = runner.invoke(app, ["invoice", "list", "--page-offset", "-1"])
+    assert result.exit_code == 2

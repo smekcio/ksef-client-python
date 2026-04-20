@@ -93,7 +93,12 @@ def invoice_list(
         max=250,
         help="Number of items per page (10-250).",
     ),
-    page_offset: int = typer.Option(0, "--page-offset", help="Pagination offset."),
+    page_offset: int = typer.Option(
+        0,
+        "--page-offset",
+        min=0,
+        help="Pagination offset (0 or greater).",
+    ),
     sort_order: SortOrder = typer.Option(  # noqa: B008
         SortOrder.DESC,
         "--sort-order",

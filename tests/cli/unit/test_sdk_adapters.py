@@ -259,6 +259,31 @@ def test_list_invoices_rejects_page_size_above_openapi_max(monkeypatch) -> None:
     assert "10 and 250" in (exc.value.hint or "")
 
 
+def test_list_invoices_rejects_negative_page_offset(monkeypatch) -> None:
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not call client")),
+    )
+
+    with pytest.raises(CliError) as exc:
+        adapters.list_invoices(
+            profile="demo",
+            base_url="https://example.invalid",
+            date_from="2026-01-01",
+            date_to="2026-01-31",
+            subject_type="Subject1",
+            date_type="Issue",
+            page_size=10,
+            page_offset=-1,
+            sort_order="Desc",
+        )
+
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+    assert "0 or greater" in (exc.value.hint or "")
+
+
 def test_list_invoices_rejects_invalid_subject_type(monkeypatch) -> None:
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
     monkeypatch.setattr(
@@ -1446,6 +1471,23 @@ def test_list_invoices_without_subject_type_aggregates_lowest_hwm_date(monkeypat
 
     assert result["count"] == 4
     assert result["permanent_storage_hwm_date"] == "2026-01-15T00:00:00Z"
+
+
+def test_merge_permanent_storage_hwm_date_prefers_valid_iso_candidate() -> None:
+    assert (
+        adapters._merge_permanent_storage_hwm_date(
+            "1000-not-date",
+            "2026-01-15T00:00:00Z",
+        )
+        == "2026-01-15T00:00:00Z"
+    )
+    assert (
+        adapters._merge_permanent_storage_hwm_date(
+            "2026-01-15T00:00:00Z",
+            "1000-not-date",
+        )
+        == "2026-01-15T00:00:00Z"
+    )
 
 
 def test_invoice_sort_value_handles_empty_invalid_and_naive_datetime() -> None:
