@@ -71,6 +71,9 @@ def test_list_invoices_success(monkeypatch) -> None:
 
     assert result["count"] == 1
     assert result["continuation_token"] == "ct"
+    assert result["has_more"] is True
+    assert result["is_truncated"] is False
+    assert result["permanent_storage_hwm_date"] == ""
     assert seen["page_size"] == 10
     assert seen["sort_order"] == "Desc"
     payload = seen["payload"]
@@ -1214,6 +1217,9 @@ def test_list_invoices_uses_default_from_and_invoice_list_key(monkeypatch) -> No
     )
     assert result["count"] == 1
     assert result["items"][0]["ksefReferenceNumber"] == "KSEF-X"
+    assert result["has_more"] is False
+    assert result["is_truncated"] is False
+    assert result["permanent_storage_hwm_date"] == ""
 
 
 def test_list_invoices_without_subject_type_queries_all_subject_types(monkeypatch) -> None:
@@ -1224,11 +1230,14 @@ def test_list_invoices_without_subject_type_queries_all_subject_types(monkeypatc
             "invoices": [
                 {"ksefNumber": "KSEF-2", "issueDate": "2026-01-03T00:00:00Z"},
                 {"ksefNumber": "KSEF-DUP", "issueDate": "2026-01-02T00:00:00Z"},
-            ]
+            ],
+            "hasMore": False,
         },
         ("Subject1", 2): {"invoices": []},
         ("Subject2", 0): {
-            "invoices": [{"ksefNumber": "KSEF-3", "issueDate": "2026-01-04T00:00:00Z"}]
+            "invoices": [{"ksefNumber": "KSEF-3", "issueDate": "2026-01-04T00:00:00Z"}],
+            "isTruncated": True,
+            "permanentStorageHwmDate": "2026-01-31T23:59:59Z",
         },
         ("Subject3", 0): {
             "invoices": [{"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"}]
@@ -1267,7 +1276,6 @@ def test_list_invoices_without_subject_type_queries_all_subject_types(monkeypatc
 
     assert seen_calls == [
         ("Subject1", 0, 2),
-        ("Subject1", 2, 2),
         ("Subject2", 0, 2),
         ("Subject3", 0, 2),
         ("SubjectAuthorized", 0, 2),
@@ -1275,6 +1283,9 @@ def test_list_invoices_without_subject_type_queries_all_subject_types(monkeypatc
     assert result["count"] == 2
     assert [item["ksefNumber"] for item in result["items"]] == ["KSEF-2", "KSEF-DUP"]
     assert result["continuation_token"] == ""
+    assert result["has_more"] is True
+    assert result["is_truncated"] is True
+    assert result["permanent_storage_hwm_date"] == "2026-01-31T23:59:59Z"
 
 
 def test_invoice_sort_value_handles_empty_invalid_and_naive_datetime() -> None:
@@ -1301,16 +1312,16 @@ def test_query_all_invoice_subject_types_handles_negative_offset_and_unbounded_p
     monkeypatch,
 ) -> None:
     responses = {
-        ("Subject1", 0): [{"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"}],
-        ("Subject2", 0): [{"ksefNumber": "KSEF-3", "issueDate": "2026-01-03T00:00:00Z"}],
-        ("Subject3", 0): [{"ksefNumber": "KSEF-2", "issueDate": "2026-01-02T00:00:00Z"}],
-        ("SubjectAuthorized", 0): [],
+        ("Subject1", 0): {"invoices": [{"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"}]},
+        ("Subject2", 0): {"invoices": [{"ksefNumber": "KSEF-3", "issueDate": "2026-01-03T00:00:00Z"}]},
+        ("Subject3", 0): {"invoices": [{"ksefNumber": "KSEF-2", "issueDate": "2026-01-02T00:00:00Z"}]},
+        ("SubjectAuthorized", 0): {"invoices": []},
     }
 
     def _fake_query_page(**kwargs):
         subject_type = kwargs["subject_type"].value
         page_offset = kwargs["page_offset"]
-        return {"invoices": responses[(subject_type, page_offset)]}
+        return responses[(subject_type, page_offset)]
 
     monkeypatch.setattr(adapters, "_query_invoice_metadata_page", _fake_query_page)
 
@@ -1325,7 +1336,10 @@ def test_query_all_invoice_subject_types_handles_negative_offset_and_unbounded_p
         sort_order="Asc",
     )
 
-    assert [item["ksefNumber"] for item in result] == ["KSEF-1", "KSEF-2", "KSEF-3"]
+    assert [item["ksefNumber"] for item in result["items"]] == ["KSEF-1", "KSEF-2", "KSEF-3"]
+    assert result["has_more"] is False
+    assert result["is_truncated"] is False
+    assert result["permanent_storage_hwm_date"] == ""
 
 
 def test_resolve_output_path_for_plain_path_segment() -> None:
