@@ -4,6 +4,10 @@ import unittest
 from typing import BinaryIO, cast
 from unittest.mock import patch
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, padding, utils
+
 from ksef_client.services import crypto
 from ksef_client.services.crypto import (
     build_send_invoice_request,
@@ -181,15 +185,46 @@ class CryptoTests(unittest.TestCase):
         self.assertTrue(request.offline_mode)
         self.assertEqual(request.hash_of_corrected_invoice, "hash")
 
-    def test_signatures(self):
+    def test_sign_path_rsa_pss_uses_sha256_with_32_byte_salt(self):
         rsa_cert = generate_rsa_cert()
-        signature = crypto.sign_path_rsa_pss(rsa_cert.private_key, b"data")
-        self.assertTrue(signature)
+        payload = b"qr-test.ksef.mf.gov.pl/certificate/Nip/123/123/1/YQ"
+        signature = crypto.sign_path_rsa_pss(rsa_cert.private_key, payload)
 
+        rsa_cert.private_key.public_key().verify(
+            signature,
+            payload,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32),
+            hashes.SHA256(),
+        )
+
+        payload_hash = hashes.Hash(hashes.SHA256())
+        payload_hash.update(payload)
+        with self.assertRaises(InvalidSignature):
+            rsa_cert.private_key.public_key().verify(
+                signature,
+                payload_hash.finalize(),
+                padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32),
+                hashes.SHA256(),
+            )
+
+    def test_sign_path_ecdsa_returns_verifiable_der_signature(self):
         ec_cert = generate_ec_cert()
-        sig_p1363 = crypto.sign_path_ecdsa(ec_cert.private_key, b"data")
-        sig_der = crypto.sign_path_ecdsa(ec_cert.private_key, b"data", format="der")
-        self.assertNotEqual(sig_p1363, sig_der)
+        payload = b"qr-test.ksef.mf.gov.pl/certificate/Nip/123/123/1/YQ"
+        signature = crypto.sign_path_ecdsa(ec_cert.private_key, payload, format="der")
+
+        ec_cert.private_key.public_key().verify(signature, payload, ec.ECDSA(hashes.SHA256()))
+
+    def test_sign_path_ecdsa_returns_verifiable_p1363_signature(self):
+        ec_cert = generate_ec_cert()
+        payload = b"qr-test.ksef.mf.gov.pl/certificate/Nip/123/123/1/YQ"
+        signature = crypto.sign_path_ecdsa(ec_cert.private_key, payload)
+
+        size = ec_cert.private_key.key_size // 8
+        self.assertEqual(len(signature), size * 2)
+        r = int.from_bytes(signature[:size], "big")
+        s = int.from_bytes(signature[size:], "big")
+        signature_der = utils.encode_dss_signature(r, s)
+        ec_cert.private_key.public_key().verify(signature_der, payload, ec.ECDSA(hashes.SHA256()))
 
     def test_load_private_key_wrapper(self):
         rsa_cert = generate_rsa_cert()

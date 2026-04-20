@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+* **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
+
 ## [0.10.1](https://github.com/smekcio/ksef-client-python/compare/v0.10.0...v0.10.1) (2026-04-19)
 
 
@@ -33,7 +39,6 @@
 
 * describe KSeF 2.4 changes and typed model migration ([3a9dde4](https://github.com/smekcio/ksef-client-python/commit/3a9dde4ddaa422fe0270fefa781aad70acf83e3a))
 * **tokens:** clarify self-revoke fallback ([2762c7a](https://github.com/smekcio/ksef-client-python/commit/2762c7a9f8ccfe87f4409255c4e5764611b0adae))
-
 ## [0.9.0](https://github.com/smekcio/ksef-client-python/compare/v0.8.0...v0.9.0) (2026-04-03)
 
 

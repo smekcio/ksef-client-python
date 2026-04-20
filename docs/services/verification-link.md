@@ -26,6 +26,16 @@ Parametry, które mają największe znaczenie:
 - `private_key_password` – opcjonalny; wymagany, jeśli `private_key_pem` jest zaszyfrowany
 - `signature_format`: `"p1363"` (domyślnie) albo `"der"` dla ECDSA
 
+Podpis obejmuje fragment URL bez prefiksu `https://` / `http://`, np.:
+
+```text
+qr-test.ksef.mf.gov.pl/certificate/nip/1234567890/1234567890/1/YQ
+```
+
+Biblioteka podpisuje ten ciąg algorytmem zgodnym z kluczem:
+- RSA-PSS z `SHA-256`, `MGF1(SHA-256)` i długością soli `32` bajty
+- ECDSA P-256 z `SHA-256`; wynik może być zwrócony jako `"p1363"` (domyślnie) albo `"der"`
+
 Przykład z zaszyfrowanym PEM:
 
 ```python
