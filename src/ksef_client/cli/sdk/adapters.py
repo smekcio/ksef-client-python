@@ -354,10 +354,6 @@ def _merge_permanent_storage_hwm_date(current: str, candidate: str) -> str:
 
     current_normalized = _normalize_invoice_sort_value(current_value)
     candidate_normalized = _normalize_invoice_sort_value(candidate_value)
-    if not current_normalized:
-        return candidate_value
-    if not candidate_normalized:
-        return current_value
 
     if candidate_normalized < current_normalized:
         return candidate_value
@@ -475,7 +471,7 @@ def _query_all_invoice_subject_types(
         nonlocal aggregated_is_truncated
         nonlocal permanent_storage_hwm_date
 
-        if state["exhausted"]:
+        if state["exhausted"]:  # pragma: no cover - defensive guard
             return
 
         response = _query_invoice_metadata_page(

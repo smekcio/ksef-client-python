@@ -1554,6 +1554,76 @@ def test_query_all_invoice_subject_types_has_more_false_when_followup_pages_only
     assert result["has_more"] is False
 
 
+def test_query_all_invoice_subject_types_page_size_zero_returns_unbounded_slice(
+    monkeypatch,
+) -> None:
+    responses = {
+        ("Subject1", 0): {
+            "invoices": [{"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"}]
+        },
+        ("Subject2", 0): {"invoices": []},
+        ("Subject3", 0): {"invoices": []},
+        ("SubjectAuthorized", 0): {"invoices": []},
+    }
+
+    def _fake_query_page(**kwargs):
+        subject_type = kwargs["subject_type"].value
+        page_offset = kwargs["page_offset"]
+        return responses[(subject_type, page_offset)]
+
+    monkeypatch.setattr(adapters, "_query_invoice_metadata_page", _fake_query_page)
+
+    result = adapters._query_all_invoice_subject_types(
+        client=object(),
+        access_token="token",
+        date_type=m.InvoiceQueryDateType.ISSUE,
+        from_iso="2026-01-01T00:00:00Z",
+        to_iso="2026-01-31T23:59:59Z",
+        page_size=0,
+        page_offset=0,
+        sort_order="Asc",
+    )
+
+    assert [item["ksefNumber"] for item in result["items"]] == ["KSEF-1"]
+    assert result["has_more"] is False
+
+
+def test_query_all_invoice_subject_types_stops_at_limit_before_deeper_paging(monkeypatch) -> None:
+    responses = {
+        ("Subject1", 0): {
+            "invoices": [
+                {"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"},
+                {"ksefNumber": "KSEF-2", "issueDate": "2026-01-02T00:00:00Z"},
+                {"ksefNumber": "KSEF-3", "issueDate": "2026-01-03T00:00:00Z"},
+            ]
+        },
+        ("Subject2", 0): {"invoices": []},
+        ("Subject3", 0): {"invoices": []},
+        ("SubjectAuthorized", 0): {"invoices": []},
+    }
+
+    def _fake_query_page(**kwargs):
+        subject_type = kwargs["subject_type"].value
+        page_offset = kwargs["page_offset"]
+        return responses[(subject_type, page_offset)]
+
+    monkeypatch.setattr(adapters, "_query_invoice_metadata_page", _fake_query_page)
+
+    result = adapters._query_all_invoice_subject_types(
+        client=object(),
+        access_token="token",
+        date_type=m.InvoiceQueryDateType.ISSUE,
+        from_iso="2026-01-01T00:00:00Z",
+        to_iso="2026-01-31T23:59:59Z",
+        page_size=1,
+        page_offset=0,
+        sort_order="Asc",
+    )
+
+    assert [item["ksefNumber"] for item in result["items"]] == ["KSEF-1"]
+    assert result["has_more"] is True
+
+
 def test_resolve_output_path_for_plain_path_segment() -> None:
     path = adapters._resolve_output_path("artifacts", default_filename="out.xml")
     assert path.as_posix().endswith("artifacts")
