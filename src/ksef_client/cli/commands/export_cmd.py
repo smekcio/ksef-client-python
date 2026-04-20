@@ -72,8 +72,18 @@ def export_run(
     ctx: typer.Context,
     date_from: str | None = typer.Option(None, "--from", help="Start date (YYYY-MM-DD)."),
     date_to: str | None = typer.Option(None, "--to", help="End date (YYYY-MM-DD)."),
+    date_type: str = typer.Option(
+        "Issue",
+        "--date-type",
+        help="Date field for filtering (Issue, Invoicing, PermanentStorage).",
+    ),
     subject_type: str = typer.Option(
         "Subject1", "--subject-type", help="KSeF subject type filter."
+    ),
+    restrict_to_permanent_storage_hwm_date: bool = typer.Option(
+        False,
+        "--restrict-to-permanent-storage-hwm-date/--no-restrict-to-permanent-storage-hwm-date",
+        help="Use PermanentStorageHwmDate guard from API for incremental export.",
     ),
     only_metadata: bool = typer.Option(
         False,
@@ -99,7 +109,9 @@ def export_run(
             base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
             date_from=date_from,
             date_to=date_to,
+            date_type=date_type,
             subject_type=subject_type,
+            restrict_to_permanent_storage_hwm_date=restrict_to_permanent_storage_hwm_date,
             only_metadata=only_metadata,
             poll_interval=poll_interval,
             max_attempts=max_attempts,

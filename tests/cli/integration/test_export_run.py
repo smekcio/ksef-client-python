@@ -15,6 +15,7 @@ def _json_output(text: str) -> dict:
 def test_export_run_help(runner) -> None:
     result = runner.invoke(app, ["export", "run", "--help"])
     assert result.exit_code == 0
+    assert "--sort-order" not in result.stdout
 
 
 def test_export_run_success(runner, monkeypatch, tmp_path) -> None:
@@ -63,3 +64,11 @@ def test_export_run_validation_error_exit(runner, monkeypatch, tmp_path) -> None
     )
     result = runner.invoke(app, ["export", "run", "--out", str(tmp_path)])
     assert result.exit_code == int(ExitCode.VALIDATION_ERROR)
+
+
+def test_export_run_rejects_removed_sort_order_option(runner, tmp_path) -> None:
+    result = runner.invoke(
+        app,
+        ["export", "run", "--sort-order", "Asc", "--out", str(tmp_path)],
+    )
+    assert result.exit_code != 0
