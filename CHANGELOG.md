@@ -6,6 +6,14 @@
 
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
 
+## [0.10.2](https://github.com/smekcio/ksef-client-python/compare/v0.10.1...v0.10.2) (2026-04-20)
+
+
+### Bug Fixes
+
+* correct QR II verification-link signing ([103a0a4](https://github.com/smekcio/ksef-client-python/commit/103a0a415b0e6a70c26a759d88c5a8740105dd5f))
+* **verification-link:** correct QR II signing and add e2e checks ([93887ae](https://github.com/smekcio/ksef-client-python/commit/93887aecc1d70b8ad86dbeace1662564d966c606))
+
 ## [0.10.1](https://github.com/smekcio/ksef-client-python/compare/v0.10.0...v0.10.1) (2026-04-19)
 
 
