@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -2666,7 +2667,7 @@ def test_run_export_incremental_hwm_filters(monkeypatch) -> None:
 
 
 def test_export_run_cli_passes_incremental_options(monkeypatch) -> None:
-    seen: dict[str, object] = {}
+    seen: dict[str, Any] = {}
 
     class _Renderer:
         def success(self, *, command, profile, data):
@@ -2684,7 +2685,7 @@ def test_export_run_cli_passes_incremental_options(monkeypatch) -> None:
     )
 
     export_cmd.export_run(
-        ctx=SimpleNamespace(),
+        ctx=cast(Any, SimpleNamespace()),
         date_from="2026-01-01",
         date_to="2026-01-31",
         date_type="PermanentStorage",
