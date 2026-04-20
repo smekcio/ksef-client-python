@@ -92,7 +92,6 @@ ksef export run \
   --from 2025-08-28 \
   --to 2025-09-28 \
   --date-type PermanentStorage \
-  --sort-order Asc \
   --restrict-to-permanent-storage-hwm-date \
   --subject-type Subject1 \
   --out ./out/export
@@ -100,11 +99,9 @@ ksef export run \
 
 Mapowanie opcji CLI na payload eksportu:
 - `--date-type` -> `filters.dateRange.dateType`
-- `--sort-order` -> `filters.sortOrder`
 - `--restrict-to-permanent-storage-hwm-date` -> `filters.dateRange.restrictToPermanentStorageHwmDate`
 - `--subject-type` -> `filters.subjectType`
 - `--only-metadata` -> `onlyMetadata`
 
 Uwagi:
-- CLI wspiera `--sort-order` tylko jako `Asc` (inne wartosci sa odrzucane).
 - Dla synchronizacji przyrostowej/HWM uzyj `--date-type PermanentStorage` razem z `--restrict-to-permanent-storage-hwm-date`.

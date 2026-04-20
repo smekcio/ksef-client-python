@@ -290,16 +290,6 @@ def _require_invoice_query_date_type(value: str) -> m.InvoiceQueryDateType:
     )
 
 
-def _require_export_sort_order(value: str) -> str:
-    if value == "Asc":
-        return value
-    raise CliError(
-        "Invalid sort order for export.",
-        ExitCode.VALIDATION_ERROR,
-        "For `ksef export run` use --sort-order Asc.",
-    )
-
-
 def _require_encryption_info(encryption: EncryptionData) -> m.EncryptionInfo:
     encryption_info = getattr(encryption, "encryption_info", None)
     if encryption_info is None:
@@ -352,6 +342,26 @@ def _extract_invoice_query_metadata(response: Any) -> tuple[bool, bool, str, str
         or ""
     )
     return has_more, is_truncated, permanent_storage_hwm_date, continuation_token
+
+
+def _merge_permanent_storage_hwm_date(current: str, candidate: str) -> str:
+    current_value = (current or "").strip()
+    candidate_value = (candidate or "").strip()
+    if not candidate_value:
+        return current_value
+    if not current_value:
+        return candidate_value
+
+    current_normalized = _normalize_invoice_sort_value(current_value)
+    candidate_normalized = _normalize_invoice_sort_value(candidate_value)
+    if not current_normalized:
+        return candidate_value
+    if not candidate_normalized:
+        return current_value
+
+    if candidate_normalized < current_normalized:
+        return candidate_value
+    return current_value
 
 
 def _normalize_invoice_sort_value(value: Any) -> str:
@@ -443,10 +453,7 @@ def _query_all_invoice_subject_types(
     sort_order: str,
 ) -> dict[str, Any]:
     normalized_offset = max(page_offset, 0)
-    if page_size <= 0:
-        limit = None
-    else:
-        limit = normalized_offset + page_size + 1
+    limit = None if page_size <= 0 else normalized_offset + page_size + 1
     reverse_order = sort_order.casefold() == "desc"
 
     stream_states: list[dict[str, Any]] = [
@@ -461,12 +468,10 @@ def _query_all_invoice_subject_types(
     ]
     aggregated: list[Any] = []
     dedupe_keys: set[str] = set()
-    aggregated_has_more = False
     aggregated_is_truncated = False
     permanent_storage_hwm_date = ""
 
     def _load_next_page(state: dict[str, Any]) -> None:
-        nonlocal aggregated_has_more
         nonlocal aggregated_is_truncated
         nonlocal permanent_storage_hwm_date
 
@@ -486,15 +491,16 @@ def _query_all_invoice_subject_types(
         )
         invoices = _extract_invoice_items(response)
         has_more_raw = _get_value(response, "has_more", "hasMore", None)
-        has_more, is_truncated, hwm_date, _ = _extract_invoice_query_metadata(response)
+        _, is_truncated, hwm_date, _ = _extract_invoice_query_metadata(response)
         state["invoices"] = invoices
         state["index"] = 0
         state["next_offset"] += max(page_size, 0)
 
-        aggregated_has_more = aggregated_has_more or has_more
         aggregated_is_truncated = aggregated_is_truncated or is_truncated
-        if hwm_date and not permanent_storage_hwm_date:
-            permanent_storage_hwm_date = hwm_date
+        permanent_storage_hwm_date = _merge_permanent_storage_hwm_date(
+            permanent_storage_hwm_date,
+            hwm_date,
+        )
 
         if not invoices:
             state["exhausted"] = True
@@ -523,9 +529,21 @@ def _query_all_invoice_subject_types(
         if not available_states:
             break
         selected_state = (
-            max(available_states, key=lambda state: _invoice_sort_key(state["invoices"][state["index"]], date_type=date_type))
+            max(
+                available_states,
+                key=lambda state: _invoice_sort_key(
+                    state["invoices"][state["index"]],
+                    date_type=date_type,
+                ),
+            )
             if reverse_order
-            else min(available_states, key=lambda state: _invoice_sort_key(state["invoices"][state["index"]], date_type=date_type))
+            else min(
+                available_states,
+                key=lambda state: _invoice_sort_key(
+                    state["invoices"][state["index"]],
+                    date_type=date_type,
+                ),
+            )
         )
         invoice = selected_state["invoices"][selected_state["index"]]
         selected_state["index"] += 1
@@ -542,8 +560,6 @@ def _query_all_invoice_subject_types(
         page_end = normalized_offset + page_size
         items = aggregated[normalized_offset:page_end]
         has_more = len(aggregated) > page_end
-        if not has_more and aggregated_has_more and len(aggregated) >= page_end:
-            has_more = True
 
     return {
         "items": items,
@@ -1385,7 +1401,6 @@ def run_export(
     date_from: str | None,
     date_to: str | None,
     date_type: str = m.InvoiceQueryDateType.ISSUE.value,
-    sort_order: str = "Asc",
     subject_type: str,
     restrict_to_permanent_storage_hwm_date: bool = False,
     only_metadata: bool = False,
@@ -1397,7 +1412,6 @@ def run_export(
     _validate_polling_options(poll_interval, max_attempts)
     from_iso, to_iso = _normalize_date_range(date_from, date_to)
     date_type_enum = _require_invoice_query_date_type(date_type)
-    normalized_sort_order = _require_export_sort_order(sort_order)
     out_dir = Path(out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1481,7 +1495,6 @@ def run_export(
         "from": from_iso,
         "to": to_iso,
         "date_type": date_type_enum.value,
-        "sort_order": normalized_sort_order,
         "restrict_to_permanent_storage_hwm_date": restrict_to_permanent_storage_hwm_date,
     }
 

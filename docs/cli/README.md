@@ -501,7 +501,6 @@ Options:
   --from TEXT
   --to TEXT
   --date-type TEXT          [default: Issue]
-  --sort-order TEXT         [default: Asc]
   --subject-type TEXT        [default: Subject1]
   --restrict-to-permanent-storage-hwm-date / --no-restrict-to-permanent-storage-hwm-date
   --only-metadata
@@ -513,7 +512,6 @@ Options:
 
 Uwagi:
 - `--only-metadata` pobiera tylko `_metadata.json` bez XML faktur.
-- `--sort-order` jest wspierane tylko jako `Asc`; inne wartosci sa odrzucane walidacja CLI.
 - dla eksportu przyrostowego uzyj `--date-type PermanentStorage` razem z `--restrict-to-permanent-storage-hwm-date`.
 
 ## Exit codes

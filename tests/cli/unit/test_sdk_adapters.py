@@ -1387,11 +1387,64 @@ def test_list_invoices_without_subject_type_queries_all_subject_types(monkeypatc
         ("SubjectAuthorized", 0, 10),
     ]
     assert result["count"] == 4
-    assert [item["ksefNumber"] for item in result["items"]] == ["KSEF-3", "KSEF-2", "KSEF-DUP", "KSEF-1"]
+    assert [item["ksefNumber"] for item in result["items"]] == [
+        "KSEF-3",
+        "KSEF-2",
+        "KSEF-DUP",
+        "KSEF-1",
+    ]
     assert result["continuation_token"] == ""
     assert result["has_more"] is False
     assert result["is_truncated"] is True
     assert result["permanent_storage_hwm_date"] == "2026-01-31T23:59:59Z"
+
+
+def test_list_invoices_without_subject_type_aggregates_lowest_hwm_date(monkeypatch) -> None:
+    responses = {
+        ("Subject1", 0): {
+            "invoices": [{"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"}],
+            "permanentStorageHwmDate": "2026-02-10T00:00:00Z",
+        },
+        ("Subject2", 0): {
+            "invoices": [{"ksefNumber": "KSEF-2", "issueDate": "2026-01-02T00:00:00Z"}],
+            "permanentStorageHwmDate": "2026-01-15T00:00:00Z",
+        },
+        ("Subject3", 0): {
+            "invoices": [{"ksefNumber": "KSEF-3", "issueDate": "2026-01-03T00:00:00Z"}],
+            "permanentStorageHwmDate": "2026-01-20T00:00:00Z",
+        },
+        ("SubjectAuthorized", 0): {
+            "invoices": [{"ksefNumber": "KSEF-4", "issueDate": "2026-01-04T00:00:00Z"}]
+        },
+    }
+
+    class _Invoices:
+        def query_invoice_metadata(self, payload, **kwargs):
+            subject_type = payload.subject_type.value
+            page_offset = int(kwargs.get("page_offset", 0) or 0)
+            return responses[(subject_type, page_offset)]
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(invoices=_Invoices()),
+    )
+
+    result = adapters.list_invoices(
+        profile="demo",
+        base_url="https://example.invalid",
+        date_from="2026-01-01",
+        date_to="2026-01-31",
+        subject_type=None,
+        date_type="Issue",
+        page_size=10,
+        page_offset=0,
+        sort_order="Asc",
+    )
+
+    assert result["count"] == 4
+    assert result["permanent_storage_hwm_date"] == "2026-01-15T00:00:00Z"
 
 
 def test_invoice_sort_value_handles_empty_invalid_and_naive_datetime() -> None:
@@ -1418,9 +1471,15 @@ def test_query_all_invoice_subject_types_handles_negative_offset_and_bounded_pag
     monkeypatch,
 ) -> None:
     responses = {
-        ("Subject1", 0): {"invoices": [{"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"}]},
-        ("Subject2", 0): {"invoices": [{"ksefNumber": "KSEF-3", "issueDate": "2026-01-03T00:00:00Z"}]},
-        ("Subject3", 0): {"invoices": [{"ksefNumber": "KSEF-2", "issueDate": "2026-01-02T00:00:00Z"}]},
+        ("Subject1", 0): {
+            "invoices": [{"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"}]
+        },
+        ("Subject2", 0): {
+            "invoices": [{"ksefNumber": "KSEF-3", "issueDate": "2026-01-03T00:00:00Z"}]
+        },
+        ("Subject3", 0): {
+            "invoices": [{"ksefNumber": "KSEF-2", "issueDate": "2026-01-02T00:00:00Z"}]
+        },
         ("SubjectAuthorized", 0): {"invoices": []},
     }
 
@@ -1446,6 +1505,53 @@ def test_query_all_invoice_subject_types_handles_negative_offset_and_bounded_pag
     assert result["has_more"] is False
     assert result["is_truncated"] is False
     assert result["permanent_storage_hwm_date"] == ""
+
+
+def test_query_all_invoice_subject_types_has_more_false_when_followup_pages_only_duplicate(
+    monkeypatch,
+) -> None:
+    seen_calls: list[tuple[str, int]] = []
+    responses = {
+        ("Subject1", 0): {
+            "invoices": [
+                {"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"},
+                {"ksefNumber": "KSEF-2", "issueDate": "2026-01-02T00:00:00Z"},
+            ],
+            "hasMore": True,
+        },
+        ("Subject1", 2): {
+            "invoices": [
+                {"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"},
+            ],
+            "hasMore": False,
+        },
+        ("Subject2", 0): {"invoices": []},
+        ("Subject3", 0): {"invoices": []},
+        ("SubjectAuthorized", 0): {"invoices": []},
+    }
+
+    def _fake_query_page(**kwargs):
+        subject_type = kwargs["subject_type"].value
+        page_offset = kwargs["page_offset"]
+        seen_calls.append((subject_type, page_offset))
+        return responses[(subject_type, page_offset)]
+
+    monkeypatch.setattr(adapters, "_query_invoice_metadata_page", _fake_query_page)
+
+    result = adapters._query_all_invoice_subject_types(
+        client=object(),
+        access_token="token",
+        date_type=m.InvoiceQueryDateType.ISSUE,
+        from_iso="2026-01-01T00:00:00Z",
+        to_iso="2026-01-31T23:59:59Z",
+        page_size=2,
+        page_offset=0,
+        sort_order="Asc",
+    )
+
+    assert [item["ksefNumber"] for item in result["items"]] == ["KSEF-1", "KSEF-2"]
+    assert ("Subject1", 2) in seen_calls
+    assert result["has_more"] is False
 
 
 def test_resolve_output_path_for_plain_path_segment() -> None:
@@ -2309,7 +2415,6 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
     assert result["metadata_count"] == 1
     assert result["only_metadata"] is False
     assert result["date_type"] == "Issue"
-    assert result["sort_order"] == "Asc"
     assert result["restrict_to_permanent_storage_hwm_date"] is False
     payload = seen["payload"]
     assert isinstance(payload, m.InvoiceExportRequest)
@@ -2405,7 +2510,6 @@ def test_run_export_only_metadata_success(monkeypatch, tmp_path) -> None:
     assert result["metadata_count"] == 1
     assert result["xml_files_count"] == 0
     assert result["only_metadata"] is True
-    assert result["sort_order"] == "Asc"
     payload = seen["payload"]
     assert isinstance(payload, m.InvoiceExportRequest)
     assert payload.only_metadata is True
@@ -2475,7 +2579,6 @@ def test_run_export_incremental_hwm_filters(monkeypatch) -> None:
         date_from="2026-01-01",
         date_to="2026-01-31",
         date_type="PermanentStorage",
-        sort_order="Asc",
         subject_type="Subject1",
         restrict_to_permanent_storage_hwm_date=True,
         poll_interval=0.01,
@@ -2485,30 +2588,11 @@ def test_run_export_incremental_hwm_filters(monkeypatch) -> None:
 
     assert result["reference_number"] == "EXP-HWM"
     assert result["date_type"] == "PermanentStorage"
-    assert result["sort_order"] == "Asc"
     assert result["restrict_to_permanent_storage_hwm_date"] is True
     payload = seen["payload"]
     assert isinstance(payload, m.InvoiceExportRequest)
     assert payload.filters.date_range.date_type == m.InvoiceQueryDateType.PERMANENTSTORAGE
     assert payload.filters.date_range.restrict_to_permanent_storage_hwm_date is True
-
-
-def test_run_export_rejects_sort_order_other_than_asc(monkeypatch) -> None:
-    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
-    with pytest.raises(CliError) as exc:
-        adapters.run_export(
-            profile="demo",
-            base_url="https://example.invalid",
-            date_from="2026-01-01",
-            date_to="2026-01-31",
-            date_type="Issue",
-            sort_order="Desc",
-            subject_type="Subject1",
-            poll_interval=0.01,
-            max_attempts=1,
-            out=".",
-        )
-    assert exc.value.code == ExitCode.VALIDATION_ERROR
 
 
 def test_export_run_cli_passes_incremental_options(monkeypatch) -> None:
@@ -2534,7 +2618,6 @@ def test_export_run_cli_passes_incremental_options(monkeypatch) -> None:
         date_from="2026-01-01",
         date_to="2026-01-31",
         date_type="PermanentStorage",
-        sort_order="Asc",
         subject_type="Subject1",
         restrict_to_permanent_storage_hwm_date=True,
         only_metadata=False,
@@ -2545,8 +2628,8 @@ def test_export_run_cli_passes_incremental_options(monkeypatch) -> None:
     )
 
     assert seen["kwargs"]["date_type"] == "PermanentStorage"
-    assert seen["kwargs"]["sort_order"] == "Asc"
     assert seen["kwargs"]["restrict_to_permanent_storage_hwm_date"] is True
+    assert "sort_order" not in seen["kwargs"]
 
 
 def test_run_export_missing_reference_and_package(monkeypatch, tmp_path) -> None:

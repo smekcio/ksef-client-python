@@ -77,11 +77,6 @@ def export_run(
         "--date-type",
         help="Date field for filtering (Issue, Invoicing, PermanentStorage).",
     ),
-    sort_order: str = typer.Option(
-        "Asc",
-        "--sort-order",
-        help="Sort order for export workflow (OpenAPI allows only Asc).",
-    ),
     subject_type: str = typer.Option(
         "Subject1", "--subject-type", help="KSeF subject type filter."
     ),
@@ -115,7 +110,6 @@ def export_run(
             date_from=date_from,
             date_to=date_to,
             date_type=date_type,
-            sort_order=sort_order,
             subject_type=subject_type,
             restrict_to_permanent_storage_hwm_date=restrict_to_permanent_storage_hwm_date,
             only_metadata=only_metadata,
