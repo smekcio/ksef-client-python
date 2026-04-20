@@ -86,7 +86,13 @@ def invoice_list(
     date_type: str = typer.Option(
         "Issue", "--date-type", help="Date field used in filter, e.g. Issue."
     ),
-    page_size: int = typer.Option(10, "--page-size", help="Number of items per page."),
+    page_size: int = typer.Option(
+        10,
+        "--page-size",
+        min=10,
+        max=250,
+        help="Number of items per page (10-250).",
+    ),
     page_offset: int = typer.Option(0, "--page-offset", help="Pagination offset."),
     sort_order: SortOrder = typer.Option(  # noqa: B008
         SortOrder.DESC,

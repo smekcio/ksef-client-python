@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import json
 import time
 from contextlib import suppress
@@ -112,8 +113,33 @@ def _normalize_date_range(date_from: str | None, date_to: str | None) -> tuple[s
             ExitCode.VALIDATION_ERROR,
             "--from must be earlier than or equal to --to.",
         )
+    max_to_dt = _add_months(from_dt, 3)
+    if to_dt.date() > max_to_dt.date():
+        raise CliError(
+            "Date range exceeds KSeF limit.",
+            ExitCode.VALIDATION_ERROR,
+            "Use a maximum range of 3 months between --from and --to.",
+        )
 
     return from_dt.isoformat().replace("+00:00", "Z"), to_dt.isoformat().replace("+00:00", "Z")
+
+
+def _add_months(value: datetime, months: int) -> datetime:
+    month_index = value.month - 1 + months
+    target_year = value.year + month_index // 12
+    target_month = month_index % 12 + 1
+    target_day = min(value.day, calendar.monthrange(target_year, target_month)[1])
+    return value.replace(year=target_year, month=target_month, day=target_day)
+
+
+def _require_invoice_query_page_size(value: int) -> int:
+    if 10 <= value <= 250:
+        return value
+    raise CliError(
+        "Invalid page size.",
+        ExitCode.VALIDATION_ERROR,
+        "--page-size must be between 10 and 250.",
+    )
 
 
 def _resolve_output_path(
@@ -844,6 +870,7 @@ def list_invoices(
     sort_order: str,
 ) -> dict[str, Any]:
     access_token = _require_access_token(profile)
+    normalized_page_size = _require_invoice_query_page_size(page_size)
     from_iso, to_iso = _normalize_date_range(date_from, date_to)
     resolved_date_type = _require_invoice_query_date_type(date_type)
 
@@ -859,7 +886,7 @@ def list_invoices(
                 date_type=resolved_date_type,
                 from_iso=from_iso,
                 to_iso=to_iso,
-                page_size=page_size,
+                page_size=normalized_page_size,
                 page_offset=page_offset,
                 sort_order=sort_order,
             )
@@ -875,7 +902,7 @@ def list_invoices(
                 date_type=resolved_date_type,
                 from_iso=from_iso,
                 to_iso=to_iso,
-                page_size=page_size,
+                page_size=normalized_page_size,
                 page_offset=page_offset,
                 sort_order=sort_order,
             )

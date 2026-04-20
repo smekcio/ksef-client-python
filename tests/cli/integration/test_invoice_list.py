@@ -46,7 +46,7 @@ def test_invoice_list_success(runner, monkeypatch) -> None:
             "--date-type",
             "Issue",
             "--page-size",
-            "5",
+            "10",
             "--page-offset",
             "10",
             "--sort-order",
@@ -57,7 +57,7 @@ def test_invoice_list_success(runner, monkeypatch) -> None:
     assert result.exit_code == 0
     assert seen["profile"] == "demo"
     assert seen["subject_type"] == "Subject2"
-    assert seen["page_size"] == 5
+    assert seen["page_size"] == 10
     assert seen["page_offset"] == 10
     assert seen["sort_order"] == "Asc"
     assert "invoice.list" in result.stdout
@@ -130,3 +130,15 @@ def test_invoice_list_json_validation_error_envelope(runner, monkeypatch) -> Non
 def test_invoice_list_invalid_sort_order_is_rejected(runner) -> None:
     result = runner.invoke(app, ["invoice", "list", "--sort-order", "WRONG"])
     assert result.exit_code == int(ExitCode.VALIDATION_ERROR)
+
+
+def test_invoice_list_rejects_page_size_below_openapi_min(runner) -> None:
+    result = runner.invoke(app, ["invoice", "list", "--page-size", "9"])
+    assert result.exit_code == 2
+    assert "10<=x<=250" in result.stdout
+
+
+def test_invoice_list_rejects_page_size_above_openapi_max(runner) -> None:
+    result = runner.invoke(app, ["invoice", "list", "--page-size", "251"])
+    assert result.exit_code == 2
+    assert "10<=x<=250" in result.stdout

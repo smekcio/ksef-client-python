@@ -151,6 +151,113 @@ def test_list_invoices_rejects_reverse_date_range(monkeypatch) -> None:
     assert exc.value.code == ExitCode.VALIDATION_ERROR
 
 
+def test_list_invoices_rejects_date_range_longer_than_3_months(monkeypatch) -> None:
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(invoices=SimpleNamespace()),
+    )
+
+    with pytest.raises(CliError) as exc:
+        adapters.list_invoices(
+            profile="demo",
+            base_url="https://example.invalid",
+            date_from="2026-01-01",
+            date_to="2026-04-02",
+            subject_type="Subject1",
+            date_type="Issue",
+            page_size=10,
+            page_offset=0,
+            sort_order="Desc",
+        )
+
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+    assert "3 months" in (exc.value.hint or "")
+
+
+def test_list_invoices_accepts_date_range_exactly_3_months(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    class _Invoices:
+        def query_invoice_metadata(self, payload, **kwargs):
+            _ = payload
+            seen.update(kwargs)
+            return {"invoices": []}
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(invoices=_Invoices()),
+    )
+
+    result = adapters.list_invoices(
+        profile="demo",
+        base_url="https://example.invalid",
+        date_from="2026-01-01",
+        date_to="2026-04-01",
+        subject_type="Subject1",
+        date_type="Issue",
+        page_size=10,
+        page_offset=0,
+        sort_order="Desc",
+    )
+
+    assert result["count"] == 0
+    assert seen["page_size"] == 10
+
+
+def test_list_invoices_rejects_page_size_below_openapi_min(monkeypatch) -> None:
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not call client")),
+    )
+
+    with pytest.raises(CliError) as exc:
+        adapters.list_invoices(
+            profile="demo",
+            base_url="https://example.invalid",
+            date_from="2026-01-01",
+            date_to="2026-01-31",
+            subject_type="Subject1",
+            date_type="Issue",
+            page_size=9,
+            page_offset=0,
+            sort_order="Desc",
+        )
+
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+    assert "10 and 250" in (exc.value.hint or "")
+
+
+def test_list_invoices_rejects_page_size_above_openapi_max(monkeypatch) -> None:
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not call client")),
+    )
+
+    with pytest.raises(CliError) as exc:
+        adapters.list_invoices(
+            profile="demo",
+            base_url="https://example.invalid",
+            date_from="2026-01-01",
+            date_to="2026-01-31",
+            subject_type="Subject1",
+            date_type="Issue",
+            page_size=251,
+            page_offset=0,
+            sort_order="Desc",
+        )
+
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+    assert "10 and 250" in (exc.value.hint or "")
+
+
 def test_list_invoices_rejects_invalid_subject_type(monkeypatch) -> None:
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
     monkeypatch.setattr(
@@ -1308,7 +1415,7 @@ def test_invoice_identity_key_falls_back_to_serialized_payload_and_repr() -> Non
     assert "_PlainObject object" in repr_key
 
 
-def test_query_all_invoice_subject_types_handles_negative_offset_and_unbounded_page_size(
+def test_query_all_invoice_subject_types_handles_negative_offset_and_bounded_page_size(
     monkeypatch,
 ) -> None:
     responses = {
@@ -1331,7 +1438,7 @@ def test_query_all_invoice_subject_types_handles_negative_offset_and_unbounded_p
         date_type=m.InvoiceQueryDateType.ISSUE,
         from_iso="2026-01-01T00:00:00Z",
         to_iso="2026-01-31T23:59:59Z",
-        page_size=0,
+        page_size=10,
         page_offset=-5,
         sort_order="Asc",
     )
