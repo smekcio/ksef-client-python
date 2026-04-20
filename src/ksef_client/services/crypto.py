@@ -204,7 +204,7 @@ def build_send_invoice_request(
 def sign_path_rsa_pss(private_key: rsa.RSAPrivateKey, data: bytes) -> bytes:
     return private_key.sign(
         data,
-        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32),
         hashes.SHA256(),
     )
 

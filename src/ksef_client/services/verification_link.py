@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
 from ..config import KsefClientOptions
@@ -123,14 +122,11 @@ def _sign_path(
         ) from exc
 
     data = path_to_sign.encode("utf-8")
-    digest = hashes.Hash(hashes.SHA256())
-    digest.update(data)
-    sha = digest.finalize()
 
     if isinstance(private_key, rsa.RSAPrivateKey):
-        return sign_path_rsa_pss(private_key, sha)
+        return sign_path_rsa_pss(private_key, data)
     if isinstance(private_key, ec.EllipticCurvePrivateKey):
-        return sign_path_ecdsa(private_key, sha, format=signature_format)
+        return sign_path_ecdsa(private_key, data, format=signature_format)
 
     # If a certificate is provided, we can try to infer key type, but private key is required.
     if certificate_pem:

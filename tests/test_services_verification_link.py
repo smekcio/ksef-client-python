@@ -3,17 +3,26 @@ import unittest
 from datetime import date
 from unittest.mock import patch
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, padding, utils
+
 from ksef_client.config import KsefClientOptions, KsefEnvironment
 from ksef_client.services.verification_link import (
     VerificationLinkService,
     _decode_base64_or_url,
     _sign_path,
 )
+from ksef_client.utils.base64url import b64url_decode
 from tests.helpers import generate_ec_cert, generate_ed25519_key_pem, generate_rsa_cert
 
 
 class VerificationLinkTests(unittest.TestCase):
     ENCRYPTED_KEY_PASSWORD = "secret-password"
+
+    def _extract_signed_path(self, url: str) -> tuple[bytes, bytes]:
+        path_without_scheme = url.replace("https://", "").replace("http://", "")
+        path_to_sign, signature_segment = path_without_scheme.rsplit("/", 1)
+        return path_to_sign.encode("utf-8"), b64url_decode(signature_segment)
 
     def test_decode_base64_or_url(self):
         payload = b"data"
@@ -47,6 +56,13 @@ class VerificationLinkTests(unittest.TestCase):
             signature_format="p1363",
         )
         self.assertIn("/certificate/", url)
+        path_to_sign, signature = self._extract_signed_path(url)
+        rsa_cert.private_key.public_key().verify(
+            signature,
+            path_to_sign,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32),
+            hashes.SHA256(),
+        )
 
     def test_certificate_verification_url_rsa_accepts_password_as_str(self):
         options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
@@ -64,6 +80,13 @@ class VerificationLinkTests(unittest.TestCase):
             signature_format="p1363",
         )
         self.assertIn("/certificate/", url)
+        path_to_sign, signature = self._extract_signed_path(url)
+        rsa_cert.private_key.public_key().verify(
+            signature,
+            path_to_sign,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32),
+            hashes.SHA256(),
+        )
 
     def test_certificate_verification_url_rsa_accepts_password_as_bytes(self):
         options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
@@ -81,6 +104,13 @@ class VerificationLinkTests(unittest.TestCase):
             signature_format="p1363",
         )
         self.assertIn("/certificate/", url)
+        path_to_sign, signature = self._extract_signed_path(url)
+        rsa_cert.private_key.public_key().verify(
+            signature,
+            path_to_sign,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32),
+            hashes.SHA256(),
+        )
 
     def test_sign_path_errors(self):
         with self.assertRaises(ValueError):
@@ -134,10 +164,32 @@ class VerificationLinkTests(unittest.TestCase):
         ), self.assertRaisesRegex(ValueError, "Invalid private key password configuration"):
             _sign_path("path", None, "ignored-private-key", "p1363")
 
-    def test_sign_path_ec(self):
+    def test_sign_path_ec_der_signature_is_verifiable(self):
         ec_cert = generate_ec_cert()
         signature = _sign_path("path", None, ec_cert.private_key_pem, "der")
-        self.assertTrue(signature)
+        ec_cert.private_key.public_key().verify(signature, b"path", ec.ECDSA(hashes.SHA256()))
+
+    def test_certificate_verification_url_ec_default_p1363_signature_is_verifiable(self):
+        options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
+        service = VerificationLinkService(options)
+        ec_cert = generate_ec_cert()
+        url = service.build_certificate_verification_url(
+            seller_nip="123",
+            context_identifier_type="nip",
+            context_identifier_value="123",
+            certificate_serial="1",
+            invoice_hash="YQ==",
+            signing_certificate_pem=ec_cert.certificate_pem,
+            private_key_pem=ec_cert.private_key_pem,
+        )
+
+        path_to_sign, signature = self._extract_signed_path(url)
+        size = ec_cert.private_key.key_size // 8
+        self.assertEqual(len(signature), size * 2)
+        r = int.from_bytes(signature[:size], "big")
+        s = int.from_bytes(signature[size:], "big")
+        signature_der = utils.encode_dss_signature(r, s)
+        ec_cert.private_key.public_key().verify(signature_der, path_to_sign, ec.ECDSA(hashes.SHA256()))
 
 
 if __name__ == "__main__":
