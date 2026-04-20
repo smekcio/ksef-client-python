@@ -96,10 +96,18 @@ def _invoice_hash_base64() -> str:
     return base64.b64encode(digest).decode("ascii")
 
 
-@pytest.mark.parametrize("case", [_load_case("rsa"), _load_case("ecdsa")], ids=lambda case: case.name)
-def test_certificate_verification_link_matches_public_ksef_qr_endpoint(case: VerificationLinkE2ECase) -> None:
+@pytest.mark.parametrize(
+    "case",
+    [_load_case("rsa"), _load_case("ecdsa")],
+    ids=lambda case: case.name,
+)
+def test_certificate_verification_link_matches_public_ksef_qr_endpoint(
+    case: VerificationLinkE2ECase,
+) -> None:
     _ensure_e2e_enabled()
-    assert case.private_key_path.exists(), f"Missing private key fixture: {case.private_key_path}"
+    assert case.private_key_path.exists(), (
+        f"Missing private key fixture: {case.private_key_path}"
+    )
 
     service = VerificationLinkService(KsefClientOptions(base_url=KsefEnvironment.TEST.value))
     private_key_pem = case.private_key_path.read_text(encoding="ascii")

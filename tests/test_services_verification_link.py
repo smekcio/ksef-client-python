@@ -189,7 +189,11 @@ class VerificationLinkTests(unittest.TestCase):
         r = int.from_bytes(signature[:size], "big")
         s = int.from_bytes(signature[size:], "big")
         signature_der = utils.encode_dss_signature(r, s)
-        ec_cert.private_key.public_key().verify(signature_der, path_to_sign, ec.ECDSA(hashes.SHA256()))
+        ec_cert.private_key.public_key().verify(
+            signature_der,
+            path_to_sign,
+            ec.ECDSA(hashes.SHA256()),
+        )
 
 
 if __name__ == "__main__":
