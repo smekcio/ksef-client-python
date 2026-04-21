@@ -5,7 +5,7 @@ from pathlib import Path
 from ksef_client import models as m
 from ksef_client.cli import app
 from ksef_client.cli.sdk import session_ops
-from ksef_client.cli.session_store import load_checkpoint
+from ksef_client.cli.session_store import BatchSessionCheckpoint, load_checkpoint
 from ksef_client.services.sessions import BatchSessionState, OnlineSessionState
 
 
@@ -197,6 +197,7 @@ def test_cli_batch_session_resume_flow(runner, monkeypatch, tmp_path: Path) -> N
     assert runner.invoke(app, ["session", "batch", "close", "--id", "smoke-batch"]).exit_code == 0
 
     checkpoint = load_checkpoint("demo", "smoke-batch")
+    assert isinstance(checkpoint, BatchSessionCheckpoint)
     assert checkpoint.kind == "batch"
     assert checkpoint.stage == "closed"
     assert checkpoint.uploaded_ordinals == [1]

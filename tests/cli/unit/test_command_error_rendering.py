@@ -15,6 +15,7 @@ from ksef_client.cli.commands import (
     invoice_cmd,
     profile_cmd,
     send_cmd,
+    session_cmd,
     upo_cmd,
 )
 from ksef_client.cli.context import CliContext
@@ -35,6 +36,7 @@ def _ctx() -> typer.Context:
         (auth_cmd, "auth.test"),
         (invoice_cmd, "invoice.test"),
         (send_cmd, "send.test"),
+        (session_cmd, "session.test"),
         (upo_cmd, "upo.test"),
         (export_cmd, "export.test"),
         (health_cmd, "health.test"),
@@ -52,6 +54,7 @@ def test_render_error_cli_error(module, command) -> None:
         (auth_cmd, "auth.test"),
         (invoice_cmd, "invoice.test"),
         (send_cmd, "send.test"),
+        (session_cmd, "session.test"),
         (upo_cmd, "upo.test"),
         (export_cmd, "export.test"),
         (health_cmd, "health.test"),
@@ -81,7 +84,7 @@ def test_auth_render_error_api_and_http() -> None:
 
 @pytest.mark.parametrize(
     "module",
-    [invoice_cmd, send_cmd, upo_cmd, export_cmd, health_cmd],
+    [invoice_cmd, send_cmd, session_cmd, upo_cmd, export_cmd, health_cmd],
 )
 def test_render_error_api_http_combined(module) -> None:
     with pytest.raises(typer.Exit) as api_exc:
@@ -95,7 +98,17 @@ def test_render_error_api_http_combined(module) -> None:
 
 @pytest.mark.parametrize(
     "module",
-    [auth_cmd, invoice_cmd, send_cmd, upo_cmd, export_cmd, health_cmd, init_cmd, profile_cmd],
+    [
+        auth_cmd,
+        invoice_cmd,
+        send_cmd,
+        session_cmd,
+        upo_cmd,
+        export_cmd,
+        health_cmd,
+        init_cmd,
+        profile_cmd,
+    ],
 )
 def test_render_error_unexpected(module) -> None:
     with pytest.raises(typer.Exit) as exc:

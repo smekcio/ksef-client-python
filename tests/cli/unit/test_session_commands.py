@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from ksef_client.cli import app
 from ksef_client.cli.commands import session_cmd
+from ksef_client.cli.errors import CliError
+from ksef_client.cli.exit_codes import ExitCode
 
 
 def _payload(stdout: str) -> dict:
@@ -82,6 +86,40 @@ def test_session_status_command_passes_invoice_ref(runner, monkeypatch) -> None:
     assert _payload(result.stdout)["data"]["status_code"] == 200
 
 
+@pytest.mark.parametrize(
+    ("attribute_name", "argv", "command"),
+    [
+        ("show_saved_session", ["--json", "session", "show", "--id", "resume-1"], "session.show"),
+        (
+            "export_saved_session",
+            ["--json", "session", "export", "--id", "resume-1", "--out", "out.json"],
+            "session.export",
+        ),
+        (
+            "import_saved_session",
+            ["--json", "session", "import", "--in", "resume.json"],
+            "session.import",
+        ),
+        ("drop_saved_session", ["--json", "session", "drop", "--id", "resume-1"], "session.drop"),
+    ],
+)
+def test_session_commands_render_success_for_general_actions(
+    runner, monkeypatch, attribute_name, argv, command
+) -> None:
+    monkeypatch.setattr(
+        session_cmd,
+        attribute_name,
+        lambda **kwargs: {"id": kwargs.get("session_id", "resume-1"), "ok": True},
+    )
+
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code == 0
+    payload = _payload(result.stdout)
+    assert payload["command"] == command
+    assert payload["data"]["ok"] is True
+
+
 def test_session_batch_close_command_forwards_wait_options(runner, monkeypatch) -> None:
     seen: dict[str, object] = {}
 
@@ -117,3 +155,82 @@ def test_session_batch_close_command_forwards_wait_options(runner, monkeypatch) 
     assert seen["wait_upo"] is True
     assert seen["save_upo"] == "upo.xml"
     assert _payload(result.stdout)["command"] == "session.batch.close"
+
+
+@pytest.mark.parametrize(
+    ("attribute_name", "argv", "command"),
+    [
+        ("list_saved_sessions", ["--json", "session", "list"], "session.list"),
+        ("show_saved_session", ["--json", "session", "show", "--id", "resume-1"], "session.show"),
+        (
+            "get_saved_session_status",
+            ["--json", "session", "status", "--id", "resume-1"],
+            "session.status",
+        ),
+        (
+            "export_saved_session",
+            ["--json", "session", "export", "--id", "resume-1", "--out", "out.json"],
+            "session.export",
+        ),
+        (
+            "import_saved_session",
+            ["--json", "session", "import", "--in", "resume.json"],
+            "session.import",
+        ),
+        ("drop_saved_session", ["--json", "session", "drop", "--id", "resume-1"], "session.drop"),
+        (
+            "open_online_session",
+            ["--json", "session", "online", "open", "--id", "resume-1"],
+            "session.online.open",
+        ),
+        (
+            "send_online_session_invoice",
+            [
+                "--json",
+                "session",
+                "online",
+                "send",
+                "--id",
+                "resume-1",
+                "--invoice",
+                "invoice.xml",
+            ],
+            "session.online.send",
+        ),
+        (
+            "close_online_session",
+            ["--json", "session", "online", "close", "--id", "resume-1"],
+            "session.online.close",
+        ),
+        (
+            "open_batch_session",
+            ["--json", "session", "batch", "open", "--id", "resume-1", "--zip", "batch.zip"],
+            "session.batch.open",
+        ),
+        (
+            "upload_batch_session",
+            ["--json", "session", "batch", "upload", "--id", "resume-1"],
+            "session.batch.upload",
+        ),
+        (
+            "close_batch_session",
+            ["--json", "session", "batch", "close", "--id", "resume-1"],
+            "session.batch.close",
+        ),
+    ],
+)
+def test_session_commands_render_cli_errors(
+    runner, monkeypatch, attribute_name, argv, command
+) -> None:
+    def _boom(**kwargs):
+        _ = kwargs
+        raise CliError("broken", ExitCode.VALIDATION_ERROR, "fix-it")
+
+    monkeypatch.setattr(session_cmd, attribute_name, _boom)
+
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code == int(ExitCode.VALIDATION_ERROR)
+    payload = _payload(result.stdout)
+    assert payload["command"] == command
+    assert payload["errors"][0]["code"] == ExitCode.VALIDATION_ERROR.name

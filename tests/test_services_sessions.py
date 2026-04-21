@@ -7,8 +7,14 @@ from typing import Any
 import pytest
 
 from ksef_client import models as m
-from ksef_client.services.sessions import BatchSessionState, OnlineSessionState
+from ksef_client.services.sessions import (
+    AsyncBatchSessionHandle,
+    BatchSessionHandle,
+    BatchSessionState,
+    OnlineSessionState,
+)
 from ksef_client.services.workflows import (
+    AsyncBatchSessionWorkflow,
     AsyncBatchUploadHelper,
     AsyncOnlineSessionWorkflow,
     BatchSessionWorkflow,
@@ -98,7 +104,7 @@ class _RecordingAsyncHttp:
 
 class _StubSessionsClient:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, Any]] = []
+        self.calls: list[tuple[Any, ...]] = []
         self._batch_requests = 0
 
     def open_online_session(self, payload, *, access_token=None, upo_v43=False):
@@ -298,6 +304,99 @@ def test_batch_session_state_roundtrip_and_validation() -> None:
         BatchSessionState.from_dict(state.to_dict() | {"iv_base64": "###"})
 
 
+def test_session_states_cover_validation_error_paths() -> None:
+    with pytest.raises(ValueError):
+        OnlineSessionState.from_json("[]")
+    with pytest.raises(ValueError):
+        OnlineSessionState(
+            reference_number="SES-1",
+            form_code=_form_code(),
+            valid_until="2026-04-01T12:30:00Z",
+            symmetric_key_base64="AQID",
+            iv_base64="BAUG",
+            schema_version=2,
+        )
+    with pytest.raises(ValueError):
+        OnlineSessionState(
+            reference_number="SES-1",
+            form_code=_form_code(),
+            valid_until="2026-04-01T12:30:00Z",
+            symmetric_key_base64="AQID",
+            iv_base64="BAUG",
+            kind="batch",
+        )
+
+    online_state = OnlineSessionState(
+        reference_number="SES-1",
+        form_code=_form_code(),
+        valid_until="2026-04-01T12:30:00Z",
+        symmetric_key_base64="AQID",
+        iv_base64="BAUG",
+    )
+    with pytest.raises(ValueError):
+        OnlineSessionState.from_dict(online_state.to_dict() | {"reference_number": " "})
+    with pytest.raises(ValueError):
+        OnlineSessionState.from_dict(online_state.to_dict() | {"valid_until": 1})
+    with pytest.raises(ValueError):
+        OnlineSessionState.from_dict(online_state.to_dict() | {"symmetric_key_base64": 1})
+    with pytest.raises(ValueError):
+        OnlineSessionState.from_dict(online_state.to_dict() | {"iv_base64": 1})
+
+    batch_state = BatchSessionState(
+        reference_number="SES-BATCH",
+        form_code=_form_code(),
+        batch_file=m.BatchFileInfo.from_dict(
+            {
+                "fileSize": 10,
+                "fileHash": "hash",
+                "fileParts": [{"ordinalNumber": 1, "fileSize": 10, "fileHash": "hash-part"}],
+            }
+        ),
+        part_upload_requests=[
+            m.PartUploadRequest.from_dict(
+                {
+                    "ordinalNumber": 1,
+                    "url": "https://upload/1",
+                    "method": "PUT",
+                    "headers": {},
+                }
+            )
+        ],
+        symmetric_key_base64="AQID",
+        iv_base64="BAUG",
+    )
+    with pytest.raises(ValueError):
+        BatchSessionState(
+            reference_number=batch_state.reference_number,
+            form_code=batch_state.form_code,
+            batch_file=batch_state.batch_file,
+            part_upload_requests=batch_state.part_upload_requests,
+            symmetric_key_base64=batch_state.symmetric_key_base64,
+            iv_base64=batch_state.iv_base64,
+            schema_version=2,
+        )
+    with pytest.raises(ValueError):
+        BatchSessionState(
+            reference_number=batch_state.reference_number,
+            form_code=batch_state.form_code,
+            batch_file=batch_state.batch_file,
+            part_upload_requests=batch_state.part_upload_requests,
+            symmetric_key_base64=batch_state.symmetric_key_base64,
+            iv_base64=batch_state.iv_base64,
+            kind="online",
+        )
+    with pytest.raises(ValueError):
+        BatchSessionState.from_dict(batch_state.to_dict() | {"reference_number": " "})
+    with pytest.raises(ValueError):
+        BatchSessionState.from_dict(batch_state.to_dict() | {"symmetric_key_base64": 1})
+    with pytest.raises(ValueError):
+        BatchSessionState.from_dict(batch_state.to_dict() | {"iv_base64": 1})
+    with pytest.raises(ValueError):
+        BatchSessionState.from_dict(batch_state.to_dict() | {"offline_mode": "yes"})
+    with pytest.raises(ValueError):
+        BatchSessionState.from_dict(batch_state.to_dict() | {"part_upload_requests": {}})
+
+
 def test_online_workflow_returns_handle_and_resume_supports_status_methods() -> None:
     sessions = _StubSessionsClient()
     workflow = OnlineSessionWorkflow(sessions)
@@ -320,6 +419,28 @@ def test_online_workflow_returns_handle_and_resume_supports_status_methods() -> 
     assert resumed.get_invoice_upo_by_ksef("KSEF-1") == b"<upo-by-ksef/>"
     assert resumed.get_upo("UPO-1") == b"<upo-session/>"
     resumed.close()
+
+
+def test_online_handle_send_and_list_operations_cover_sync_paths() -> None:
+    sessions = _StubSessionsClient()
+    workflow = OnlineSessionWorkflow(sessions)
+    rsa_cert = generate_rsa_cert()
+
+    session = workflow.open_session(
+        form_code=_form_code(),
+        public_certificate=rsa_cert.certificate_pem,
+        access_token="token",
+    )
+
+    response = session.send_invoice(
+        b"<faktura/>",
+        offline_mode=True,
+        hash_of_corrected_invoice="HASH-1",
+    )
+
+    assert response.reference_number == "INV-1"
+    assert session.list_invoices().invoices == []
+    assert session.list_failed_invoices().invoices == []
 
 
 def test_batch_workflow_resume_validates_zip_and_upload_progress() -> None:
@@ -362,6 +483,49 @@ def test_batch_workflow_resume_validates_zip_and_upload_progress() -> None:
         )
 
 
+def test_batch_handle_from_state_without_zip_covers_error_and_status_methods() -> None:
+    sessions = _StubSessionsClient()
+    uploader = BatchUploadHelper(_RecordingHttp())
+    state = BatchSessionState(
+        reference_number="SES-BATCH-1",
+        form_code=_form_code(),
+        batch_file=m.BatchFileInfo.from_dict(
+            {
+                "fileSize": 10,
+                "fileHash": "hash",
+                "fileParts": [{"ordinalNumber": 1, "fileSize": 10, "fileHash": "hash-part"}],
+            }
+        ),
+        part_upload_requests=[
+            m.PartUploadRequest.from_dict(
+                {
+                    "ordinalNumber": 1,
+                    "url": "https://upload/1",
+                    "method": "PUT",
+                    "headers": {},
+                }
+            )
+        ],
+        symmetric_key_base64="AQID",
+        iv_base64="BAUG",
+    )
+
+    handle = BatchSessionHandle.from_state(
+        state,
+        sessions_client=sessions,
+        uploader=uploader,
+        access_token="token",
+    )
+
+    assert handle.session_reference_number == "SES-BATCH-1"
+    assert handle.get_status().status.code == 200
+    assert handle.list_invoices().invoices == []
+    assert handle.list_failed_invoices().invoices == []
+    assert handle.get_upo("UPO-1") == b"<upo-session/>"
+    with pytest.raises(ValueError):
+        handle.upload_parts()
+
+
 def test_async_online_workflow_resume_supports_handle_methods() -> None:
     async def _run() -> None:
         sessions = _StubAsyncSessionsClient()
@@ -378,6 +542,29 @@ def test_async_online_workflow_resume_supports_handle_methods() -> None:
         status = await resumed.get_status()
         assert status.status.code == 200
         await resumed.close()
+
+    asyncio.run(_run())
+
+
+def test_async_online_handle_covers_listing_and_upo_methods() -> None:
+    async def _run() -> None:
+        sessions = _StubAsyncSessionsClient()
+        workflow = AsyncOnlineSessionWorkflow(sessions)
+        rsa_cert = generate_rsa_cert()
+
+        session = await workflow.open_session(
+            form_code=_form_code(),
+            public_certificate=rsa_cert.certificate_pem,
+            access_token="token",
+        )
+
+        assert session.session_reference_number == "SES-ONLINE-1"
+        await session.list_invoices()
+        await session.list_failed_invoices()
+        assert (await session.get_invoice_status("INV-1")).reference_number == "INV-1"
+        assert await session.get_invoice_upo_by_ref("INV-1") == b"<upo-by-ref/>"
+        assert await session.get_invoice_upo_by_ksef("KSEF-1") == b"<upo-by-ksef/>"
+        assert await session.get_upo("UPO-1") == b"<upo-session/>"
 
     asyncio.run(_run())
 
@@ -415,6 +602,58 @@ def test_async_batch_upload_helper_supports_skip_and_progress() -> None:
 
         assert seen == [2]
         assert len(http.calls) == 1
+
+    asyncio.run(_run())
+
+
+def test_async_batch_workflow_resume_covers_handle_methods_and_validation() -> None:
+    async def _run() -> None:
+        sessions = _StubAsyncSessionsClient()
+        http = _RecordingAsyncHttp()
+        workflow = AsyncBatchSessionWorkflow(sessions, http)
+        rsa_cert = generate_rsa_cert()
+        zip_bytes = build_zip({"a.xml": b"<a/>"})
+
+        session = await workflow.open_session(
+            form_code=_form_code(),
+            zip_bytes=zip_bytes,
+            public_certificate=rsa_cert.certificate_pem,
+            access_token="token",
+        )
+        assert session.session_reference_number == "SES-BATCH-1"
+
+        resumed = workflow.resume_session(
+            session.get_state(),
+            zip_bytes=zip_bytes,
+            access_token="token",
+        )
+        assert resumed.session_reference_number == "SES-BATCH-1"
+        assert resumed.get_state().reference_number == "SES-BATCH-1"
+
+        seen: list[int] = []
+        await resumed.upload_parts(progress_callback=lambda ordinal: seen.append(ordinal))
+        assert seen == [1]
+        assert (await resumed.get_status()).status.code == 200
+        assert (await resumed.list_invoices()).invoices == []
+        assert (await resumed.list_failed_invoices()).invoices == []
+        assert await resumed.get_upo("UPO-1") == b"<upo-session/>"
+        await resumed.close()
+
+        detached = AsyncBatchSessionHandle.from_state(
+            session.get_state(),
+            sessions_client=sessions,
+            uploader=AsyncBatchUploadHelper(http),
+            access_token="token",
+        )
+        with pytest.raises(ValueError):
+            await detached.upload_parts()
+
+        with pytest.raises(ValueError):
+            workflow.resume_session(
+                session.get_state(),
+                zip_bytes=build_zip({"changed.xml": b"<x/>"}),
+                access_token="token",
+            )
 
     asyncio.run(_run())
 

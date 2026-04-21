@@ -48,6 +48,12 @@ from .sessions import (
     OnlineSessionState,
     _indexed_parts,
 )
+from .sessions import (
+    _AsyncSessionsClient as _HandleAsyncSessionsClient,
+)
+from .sessions import (
+    _SessionsClient as _HandleSessionsClient,
+)
 from .xades import XadesKeyPair
 
 
@@ -576,7 +582,7 @@ class OnlineSessionWorkflow:
             upo_v43=upo_v43,
         )
         return OnlineSessionHandle(
-            _sessions=self._sessions,
+            _sessions=cast(_HandleSessionsClient, self._sessions),
             reference_number=response.reference_number,
             form_code=form_code,
             valid_until=response.valid_until,
@@ -593,7 +599,7 @@ class OnlineSessionWorkflow:
     ) -> OnlineSessionHandle:
         return OnlineSessionHandle.from_state(
             state,
-            sessions_client=self._sessions,
+            sessions_client=cast(_HandleSessionsClient, self._sessions),
             access_token=access_token,
         )
 
@@ -646,7 +652,7 @@ class AsyncOnlineSessionWorkflow:
             upo_v43=upo_v43,
         )
         return AsyncOnlineSessionHandle(
-            _sessions=self._sessions,
+            _sessions=cast(_HandleAsyncSessionsClient, self._sessions),
             reference_number=response.reference_number,
             form_code=form_code,
             valid_until=response.valid_until,
@@ -663,7 +669,7 @@ class AsyncOnlineSessionWorkflow:
     ) -> AsyncOnlineSessionHandle:
         return AsyncOnlineSessionHandle.from_state(
             state,
-            sessions_client=self._sessions,
+            sessions_client=cast(_HandleAsyncSessionsClient, self._sessions),
             access_token=access_token,
         )
 
@@ -724,7 +730,7 @@ class BatchSessionWorkflow:
             upo_v43=upo_v43,
         )
         return BatchSessionHandle(
-            _sessions=self._sessions,
+            _sessions=cast(_HandleSessionsClient, self._sessions),
             _uploader=self._upload_helper,
             reference_number=response.reference_number,
             form_code=form_code,
@@ -746,7 +752,7 @@ class BatchSessionWorkflow:
     ) -> BatchSessionHandle:
         return BatchSessionHandle.from_state(
             state,
-            sessions_client=self._sessions,
+            sessions_client=cast(_HandleSessionsClient, self._sessions),
             uploader=self._upload_helper,
             access_token=access_token,
             zip_bytes=zip_bytes,
@@ -808,7 +814,7 @@ class AsyncBatchSessionWorkflow:
             upo_v43=upo_v43,
         )
         return AsyncBatchSessionHandle(
-            _sessions=self._sessions,
+            _sessions=cast(_HandleAsyncSessionsClient, self._sessions),
             _uploader=self._upload_helper,
             reference_number=response.reference_number,
             form_code=form_code,
@@ -830,7 +836,7 @@ class AsyncBatchSessionWorkflow:
     ) -> AsyncBatchSessionHandle:
         return AsyncBatchSessionHandle.from_state(
             state,
-            sessions_client=self._sessions,
+            sessions_client=cast(_HandleAsyncSessionsClient, self._sessions),
             uploader=self._upload_helper,
             access_token=access_token,
             zip_bytes=zip_bytes,
