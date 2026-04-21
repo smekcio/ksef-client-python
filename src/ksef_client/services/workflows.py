@@ -4,8 +4,8 @@ import asyncio
 import base64
 import hashlib
 import time
-from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Collection, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -39,6 +39,15 @@ from .crypto import (
     build_send_invoice_request,
     decrypt_aes_cbc_pkcs7,
 )
+from .sessions import (
+    AsyncBatchSessionHandle,
+    AsyncOnlineSessionHandle,
+    BatchSessionHandle,
+    BatchSessionState,
+    OnlineSessionHandle,
+    OnlineSessionState,
+    _indexed_parts,
+)
 from .xades import XadesKeyPair
 
 
@@ -55,7 +64,7 @@ class _SessionsClient(Protocol):
         self,
         request_payload: OpenOnlineSessionRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         upo_v43: bool = False,
     ) -> OpenOnlineSessionResponse: ...
 
@@ -64,20 +73,24 @@ class _SessionsClient(Protocol):
         reference_number: str,
         request_payload: SendInvoiceRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> SendInvoiceResponse: ...
 
-    def close_online_session(self, reference_number: str, access_token: str) -> None: ...
+    def close_online_session(
+        self, reference_number: str, access_token: str | None = None
+    ) -> None: ...
 
     def open_batch_session(
         self,
         request_payload: OpenBatchSessionRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         upo_v43: bool = False,
     ) -> OpenBatchSessionResponse: ...
 
-    def close_batch_session(self, reference_number: str, access_token: str) -> None: ...
+    def close_batch_session(
+        self, reference_number: str, access_token: str | None = None
+    ) -> None: ...
 
 
 class _AsyncSessionsClient(Protocol):
@@ -85,7 +98,7 @@ class _AsyncSessionsClient(Protocol):
         self,
         request_payload: OpenOnlineSessionRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         upo_v43: bool = False,
     ) -> OpenOnlineSessionResponse: ...
 
@@ -94,20 +107,24 @@ class _AsyncSessionsClient(Protocol):
         reference_number: str,
         request_payload: SendInvoiceRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> SendInvoiceResponse: ...
 
-    async def close_online_session(self, reference_number: str, access_token: str) -> None: ...
+    async def close_online_session(
+        self, reference_number: str, access_token: str | None = None
+    ) -> None: ...
 
     async def open_batch_session(
         self,
         request_payload: OpenBatchSessionRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         upo_v43: bool = False,
     ) -> OpenBatchSessionResponse: ...
 
-    async def close_batch_session(self, reference_number: str, access_token: str) -> None: ...
+    async def close_batch_session(
+        self, reference_number: str, access_token: str | None = None
+    ) -> None: ...
 
 
 class _AuthClient(Protocol):
@@ -164,11 +181,18 @@ class BatchUploadHelper:
         parts: Sequence[bytes] | Sequence[tuple[int, bytes]],
         *,
         parallelism: int = 1,
+        skip_ordinals: Collection[int] | None = None,
+        progress_callback: Callable[[int], None] | None = None,
     ) -> None:
         if len(part_upload_requests) != len(parts):
             raise ValueError("parts length must match part_upload_requests length")
 
-        pairs = _pair_requests_with_parts(part_upload_requests, parts)
+        skip_set = {int(ordinal) for ordinal in (skip_ordinals or [])}
+        pairs = [
+            (req, part)
+            for req, part in _pair_requests_with_parts(part_upload_requests, parts)
+            if req.ordinal_number not in skip_set
+        ]
 
         def _send(req: PartUploadRequest, content: bytes) -> None:
             self._http.request(
@@ -183,12 +207,16 @@ class BatchUploadHelper:
         if parallelism <= 1:
             for req, part in pairs:
                 _send(req, part)
+                if progress_callback is not None:
+                    progress_callback(req.ordinal_number)
             return
 
         with ThreadPoolExecutor(max_workers=parallelism) as executor:
-            futures = [executor.submit(_send, req, part) for req, part in pairs]
-            for fut in futures:
+            futures = {executor.submit(_send, req, part): req.ordinal_number for req, part in pairs}
+            for fut in as_completed(futures):
                 fut.result()
+                if progress_callback is not None:
+                    progress_callback(futures[fut])
 
 
 class AsyncBatchUploadHelper:
@@ -199,11 +227,19 @@ class AsyncBatchUploadHelper:
         self,
         part_upload_requests: list[PartUploadRequest],
         parts: Sequence[bytes] | Sequence[tuple[int, bytes]],
+        *,
+        skip_ordinals: Collection[int] | None = None,
+        progress_callback: Callable[[int], None] | None = None,
     ) -> None:
         if len(part_upload_requests) != len(parts):
             raise ValueError("parts length must match part_upload_requests length")
 
-        pairs = _pair_requests_with_parts(part_upload_requests, parts)
+        skip_set = {int(ordinal) for ordinal in (skip_ordinals or [])}
+        pairs = [
+            (req, part)
+            for req, part in _pair_requests_with_parts(part_upload_requests, parts)
+            if req.ordinal_number not in skip_set
+        ]
 
         async def _send(req: PartUploadRequest, content: bytes) -> None:
             await self._http.request(
@@ -215,8 +251,15 @@ class AsyncBatchUploadHelper:
                 expected_status={200, 201},
             )
 
-        tasks = [asyncio.create_task(_send(req, part)) for req, part in pairs]
-        await asyncio.gather(*tasks)
+        async def _send_with_ordinal(req: PartUploadRequest, content: bytes) -> int:
+            await _send(req, content)
+            return req.ordinal_number
+
+        tasks = [asyncio.create_task(_send_with_ordinal(req, part)) for req, part in pairs]
+        for task in asyncio.as_completed(tasks):
+            ordinal_number = await task
+            if progress_callback is not None:
+                progress_callback(ordinal_number)
 
 
 @dataclass(frozen=True)
@@ -508,10 +551,7 @@ class AsyncAuthCoordinator:
         raise TimeoutError("Authentication did not complete within max_attempts")
 
 
-@dataclass(frozen=True)
-class OnlineSessionResult:
-    session_reference_number: str
-    encryption_data: EncryptionData
+OnlineSessionResult = OnlineSessionHandle
 
 
 class OnlineSessionWorkflow:
@@ -525,7 +565,7 @@ class OnlineSessionWorkflow:
         public_certificate: str,
         access_token: str,
         upo_v43: bool = False,
-    ) -> OnlineSessionResult:
+    ) -> OnlineSessionHandle:
         encryption = build_encryption_data(public_certificate)
         response = self._sessions.open_online_session(
             OpenOnlineSessionRequest(
@@ -535,9 +575,26 @@ class OnlineSessionWorkflow:
             access_token=access_token,
             upo_v43=upo_v43,
         )
-        return OnlineSessionResult(
-            session_reference_number=response.reference_number,
+        return OnlineSessionHandle(
+            _sessions=self._sessions,
+            reference_number=response.reference_number,
+            form_code=form_code,
+            valid_until=response.valid_until,
             encryption_data=encryption,
+            _access_token=access_token,
+            upo_v43=upo_v43,
+        )
+
+    def resume_session(
+        self,
+        state: OnlineSessionState,
+        *,
+        access_token: str | None = None,
+    ) -> OnlineSessionHandle:
+        return OnlineSessionHandle.from_state(
+            state,
+            sessions_client=self._sessions,
+            access_token=access_token,
         )
 
     def send_invoice(
@@ -578,7 +635,7 @@ class AsyncOnlineSessionWorkflow:
         public_certificate: str,
         access_token: str,
         upo_v43: bool = False,
-    ) -> OnlineSessionResult:
+    ) -> AsyncOnlineSessionHandle:
         encryption = build_encryption_data(public_certificate)
         response = await self._sessions.open_online_session(
             OpenOnlineSessionRequest(
@@ -588,9 +645,26 @@ class AsyncOnlineSessionWorkflow:
             access_token=access_token,
             upo_v43=upo_v43,
         )
-        return OnlineSessionResult(
-            session_reference_number=response.reference_number,
+        return AsyncOnlineSessionHandle(
+            _sessions=self._sessions,
+            reference_number=response.reference_number,
+            form_code=form_code,
+            valid_until=response.valid_until,
             encryption_data=encryption,
+            _access_token=access_token,
+            upo_v43=upo_v43,
+        )
+
+    def resume_session(
+        self,
+        state: OnlineSessionState,
+        *,
+        access_token: str | None = None,
+    ) -> AsyncOnlineSessionHandle:
+        return AsyncOnlineSessionHandle.from_state(
+            state,
+            sessions_client=self._sessions,
+            access_token=access_token,
         )
 
     async def send_invoice(
@@ -625,7 +699,7 @@ class BatchSessionWorkflow:
         self._sessions = sessions_client
         self._upload_helper = BatchUploadHelper(http_client)
 
-    def open_upload_and_close(
+    def open_session(
         self,
         *,
         form_code: FormCode,
@@ -634,8 +708,7 @@ class BatchSessionWorkflow:
         access_token: str,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
-        parallelism: int = 1,
-    ) -> str:
+    ) -> BatchSessionHandle:
         encryption = build_encryption_data(public_certificate)
         encrypted_parts, batch_file_info = encrypt_batch_parts(
             zip_bytes, encryption.key, encryption.iv
@@ -650,24 +723,36 @@ class BatchSessionWorkflow:
             access_token=access_token,
             upo_v43=upo_v43,
         )
-        self._upload_helper.upload_parts(
-            response.part_upload_requests,
-            encrypted_parts,
-            parallelism=parallelism,
+        return BatchSessionHandle(
+            _sessions=self._sessions,
+            _uploader=self._upload_helper,
+            reference_number=response.reference_number,
+            form_code=form_code,
+            batch_file=batch_file_info,
+            part_upload_requests=response.part_upload_requests,
+            encryption_data=encryption,
+            _access_token=access_token,
+            upo_v43=upo_v43,
+            offline_mode=offline_mode,
+            _encrypted_parts=_indexed_parts(encrypted_parts),
         )
-        reference_number = response.reference_number
-        self._sessions.close_batch_session(reference_number, access_token=access_token)
-        return reference_number
 
+    def resume_session(
+        self,
+        state: BatchSessionState,
+        *,
+        zip_bytes: bytes,
+        access_token: str | None = None,
+    ) -> BatchSessionHandle:
+        return BatchSessionHandle.from_state(
+            state,
+            sessions_client=self._sessions,
+            uploader=self._upload_helper,
+            access_token=access_token,
+            zip_bytes=zip_bytes,
+        )
 
-class AsyncBatchSessionWorkflow:
-    def __init__(
-        self, sessions_client: _AsyncSessionsClient, http_client: _AsyncRequestHttpClient
-    ) -> None:
-        self._sessions = sessions_client
-        self._upload_helper = AsyncBatchUploadHelper(http_client)
-
-    async def open_upload_and_close(
+    def open_upload_and_close(
         self,
         *,
         form_code: FormCode,
@@ -678,6 +763,36 @@ class AsyncBatchSessionWorkflow:
         upo_v43: bool = False,
         parallelism: int = 1,
     ) -> str:
+        session = self.open_session(
+            form_code=form_code,
+            zip_bytes=zip_bytes,
+            public_certificate=public_certificate,
+            access_token=access_token,
+            offline_mode=offline_mode,
+            upo_v43=upo_v43,
+        )
+        session.upload_parts(parallelism=parallelism)
+        session.close(access_token=access_token)
+        return session.reference_number
+
+
+class AsyncBatchSessionWorkflow:
+    def __init__(
+        self, sessions_client: _AsyncSessionsClient, http_client: _AsyncRequestHttpClient
+    ) -> None:
+        self._sessions = sessions_client
+        self._upload_helper = AsyncBatchUploadHelper(http_client)
+
+    async def open_session(
+        self,
+        *,
+        form_code: FormCode,
+        zip_bytes: bytes,
+        public_certificate: str,
+        access_token: str,
+        offline_mode: bool | None = None,
+        upo_v43: bool = False,
+    ) -> AsyncBatchSessionHandle:
         encryption = build_encryption_data(public_certificate)
         encrypted_parts, batch_file_info = encrypt_batch_parts(
             zip_bytes, encryption.key, encryption.iv
@@ -692,10 +807,58 @@ class AsyncBatchSessionWorkflow:
             access_token=access_token,
             upo_v43=upo_v43,
         )
-        await self._upload_helper.upload_parts(response.part_upload_requests, encrypted_parts)
-        reference_number = response.reference_number
-        await self._sessions.close_batch_session(reference_number, access_token=access_token)
-        return reference_number
+        return AsyncBatchSessionHandle(
+            _sessions=self._sessions,
+            _uploader=self._upload_helper,
+            reference_number=response.reference_number,
+            form_code=form_code,
+            batch_file=batch_file_info,
+            part_upload_requests=response.part_upload_requests,
+            encryption_data=encryption,
+            _access_token=access_token,
+            upo_v43=upo_v43,
+            offline_mode=offline_mode,
+            _encrypted_parts=_indexed_parts(encrypted_parts),
+        )
+
+    def resume_session(
+        self,
+        state: BatchSessionState,
+        *,
+        zip_bytes: bytes,
+        access_token: str | None = None,
+    ) -> AsyncBatchSessionHandle:
+        return AsyncBatchSessionHandle.from_state(
+            state,
+            sessions_client=self._sessions,
+            uploader=self._upload_helper,
+            access_token=access_token,
+            zip_bytes=zip_bytes,
+        )
+
+    async def open_upload_and_close(
+        self,
+        *,
+        form_code: FormCode,
+        zip_bytes: bytes,
+        public_certificate: str,
+        access_token: str,
+        offline_mode: bool | None = None,
+        upo_v43: bool = False,
+        parallelism: int = 1,
+    ) -> str:
+        _ = parallelism
+        session = await self.open_session(
+            form_code=form_code,
+            zip_bytes=zip_bytes,
+            public_certificate=public_certificate,
+            access_token=access_token,
+            offline_mode=offline_mode,
+            upo_v43=upo_v43,
+        )
+        await session.upload_parts()
+        await session.close(access_token=access_token)
+        return session.reference_number
 
 
 class ExportDownloadHelper:

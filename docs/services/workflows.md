@@ -1,26 +1,31 @@
 # Workflows i narzędzia pomocnicze (`ksef_client.services.workflows`)
 
-Klasy łączące wywołania API z operacjami lokalnymi (kryptografia, ZIP) w spójne scenariusze. W większości integracji stanowią podstawową warstwę użycia biblioteki.
+Klasy łączące wywołania API z operacjami lokalnymi: kryptografia, ZIP, upload partów i polling.
+W większości integracji stanowią podstawową warstwę użycia biblioteki.
 
 ## Klasy pomocnicze do wysyłki i pobierania partów
 
-### `BatchUploadHelper.upload_parts(part_upload_requests, parts, parallelism=1)`
+### `BatchUploadHelper.upload_parts(part_upload_requests, parts, parallelism=1, skip_ordinals=None, progress_callback=None)`
 
 Wysyła party paczki wsadowej na pre-signed URL zwrócone w `partUploadRequests`.
 
 Zasady wynikające z KSeF:
-- nagłówek `Authorization` nie jest przesyłany (wysyłka po pre-signed URL),
-- pary łączone są po `ordinalNumber` (dlatego `parts` może zostać przekazane jako `list[bytes]` albo `list[tuple[int, bytes]]`).
+- nagłówek `Authorization` nie jest przesyłany,
+- pary łączone są po `ordinalNumber`, dlatego `parts` może być przekazane jako `list[bytes]`
+  albo `list[tuple[int, bytes]]`.
 
-`parallelism` wykorzystuje `ThreadPoolExecutor` (sync). Dla większych paczek zwykle skraca czas wysyłki.
+Parametry:
+- `parallelism`: wykorzystuje `ThreadPoolExecutor` w wariancie sync,
+- `skip_ordinals`: pomija wskazane numery partów,
+- `progress_callback(ordinal_number)`: wywoływany po każdym udanym uploadzie partu.
 
-### `AsyncBatchUploadHelper.upload_parts(part_upload_requests, parts)`
+### `AsyncBatchUploadHelper.upload_parts(part_upload_requests, parts, skip_ordinals=None, progress_callback=None)`
 
-Wariant asynchroniczny – wysyła party równolegle przez `asyncio.gather()`.
+Wariant asynchroniczny. Również obsługuje `skip_ordinals` i `progress_callback`.
 
 ### `ExportDownloadHelper.download_parts(parts)` / `download_parts_with_hash(parts)`
 
-Pobiera części paczki eksportu (pre-signed URL). Token nie jest wymagany.
+Pobiera części paczki eksportu z pre-signed URL. Token nie jest wymagany.
 
 `download_parts_with_hash()` zwraca `(bytes, x-ms-meta-hash)` dla każdej części.
 
@@ -30,103 +35,163 @@ Async odpowiednik: `AsyncExportDownloadHelper`.
 
 ### `AuthCoordinator.authenticate_with_xades_key_pair(...) -> AuthResult`
 
-Wariant uwierzytelnienia XAdES oparty o `XadesKeyPair`. Zamiast przekazywania surowych stringów PEM, wykorzystywany jest obiekt wczytany z kontenera PKCS#12 (`.pfx`/`.p12`) albo z pary plików certyfikat/klucz.
-
-Powiązane: `XadesKeyPair` (opis: `services/xades.md`).
+Wariant uwierzytelnienia XAdES oparty o `XadesKeyPair`.
 
 ### `AuthCoordinator.authenticate_with_xades(...) -> AuthResult`
 
 Scenariusz:
-1) `POST /auth/challenge`
-2) budowa XML `AuthTokenRequest`
-3) podpis XAdES (wymaga dodatku `xml`)
-4) `POST /auth/xades-signature`
-5) polling `GET /auth/{referenceNumber}` aż `status.code == 200`
-6) `POST /auth/token/redeem` → `accessToken` + `refreshToken`
-
-Najczęściej używane parametry:
-- `context_identifier_type`: `"nip" | "internalId" | "nipVatUe" | "peppolId"`
-- `context_identifier_value`: np. NIP
-- `subject_identifier_type`: np. `"certificateSubject"` (lub `"certificateFingerprint"`)
-- `verify_certificate_chain`: przydatne w TE
-- `enforce_xades_compliance`: gdy `True`, ustawia nagłówek `X-KSeF-Feature: enforce-xades-compliance`
-- `poll_interval_seconds`, `max_attempts`: parametry pollingu
+1. `POST /auth/challenge`
+2. budowa XML `AuthTokenRequest`
+3. podpis XAdES
+4. `POST /auth/xades-signature`
+5. polling `GET /auth/{referenceNumber}` aż `status.code == 200`
+6. `POST /auth/token/redeem`
 
 ### `AuthCoordinator.authenticate_with_ksef_token(...) -> AuthResult`
 
-Scenariusz analogiczny, ale zamiast XAdES:
-- szyfrowanie wartości `token|timestampMs` certyfikatem KSeF (`KsefTokenEncryption`)
-- wysłanie JSON na `POST /auth/ksef-token`
-
-Parametry:
-- `method`: `"rsa"` (domyślnie) albo `"ec"`
-- `ec_output_format`: `"java"` lub `"csharp"` – ważne tylko dla `ec` (format bajtów zgodny z ekosystemem)
+Scenariusz analogiczny, ale z szyfrowaniem wartości `token|timestampMs` certyfikatem KSeF
+(`KsefTokenEncryption`) i wysyłką na `POST /auth/ksef-token`.
 
 Async odpowiednik: `AsyncAuthCoordinator`.
 
 ### `AuthResult`
 
-- `reference_number`: numer operacji uwierzytelnienia
-- `authentication_token`: token tymczasowy (do statusu + redeem)
-- `tokens`: `AuthenticationTokensResponse` (`access_token`, `refresh_token`)
+- `reference_number`
+- `authentication_token`
+- `tokens` / wygodne aliasy `access_token`, `refresh_token`
 
 ## Sesja interaktywna (online)
 
-### `OnlineSessionWorkflow.open_session(...) -> OnlineSessionResult`
+### `OnlineSessionWorkflow.open_session(...) -> OnlineSessionHandle`
 
-Buduje `EncryptionData` na bazie certyfikatu KSeF (`SymmetricKeyEncryption`), otwiera sesję i zwraca:
+Buduje `EncryptionData` na bazie certyfikatu KSeF (`SymmetricKeyEncryption`), otwiera sesję
+i zwraca handle sesji.
 
-- `session_reference_number`
-- `encryption_data` (klucz/IV + encryptionInfo)
+### `OnlineSessionWorkflow.resume_session(state, *, access_token=None) -> OnlineSessionHandle`
 
-### `OnlineSessionWorkflow.send_invoice(...)`
+Wznawia sesję z `OnlineSessionState`. Stan nie zawiera tokenu, więc po wznowieniu:
+- przekaż `access_token` jawnie, albo
+- ustaw token na kliencie `KsefClient(..., access_token=...)`.
 
-Szyfruje XML faktury (AES-256-CBC/PKCS7), liczy hashe/rozmiary i wysyła na:
-`POST /sessions/online/{referenceNumber}/invoices`
+### `OnlineSessionHandle`
 
-Parametry:
-- `offline_mode`: flaga trybu offline (jeśli dotyczy)
-- `hash_of_corrected_invoice`: wymagane dla korekty technicznej (jeśli dotyczy)
+Publiczne pola i metody:
+- `reference_number`
+- `session_reference_number` jako alias kompatybilności
+- `valid_until`
+- `form_code`
+- `encryption_data`
+- `get_state() -> OnlineSessionState`
+- `send_invoice(...)`
+- `get_status()`
+- `list_invoices()`
+- `list_failed_invoices()`
+- `get_invoice_status(...)`
+- `get_invoice_upo_by_ref(...)`
+- `get_invoice_upo_by_ksef(...)`
+- `get_upo(...)`
+- `close()`
 
-### `OnlineSessionWorkflow.close_session(reference_number, access_token)`
+### `OnlineSessionState`
 
-Zamyka sesję i inicjuje generowanie UPO.
+Lekki, wersjonowany stan JSON przeznaczony do resume:
+- `schema_version`
+- `kind="online"`
+- `reference_number`
+- `form_code`
+- `valid_until`
+- `symmetric_key_base64`
+- `iv_base64`
+- `upo_v43`
 
-Async odpowiednik: `AsyncOnlineSessionWorkflow`.
+Nie zawiera:
+- tokenów,
+- XML faktur,
+- `invoice_reference`.
 
-### `OnlineSessionResult`
+### Zgodność wsteczna
 
-- `session_reference_number`
-- `encryption_data` (`EncryptionData`)
+`OnlineSessionResult` pozostaje aliasem do `OnlineSessionHandle`.
+
+Async odpowiedniki:
+- `AsyncOnlineSessionWorkflow`
+- `AsyncOnlineSessionHandle`
 
 ## Sesja wsadowa (batch)
 
-### `BatchSessionWorkflow.open_upload_and_close(...) -> str`
+### `BatchSessionWorkflow.open_session(...) -> BatchSessionHandle`
 
 Scenariusz:
-1) budowa `EncryptionData` z `SymmetricKeyEncryption`
-2) ZIP → podział ≤100MB → szyfrowanie partów
-3) `POST /sessions/batch` (open)
-4) wysyłka partów wg `partUploadRequests` (bez Bearer)
-5) `POST /sessions/batch/{referenceNumber}/close`
+1. budowa `EncryptionData` z `SymmetricKeyEncryption`,
+2. ZIP -> podział <=100MB -> szyfrowanie partów,
+3. `POST /sessions/batch` (open),
+4. zwrot handle'a gotowego do uploadu partów.
 
-Parametry:
-- `offline_mode`: flaga trybu offline (jeśli dotyczy)
-- `parallelism`: poziom równoległości wysyłki (sync)
-- `upo_v43`: negocjacja UPO v4-3 nagłówkiem `X-KSeF-Feature`
+### `BatchSessionWorkflow.resume_session(state, *, zip_bytes, access_token=None) -> BatchSessionHandle`
 
-Zwraca `referenceNumber` sesji wsadowej.
+Wznawia sesję z `BatchSessionState` i odtwarza zaszyfrowane party na podstawie przekazanego
+`zip_bytes`.
 
-Async odpowiednik: `AsyncBatchSessionWorkflow`.
+Workflow weryfikuje, że odtworzony `BatchFileInfo` jest identyczny z zapisanym w stanie.
+Jeśli źródło batch się zmieniło, resume kończy się błędem i upload nie jest wykonywany.
+
+### `BatchSessionWorkflow.open_upload_and_close(...) -> str`
+
+One-shot convenience API z zachowaną zgodnością wsteczną:
+`open_session() -> upload_parts() -> close()`.
+
+### `BatchSessionHandle`
+
+Publiczne pola i metody:
+- `reference_number`
+- `session_reference_number` jako alias kompatybilności
+- `form_code`
+- `batch_file`
+- `part_upload_requests`
+- `encryption_data`
+- `get_state() -> BatchSessionState`
+- `upload_parts(parallelism=1, skip_ordinals=None, progress_callback=None)`
+- `get_status()`
+- `list_invoices()`
+- `list_failed_invoices()`
+- `get_upo(...)`
+- `close()`
+
+### `BatchSessionState`
+
+Lekki, wersjonowany stan JSON przeznaczony do resume:
+- `schema_version`
+- `kind="batch"`
+- `reference_number`
+- `form_code`
+- `batch_file`
+- `part_upload_requests`
+- `symmetric_key_base64`
+- `iv_base64`
+- `upo_v43`
+- `offline_mode`
+
+Nie zawiera:
+- tokenów,
+- ZIP-a,
+- XML faktur,
+- listy już wysłanych `uploaded_ordinals`,
+- ścieżki do źródła batch.
+
+Te dane powinny być utrzymywane przez warstwę workflow/CLI po stronie aplikacji.
+
+Async odpowiedniki:
+- `AsyncBatchSessionWorkflow`
+- `AsyncBatchSessionHandle`
 
 ## Eksport (pobieranie paczek)
 
 ### `ExportWorkflow.download_and_process_package(package, encryption_data) -> PackageProcessingResult`
 
-Pobiera wszystkie części paczki (pre-signed URL), odszyfrowuje je AES i skleja w ZIP.
+Pobiera wszystkie części paczki eksportu, odszyfrowuje je AES i skleja w ZIP.
 Potem rozpakowuje ZIP bezpiecznie (`unzip_bytes_safe`) i zwraca:
-- `metadata_summaries` – rekordy z `_metadata.json` (jeśli plik był w paczce)
-- `invoice_xml_files` – mapę `nazwaPliku.xml -> treść XML`
+- `metadata_summaries`
+- `invoice_xml_files`
 
 Async odpowiednik: `AsyncExportWorkflow`.
 

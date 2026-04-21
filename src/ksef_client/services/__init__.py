@@ -17,6 +17,14 @@ from .csr import CsrResult, generate_csr_ec, generate_csr_rsa
 from .hwm import dedupe_by_ksef_number, get_effective_start_date, update_continuation_point
 from .person_token import PersonToken, PersonTokenService
 from .qr import add_label_to_qr, generate_qr_png, resize_png
+from .sessions import (
+    AsyncBatchSessionHandle,
+    AsyncOnlineSessionHandle,
+    BatchSessionHandle,
+    BatchSessionState,
+    OnlineSessionHandle,
+    OnlineSessionState,
+)
 from .verification_link import VerificationLinkService
 from .workflows import (
     AsyncAuthCoordinator,
@@ -60,6 +68,12 @@ __all__ = [
     "XadesKeyPair",
     "BatchUploadHelper",
     "AsyncBatchUploadHelper",
+    "OnlineSessionState",
+    "BatchSessionState",
+    "OnlineSessionHandle",
+    "BatchSessionHandle",
+    "AsyncOnlineSessionHandle",
+    "AsyncBatchSessionHandle",
     "ExportDownloadHelper",
     "AsyncExportDownloadHelper",
     "AuthCoordinator",

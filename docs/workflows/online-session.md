@@ -1,23 +1,29 @@
 # Workflow: sesja interaktywna (online)
 
-Scenariusz obejmuje: otwarcie sesji, wysyłkę jednej lub wielu faktur, sprawdzanie statusów, zamknięcie sesji oraz pobranie UPO.
+Scenariusz obejmuje: otwarcie sesji, serializację lekkiego stanu JSON, wznowienie po restarcie procesu,
+wysyłkę jednej lub wielu faktur, sprawdzanie statusów, zamknięcie sesji oraz pobranie UPO.
 
-Rekomendowane podejście: `OnlineSessionWorkflow` oraz metody `client.sessions.*` do sprawdzania statusów.
+Rekomendowane podejście:
+- `OnlineSessionWorkflow.open_session()` do otwarcia sesji,
+- `OnlineSessionHandle` do dalszych operacji na sesji,
+- `OnlineSessionWorkflow.resume_session()` do wznowienia z `OnlineSessionState`.
 
-## Przykład (sync)
+## Przykład (sync, z resume)
 
 ```python
 import time
+
 from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment, models as m
-from ksef_client.services import AuthCoordinator, OnlineSessionWorkflow
+from ksef_client.services import AuthCoordinator, OnlineSessionState, OnlineSessionWorkflow
 
 KSEF_TOKEN = "<TOKEN_KSEF>"
 CONTEXT_TYPE = "nip"
 CONTEXT_VALUE = "5265877635"
-INVOICE_XML = b\"\"\"<Invoice>...</Invoice>\"\"\"  # bytes
+INVOICE_XML = b"""<Invoice>...</Invoice>"""
 
 FORM_CODE = m.FormCode(system_code="FA (3)", schema_version="1-0E", value="FA")
 
+# Proces 1: auth + open + zapis lekkiego stanu JSON
 with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as client:
     token_cert = client.security.get_public_key_certificate_pem(
         m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
@@ -42,23 +48,23 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
         access_token=access_token,
         upo_v43=False,
     )
+    state_json = session.get_state().to_json()
 
-    send = workflow.send_invoice(
-        session_reference_number=session.session_reference_number,
-        invoice_xml=INVOICE_XML,
-        encryption_data=session.encryption_data,
-        access_token=access_token,
-        offline_mode=None,
-        hash_of_corrected_invoice=None,
-    )
+# Proces 2: nowy klient + resume z JSON
+state = OnlineSessionState.from_json(state_json)
+
+with KsefClient(
+    KsefClientOptions(base_url=KsefEnvironment.DEMO.value),
+    access_token=access_token,
+) as client:
+    workflow = OnlineSessionWorkflow(client.sessions)
+    session = workflow.resume_session(state)
+
+    send = session.send_invoice(INVOICE_XML)
     invoice_reference = send.reference_number
 
     for _ in range(60):
-        status = client.sessions.get_session_invoice_status(
-            session.session_reference_number,
-            invoice_reference,
-            access_token=access_token,
-        )
+        status = session.get_invoice_status(invoice_reference)
         code = int(status.status.code)
         if code == 200:
             break
@@ -66,17 +72,63 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
             raise RuntimeError(status.to_dict())
         time.sleep(2)
 
-    workflow.close_session(session.session_reference_number, access_token)
+    session.close()
 
 print("OK")
 ```
 
+## Kontrakt stanu SDK
+
+`OnlineSessionState` serializuje wyłącznie dane potrzebne do wznowienia sesji:
+- `schema_version`
+- `kind="online"`
+- `reference_number`
+- `form_code`
+- `valid_until`
+- `symmetric_key_base64`
+- `iv_base64`
+- `upo_v43`
+
+Nie są serializowane:
+- `access_token`
+- XML faktur
+- wynik wysyłki / `invoice_reference`
+
+Oznacza to, że po wznowieniu musisz nadal mieć ważny token dostępu:
+- przekazany jawnie do `resume_session(..., access_token=...)`, albo
+- ustawiony na kliencie: `KsefClient(..., access_token=...)`.
+
+## Publiczne API handle'a
+
+`OnlineSessionHandle` udostępnia:
+- `reference_number`
+- `session_reference_number` jako alias kompatybilności
+- `valid_until`
+- `form_code`
+- `encryption_data`
+- `get_state()`
+- `send_invoice()`
+- `get_status()`
+- `list_invoices()`
+- `list_failed_invoices()`
+- `get_invoice_status()`
+- `get_invoice_upo_by_ref()`
+- `get_invoice_upo_by_ksef()`
+- `get_upo()`
+- `close()`
+
+Zgodność wsteczna:
+- `OnlineSessionResult` pozostaje aliasem do `OnlineSessionHandle`,
+- kod używający `session_reference_number` i `encryption_data` nadal działa.
+
 ## Uwagi
 
-- `encryption_data` z `open_session()` musi być użyte dla wszystkich faktur wysyłanych w ramach sesji.
+- `encryption_data` z `open_session()` musi być użyte dla wszystkich faktur wysyłanych w ramach tej sesji; dlatego jest odtwarzane również przy `resume_session()`.
+- `resume_session()` odtwarza tylko stan sesji i materiał kryptograficzny. Statusy faktur wysłanych wcześniej trzeba śledzić osobno przez `invoice_reference`.
 - Dla `FA_RR (1)` w wersji `1-1E` przekazuj `formCode.value="FA_RR"` zamiast `RR`.
 - Status przetwarzania jest udostępniany asynchronicznie; sprawdzanie statusu odbywa się przez polling.
 - Pobranie UPO:
-  - dla faktury: `get_session_invoice_upo_by_ref()` / `...by_ksef()`
-  - dla sesji: `get_session_upo()`
+  - dla faktury: `get_invoice_upo_by_ref()` / `get_invoice_upo_by_ksef()`
+  - dla sesji: `get_upo()`
 - `upo_v43=True` dodaje nagłówek `X-KSeF-Feature: upo-v4-3` przy otwieraniu sesji.
+- `AsyncOnlineSessionWorkflow` i `AsyncOnlineSessionHandle` oferują lustrzane API asynchroniczne.

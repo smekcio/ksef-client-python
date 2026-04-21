@@ -30,6 +30,9 @@ sa renderowane z bogatszymi hintami, jesli KSeF zwroci `application/problem+json
 - faktury i UPO:
   - `invoice list`, `invoice download`
   - `send online`, `send batch`, `send status`
+  - `session list/show/status/export/import/drop`
+  - `session online open/send/close`
+  - `session batch open/upload/close`
   - `upo get`, `upo wait`
 - eksport:
   - `export run`, `export status`
@@ -64,7 +67,17 @@ ksef profile show
 ```bash
 ksef invoice list --from 2026-01-01 --to 2026-01-31
 ksef send online --invoice ./fa.xml --wait-upo --save-upo ./out/upo-online.xml
+ksef send online --invoice ./fa.xml --save-session online-demo
+ksef session show --id online-demo
 ksef invoice download --ksef-number <KSEF_NUMBER> --out ./out/
+```
+
+5. Manualny flow resumable:
+
+```bash
+ksef session online open --id online-demo
+ksef session online send --id online-demo --invoice ./fa.xml --wait-status
+ksef session online close --id online-demo
 ```
 
 ## Troubleshooting
@@ -108,6 +121,21 @@ ksef
     online
     batch
     status
+  session
+    list
+    show
+    status
+    export
+    import
+    drop
+    online
+      open
+      send
+      close
+    batch
+      open
+      upload
+      close
   upo
     get
     wait
@@ -139,6 +167,7 @@ Zachowanie profilu:
 
 Brak aktywnego profilu:
 - komendy `auth`, `health`, `invoice`, `send`, `upo`, `export` wymagaja aktywnego profilu,
+- komendy `session ...` rowniez wymagaja aktywnego profilu,
 - komendy `lighthouse ...` dzialaja bez profilu (publiczne API Latarni),
 - jesli profil nie jest ustawiony, CLI zwraca czytelny blad z podpowiedzia:
   - `ksef init --set-active`
@@ -417,6 +446,7 @@ Options:
   --poll-interval FLOAT     [default: 2.0]
   --max-attempts INTEGER    [default: 60]
   --save-upo TEXT
+  --save-session TEXT
   --save-upo-overwrite
   --base-url TEXT
 ```
@@ -424,6 +454,9 @@ Options:
 Uwagi:
 - `--save-upo` wymaga `--wait-upo`.
 - `--save-upo` bez rozszerzenia jest traktowane jako sciezka pliku.
+- `--save-session <id>` zapisuje lokalny checkpoint resumable sesji pod wskazanym identyfikatorem.
+- Przy udanym zakonczeniu komenda nadal zamyka sesje; checkpoint sluzy glownie do inspekcji
+  oraz odzyskania flow po przerwaniu lub bledzie po zapisaniu checkpointu.
 - `--save-upo-overwrite` pozwala nadpisac istniejacy plik UPO wskazany przez `--save-upo`.
 - Dla `FA_RR (1)` z `--schema-version 1-1E` uzyj `--form-value FA_RR`; CLI normalizuje historyczne `RR` do `FA_RR`.
 
@@ -445,14 +478,233 @@ Options:
   --poll-interval FLOAT     [default: 2.0]
   --max-attempts INTEGER    [default: 120]
   --save-upo TEXT
+  --save-session TEXT
   --save-upo-overwrite
   --base-url TEXT
 ```
 
 Walidacja:
 - dokladnie jedno z `--zip` albo `--dir`.
+- `--save-session <id>` zapisuje lokalny checkpoint resumable sesji pod wskazanym identyfikatorem.
+- Przy udanym zakonczeniu komenda nadal zamyka sesje; checkpoint sluzy glownie do inspekcji
+  oraz odzyskania flow po przerwaniu lub bledzie po zapisaniu checkpointu.
 - `--save-upo-overwrite` pozwala nadpisac istniejacy plik UPO wskazany przez `--save-upo`.
 - Dla `FA_RR (1)` z `--schema-version 1-1E` uzyj `--form-value FA_RR`; CLI normalizuje historyczne `RR` do `FA_RR`.
+
+## Resumable sessions
+
+CLI utrzymuje osobny checkpoint workflow dla wznowien po restarcie procesu. To cos wiecej niz
+lekki `OnlineSessionState` / `BatchSessionState` z SDK:
+- checkpoint online przechowuje `id`, `profile`, `base_url`, `stage`, `session_state`,
+  `last_invoice_ref`, `sent_invoice_refs`,
+- checkpoint batch przechowuje `id`, `profile`, `base_url`, `stage`, `session_state`,
+  `payload_source`, `uploaded_ordinals`, `last_upo_ref`.
+
+Wazne granice odpowiedzialnosci:
+- checkpoint nie przechowuje tokenow,
+- checkpoint batch nie embeduje ZIP-a ani XML-i,
+- resume batch wymaga zachowania tego samego ZIP-a albo tego samego katalogu zrodlowego.
+
+Przy wygaslym tokenie najpierw odswiez sesje:
+
+```bash
+ksef auth refresh
+```
+
+albo zaloguj sie ponownie, a dopiero potem wykonaj `ksef session ...`.
+
+## `ksef session list`
+
+```text
+Usage: ksef session list
+```
+
+Zwraca checkpointy zapisane dla aktywnego profilu.
+
+## `ksef session show`
+
+```text
+Usage: ksef session show --id TEXT
+```
+
+Pokazuje skrot i pelny JSON checkpointu.
+
+## `ksef session status`
+
+```text
+Usage: ksef session status [OPTIONS]
+
+Options:
+  --id TEXT                 [required]
+  --invoice-ref TEXT
+```
+
+Uwagi:
+- bez `--invoice-ref` CLI pobiera status sesji,
+- z `--invoice-ref` CLI pobiera status konkretnej faktury w sesji online.
+
+## `ksef session export`
+
+```text
+Usage: ksef session export [OPTIONS]
+
+Options:
+  --id TEXT                 [required]
+  --out TEXT                [required]
+```
+
+Eksportuje checkpoint do wskazanego pliku JSON albo katalogu.
+
+## `ksef session import`
+
+```text
+Usage: ksef session import [OPTIONS]
+
+Options:
+  --in TEXT                 [required]
+  --id TEXT
+```
+
+Uwagi:
+- importowany checkpoint musi nalezec do wybranego profilu,
+- `--id` pozwala nadpisac identyfikator podczas importu.
+
+## `ksef session drop`
+
+```text
+Usage: ksef session drop --id TEXT
+```
+
+Usuwa lokalny checkpoint. Nie wykonuje zadnych operacji na sesji po stronie KSeF.
+
+## `ksef session online open`
+
+```text
+Usage: ksef session online open [OPTIONS]
+
+Options:
+  --id TEXT                 [required]
+  --system-code TEXT        [default: FA (3)]
+  --schema-version TEXT     [default: 1-0E]
+  --form-value TEXT         [default: FA]
+  --upo-v43
+  --base-url TEXT
+```
+
+Otwiera sesje online i zapisuje checkpoint w stanie `opened`.
+
+## `ksef session online send`
+
+```text
+Usage: ksef session online send [OPTIONS]
+
+Options:
+  --id TEXT                 [required]
+  --invoice TEXT            [required]
+  --wait-status
+  --wait-upo
+  --poll-interval FLOAT     [default: 2.0]
+  --max-attempts INTEGER    [default: 60]
+  --save-upo TEXT
+  --save-upo-overwrite
+```
+
+Uwagi:
+- komenda wznawia sesje z checkpointu i wysyla kolejna fakture,
+- po sukcesie aktualizuje `last_invoice_ref` i `sent_invoice_refs`,
+- `--save-upo` wymaga `--wait-upo`.
+
+## `ksef session online close`
+
+```text
+Usage: ksef session online close --id TEXT
+```
+
+Zamyka sesje online i aktualizuje checkpoint do stanu `closed`.
+
+## `ksef session batch open`
+
+```text
+Usage: ksef session batch open [OPTIONS]
+
+Options:
+  --id TEXT                 [required]
+  --zip TEXT
+  --dir TEXT
+  --system-code TEXT        [default: FA (3)]
+  --schema-version TEXT     [default: 1-0E]
+  --form-value TEXT         [default: FA]
+  --upo-v43
+  --base-url TEXT
+```
+
+Walidacja:
+- dokladnie jedno z `--zip` albo `--dir`.
+
+Komenda otwiera sesje batch i zapisuje checkpoint z deskryptorem `payload_source`.
+
+## `ksef session batch upload`
+
+```text
+Usage: ksef session batch upload [OPTIONS]
+
+Options:
+  --id TEXT                 [required]
+  --parallelism INTEGER     [default: 4]
+```
+
+Uwagi:
+- CLI odtwarza ZIP z `payload_source`,
+- weryfikuje, czy hash i rozmiar zrodla nie zmienily sie od czasu utworzenia checkpointu,
+- wznawia upload tylko brakujacych partow, pomijajac `uploaded_ordinals`.
+
+## `ksef session batch close`
+
+```text
+Usage: ksef session batch close [OPTIONS]
+
+Options:
+  --id TEXT                 [required]
+  --wait-status
+  --wait-upo
+  --poll-interval FLOAT     [default: 2.0]
+  --max-attempts INTEGER    [default: 120]
+  --save-upo TEXT
+  --save-upo-overwrite
+```
+
+Uwagi:
+- komenda zamyka sesje batch bez potrzeby ponownego ladowania ZIP-a,
+- `--wait-status` i `--wait-upo` dzialaja analogicznie do `send batch`,
+- po odczycie statusu CLI zapisuje `last_upo_ref` w checkpointcie.
+
+## Przyklady resume flow
+
+Manualny online:
+
+```bash
+ksef session online open --id online-demo
+ksef session online send --id online-demo --invoice ./fa.xml --wait-status
+ksef session online close --id online-demo
+```
+
+Manualny batch:
+
+```bash
+ksef session batch open --id batch-demo --zip ./batch.zip
+ksef session batch upload --id batch-demo --parallelism 4
+ksef session batch close --id batch-demo --wait-status --wait-upo
+```
+
+One-shot z checkpointem i recovery po przerwaniu:
+
+```bash
+ksef send batch --zip ./batch.zip --save-session batch-demo
+# jesli proces zostal przerwany po zapisaniu checkpointu:
+ksef session show --id batch-demo
+ksef session batch upload --id batch-demo --parallelism 4
+ksef session batch close --id batch-demo --wait-status --wait-upo
+```
 
 ## `ksef upo get`
 
@@ -571,11 +823,19 @@ Lokalizacja token fallback:
 - Cache metadanych:
   - Windows: `%LOCALAPPDATA%/ksef-cli/cache.json`
   - Linux/macOS: `~/.cache/ksef-cli/cache.json`
+- Checkpointy resumable sesji:
+  - Windows: `%LOCALAPPDATA%/ksef-cli/sessions/<profile>/<id>.json`
+  - Linux/macOS: `~/.cache/ksef-cli/sessions/<profile>/<id>.json`
 - Fallback token store:
   - Windows: `%LOCALAPPDATA%/ksef-cli/tokens.json`
   - Linux/macOS: `~/.cache/ksef-cli/tokens.json`
 - Kopia uszkodzonego configu:
   - `config.corrupt-<timestamp>.json` w tym samym katalogu co `config.json`.
+
+Uwagi:
+- checkpointy sesji sa zapisywane atomowo,
+- poza Windows CLI probuje wymusic uprawnienia `0600`,
+- checkpointy nie zawieraja tokenow ani tresci faktur.
 
 ## JSON contract (`--json`)
 

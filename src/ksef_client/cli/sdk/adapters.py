@@ -6,11 +6,11 @@ import time
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ksef_client import models as m
 from ksef_client.exceptions import KsefHttpError, KsefRateLimitError
-from ksef_client.services.crypto import EncryptionData, build_encryption_data
+from ksef_client.services.crypto import EncryptionData, build_encryption_data, get_file_metadata
 from ksef_client.services.workflows import (
     BatchSessionWorkflow,
     ExportWorkflow,
@@ -22,6 +22,13 @@ from ..auth.keyring_store import get_tokens
 from ..errors import CliError
 from ..exit_codes import ExitCode
 from ..policies.retry import RetryPolicy, compute_retry_delay_seconds, should_retry
+from ..session_store import (
+    BatchPayloadSource,
+    BatchSessionCheckpoint,
+    OnlineSessionCheckpoint,
+    save_checkpoint,
+    update_checkpoint,
+)
 from .factory import create_client
 
 _TRANSIENT_UPO_CODES = {404, 409, 425}
@@ -654,6 +661,27 @@ def _build_zip_from_directory(directory: str) -> bytes:
     return build_zip(files)
 
 
+def _build_batch_payload_source(
+    *,
+    zip_path: str | None,
+    directory: str | None,
+    zip_bytes: bytes,
+) -> BatchPayloadSource:
+    if zip_path:
+        path = str(Path(zip_path).resolve())
+        source_kind = "zip"
+    else:
+        path = str(Path(directory or "").resolve())
+        source_kind = "directory"
+    metadata = get_file_metadata(zip_bytes)
+    return BatchPayloadSource(
+        kind=source_kind,
+        path=path,
+        source_sha256_base64=metadata.sha256_base64,
+        source_size=metadata.file_size,
+    )
+
+
 def _validate_polling_options(poll_interval: float, max_attempts: int) -> None:
     if poll_interval <= 0:
         raise CliError(
@@ -1176,6 +1204,7 @@ def send_online_invoice(
     poll_interval: float,
     max_attempts: int,
     save_upo: str | None,
+    save_session: str | None = None,
     save_upo_overwrite: bool = False,
 ) -> dict[str, Any]:
     access_token = _require_access_token(profile)
@@ -1203,15 +1232,33 @@ def send_online_invoice(
             upo_v43=upo_v43,
         )
         session_ref = session.session_reference_number
+        checkpoint: OnlineSessionCheckpoint | None = None
+        if save_session is not None:
+            checkpoint = OnlineSessionCheckpoint(
+                id=save_session,
+                profile=profile,
+                base_url=base_url,
+                stage="opened",
+                session_state=session.get_state(),
+            )
+            try:
+                save_checkpoint(checkpoint, overwrite=False)
+            except Exception:
+                with suppress(Exception):
+                    session.close(access_token=access_token)
+                raise
 
         send_error: Exception | None = None
         try:
-            send_response = workflow.send_invoice(
-                session_reference_number=session_ref,
-                invoice_xml=invoice_xml,
-                encryption_data=session.encryption_data,
-                access_token=access_token,
-            )
+            if checkpoint is None:
+                send_response = workflow.send_invoice(
+                    session_reference_number=session_ref,
+                    invoice_xml=invoice_xml,
+                    encryption_data=session.encryption_data,
+                    access_token=access_token,
+                )
+            else:
+                send_response = session.send_invoice(invoice_xml, access_token=access_token)
             invoice_ref = _extract_reference_number(send_response)
             if not invoice_ref:
                 raise CliError(
@@ -1224,6 +1271,20 @@ def send_online_invoice(
                 "session_ref": session_ref,
                 "invoice_ref": invoice_ref,
             }
+            if checkpoint is not None:
+                sent_invoice_refs = list(checkpoint.sent_invoice_refs)
+                if invoice_ref not in sent_invoice_refs:
+                    sent_invoice_refs.append(invoice_ref)
+                checkpoint = cast(
+                    OnlineSessionCheckpoint,
+                    update_checkpoint(
+                        checkpoint,
+                        stage="invoice_sent",
+                        last_invoice_ref=invoice_ref,
+                        sent_invoice_refs=sent_invoice_refs,
+                    ),
+                )
+                result["session_id"] = checkpoint.id
 
             if wait_status or wait_upo:
                 status_payload = _wait_for_invoice_status(
@@ -1267,7 +1328,11 @@ def send_online_invoice(
             send_error = exc
             raise
         finally:
-            if send_error is None:
+            if checkpoint is not None:
+                if send_error is None:
+                    session.close(access_token=access_token)
+                    _ = update_checkpoint(checkpoint, stage="closed")
+            elif send_error is None:
                 workflow.close_session(session_ref, access_token)
             else:
                 with suppress(Exception):
@@ -1290,6 +1355,7 @@ def send_batch_invoices(
     poll_interval: float,
     max_attempts: int,
     save_upo: str | None,
+    save_session: str | None = None,
     save_upo_overwrite: bool = False,
 ) -> dict[str, Any]:
     access_token = _require_access_token(profile)
@@ -1319,23 +1385,85 @@ def send_batch_invoices(
     zip_bytes = (
         _load_batch_zip(zip_path or "") if zip_path else _build_zip_from_directory(directory or "")
     )
+    payload_source = _build_batch_payload_source(
+        zip_path=zip_path,
+        directory=directory,
+        zip_bytes=zip_bytes,
+    )
 
     with create_client(base_url, access_token=access_token) as client:
         certs = client.security.get_public_key_certificates()
         symmetric_cert = _select_certificate(certs, "SymmetricKeyEncryption")
         workflow = BatchSessionWorkflow(client.sessions, client.http_client)
-        session_ref = workflow.open_upload_and_close(
-            form_code=form_code,
-            zip_bytes=zip_bytes,
-            public_certificate=symmetric_cert,
-            access_token=access_token,
-            upo_v43=upo_v43,
-            parallelism=parallelism,
-        )
+        checkpoint: BatchSessionCheckpoint | None = None
+        if save_session is None:
+            session_ref = workflow.open_upload_and_close(
+                form_code=form_code,
+                zip_bytes=zip_bytes,
+                public_certificate=symmetric_cert,
+                access_token=access_token,
+                upo_v43=upo_v43,
+                parallelism=parallelism,
+            )
+        else:
+            session = workflow.open_session(
+                form_code=form_code,
+                zip_bytes=zip_bytes,
+                public_certificate=symmetric_cert,
+                access_token=access_token,
+                upo_v43=upo_v43,
+            )
+            checkpoint = BatchSessionCheckpoint(
+                id=save_session,
+                profile=profile,
+                base_url=base_url,
+                stage="opened",
+                session_state=session.get_state(),
+                payload_source=payload_source,
+            )
+            try:
+                save_checkpoint(checkpoint, overwrite=False)
+            except Exception:
+                with suppress(Exception):
+                    session.close(access_token=access_token)
+                raise
+
+            uploaded_ordinals: list[int] = []
+
+            def _progress(ordinal_number: int) -> None:
+                nonlocal checkpoint
+                if checkpoint is None:
+                    return
+                if ordinal_number not in uploaded_ordinals:
+                    uploaded_ordinals.append(ordinal_number)
+                    uploaded_ordinals.sort()
+                    checkpoint = cast(
+                        BatchSessionCheckpoint,
+                        update_checkpoint(
+                            checkpoint,
+                            stage="uploading",
+                            uploaded_ordinals=list(uploaded_ordinals),
+                        ),
+                    )
+
+            session.upload_parts(parallelism=parallelism, progress_callback=_progress)
+            checkpoint = cast(
+                BatchSessionCheckpoint,
+                update_checkpoint(
+                    checkpoint,
+                    stage="uploaded",
+                    uploaded_ordinals=list(uploaded_ordinals),
+                ),
+            )
+            session.close(access_token=access_token)
+            checkpoint = cast(BatchSessionCheckpoint, update_checkpoint(checkpoint, stage="closed"))
+            session_ref = session.reference_number
 
         result: dict[str, Any] = {
             "session_ref": session_ref,
         }
+        if checkpoint is not None:
+            result["session_id"] = checkpoint.id
 
         if wait_status or wait_upo:
             session_status = _wait_for_session_status(
@@ -1351,6 +1479,11 @@ def send_batch_invoices(
 
             upo_ref = _extract_upo_reference(session_status)
             result["upo_ref"] = str(upo_ref or "")
+            if checkpoint is not None:
+                checkpoint = cast(
+                    BatchSessionCheckpoint,
+                    update_checkpoint(checkpoint, last_upo_ref=str(upo_ref or "") or None),
+                )
 
             if wait_upo:
                 if not upo_ref:
