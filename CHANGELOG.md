@@ -6,6 +6,23 @@
 
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
 
+## [0.12.1](https://github.com/smekcio/ksef-client-python/compare/v0.12.0...v0.12.1) (2026-04-22)
+
+
+### Features
+
+* **cli:** add resumable session support ([a30d9ea](https://github.com/smekcio/ksef-client-python/commit/a30d9ea0b8d88bd8224207ad9a883c0da81c499e))
+
+
+### Bug Fixes
+
+* **cli:** harden resumable session recovery paths ([dd068c7](https://github.com/smekcio/ksef-client-python/commit/dd068c7d420550eb52cd22865b051067e2ad6409))
+
+
+### Miscellaneous Chores
+
+* release 0.12.1 ([1ef4fca](https://github.com/smekcio/ksef-client-python/commit/1ef4fca4f21b5e3521cce3f89874dae5f0ef5b85))
+
 ## [0.12.0](https://github.com/smekcio/ksef-client-python/compare/v0.11.0...v0.12.0) (2026-04-22)
 
 
