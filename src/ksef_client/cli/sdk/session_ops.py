@@ -106,6 +106,21 @@ def _require_batch_checkpoint(profile: str, session_id: str) -> BatchSessionChec
     return checkpoint
 
 
+def _ensure_checkpoint_not_closed(
+    checkpoint: SessionCheckpoint,
+    *,
+    command_name: str,
+    next_step: str,
+) -> None:
+    if checkpoint.stage != "closed":
+        return
+    raise CliError(
+        f"Session checkpoint '{checkpoint.id}' is already closed.",
+        ExitCode.VALIDATION_ERROR,
+        f"Open a new session checkpoint before running `{command_name}`. {next_step}",
+    )
+
+
 def _checkpoint_summary(checkpoint: SessionCheckpoint) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "id": checkpoint.id,
@@ -217,6 +232,11 @@ def send_online_session_invoice(
     save_upo_overwrite: bool = False,
 ) -> dict[str, Any]:
     checkpoint = _require_online_checkpoint(profile, session_id)
+    _ensure_checkpoint_not_closed(
+        checkpoint,
+        command_name="ksef session online send",
+        next_step="Use `ksef session online open --id <NEW_ID>` first.",
+    )
     access_token = adapters._require_access_token(profile)
     if save_upo and not wait_upo:
         raise CliError(
@@ -308,6 +328,14 @@ def close_online_session(
     session_id: str,
 ) -> dict[str, Any]:
     checkpoint = _require_online_checkpoint(profile, session_id)
+    _ensure_checkpoint_not_closed(
+        checkpoint,
+        command_name="ksef session online close",
+        next_step=(
+            "Use `ksef session online open --id <NEW_ID>` "
+            "if you need a new resumable session."
+        ),
+    )
     access_token = adapters._require_access_token(profile)
     with adapters.create_client(checkpoint.base_url, access_token=access_token) as client:
         workflow = OnlineSessionWorkflow(client.sessions)
@@ -369,6 +397,11 @@ def upload_batch_session(
     parallelism: int,
 ) -> dict[str, Any]:
     checkpoint = _require_batch_checkpoint(profile, session_id)
+    _ensure_checkpoint_not_closed(
+        checkpoint,
+        command_name="ksef session batch upload",
+        next_step="Use `ksef session batch open --id <NEW_ID>` to start a new batch session.",
+    )
     access_token = adapters._require_access_token(profile)
     if parallelism <= 0:
         raise CliError(
@@ -435,7 +468,6 @@ def close_batch_session(
     save_upo_overwrite: bool = False,
 ) -> dict[str, Any]:
     checkpoint = _require_batch_checkpoint(profile, session_id)
-    access_token = adapters._require_access_token(profile)
     if save_upo and not wait_upo:
         raise CliError(
             "Option --save-upo requires --wait-upo.",
@@ -445,15 +477,20 @@ def close_batch_session(
     if wait_status or wait_upo:
         adapters._validate_polling_options(poll_interval, max_attempts)
 
+    if checkpoint.stage == "closed" and not (wait_status or wait_upo):
+        return _checkpoint_summary(checkpoint)
+
+    access_token = adapters._require_access_token(profile)
     with adapters.create_client(checkpoint.base_url, access_token=access_token) as client:
-        session = BatchSessionHandle.from_state(
-            checkpoint.session_state,
-            sessions_client=client.sessions,
-            uploader=BatchUploadHelper(client.http_client),
-            access_token=access_token,
-        )
-        session.close(access_token=access_token)
-        checkpoint = cast(BatchSessionCheckpoint, update_checkpoint(checkpoint, stage="closed"))
+        if checkpoint.stage != "closed":
+            session = BatchSessionHandle.from_state(
+                checkpoint.session_state,
+                sessions_client=client.sessions,
+                uploader=BatchUploadHelper(client.http_client),
+                access_token=access_token,
+            )
+            session.close(access_token=access_token)
+            checkpoint = cast(BatchSessionCheckpoint, update_checkpoint(checkpoint, stage="closed"))
 
         result: dict[str, Any] = _checkpoint_summary(checkpoint)
         if wait_status or wait_upo:

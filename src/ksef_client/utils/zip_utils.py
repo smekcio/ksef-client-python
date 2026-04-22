@@ -5,13 +5,18 @@ import zipfile
 from pathlib import PurePosixPath
 
 MAX_BATCH_PART_SIZE_BYTES = 100 * 1024 * 1024
+_DETERMINISTIC_ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 
 
 def build_zip(files: dict[str, bytes]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for name, content in files.items():
-            zf.writestr(name, content)
+            info = zipfile.ZipInfo(filename=name, date_time=_DETERMINISTIC_ZIP_DATE_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 0
+            info.external_attr = 0
+            zf.writestr(info, content)
     return buffer.getvalue()
 
 

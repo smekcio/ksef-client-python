@@ -14,6 +14,16 @@ class ZipUtilsTests(unittest.TestCase):
         self.assertEqual(unzipped["a.txt"], b"hello")
         self.assertEqual(unzipped["b.txt"], b"world")
 
+    def test_build_zip_is_deterministic(self):
+        files = {"a.txt": b"hello", "b.txt": b"world"}
+
+        first = build_zip(files)
+        second = build_zip(files)
+
+        self.assertEqual(first, second)
+        with zipfile.ZipFile(BytesIO(first), "r") as zf:
+            self.assertEqual(zf.getinfo("a.txt").date_time, (1980, 1, 1, 0, 0, 0))
+
     def test_unzip_limits_max_files(self):
         files = {"a.txt": b"hello", "b.txt": b"world"}
         zip_bytes = build_zip(files)
