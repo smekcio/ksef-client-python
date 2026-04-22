@@ -211,49 +211,101 @@ class StubAsyncAuthClient:
 
 
 class StubSessionsClient:
-    def __init__(self):
-        self.calls = []
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, ...]] = []
 
-    def open_online_session(self, payload, access_token, upo_v43=False):
+    def open_online_session(
+        self,
+        payload: m.OpenOnlineSessionRequest,
+        *,
+        access_token: str | None = None,
+        upo_v43: bool = False,
+    ) -> m.OpenOnlineSessionResponse:
         self.calls.append(("open_online", payload, access_token, upo_v43))
         return _open_online_session_response()
 
-    def send_online_invoice(self, ref, payload, access_token):
-        self.calls.append(("send", ref, payload))
+    def send_online_invoice(
+        self,
+        reference_number: str,
+        request_payload: m.SendInvoiceRequest,
+        *,
+        access_token: str | None = None,
+    ) -> m.SendInvoiceResponse:
+        self.calls.append(("send", reference_number, request_payload, access_token))
         return _send_invoice_response()
 
-    def close_online_session(self, ref, access_token):
-        self.calls.append(("close", ref))
+    def close_online_session(
+        self,
+        reference_number: str,
+        access_token: str | None = None,
+    ) -> None:
+        self.calls.append(("close", reference_number, access_token))
 
-    def open_batch_session(self, payload, access_token, upo_v43=False):
+    def open_batch_session(
+        self,
+        payload: m.OpenBatchSessionRequest,
+        *,
+        access_token: str | None = None,
+        upo_v43: bool = False,
+    ) -> m.OpenBatchSessionResponse:
         self.calls.append(("open_batch", payload, access_token, upo_v43))
         return _open_batch_session_response()
 
-    def close_batch_session(self, ref, access_token):
-        self.calls.append(("close_batch", ref))
+    def close_batch_session(
+        self,
+        reference_number: str,
+        access_token: str | None = None,
+    ) -> None:
+        self.calls.append(("close_batch", reference_number, access_token))
 
 
 class StubAsyncSessionsClient:
-    def __init__(self):
-        self.calls = []
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, ...]] = []
 
-    async def open_online_session(self, payload, access_token, upo_v43=False):
+    async def open_online_session(
+        self,
+        payload: m.OpenOnlineSessionRequest,
+        *,
+        access_token: str | None = None,
+        upo_v43: bool = False,
+    ) -> m.OpenOnlineSessionResponse:
         self.calls.append(("open_online", payload, access_token, upo_v43))
         return _open_online_session_response()
 
-    async def send_online_invoice(self, ref, payload, access_token):
-        self.calls.append(("send", ref, payload))
+    async def send_online_invoice(
+        self,
+        reference_number: str,
+        request_payload: m.SendInvoiceRequest,
+        *,
+        access_token: str | None = None,
+    ) -> m.SendInvoiceResponse:
+        self.calls.append(("send", reference_number, request_payload, access_token))
         return _send_invoice_response()
 
-    async def close_online_session(self, ref, access_token):
-        self.calls.append(("close", ref))
+    async def close_online_session(
+        self,
+        reference_number: str,
+        access_token: str | None = None,
+    ) -> None:
+        self.calls.append(("close", reference_number, access_token))
 
-    async def open_batch_session(self, payload, access_token, upo_v43=False):
+    async def open_batch_session(
+        self,
+        payload: m.OpenBatchSessionRequest,
+        *,
+        access_token: str | None = None,
+        upo_v43: bool = False,
+    ) -> m.OpenBatchSessionResponse:
         self.calls.append(("open_batch", payload, access_token, upo_v43))
         return _open_batch_session_response()
 
-    async def close_batch_session(self, ref, access_token):
-        self.calls.append(("close_batch", ref))
+    async def close_batch_session(
+        self,
+        reference_number: str,
+        access_token: str | None = None,
+    ) -> None:
+        self.calls.append(("close_batch", reference_number, access_token))
 
 
 class WorkflowsTests(unittest.TestCase):

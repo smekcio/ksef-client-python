@@ -4,7 +4,9 @@ Katalog zawiera minimalne skrypty uruchomieniowe prezentujące podstawowe scenar
 - autoryzacja tokenem KSeF (uzyskanie `accessToken` i `refreshToken`),
 - autoryzacja podpisem XAdES (certyfikat + klucz prywatny albo kontener PKCS#12),
 - wyszukiwanie metadanych faktur,
-- wysyłka faktury w sesji online (XML FA(3) z pliku).
+- wysyłka faktury w sesji online (XML FA(3) z pliku),
+- resume sesji online z `OnlineSessionState`,
+- resume sesji batch z `BatchSessionState`.
 
 Polecenia w tym dokumencie zakładają uruchomienie z katalogu `ksef-client-python`.
 
@@ -82,6 +84,7 @@ python docs/examples/invoice_list.py
 ### `invoice_send.py`
 
 Wysyła fakturę w sesji online. Skrypt zakłada dostępność poprawnego pliku XML faktury w wersji FA(3).
+Pokazuje aktualne API handle'a sesji: `open_session() -> session.send_invoice() -> session.close()`.
 
 Dodatkowe zmienne:
 
@@ -91,4 +94,34 @@ Uruchomienie:
 
 ```bash
 python docs/examples/invoice_send.py
+```
+
+### `session_resume_online.py`
+
+Otwiera sesję online, serializuje lekki JSON stanu, a następnie wznawia sesję w nowym kliencie.
+
+Dodatkowe zmienne:
+
+- `KSEF_INVOICE_XML_PATH` – ścieżka do pliku XML (FA(3))
+- `KSEF_SESSION_STATE_PATH` – opcjonalna ścieżka do pliku JSON ze stanem sesji
+
+Uruchomienie:
+
+```bash
+python docs/examples/session_resume_online.py
+```
+
+### `session_resume_batch.py`
+
+Otwiera sesję batch, serializuje lekki JSON stanu, a następnie wznawia sesję z tego samego ZIP-a.
+
+Dodatkowe zmienne:
+
+- `KSEF_BATCH_ZIP_PATH` – ścieżka do ZIP-a z fakturami XML
+- `KSEF_BATCH_STATE_PATH` – opcjonalna ścieżka do pliku JSON ze stanem sesji
+
+Uruchomienie:
+
+```bash
+python docs/examples/session_resume_batch.py
 ```

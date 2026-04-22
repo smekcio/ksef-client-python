@@ -48,6 +48,14 @@ Token może zostać przekazany na dwa sposoby:
 
 Wariant per-call jest preferowany w przypadku obsługi wielu kontekstów.
 
+Ważne dla resume workflow:
+- handle sesji (`OnlineSessionHandle`, `BatchSessionHandle`) i metody `client.sessions.*`
+  akceptują `access_token=None`,
+- dzięki temu po wznowieniu z `OnlineSessionState` / `BatchSessionState` możesz polegać na tokenie
+  ustawionym w konstruktorze klienta, bez przekazywania go do każdego wywołania.
+
+Stan sesji serializowany przez SDK nie zawiera tokenów. To świadoma decyzja bezpieczeństwa.
+
 Ważne: payloady requestów w SDK są typed-only. Do metod klientów przekazuj modele z
 `ksef_client.models`, a nie surowe `dict`.
 

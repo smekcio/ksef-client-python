@@ -14578,7 +14578,6 @@
         "enum": [
           "FA",
           "PEF",
-          "RR",
           "FA_RR"
         ],
         "type": "string",

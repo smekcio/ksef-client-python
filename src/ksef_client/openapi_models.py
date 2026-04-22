@@ -458,7 +458,6 @@ class InvoiceQueryDateType(OpenApiEnum):
 class InvoiceQueryFormType(OpenApiEnum):
     FA = "FA"
     PEF = "PEF"
-    RR = "RR"
     FA_RR = "FA_RR"
 
 class InvoiceQuerySubjectType(OpenApiEnum):

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
 from ksef_client import models as m
-from ksef_client.services import AuthCoordinator, OnlineSessionWorkflow
+from ksef_client.services import AuthCoordinator, OnlineSessionState, OnlineSessionWorkflow
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -22,6 +22,7 @@ def main() -> None:
     context_type = _env("KSEF_CONTEXT_TYPE")
     context_value = _env("KSEF_CONTEXT_VALUE")
     invoice_xml_path = _env("KSEF_INVOICE_XML_PATH")
+    state_path = Path(os.getenv("KSEF_SESSION_STATE_PATH", "online-session-state.json"))
 
     invoice_xml = Path(invoice_xml_path).read_bytes()
 
@@ -47,12 +48,18 @@ def main() -> None:
             public_certificate=symmetric_cert_pem,
             access_token=access_token,
         )
-        send_result = session.send_invoice(invoice_xml, access_token=access_token)
+        state_path.write_text(session.get_state().to_json(), encoding="ascii")
+
+    resumed_state = OnlineSessionState.from_json(state_path.read_text(encoding="ascii"))
+
+    with KsefClient(KsefClientOptions(base_url=base_url), access_token=access_token) as client:
+        resumed = OnlineSessionWorkflow(client.sessions).resume_session(resumed_state)
+        send_result = resumed.send_invoice(invoice_xml)
         invoice_reference = send_result.reference_number
 
         status = None
         for _ in range(60):
-            status = session.get_invoice_status(invoice_reference, access_token=access_token)
+            status = resumed.get_invoice_status(invoice_reference)
             code = int(status.status.code)
             if code == 200:
                 break
@@ -60,8 +67,9 @@ def main() -> None:
                 raise RuntimeError(status.to_dict())
             time.sleep(2)
 
-        session.close(access_token=access_token)
+        resumed.close()
 
+    print(f"Saved state to: {state_path}")
     print(f"Invoice reference: {invoice_reference}")
     print(f"KSeF number: {None if status is None else status.ksef_number}")
 
