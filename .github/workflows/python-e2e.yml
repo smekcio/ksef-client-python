@@ -84,12 +84,24 @@ jobs:
           KSEF_TEST_CONTEXT_TYPE: ${{ secrets.KSEF_TEST_CONTEXT_TYPE }}
           KSEF_TEST_CONTEXT_VALUE: ${{ secrets.KSEF_TEST_CONTEXT_VALUE }}
           KSEF_TEST_SUBJECT_TYPE: Subject1
+          KSEF_E2E_RATE_LIMIT_RETRIES: "5"
+          KSEF_E2E_INVOICE_MAX_ATTEMPTS: "120"
+          KSEF_E2E_UPO_MAX_ATTEMPTS: "90"
+          KSEF_E2E_SESSION_MAX_ATTEMPTS: "120"
         run: |
-          python -m pytest -q --maxfail=1 --disable-warnings \
-            tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_token
-          python -m pytest -q --maxfail=1 --disable-warnings \
-            tests/test_e2e_resume_flows.py::test_e2e_test_environment_online_resume_token \
-            tests/test_e2e_resume_flows.py::test_e2e_test_environment_batch_resume_token
+          for attempt in 1 2; do
+            if python -m pytest -q --maxfail=1 --disable-warnings \
+              tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_token \
+              tests/test_e2e_resume_flows.py::test_e2e_test_environment_online_resume_token \
+              tests/test_e2e_resume_flows.py::test_e2e_test_environment_batch_resume_token; then
+              exit 0
+            fi
+            if [ "${attempt}" -eq 2 ]; then
+              exit 1
+            fi
+            echo "TEST token E2E failed on attempt ${attempt}; retrying after cooldown..."
+            sleep 20
+          done
 
   e2e-test-xades:
     name: E2E TEST (xades)
@@ -178,9 +190,19 @@ jobs:
           KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64 }}
           KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD }}
           KSEF_TEST_XADES_SUBJECT_IDENTIFIER_TYPE: certificateSubject
+          KSEF_E2E_RATE_LIMIT_RETRIES: "5"
         run: |
-          python -m pytest -q --maxfail=1 --disable-warnings \
-            tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_xades
+          for attempt in 1 2; do
+            if python -m pytest -q --maxfail=1 --disable-warnings \
+              tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_xades; then
+              exit 0
+            fi
+            if [ "${attempt}" -eq 2 ]; then
+              exit 1
+            fi
+            echo "TEST xades E2E failed on attempt ${attempt}; retrying after cooldown..."
+            sleep 20
+          done
 
   e2e-demo-token:
     name: E2E DEMO (token)

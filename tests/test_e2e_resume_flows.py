@@ -16,6 +16,8 @@ from tests.test_e2e_token_flows import (
     _authenticate_access_token,
     _build_invoice_xml,
     _ensure_e2e_enabled,
+    _env_float,
+    _env_int,
     _load_demo_token_config,
     _load_test_token_config,
     _poll_for_ksef_number,
@@ -34,8 +36,8 @@ def _poll_for_session_completion(
     access_token: str,
     require_upo_reference: bool = False,
 ) -> m.SessionStatusResponse:
-    max_attempts = 45
-    poll_interval = 2.0
+    max_attempts = _env_int("KSEF_E2E_SESSION_MAX_ATTEMPTS", 90)
+    poll_interval = _env_float("KSEF_E2E_POLL_INTERVAL_SECONDS", 2.0)
 
     for _ in range(max_attempts):
         status = _with_rate_limit_retry(
@@ -89,10 +91,12 @@ def _run_online_resume_flow(config: E2EConfig) -> None:
             token_cert=token_cert,
         )
 
-        session = OnlineSessionWorkflow(open_client.sessions).open_session(
-            form_code=FORM_CODE,
-            public_certificate=symmetric_cert,
-            access_token=access_token,
+        session = _with_rate_limit_retry(
+            lambda: OnlineSessionWorkflow(open_client.sessions).open_session(
+                form_code=FORM_CODE,
+                public_certificate=symmetric_cert,
+                access_token=access_token,
+            )
         )
         session_state = OnlineSessionState.from_json(session.get_state().to_json())
 
@@ -106,12 +110,14 @@ def _run_online_resume_flow(config: E2EConfig) -> None:
             access_token=access_token,
         )
         try:
-            send_result = resumed.send_invoice(
-                _build_invoice_xml(
-                    seller_nip=config.context_value,
-                    environment_name=f"{config.name}-resume",
-                ),
-                access_token=access_token,
+            send_result = _with_rate_limit_retry(
+                lambda: resumed.send_invoice(
+                    _build_invoice_xml(
+                        seller_nip=config.context_value,
+                        environment_name=f"{config.name}-resume",
+                    ),
+                    access_token=access_token,
+                )
             )
             invoice_reference_number = send_result.reference_number
             assert isinstance(invoice_reference_number, str) and invoice_reference_number, (
@@ -149,7 +155,7 @@ def _run_online_resume_flow(config: E2EConfig) -> None:
             ), "Resumed online session did not list the sent invoice."
         finally:
             with suppress(Exception):
-                resumed.close(access_token=access_token)
+                _with_rate_limit_retry(lambda: resumed.close(access_token=access_token))
 
 
 def _run_batch_resume_flow(config: E2EConfig) -> None:
@@ -174,11 +180,16 @@ def _run_batch_resume_flow(config: E2EConfig) -> None:
             token_cert=token_cert,
         )
 
-        session = BatchSessionWorkflow(open_client.sessions, open_client.http_client).open_session(
-            form_code=FORM_CODE,
-            zip_bytes=batch_zip,
-            public_certificate=symmetric_cert,
-            access_token=access_token,
+        session = _with_rate_limit_retry(
+            lambda: BatchSessionWorkflow(
+                open_client.sessions,
+                open_client.http_client,
+            ).open_session(
+                form_code=FORM_CODE,
+                zip_bytes=batch_zip,
+                public_certificate=symmetric_cert,
+                access_token=access_token,
+            )
         )
         session_state = BatchSessionState.from_json(session.get_state().to_json())
 
@@ -204,7 +215,7 @@ def _run_batch_resume_flow(config: E2EConfig) -> None:
             )
             assert uploaded_ordinals, "Batch resume did not upload any parts."
 
-            resumed.close(access_token=access_token)
+            _with_rate_limit_retry(lambda: resumed.close(access_token=access_token))
 
             session_status = _poll_for_session_completion(
                 resumed_client,
@@ -236,7 +247,7 @@ def _run_batch_resume_flow(config: E2EConfig) -> None:
             )
         finally:
             with suppress(Exception):
-                resumed.close(access_token=access_token)
+                _with_rate_limit_retry(lambda: resumed.close(access_token=access_token))
 
 
 def test_e2e_test_environment_online_resume_token() -> None:
