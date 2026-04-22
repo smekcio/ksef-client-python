@@ -22,7 +22,7 @@ jobs:
     name: E2E TEST (token)
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
 
     steps:
       - uses: actions/checkout@v5
@@ -86,6 +86,9 @@ jobs:
         run: |
           python -m pytest -q --maxfail=1 --disable-warnings \
             tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_token
+          python -m pytest -q --maxfail=1 --disable-warnings \
+            tests/test_e2e_resume_flows.py::test_e2e_test_environment_online_resume_token \
+            tests/test_e2e_resume_flows.py::test_e2e_test_environment_batch_resume_token
 
   e2e-test-xades:
     name: E2E TEST (xades)
@@ -182,7 +185,7 @@ jobs:
     name: E2E DEMO (token)
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
 
     steps:
       - uses: actions/checkout@v5
@@ -246,6 +249,9 @@ jobs:
         run: |
           python -m pytest -q --maxfail=1 --disable-warnings \
             tests/test_e2e_token_flows.py::test_e2e_demo_environment_full_flow_token
+          python -m pytest -q --maxfail=1 --disable-warnings \
+            tests/test_e2e_resume_flows.py::test_e2e_demo_environment_online_resume_token \
+            tests/test_e2e_resume_flows.py::test_e2e_demo_environment_batch_resume_token
 
   e2e-demo-xades:
     name: E2E DEMO (xades)
