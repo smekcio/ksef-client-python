@@ -13,6 +13,7 @@ from .commands import (
     lighthouse_cmd,
     profile_cmd,
     send_cmd,
+    session_cmd,
     upo_cmd,
 )
 from .config.loader import load_config
@@ -83,6 +84,7 @@ app.add_typer(health_cmd.app, name="health")
 app.add_typer(lighthouse_cmd.app, name="lighthouse")
 app.add_typer(invoice_cmd.app, name="invoice")
 app.add_typer(send_cmd.app, name="send")
+app.add_typer(session_cmd.app, name="session")
 app.add_typer(upo_cmd.app, name="upo")
 app.add_typer(export_cmd.app, name="export")
 app.command("init")(init_cmd.init_command)

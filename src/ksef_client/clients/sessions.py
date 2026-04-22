@@ -71,7 +71,7 @@ class SessionsClient(BaseApiClient):
         self,
         request_payload: OpenOnlineSessionRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         upo_v43: bool = False,
     ) -> OpenOnlineSessionResponse:
         headers = {}
@@ -87,7 +87,9 @@ class SessionsClient(BaseApiClient):
             expected_status={201},
         )
 
-    def close_online_session(self, reference_number: str, access_token: str) -> None:
+    def close_online_session(
+        self, reference_number: str, access_token: str | None = None
+    ) -> None:
         self._request_json(
             "POST",
             f"/sessions/online/{reference_number}/close",
@@ -100,7 +102,7 @@ class SessionsClient(BaseApiClient):
         reference_number: str,
         request_payload: SendInvoiceRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> SendInvoiceResponse:
         return self._request_model(
             "POST",
@@ -115,7 +117,7 @@ class SessionsClient(BaseApiClient):
         self,
         request_payload: OpenBatchSessionRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         upo_v43: bool = False,
     ) -> OpenBatchSessionResponse:
         headers = {}
@@ -131,7 +133,7 @@ class SessionsClient(BaseApiClient):
             expected_status={201},
         )
 
-    def close_batch_session(self, reference_number: str, access_token: str) -> None:
+    def close_batch_session(self, reference_number: str, access_token: str | None = None) -> None:
         self._request_json(
             "POST",
             f"/sessions/batch/{reference_number}/close",
@@ -139,7 +141,9 @@ class SessionsClient(BaseApiClient):
             expected_status={204},
         )
 
-    def get_session_status(self, reference_number: str, access_token: str) -> SessionStatusResponse:
+    def get_session_status(
+        self, reference_number: str, access_token: str | None = None
+    ) -> SessionStatusResponse:
         return self._request_model(
             "GET",
             f"/sessions/{reference_number}",
@@ -153,7 +157,7 @@ class SessionsClient(BaseApiClient):
         *,
         page_size: int | None = None,
         continuation_token: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> SessionInvoicesResponse:
         headers = {}
         if continuation_token:
@@ -176,7 +180,7 @@ class SessionsClient(BaseApiClient):
         *,
         page_size: int | None = None,
         continuation_token: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> SessionInvoicesResponse:
         headers = {}
         if continuation_token:
@@ -198,7 +202,7 @@ class SessionsClient(BaseApiClient):
         reference_number: str,
         invoice_reference_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> SessionInvoiceStatusResponse:
         return self._request_model(
             "GET",
@@ -212,7 +216,7 @@ class SessionsClient(BaseApiClient):
         reference_number: str,
         invoice_reference_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> bytes:
         return self._request_bytes(
             "GET",
@@ -225,7 +229,7 @@ class SessionsClient(BaseApiClient):
         reference_number: str,
         ksef_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> bytes:
         return self._request_bytes(
             "GET",
@@ -238,7 +242,7 @@ class SessionsClient(BaseApiClient):
         reference_number: str,
         upo_reference_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> bytes:
         return self._request_bytes(
             "GET",
@@ -301,7 +305,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         self,
         request_payload: OpenOnlineSessionRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         upo_v43: bool = False,
     ) -> OpenOnlineSessionResponse:
         headers = {}
@@ -317,7 +321,9 @@ class AsyncSessionsClient(AsyncBaseApiClient):
             expected_status={201},
         )
 
-    async def close_online_session(self, reference_number: str, access_token: str) -> None:
+    async def close_online_session(
+        self, reference_number: str, access_token: str | None = None
+    ) -> None:
         await self._request_json(
             "POST",
             f"/sessions/online/{reference_number}/close",
@@ -330,7 +336,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         reference_number: str,
         request_payload: SendInvoiceRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> SendInvoiceResponse:
         return await self._request_model(
             "POST",
@@ -345,7 +351,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         self,
         request_payload: OpenBatchSessionRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         upo_v43: bool = False,
     ) -> OpenBatchSessionResponse:
         headers = {}
@@ -361,7 +367,9 @@ class AsyncSessionsClient(AsyncBaseApiClient):
             expected_status={201},
         )
 
-    async def close_batch_session(self, reference_number: str, access_token: str) -> None:
+    async def close_batch_session(
+        self, reference_number: str, access_token: str | None = None
+    ) -> None:
         await self._request_json(
             "POST",
             f"/sessions/batch/{reference_number}/close",
@@ -370,7 +378,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         )
 
     async def get_session_status(
-        self, reference_number: str, access_token: str
+        self, reference_number: str, access_token: str | None = None
     ) -> SessionStatusResponse:
         return await self._request_model(
             "GET",
@@ -385,7 +393,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         *,
         page_size: int | None = None,
         continuation_token: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> SessionInvoicesResponse:
         headers = {}
         if continuation_token:
@@ -408,7 +416,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         *,
         page_size: int | None = None,
         continuation_token: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> SessionInvoicesResponse:
         headers = {}
         if continuation_token:
@@ -430,7 +438,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         reference_number: str,
         invoice_reference_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> SessionInvoiceStatusResponse:
         return await self._request_model(
             "GET",
@@ -444,7 +452,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         reference_number: str,
         invoice_reference_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> bytes:
         return await self._request_bytes(
             "GET",
@@ -457,7 +465,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         reference_number: str,
         ksef_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> bytes:
         return await self._request_bytes(
             "GET",
@@ -470,7 +478,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         reference_number: str,
         upo_reference_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> bytes:
         return await self._request_bytes(
             "GET",

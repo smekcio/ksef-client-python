@@ -92,6 +92,11 @@ def send_online(
         "--save-upo",
         help="Save UPO to this path (requires --wait-upo).",
     ),
+    save_session: str | None = typer.Option(
+        None,
+        "--save-session",
+        help="Persist a resumable local session checkpoint under this id.",
+    ),
     save_upo_overwrite: bool = typer.Option(
         False,
         "--save-upo-overwrite",
@@ -119,6 +124,7 @@ def send_online(
             poll_interval=poll_interval,
             max_attempts=max_attempts,
             save_upo=save_upo,
+            save_session=save_session,
             save_upo_overwrite=save_upo_overwrite,
         )
     except Exception as exc:
@@ -157,6 +163,11 @@ def send_batch(
         "--save-upo",
         help="Save UPO to this path (requires --wait-upo).",
     ),
+    save_session: str | None = typer.Option(
+        None,
+        "--save-session",
+        help="Persist a resumable local session checkpoint under this id.",
+    ),
     save_upo_overwrite: bool = typer.Option(
         False,
         "--save-upo-overwrite",
@@ -186,6 +197,7 @@ def send_batch(
             poll_interval=poll_interval,
             max_attempts=max_attempts,
             save_upo=save_upo,
+            save_session=save_session,
             save_upo_overwrite=save_upo_overwrite,
         )
     except Exception as exc:
