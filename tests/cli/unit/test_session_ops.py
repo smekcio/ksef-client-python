@@ -430,6 +430,47 @@ def test_send_online_session_invoice_wait_upo_without_saving_returns_empty_path(
     assert result["upo_path"] == ""
 
 
+def test_send_online_session_invoice_rejects_closed_checkpoint(monkeypatch) -> None:
+    checkpoint = replace(_online_checkpoint(), stage="closed")
+    monkeypatch.setattr(session_ops, "load_checkpoint", lambda profile, session_id: checkpoint)
+    monkeypatch.setattr(
+        session_ops.adapters,
+        "_require_access_token",
+        lambda profile: (_ for _ in ()).throw(AssertionError("token lookup should not run")),
+    )
+
+    with pytest.raises(CliError) as exc:
+        session_ops.send_online_session_invoice(
+            profile="demo",
+            session_id="resume-online",
+            invoice="invoice.xml",
+            wait_status=False,
+            wait_upo=False,
+            poll_interval=1.0,
+            max_attempts=1,
+            save_upo=None,
+        )
+
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+    assert "already closed" in exc.value.message
+
+
+def test_close_online_session_rejects_closed_checkpoint(monkeypatch) -> None:
+    checkpoint = replace(_online_checkpoint(), stage="closed")
+    monkeypatch.setattr(session_ops, "load_checkpoint", lambda profile, session_id: checkpoint)
+    monkeypatch.setattr(
+        session_ops.adapters,
+        "_require_access_token",
+        lambda profile: (_ for _ in ()).throw(AssertionError("token lookup should not run")),
+    )
+
+    with pytest.raises(CliError) as exc:
+        session_ops.close_online_session(profile="demo", session_id="resume-online")
+
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+    assert "already closed" in exc.value.message
+
+
 def test_open_batch_session_closes_handle_when_save_fails(monkeypatch) -> None:
     closed: list[str | None] = []
 
@@ -548,6 +589,26 @@ def test_upload_batch_session_validates_parallelism_and_updates_progress(monkeyp
     assert updated[-1].uploaded_ordinals == [1]
 
 
+def test_upload_batch_session_rejects_closed_checkpoint(monkeypatch) -> None:
+    checkpoint = replace(_batch_checkpoint(), stage="closed")
+    monkeypatch.setattr(session_ops, "load_checkpoint", lambda profile, session_id: checkpoint)
+    monkeypatch.setattr(
+        session_ops.adapters,
+        "_require_access_token",
+        lambda profile: (_ for _ in ()).throw(AssertionError("token lookup should not run")),
+    )
+
+    with pytest.raises(CliError) as exc:
+        session_ops.upload_batch_session(
+            profile="demo",
+            session_id="resume-batch",
+            parallelism=1,
+        )
+
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+    assert "already closed" in exc.value.message
+
+
 def test_close_batch_session_validates_and_waits(monkeypatch, tmp_path: Path) -> None:
     checkpoint = _batch_checkpoint()
 
@@ -643,6 +704,36 @@ def test_close_batch_session_validates_and_waits(monkeypatch, tmp_path: Path) ->
     assert close_calls == ["token"]
     assert validate_calls == [(0.5, 5)]
     assert updated[-1].last_upo_ref == "UPO-1"
+
+
+def test_close_batch_session_returns_summary_for_closed_checkpoint_without_waits(
+    monkeypatch,
+) -> None:
+    checkpoint = replace(_batch_checkpoint(), stage="closed")
+    monkeypatch.setattr(session_ops, "load_checkpoint", lambda profile, session_id: checkpoint)
+    monkeypatch.setattr(
+        session_ops.adapters,
+        "_require_access_token",
+        lambda profile: (_ for _ in ()).throw(AssertionError("token lookup should not run")),
+    )
+    monkeypatch.setattr(
+        session_ops.adapters,
+        "create_client",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("client should not open")),
+    )
+
+    result = session_ops.close_batch_session(
+        profile="demo",
+        session_id="resume-batch",
+        wait_status=False,
+        wait_upo=False,
+        poll_interval=1.0,
+        max_attempts=1,
+        save_upo=None,
+    )
+
+    assert result["id"] == "resume-batch"
+    assert result["stage"] == "closed"
 
 
 def test_close_batch_session_wait_upo_requires_reference(monkeypatch) -> None:
