@@ -31,7 +31,12 @@ from ..models import (
     SendInvoiceResponse,
 )
 from ..utils.zip_utils import unzip_bytes_safe
-from .auth import build_auth_token_request_xml, build_ksef_token_auth_request, encrypt_ksef_token
+from .auth import (
+    DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
+    build_auth_token_request_xml,
+    build_ksef_token_auth_request,
+    encrypt_ksef_token,
+)
 from .batch import encrypt_batch_parts
 from .crypto import (
     EncryptionData,
@@ -297,6 +302,7 @@ class AuthCoordinator:
         verify_certificate_chain: bool | None = None,
         enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
+        auth_request_schema_version: str = DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -309,6 +315,7 @@ class AuthCoordinator:
             verify_certificate_chain=verify_certificate_chain,
             enforce_xades_compliance=enforce_xades_compliance,
             authorization_policy_xml=authorization_policy_xml,
+            auth_request_schema_version=auth_request_schema_version,
             poll_interval_seconds=poll_interval_seconds,
             max_attempts=max_attempts,
         )
@@ -324,6 +331,7 @@ class AuthCoordinator:
         verify_certificate_chain: bool | None = None,
         enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
+        auth_request_schema_version: str = DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -334,6 +342,7 @@ class AuthCoordinator:
             context_identifier_value=context_identifier_value,
             subject_identifier_type=subject_identifier_type,
             authorization_policy_xml=authorization_policy_xml,
+            schema_version=auth_request_schema_version,
         )
         from .xades import sign_xades_enveloped
 
@@ -436,6 +445,7 @@ class AsyncAuthCoordinator:
         verify_certificate_chain: bool | None = None,
         enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
+        auth_request_schema_version: str = DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -448,6 +458,7 @@ class AsyncAuthCoordinator:
             verify_certificate_chain=verify_certificate_chain,
             enforce_xades_compliance=enforce_xades_compliance,
             authorization_policy_xml=authorization_policy_xml,
+            auth_request_schema_version=auth_request_schema_version,
             poll_interval_seconds=poll_interval_seconds,
             max_attempts=max_attempts,
         )
@@ -463,6 +474,7 @@ class AsyncAuthCoordinator:
         verify_certificate_chain: bool | None = None,
         enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
+        auth_request_schema_version: str = DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -473,6 +485,7 @@ class AsyncAuthCoordinator:
             context_identifier_value=context_identifier_value,
             subject_identifier_type=subject_identifier_type,
             authorization_policy_xml=authorization_policy_xml,
+            schema_version=auth_request_schema_version,
         )
         from .xades import sign_xades_enveloped
 

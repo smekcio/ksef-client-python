@@ -3,6 +3,7 @@ import unittest
 
 from ksef_client.services.auth import (
     AUTH_NS,
+    AUTH_TOKEN_REQUEST_NAMESPACE_BY_SCHEMA_VERSION,
     _context_tag,
     build_auth_token_request_xml,
     build_ksef_token_auth_request,
@@ -21,8 +22,28 @@ class AuthServiceTests(unittest.TestCase):
             authorization_policy_xml="<Policy/>",
         )
         self.assertIn(AUTH_NS, xml)
+        self.assertIn("http://ksef.mf.gov.pl/auth/token/2.1", xml)
         self.assertIn("<Nip>123</Nip>", xml)
         self.assertIn("<Policy/>", xml)
+
+    def test_build_auth_token_request_xml_supports_schema_2_0(self):
+        xml = build_auth_token_request_xml(
+            challenge="c",
+            context_identifier_type="nip",
+            context_identifier_value="123",
+            schema_version="2.0",
+        )
+        self.assertIn(AUTH_TOKEN_REQUEST_NAMESPACE_BY_SCHEMA_VERSION["2.0"], xml)
+        self.assertNotIn(AUTH_TOKEN_REQUEST_NAMESPACE_BY_SCHEMA_VERSION["2.1"], xml)
+
+    def test_build_auth_token_request_xml_rejects_unknown_schema_version(self):
+        with self.assertRaises(ValueError):
+            build_auth_token_request_xml(
+                challenge="c",
+                context_identifier_type="nip",
+                context_identifier_value="123",
+                schema_version="1.0",
+            )
 
     def test_context_tag(self):
         self.assertEqual(_context_tag("NIP"), "Nip")

@@ -47,6 +47,9 @@ Scenariusz:
 5. polling `GET /auth/{referenceNumber}` aż `status.code == 200`
 6. `POST /auth/token/redeem`
 
+Domyślnie używana jest schema `AuthTokenRequest` `2.1`; parametr
+`auth_request_schema_version="2.0"` zachowuje możliwość wygenerowania XML w starszej przestrzeni nazw.
+
 ### `AuthCoordinator.authenticate_with_ksef_token(...) -> AuthResult`
 
 Scenariusz analogiczny, ale z szyfrowaniem wartości `token|timestampMs` certyfikatem KSeF

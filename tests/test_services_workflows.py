@@ -480,6 +480,29 @@ class WorkflowsTests(unittest.TestCase):
                 max_attempts=1,
             )
 
+    def test_auth_coordinator_xades_schema_version_option(self):
+        auth = StubAuthClient([200])
+        coord = workflows.AuthCoordinator(auth)
+        rsa_cert = generate_rsa_cert()
+
+        def _sign(xml, certificate_pem, private_key_pem):
+            _ = (certificate_pem, private_key_pem)
+            self.assertIn("http://ksef.mf.gov.pl/auth/token/2.0", xml)
+            self.assertNotIn("http://ksef.mf.gov.pl/auth/token/2.1", xml)
+            return "signed"
+
+        with patch("ksef_client.services.xades.sign_xades_enveloped", side_effect=_sign):
+            coord.authenticate_with_xades(
+                context_identifier_type="nip",
+                context_identifier_value="123",
+                subject_identifier_type="certificateSubject",
+                certificate_pem=rsa_cert.certificate_pem,
+                private_key_pem=rsa_cert.private_key_pem,
+                auth_request_schema_version="2.0",
+                poll_interval_seconds=0,
+                max_attempts=1,
+            )
+
     def test_online_session_workflow(self):
         sessions = StubSessionsClient()
         workflow = workflows.OnlineSessionWorkflow(sessions)
