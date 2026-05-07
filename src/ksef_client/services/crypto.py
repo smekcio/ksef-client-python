@@ -114,13 +114,18 @@ def get_stream_metadata(stream: BinaryIO) -> FileMetadata:
     )
 
 
-def build_encryption_data(public_certificate: str | bytes) -> EncryptionData:
+def build_encryption_data(
+    public_certificate: str | bytes,
+    *,
+    public_key_id: str | None = None,
+) -> EncryptionData:
     key = generate_symmetric_key()
     iv = generate_iv()
     encrypted_key = encrypt_rsa_oaep(public_certificate, key)
     encryption_info = EncryptionInfo(
         encrypted_symmetric_key=base64.b64encode(encrypted_key).decode("ascii"),
         initialization_vector=base64.b64encode(iv).decode("ascii"),
+        public_key_id=public_key_id,
     )
     return EncryptionData(key=key, iv=iv, encryption_info=encryption_info)
 

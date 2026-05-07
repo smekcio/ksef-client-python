@@ -33,11 +33,15 @@ class OpenApiModelsTests(unittest.TestCase):
     def test_unknown_enum_value_roundtrips_without_error(self):
         payload = {
             "certificate": "pem-1",
+            "certificateId": "cert-id",
+            "publicKeyId": "key-id",
             "usage": ["FutureUsage"],
             "validFrom": "2026-01-01T00:00:00Z",
             "validTo": "2026-12-31T23:59:59Z",
         }
         parsed = m.PublicKeyCertificate.from_dict(payload)
+        self.assertEqual(parsed.certificate_id, "cert-id")
+        self.assertEqual(parsed.public_key_id, "key-id")
         self.assertEqual(parsed.usage[0].value, "FutureUsage")
         self.assertEqual(parsed.to_dict()["usage"], ["FutureUsage"])
         self.assertIs(m.PublicKeyCertificateUsage("FutureUsage"), parsed.usage[0])
@@ -111,6 +115,7 @@ class OpenApiModelsTests(unittest.TestCase):
             "encryption": {
                 "encryptedSymmetricKey": "enc",
                 "initializationVector": "iv",
+                "publicKeyId": "key-id",
             },
             "filters": {
                 "subjectType": "Subject1",
@@ -124,7 +129,9 @@ class OpenApiModelsTests(unittest.TestCase):
         }
         parsed = m.InvoiceExportRequest.from_dict(payload)
         self.assertTrue(parsed.only_metadata)
+        self.assertEqual(parsed.encryption.public_key_id, "key-id")
         self.assertTrue(parsed.to_dict()["onlyMetadata"])
+        self.assertEqual(parsed.to_dict()["encryption"]["publicKeyId"], "key-id")
 
     def test_token_permission_type_contains_introspection(self):
         values = {item.value for item in m.TokenPermissionType}

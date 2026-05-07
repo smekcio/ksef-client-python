@@ -17,7 +17,11 @@ class _FakeClient:
     def __init__(self) -> None:
         self.security = SimpleNamespace(
             get_public_key_certificates=lambda: [
-                {"usage": ["KsefTokenEncryption"], "certificate": "CERT"},
+                {
+                    "usage": ["KsefTokenEncryption"],
+                    "certificate": "CERT",
+                    "publicKeyId": "key-id",
+                },
             ]
         )
         self.auth = SimpleNamespace(
@@ -49,11 +53,13 @@ class _FakeAuthResult:
 
 
 class _FakeAuthCoordinator:
+    last_ksef_token_kwargs: dict[str, object] = {}
+
     def __init__(self, _auth) -> None:
         _ = _auth
 
     def authenticate_with_ksef_token(self, **kwargs) -> _FakeAuthResult:
-        _ = kwargs
+        type(self).last_ksef_token_kwargs = dict(kwargs)
         return _FakeAuthResult(
             reference_number="ref-1",
             tokens=_FakeTokens(
@@ -271,6 +277,7 @@ def test_login_with_token_caches_ksef_reference_number(monkeypatch) -> None:
     )
 
     assert saved["ksef_token_reference_number"] == "REF-123"
+    assert _FakeAuthCoordinator.last_ksef_token_kwargs["public_key_id"] == "key-id"
 
 
 def test_login_with_token_uses_profile_context_fallback(monkeypatch) -> None:
@@ -354,12 +361,26 @@ def test_status_and_logout(monkeypatch) -> None:
 def test_select_certificate_and_require_non_empty_errors() -> None:
     cert = manager._select_certificate(
         [
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-OLD",
+                "publicKeyId": "key-old",
+                "validFrom": "2026-01-01T00:00:00Z",
+                "validTo": "2999-01-01T00:00:00Z",
+            },
             {"usage": ["KsefTokenEncryption"], "certificate": ""},
-            {"usage": ["KsefTokenEncryption"], "certificate": "CERT"},
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-NEW",
+                "publicKeyId": "key-new",
+                "validFrom": "2026-02-01T00:00:00Z",
+                "validTo": "2999-01-01T00:00:00Z",
+            },
         ],
         "KsefTokenEncryption",
     )
-    assert cert == "CERT"
+    assert cert.certificate == "CERT-NEW"
+    assert cert.public_key_id == "key-new"
 
     with pytest.raises(CliError) as cert_error:
         manager._select_certificate([], "KsefTokenEncryption")
@@ -376,11 +397,40 @@ def test_select_certificate_supports_object_payloads() -> None:
             SimpleNamespace(
                 usage=[SimpleNamespace(value="KsefTokenEncryption")],
                 certificate="CERT-OBJ",
+                public_key_id="key-obj",
             )
         ],
         "KsefTokenEncryption",
     )
-    assert cert == "CERT-OBJ"
+    assert cert.certificate == "CERT-OBJ"
+    assert cert.public_key_id == "key-obj"
+
+
+def test_select_certificate_ignores_invalid_and_future_validity() -> None:
+    cert = manager._select_certificate(
+        [
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-FUTURE",
+                "validFrom": "2999-01-01T00:00:00Z",
+            },
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-INVALID",
+                "publicKeyId": "key-invalid",
+                "validFrom": "not-a-date",
+            },
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-NAIVE",
+                "validFrom": "2026-01-01T00:00:00",
+            },
+        ],
+        "KsefTokenEncryption",
+    )
+
+    assert cert.certificate == "CERT-NAIVE"
+    assert cert.public_key_id is None
 
 
 def test_resolve_base_url_prefers_provided_value() -> None:

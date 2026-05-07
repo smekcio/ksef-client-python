@@ -330,6 +330,34 @@ def test_list_invoices_rejects_invalid_date_type(monkeypatch) -> None:
     assert exc.value.code == ExitCode.VALIDATION_ERROR
 
 
+def test_select_certificate_uses_current_newest_valid_from() -> None:
+    cert = adapters._select_certificate(
+        [
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-FUTURE",
+                "validFrom": "2999-01-01T00:00:00Z",
+            },
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-INVALID",
+                "publicKeyId": "key-invalid",
+                "validFrom": "not-a-date",
+            },
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-NAIVE",
+                "publicKeyId": "key-naive",
+                "validFrom": "2026-01-01T00:00:00",
+            },
+        ],
+        "KsefTokenEncryption",
+    )
+
+    assert cert.certificate == "CERT-NAIVE"
+    assert cert.public_key_id == "key-naive"
+
+
 def test_get_lighthouse_status_success(monkeypatch) -> None:
     seen: dict[str, object] = {}
 
@@ -722,7 +750,13 @@ def test_wait_for_upo_rejects_invalid_polling_options(monkeypatch) -> None:
 def test_send_online_invoice_success_with_wait_and_upo(monkeypatch, tmp_path) -> None:
     class _Security:
         def get_public_key_certificates(self):
-            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+            return [
+                {
+                    "usage": ["SymmetricKeyEncryption"],
+                    "certificate": "CERT",
+                    "publicKeyId": "key-id",
+                }
+            ]
 
     class _Sessions:
         def get_session_invoice_status(self, session_ref, invoice_ref, access_token):
@@ -738,8 +772,16 @@ def test_send_online_invoice_success_with_wait_and_upo(monkeypatch, tmp_path) ->
             _ = sessions
             self.closed_refs: list[str] = []
 
-        def open_session(self, *, form_code, public_certificate, access_token, upo_v43=False):
-            _ = (form_code, public_certificate, access_token, upo_v43)
+        def open_session(
+            self,
+            *,
+            form_code,
+            public_certificate,
+            access_token,
+            upo_v43=False,
+            public_key_id=None,
+        ):
+            _ = (form_code, public_certificate, access_token, upo_v43, public_key_id)
             return SimpleNamespace(
                 session_reference_number="SES-ONLINE-1",
                 encryption_data=SimpleNamespace(key=b"k", iv=b"i"),
@@ -801,7 +843,13 @@ def test_send_online_invoice_save_upo_without_extension_is_treated_as_file(
 ) -> None:
     class _Security:
         def get_public_key_certificates(self):
-            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+            return [
+                {
+                    "usage": ["SymmetricKeyEncryption"],
+                    "certificate": "CERT",
+                    "publicKeyId": "key-id",
+                }
+            ]
 
     class _Sessions:
         def get_session_invoice_status(self, session_ref, invoice_ref, access_token):
@@ -816,8 +864,16 @@ def test_send_online_invoice_save_upo_without_extension_is_treated_as_file(
         def __init__(self, sessions):
             _ = sessions
 
-        def open_session(self, *, form_code, public_certificate, access_token, upo_v43=False):
-            _ = (form_code, public_certificate, access_token, upo_v43)
+        def open_session(
+            self,
+            *,
+            form_code,
+            public_certificate,
+            access_token,
+            upo_v43=False,
+            public_key_id=None,
+        ):
+            _ = (form_code, public_certificate, access_token, upo_v43, public_key_id)
             return SimpleNamespace(
                 session_reference_number="SES-ONLINE-2",
                 encryption_data=SimpleNamespace(key=b"k", iv=b"i"),
@@ -865,14 +921,28 @@ def test_send_online_invoice_save_upo_without_extension_is_treated_as_file(
 def test_send_online_invoice_save_upo_overwrite_support(monkeypatch, tmp_path) -> None:
     class _Security:
         def get_public_key_certificates(self):
-            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+            return [
+                {
+                    "usage": ["SymmetricKeyEncryption"],
+                    "certificate": "CERT",
+                    "publicKeyId": "key-id",
+                }
+            ]
 
     class _OnlineWorkflow:
         def __init__(self, sessions):
             _ = sessions
 
-        def open_session(self, *, form_code, public_certificate, access_token, upo_v43=False):
-            _ = (form_code, public_certificate, access_token, upo_v43)
+        def open_session(
+            self,
+            *,
+            form_code,
+            public_certificate,
+            access_token,
+            upo_v43=False,
+            public_key_id=None,
+        ):
+            _ = (form_code, public_certificate, access_token, upo_v43, public_key_id)
             return SimpleNamespace(
                 session_reference_number="SES-ONLINE-OVERWRITE",
                 encryption_data=SimpleNamespace(key=b"k", iv=b"i"),
@@ -2127,8 +2197,16 @@ def test_send_online_invoice_missing_reference_and_failed_close(monkeypatch, tmp
         def __init__(self, sessions):
             _ = sessions
 
-        def open_session(self, *, form_code, public_certificate, access_token, upo_v43=False):
-            _ = (form_code, public_certificate, access_token, upo_v43)
+        def open_session(
+            self,
+            *,
+            form_code,
+            public_certificate,
+            access_token,
+            upo_v43=False,
+            public_key_id=None,
+        ):
+            _ = (form_code, public_certificate, access_token, upo_v43, public_key_id)
             return SimpleNamespace(
                 session_reference_number="SES-ONLINE-X",
                 encryption_data=SimpleNamespace(key=b"k", iv=b"i"),
@@ -2329,8 +2407,16 @@ def test_send_online_invoice_sets_empty_ksef_and_upo_path_without_save(
         def __init__(self, sessions):
             _ = sessions
 
-        def open_session(self, *, form_code, public_certificate, access_token, upo_v43=False):
-            _ = (form_code, public_certificate, access_token, upo_v43)
+        def open_session(
+            self,
+            *,
+            form_code,
+            public_certificate,
+            access_token,
+            upo_v43=False,
+            public_key_id=None,
+        ):
+            _ = (form_code, public_certificate, access_token, upo_v43, public_key_id)
             return SimpleNamespace(
                 session_reference_number="SES-NO-KSEF",
                 encryption_data=SimpleNamespace(key=b"k", iv=b"i"),
@@ -2472,7 +2558,13 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
 
     class _Security:
         def get_public_key_certificates(self):
-            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+            return [
+                {
+                    "usage": ["SymmetricKeyEncryption"],
+                    "certificate": "CERT",
+                    "publicKeyId": "key-id",
+                }
+            ]
 
     class _Invoices:
         def export_invoices(self, payload, access_token):
@@ -2509,8 +2601,14 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
         encryption_info=SimpleNamespace(
             encrypted_symmetric_key="enc",
             initialization_vector="iv",
+            public_key_id="key-id",
         ),
     )
+
+    def _build_encryption_data(cert, **kwargs):
+        seen["encryption_cert"] = cert
+        seen["public_key_id"] = kwargs.get("public_key_id")
+        return fake_encryption
 
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
     monkeypatch.setattr(
@@ -2520,7 +2618,7 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
             invoices=_Invoices(), security=_Security(), http_client=SimpleNamespace()
         ),
     )
-    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert: fake_encryption)
+    monkeypatch.setattr(adapters, "build_encryption_data", _build_encryption_data)
     monkeypatch.setattr(adapters, "ExportWorkflow", _FakeExportWorkflow)
     monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
 
@@ -2542,6 +2640,9 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
     payload = seen["payload"]
     assert isinstance(payload, m.InvoiceExportRequest)
     assert payload.only_metadata is False
+    assert payload.encryption.public_key_id == "key-id"
+    assert seen["encryption_cert"] == "CERT"
+    assert seen["public_key_id"] == "key-id"
     assert payload.filters.date_range.date_type == m.InvoiceQueryDateType.ISSUE
     assert payload.filters.date_range.restrict_to_permanent_storage_hwm_date is False
     assert (tmp_path / "_metadata.json").exists()
@@ -2613,7 +2714,7 @@ def test_run_export_only_metadata_success(monkeypatch, tmp_path) -> None:
             invoices=_Invoices(), security=_Security(), http_client=SimpleNamespace()
         ),
     )
-    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert: fake_encryption)
+    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert, **kwargs: fake_encryption)
     monkeypatch.setattr(adapters, "ExportWorkflow", _FakeExportWorkflow)
     monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
 
@@ -2690,7 +2791,7 @@ def test_run_export_incremental_hwm_filters(monkeypatch) -> None:
             invoices=_Invoices(), security=_Security(), http_client=SimpleNamespace()
         ),
     )
-    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert: fake_encryption)
+    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert, **kwargs: fake_encryption)
     monkeypatch.setattr(adapters, "ExportWorkflow", _FakeExportWorkflow)
     monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
 
@@ -2784,7 +2885,7 @@ def test_run_export_missing_reference_and_package(monkeypatch, tmp_path) -> None
     )
 
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
-    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert: fake_encryption)
+    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert, **kwargs: fake_encryption)
     monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
 
     monkeypatch.setattr(
@@ -2838,7 +2939,7 @@ def test_run_export_requires_encryption_metadata(monkeypatch, tmp_path) -> None:
     fake_encryption = adapters.EncryptionData(key=b"k" * 32, iv=b"i" * 16, encryption_info=None)
 
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
-    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert: fake_encryption)
+    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert, **kwargs: fake_encryption)
     monkeypatch.setattr(
         adapters,
         "create_client",
@@ -3180,8 +3281,16 @@ def test_send_online_invoice_success_without_waits(monkeypatch, tmp_path) -> Non
         def __init__(self, sessions):
             _ = sessions
 
-        def open_session(self, *, form_code, public_certificate, access_token, upo_v43=False):
-            _ = (form_code, public_certificate, access_token, upo_v43)
+        def open_session(
+            self,
+            *,
+            form_code,
+            public_certificate,
+            access_token,
+            upo_v43=False,
+            public_key_id=None,
+        ):
+            _ = (form_code, public_certificate, access_token, upo_v43, public_key_id)
             return SimpleNamespace(
                 session_reference_number="SES-NO-WAIT",
                 encryption_data=SimpleNamespace(key=b"k", iv=b"i"),
@@ -3234,8 +3343,16 @@ def test_send_online_invoice_wait_status_without_wait_upo(monkeypatch, tmp_path)
         def __init__(self, sessions):
             _ = sessions
 
-        def open_session(self, *, form_code, public_certificate, access_token, upo_v43=False):
-            _ = (form_code, public_certificate, access_token, upo_v43)
+        def open_session(
+            self,
+            *,
+            form_code,
+            public_certificate,
+            access_token,
+            upo_v43=False,
+            public_key_id=None,
+        ):
+            _ = (form_code, public_certificate, access_token, upo_v43, public_key_id)
             return SimpleNamespace(
                 session_reference_number="SES-STATUS-ONLY",
                 encryption_data=SimpleNamespace(key=b"k", iv=b"i"),

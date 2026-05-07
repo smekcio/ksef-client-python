@@ -31,7 +31,12 @@ from ..models import (
     SendInvoiceResponse,
 )
 from ..utils.zip_utils import unzip_bytes_safe
-from .auth import build_auth_token_request_xml, build_ksef_token_auth_request, encrypt_ksef_token
+from .auth import (
+    DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
+    build_auth_token_request_xml,
+    build_ksef_token_auth_request,
+    encrypt_ksef_token,
+)
 from .batch import encrypt_batch_parts
 from .crypto import (
     EncryptionData,
@@ -297,6 +302,7 @@ class AuthCoordinator:
         verify_certificate_chain: bool | None = None,
         enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
+        auth_request_schema_version: str = DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -309,6 +315,7 @@ class AuthCoordinator:
             verify_certificate_chain=verify_certificate_chain,
             enforce_xades_compliance=enforce_xades_compliance,
             authorization_policy_xml=authorization_policy_xml,
+            auth_request_schema_version=auth_request_schema_version,
             poll_interval_seconds=poll_interval_seconds,
             max_attempts=max_attempts,
         )
@@ -324,6 +331,7 @@ class AuthCoordinator:
         verify_certificate_chain: bool | None = None,
         enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
+        auth_request_schema_version: str = DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -334,6 +342,7 @@ class AuthCoordinator:
             context_identifier_value=context_identifier_value,
             subject_identifier_type=subject_identifier_type,
             authorization_policy_xml=authorization_policy_xml,
+            schema_version=auth_request_schema_version,
         )
         from .xades import sign_xades_enveloped
 
@@ -360,6 +369,7 @@ class AuthCoordinator:
         *,
         token: str,
         public_certificate: str,
+        public_key_id: str | None = None,
         context_identifier_type: str,
         context_identifier_value: str,
         method: str = "rsa",
@@ -382,6 +392,7 @@ class AuthCoordinator:
                 context_identifier_type=context_identifier_type,
                 context_identifier_value=context_identifier_value,
                 encrypted_token_base64=encrypted_token_b64,
+                public_key_id=public_key_id,
                 authorization_policy=authorization_policy,
             )
         )
@@ -434,6 +445,7 @@ class AsyncAuthCoordinator:
         verify_certificate_chain: bool | None = None,
         enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
+        auth_request_schema_version: str = DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -446,6 +458,7 @@ class AsyncAuthCoordinator:
             verify_certificate_chain=verify_certificate_chain,
             enforce_xades_compliance=enforce_xades_compliance,
             authorization_policy_xml=authorization_policy_xml,
+            auth_request_schema_version=auth_request_schema_version,
             poll_interval_seconds=poll_interval_seconds,
             max_attempts=max_attempts,
         )
@@ -461,6 +474,7 @@ class AsyncAuthCoordinator:
         verify_certificate_chain: bool | None = None,
         enforce_xades_compliance: bool = False,
         authorization_policy_xml: str | None = None,
+        auth_request_schema_version: str = DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
         poll_interval_seconds: float = 2.0,
         max_attempts: int = 30,
     ) -> AuthResult:
@@ -471,6 +485,7 @@ class AsyncAuthCoordinator:
             context_identifier_value=context_identifier_value,
             subject_identifier_type=subject_identifier_type,
             authorization_policy_xml=authorization_policy_xml,
+            schema_version=auth_request_schema_version,
         )
         from .xades import sign_xades_enveloped
 
@@ -497,6 +512,7 @@ class AsyncAuthCoordinator:
         *,
         token: str,
         public_certificate: str,
+        public_key_id: str | None = None,
         context_identifier_type: str,
         context_identifier_value: str,
         method: str = "rsa",
@@ -519,6 +535,7 @@ class AsyncAuthCoordinator:
                 context_identifier_type=context_identifier_type,
                 context_identifier_value=context_identifier_value,
                 encrypted_token_base64=encrypted_token_b64,
+                public_key_id=public_key_id,
                 authorization_policy=authorization_policy,
             )
         )
@@ -569,10 +586,11 @@ class OnlineSessionWorkflow:
         *,
         form_code: FormCode,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         upo_v43: bool = False,
     ) -> OnlineSessionHandle:
-        encryption = build_encryption_data(public_certificate)
+        encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
         response = self._sessions.open_online_session(
             OpenOnlineSessionRequest(
                 form_code=form_code,
@@ -639,10 +657,11 @@ class AsyncOnlineSessionWorkflow:
         *,
         form_code: FormCode,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         upo_v43: bool = False,
     ) -> AsyncOnlineSessionHandle:
-        encryption = build_encryption_data(public_certificate)
+        encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
         response = await self._sessions.open_online_session(
             OpenOnlineSessionRequest(
                 form_code=form_code,
@@ -711,11 +730,12 @@ class BatchSessionWorkflow:
         form_code: FormCode,
         zip_bytes: bytes,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
     ) -> BatchSessionHandle:
-        encryption = build_encryption_data(public_certificate)
+        encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
         encrypted_parts, batch_file_info = encrypt_batch_parts(
             zip_bytes, encryption.key, encryption.iv
         )
@@ -764,6 +784,7 @@ class BatchSessionWorkflow:
         form_code: FormCode,
         zip_bytes: bytes,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
@@ -773,6 +794,7 @@ class BatchSessionWorkflow:
             form_code=form_code,
             zip_bytes=zip_bytes,
             public_certificate=public_certificate,
+            public_key_id=public_key_id,
             access_token=access_token,
             offline_mode=offline_mode,
             upo_v43=upo_v43,
@@ -795,11 +817,12 @@ class AsyncBatchSessionWorkflow:
         form_code: FormCode,
         zip_bytes: bytes,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
     ) -> AsyncBatchSessionHandle:
-        encryption = build_encryption_data(public_certificate)
+        encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
         encrypted_parts, batch_file_info = encrypt_batch_parts(
             zip_bytes, encryption.key, encryption.iv
         )
@@ -848,6 +871,7 @@ class AsyncBatchSessionWorkflow:
         form_code: FormCode,
         zip_bytes: bytes,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
@@ -858,6 +882,7 @@ class AsyncBatchSessionWorkflow:
             form_code=form_code,
             zip_bytes=zip_bytes,
             public_certificate=public_certificate,
+            public_key_id=public_key_id,
             access_token=access_token,
             offline_mode=offline_mode,
             upo_v43=upo_v43,

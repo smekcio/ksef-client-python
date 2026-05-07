@@ -438,6 +438,8 @@ class LighthouseStatusResponse:
 class PublicKeyCertificate:
     certificate: str
     usage: list[PublicKeyCertificateUsage] = ...
+    certificate_id: str | None = None
+    public_key_id: str | None = None
     valid_from: str | None = None
     valid_to: str | None = None
     @staticmethod

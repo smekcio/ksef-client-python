@@ -458,7 +458,7 @@ Uwagi:
 - Przy udanym zakonczeniu komenda nadal zamyka sesje; checkpoint sluzy glownie do inspekcji
   oraz odzyskania flow po przerwaniu lub bledzie po zapisaniu checkpointu.
 - `--save-upo-overwrite` pozwala nadpisac istniejacy plik UPO wskazany przez `--save-upo`.
-- Dla `FA_RR (1)` z `--schema-version 1-1E` uzyj `--form-value FA_RR`; CLI normalizuje historyczne `RR` do `FA_RR`.
+- Dla `FA_RR (1)` z `--schema-version 1-1E` uzyj `--form-value FA_RR`.
 
 ## `ksef send batch`
 
@@ -489,7 +489,7 @@ Walidacja:
 - Przy udanym zakonczeniu komenda nadal zamyka sesje; checkpoint sluzy glownie do inspekcji
   oraz odzyskania flow po przerwaniu lub bledzie po zapisaniu checkpointu.
 - `--save-upo-overwrite` pozwala nadpisac istniejacy plik UPO wskazany przez `--save-upo`.
-- Dla `FA_RR (1)` z `--schema-version 1-1E` uzyj `--form-value FA_RR`; CLI normalizuje historyczne `RR` do `FA_RR`.
+- Dla `FA_RR (1)` z `--schema-version 1-1E` uzyj `--form-value FA_RR`.
 
 ## Resumable sessions
 

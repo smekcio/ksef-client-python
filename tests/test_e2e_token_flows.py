@@ -20,6 +20,7 @@ from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
 from ksef_client import models as m
 from ksef_client.exceptions import KsefHttpError, KsefRateLimitError
 from ksef_client.services import AuthCoordinator, OnlineSessionWorkflow
+from ksef_client.services.auth import DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION
 
 pytestmark = pytest.mark.e2e
 
@@ -42,6 +43,7 @@ class E2EConfig:
     certificate_pem: str | None = None
     private_key_pem: str | None = None
     subject_identifier_type: str | None = None
+    auth_request_schema_version: str = DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION
 
 
 def _optional_any(*names: str) -> str | None:
@@ -372,6 +374,10 @@ def _load_test_xades_config() -> E2EConfig:
         subject_identifier_type=(
             _optional_any("KSEF_TEST_XADES_SUBJECT_IDENTIFIER_TYPE") or "certificateSubject"
         ),
+        auth_request_schema_version=(
+            _optional_any("KSEF_TEST_XADES_AUTH_REQUEST_SCHEMA_VERSION")
+            or DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION
+        ),
     )
 
 
@@ -402,6 +408,9 @@ def _load_demo_xades_config() -> E2EConfig:
         ),
         subject_identifier_type=(
             _optional_any("KSEF_DEMO_XADES_SUBJECT_IDENTIFIER_TYPE") or "certificateSubject"
+        ),
+        auth_request_schema_version=(
+            _optional_any("KSEF_DEMO_XADES_AUTH_REQUEST_SCHEMA_VERSION") or "2.0"
         ),
     )
 
@@ -610,6 +619,7 @@ def _authenticate_access_token(
             subject_identifier_type=config.subject_identifier_type or "certificateSubject",
             certificate_pem=config.certificate_pem,
             private_key_pem=config.private_key_pem,
+            auth_request_schema_version=config.auth_request_schema_version,
             max_attempts=max_attempts,
             poll_interval_seconds=poll_interval_seconds,
         )

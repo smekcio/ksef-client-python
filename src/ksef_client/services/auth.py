@@ -10,7 +10,21 @@ from ..models import (
 )
 from .crypto import encrypt_ksef_token_ec, encrypt_ksef_token_rsa
 
-AUTH_NS = "http://ksef.mf.gov.pl/auth/token/2.0"
+AUTH_TOKEN_REQUEST_NAMESPACE_BY_SCHEMA_VERSION = {
+    "2.0": "http://ksef.mf.gov.pl/auth/token/2.0",
+    "2.1": "http://ksef.mf.gov.pl/auth/token/2.1",
+}
+DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION = "2.1"
+AUTH_NS = AUTH_TOKEN_REQUEST_NAMESPACE_BY_SCHEMA_VERSION[
+    DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION
+]
+
+
+def _auth_token_request_namespace(schema_version: str) -> str:
+    try:
+        return AUTH_TOKEN_REQUEST_NAMESPACE_BY_SCHEMA_VERSION[schema_version]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported AuthTokenRequest schema version: {schema_version}") from exc
 
 
 def build_auth_token_request_xml(
@@ -20,12 +34,14 @@ def build_auth_token_request_xml(
     context_identifier_value: str,
     subject_identifier_type: str = "certificateSubject",
     authorization_policy_xml: str | None = None,
+    schema_version: str = DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
 ) -> str:
     context_tag = _context_tag(context_identifier_type)
+    namespace = _auth_token_request_namespace(schema_version)
     auth_policy = f"\n  {authorization_policy_xml}" if authorization_policy_xml else ""
     xml = (
         '<?xml version="1.0" encoding="utf-8"?>\n'
-        f'<AuthTokenRequest xmlns="{AUTH_NS}">\n'
+        f'<AuthTokenRequest xmlns="{namespace}">\n'
         f"  <Challenge>{challenge}</Challenge>\n"
         "  <ContextIdentifier>\n"
         f"    <{context_tag}>{context_identifier_value}</{context_tag}>\n"
@@ -43,6 +59,7 @@ def build_ksef_token_auth_request(
     context_identifier_type: str,
     context_identifier_value: str,
     encrypted_token_base64: str,
+    public_key_id: str | None = None,
     authorization_policy: AuthorizationPolicy | None = None,
 ) -> InitTokenAuthenticationRequest:
     return InitTokenAuthenticationRequest(
@@ -52,6 +69,7 @@ def build_ksef_token_auth_request(
             value=context_identifier_value,
         ),
         encrypted_token=encrypted_token_base64,
+        public_key_id=public_key_id,
         authorization_policy=authorization_policy,
     )
 

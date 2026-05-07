@@ -14,6 +14,7 @@ Najważniejsze parametry:
 - `context_identifier_value`: wartość identyfikatora kontekstu (np. NIP)
 - `subject_identifier_type`: domyślnie `"certificateSubject"`; alternatywnie `"certificateFingerprint"`
 - `authorization_policy_xml`: opcjonalnie fragment XML z polityką (np. allow-list IP)
+- `schema_version`: domyślnie `"2.1"`; można przekazać `"2.0"` dla zgodności wstecznej
 
 ## `encrypt_ksef_token(...) -> str`
 
@@ -36,4 +37,5 @@ Parametry:
 - `challenge`: z `get_challenge()`
 - `context_identifier_type`, `context_identifier_value`: jak wyżej
 - `encrypted_token_base64`: wynik `encrypt_ksef_token(...)`
+- `public_key_id`: opcjonalnie identyfikator klucza KSeF użytego do szyfrowania
 - `authorization_policy`: opcjonalnie polityka (JSON, zależnie od API)

@@ -4,6 +4,7 @@ import calendar
 import json
 import time
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -49,6 +50,12 @@ _INVOICE_SORT_DATE_FIELDS = {
         ("permanent_storage_date", "permanentStorageDate"),
     ),
 }
+
+
+@dataclass(frozen=True)
+class SelectedPublicKeyCertificate:
+    certificate: str
+    public_key_id: str | None = None
 
 
 def _is_transient_polling_http(status_code: int) -> bool:
@@ -247,12 +254,48 @@ def _extract_upo_reference(payload: Any) -> str:
     return str(nested or "")
 
 
-def _select_certificate(certs: list[Any], usage_name: str) -> str:
+def _parse_certificate_datetime(value: Any) -> datetime | None:
+    if value in {None, ""}:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _is_current_certificate(cert: Any, now: datetime) -> bool:
+    valid_from = _parse_certificate_datetime(_get_value(cert, "valid_from", "validFrom"))
+    valid_to = _parse_certificate_datetime(_get_value(cert, "valid_to", "validTo"))
+    if valid_from is not None and valid_from > now:
+        return False
+    return not (valid_to is not None and valid_to < now)
+
+
+def _certificate_sort_key(cert: Any) -> tuple[bool, datetime]:
+    valid_from = _parse_certificate_datetime(_get_value(cert, "valid_from", "validFrom"))
+    if valid_from is None:
+        return (False, datetime.min.replace(tzinfo=timezone.utc))
+    return (True, valid_from)
+
+
+def _select_certificate(certs: list[Any], usage_name: str) -> SelectedPublicKeyCertificate:
+    now = datetime.now(timezone.utc)
+    candidates = []
     for cert in certs:
         usage = _as_string_list(_get_value(cert, "usage", default=[]))
         certificate = _get_value(cert, "certificate")
-        if usage_name in usage and certificate:
-            return str(certificate)
+        if usage_name in usage and certificate and _is_current_certificate(cert, now):
+            candidates.append(cert)
+    if candidates:
+        selected = max(candidates, key=_certificate_sort_key)
+        public_key_id = _get_value(selected, "public_key_id", "publicKeyId")
+        return SelectedPublicKeyCertificate(
+            certificate=str(_get_value(selected, "certificate")),
+            public_key_id=str(public_key_id) if public_key_id is not None else None,
+        )
     raise CliError(
         f"Missing KSeF public certificate usage: {usage_name}.",
         ExitCode.API_ERROR,
@@ -1227,7 +1270,8 @@ def send_online_invoice(
 
         session = workflow.open_session(
             form_code=form_code,
-            public_certificate=symmetric_cert,
+            public_certificate=symmetric_cert.certificate,
+            public_key_id=symmetric_cert.public_key_id,
             access_token=access_token,
             upo_v43=upo_v43,
         )
@@ -1400,7 +1444,8 @@ def send_batch_invoices(
             session_ref = workflow.open_upload_and_close(
                 form_code=form_code,
                 zip_bytes=zip_bytes,
-                public_certificate=symmetric_cert,
+                public_certificate=symmetric_cert.certificate,
+                public_key_id=symmetric_cert.public_key_id,
                 access_token=access_token,
                 upo_v43=upo_v43,
                 parallelism=parallelism,
@@ -1409,7 +1454,8 @@ def send_batch_invoices(
             session = workflow.open_session(
                 form_code=form_code,
                 zip_bytes=zip_bytes,
-                public_certificate=symmetric_cert,
+                public_certificate=symmetric_cert.certificate,
+                public_key_id=symmetric_cert.public_key_id,
                 access_token=access_token,
                 upo_v43=upo_v43,
             )
@@ -1576,13 +1622,13 @@ def run_export(
     with create_client(base_url, access_token=access_token) as client:
         certs = client.security.get_public_key_certificates()
         symmetric_cert = _select_certificate(certs, "SymmetricKeyEncryption")
-        encryption = build_encryption_data(symmetric_cert)
+        encryption = build_encryption_data(
+            symmetric_cert.certificate,
+            public_key_id=symmetric_cert.public_key_id,
+        )
         encryption_info = _require_encryption_info(encryption)
         payload = m.InvoiceExportRequest(
-            encryption=m.EncryptionInfo(
-                encrypted_symmetric_key=encryption_info.encrypted_symmetric_key,
-                initialization_vector=encryption_info.initialization_vector,
-            ),
+            encryption=encryption_info,
             only_metadata=only_metadata,
             filters=m.InvoiceQueryFilters(
                 subject_type=_require_invoice_query_subject_type(subject_type),
