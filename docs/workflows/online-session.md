@@ -125,7 +125,7 @@ Zgodność wsteczna:
 
 - `encryption_data` z `open_session()` musi być użyte dla wszystkich faktur wysyłanych w ramach tej sesji; dlatego jest odtwarzane również przy `resume_session()`.
 - `resume_session()` odtwarza tylko stan sesji i materiał kryptograficzny. Statusy faktur wysłanych wcześniej trzeba śledzić osobno przez `invoice_reference`.
-- Dla `FA_RR (1)` w wersji `1-1E` przekazuj `formCode.value="FA_RR"` zamiast `RR`.
+- Dla `FA_RR (1)` w wersji `1-1E` przekazuj `formCode.value="FA_RR"`.
 - Status przetwarzania jest udostępniany asynchronicznie; sprawdzanie statusu odbywa się przez polling.
 - Pobranie UPO:
   - dla faktury: `get_invoice_upo_by_ref()` / `get_invoice_upo_by_ksef()`
