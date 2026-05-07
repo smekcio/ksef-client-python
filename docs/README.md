@@ -4,12 +4,11 @@ Dokumentacja opisuje **publiczne API** biblioteki `ksef-client-python` (import: 
 
 Opis kontraktu API (OpenAPI) oraz dokumenty procesowe i ograniczenia systemu znajdują się w `ksef-docs/`.
 
-Kompatybilność SDK: **KSeF API `v2.4.0`**.
+Kompatybilność SDK: **KSeF API `v2.5.0`**.
 
-> [!WARNING]
-> Publiczny kontrakt SDK na domyślnej gałęzi repo używa typowanych modeli `ksef_client.models`.
-> Payloady requestów są `typed-only`, a wiele metod klientów zwraca modele odpowiedzi zamiast surowych
-> `dict`. Jeśli migrujesz starszą integrację, zobacz [`migration-typed-model-api.md`](migration-typed-model-api.md).
+Publiczny kontrakt SDK używa typowanych modeli `ksef_client.models`. Payloady requestów są
+`typed-only`, a wiele metod klientów zwraca modele odpowiedzi zamiast surowych `dict`. Jeśli
+migrujesz starszą integrację, zobacz [`migration-typed-model-api.md`](migration-typed-model-api.md).
 
 ## Wymagania
 
