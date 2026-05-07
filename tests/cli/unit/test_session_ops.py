@@ -222,7 +222,14 @@ def test_open_online_session_closes_handle_when_save_fails(monkeypatch) -> None:
 
     monkeypatch.setattr(session_ops.adapters, "_require_access_token", lambda profile: "token")
     monkeypatch.setattr(session_ops.adapters, "_build_form_code", lambda *args: _form_code())
-    monkeypatch.setattr(session_ops.adapters, "_select_certificate", lambda certs, usage: "CERT")
+    monkeypatch.setattr(
+        session_ops.adapters,
+        "_select_certificate",
+        lambda certs, usage: session_ops.adapters.SelectedPublicKeyCertificate(
+            "CERT",
+            "key-id",
+        ),
+    )
     monkeypatch.setattr(session_ops, "OnlineSessionWorkflow", _Workflow)
     monkeypatch.setattr(
         session_ops.adapters,
@@ -491,7 +498,14 @@ def test_open_batch_session_closes_handle_when_save_fails(monkeypatch) -> None:
 
     monkeypatch.setattr(session_ops.adapters, "_require_access_token", lambda profile: "token")
     monkeypatch.setattr(session_ops.adapters, "_build_form_code", lambda *args: _form_code())
-    monkeypatch.setattr(session_ops.adapters, "_select_certificate", lambda certs, usage: "CERT")
+    monkeypatch.setattr(
+        session_ops.adapters,
+        "_select_certificate",
+        lambda certs, usage: session_ops.adapters.SelectedPublicKeyCertificate(
+            "CERT",
+            "key-id",
+        ),
+    )
     monkeypatch.setattr(
         session_ops,
         "_build_batch_payload_source",

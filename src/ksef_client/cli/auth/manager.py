@@ -244,6 +244,7 @@ def login_with_token(
         result = AuthCoordinator(client.auth).authenticate_with_ksef_token(
             token=safe_token,
             public_certificate=token_cert_pem.certificate,
+            public_key_id=token_cert_pem.public_key_id,
             context_identifier_type=safe_context_type,
             context_identifier_value=safe_context_value,
             poll_interval_seconds=poll_interval,

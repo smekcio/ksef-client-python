@@ -199,6 +199,7 @@ def open_online_session(
         session = workflow.open_session(
             form_code=form_code,
             public_certificate=symmetric_cert.certificate,
+            public_key_id=symmetric_cert.public_key_id,
             access_token=access_token,
             upo_v43=upo_v43,
         )
@@ -369,6 +370,7 @@ def open_batch_session(
             form_code=form_code,
             zip_bytes=zip_bytes,
             public_certificate=symmetric_cert.certificate,
+            public_key_id=symmetric_cert.public_key_id,
             access_token=access_token,
             upo_v43=upo_v43,
         )

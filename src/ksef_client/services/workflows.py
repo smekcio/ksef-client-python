@@ -360,6 +360,7 @@ class AuthCoordinator:
         *,
         token: str,
         public_certificate: str,
+        public_key_id: str | None = None,
         context_identifier_type: str,
         context_identifier_value: str,
         method: str = "rsa",
@@ -382,6 +383,7 @@ class AuthCoordinator:
                 context_identifier_type=context_identifier_type,
                 context_identifier_value=context_identifier_value,
                 encrypted_token_base64=encrypted_token_b64,
+                public_key_id=public_key_id,
                 authorization_policy=authorization_policy,
             )
         )
@@ -497,6 +499,7 @@ class AsyncAuthCoordinator:
         *,
         token: str,
         public_certificate: str,
+        public_key_id: str | None = None,
         context_identifier_type: str,
         context_identifier_value: str,
         method: str = "rsa",
@@ -519,6 +522,7 @@ class AsyncAuthCoordinator:
                 context_identifier_type=context_identifier_type,
                 context_identifier_value=context_identifier_value,
                 encrypted_token_base64=encrypted_token_b64,
+                public_key_id=public_key_id,
                 authorization_policy=authorization_policy,
             )
         )
@@ -569,10 +573,11 @@ class OnlineSessionWorkflow:
         *,
         form_code: FormCode,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         upo_v43: bool = False,
     ) -> OnlineSessionHandle:
-        encryption = build_encryption_data(public_certificate)
+        encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
         response = self._sessions.open_online_session(
             OpenOnlineSessionRequest(
                 form_code=form_code,
@@ -639,10 +644,11 @@ class AsyncOnlineSessionWorkflow:
         *,
         form_code: FormCode,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         upo_v43: bool = False,
     ) -> AsyncOnlineSessionHandle:
-        encryption = build_encryption_data(public_certificate)
+        encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
         response = await self._sessions.open_online_session(
             OpenOnlineSessionRequest(
                 form_code=form_code,
@@ -711,11 +717,12 @@ class BatchSessionWorkflow:
         form_code: FormCode,
         zip_bytes: bytes,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
     ) -> BatchSessionHandle:
-        encryption = build_encryption_data(public_certificate)
+        encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
         encrypted_parts, batch_file_info = encrypt_batch_parts(
             zip_bytes, encryption.key, encryption.iv
         )
@@ -764,6 +771,7 @@ class BatchSessionWorkflow:
         form_code: FormCode,
         zip_bytes: bytes,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
@@ -773,6 +781,7 @@ class BatchSessionWorkflow:
             form_code=form_code,
             zip_bytes=zip_bytes,
             public_certificate=public_certificate,
+            public_key_id=public_key_id,
             access_token=access_token,
             offline_mode=offline_mode,
             upo_v43=upo_v43,
@@ -795,11 +804,12 @@ class AsyncBatchSessionWorkflow:
         form_code: FormCode,
         zip_bytes: bytes,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
     ) -> AsyncBatchSessionHandle:
-        encryption = build_encryption_data(public_certificate)
+        encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
         encrypted_parts, batch_file_info = encrypt_batch_parts(
             zip_bytes, encryption.key, encryption.iv
         )
@@ -848,6 +858,7 @@ class AsyncBatchSessionWorkflow:
         form_code: FormCode,
         zip_bytes: bytes,
         public_certificate: str,
+        public_key_id: str | None = None,
         access_token: str,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
@@ -858,6 +869,7 @@ class AsyncBatchSessionWorkflow:
             form_code=form_code,
             zip_bytes=zip_bytes,
             public_certificate=public_certificate,
+            public_key_id=public_key_id,
             access_token=access_token,
             offline_mode=offline_mode,
             upo_v43=upo_v43,

@@ -17,7 +17,11 @@ class _FakeClient:
     def __init__(self) -> None:
         self.security = SimpleNamespace(
             get_public_key_certificates=lambda: [
-                {"usage": ["KsefTokenEncryption"], "certificate": "CERT"},
+                {
+                    "usage": ["KsefTokenEncryption"],
+                    "certificate": "CERT",
+                    "publicKeyId": "key-id",
+                },
             ]
         )
         self.auth = SimpleNamespace(
@@ -49,11 +53,13 @@ class _FakeAuthResult:
 
 
 class _FakeAuthCoordinator:
+    last_ksef_token_kwargs: dict[str, object] = {}
+
     def __init__(self, _auth) -> None:
         _ = _auth
 
     def authenticate_with_ksef_token(self, **kwargs) -> _FakeAuthResult:
-        _ = kwargs
+        type(self).last_ksef_token_kwargs = dict(kwargs)
         return _FakeAuthResult(
             reference_number="ref-1",
             tokens=_FakeTokens(
@@ -271,6 +277,7 @@ def test_login_with_token_caches_ksef_reference_number(monkeypatch) -> None:
     )
 
     assert saved["ksef_token_reference_number"] == "REF-123"
+    assert _FakeAuthCoordinator.last_ksef_token_kwargs["public_key_id"] == "key-id"
 
 
 def test_login_with_token_uses_profile_context_fallback(monkeypatch) -> None:

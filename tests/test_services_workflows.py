@@ -158,6 +158,7 @@ class RecordingAsyncHttp:
 class StubAuthClient:
     codes: list[int]
     last_enforce_xades_compliance: bool = False
+    last_ksef_token_payload: m.InitTokenAuthenticationRequest | None = None
 
     def get_challenge(self):
         return _challenge_response()
@@ -172,6 +173,7 @@ class StubAuthClient:
         return _auth_init_response()
 
     def submit_ksef_token_auth(self, payload):
+        self.last_ksef_token_payload = payload
         return _auth_init_response()
 
     def get_auth_status(self, reference_number, authentication_token):
@@ -186,6 +188,7 @@ class StubAuthClient:
 class StubAsyncAuthClient:
     codes: list[int]
     last_enforce_xades_compliance: bool = False
+    last_ksef_token_payload: m.InitTokenAuthenticationRequest | None = None
 
     async def get_challenge(self):
         return _challenge_response()
@@ -200,6 +203,7 @@ class StubAsyncAuthClient:
         return _auth_init_response()
 
     async def submit_ksef_token_auth(self, payload):
+        self.last_ksef_token_payload = payload
         return _auth_init_response()
 
     async def get_auth_status(self, reference_number, authentication_token):
@@ -420,6 +424,7 @@ class WorkflowsTests(unittest.TestCase):
             result = coord.authenticate_with_ksef_token(
                 token="token",
                 public_certificate="cert",
+                public_key_id="key-id",
                 context_identifier_type="nip",
                 context_identifier_value="123",
                 poll_interval_seconds=0,
@@ -428,6 +433,9 @@ class WorkflowsTests(unittest.TestCase):
         self.assertEqual(result.tokens.access_token.token, "acc")
         self.assertEqual(result.access_token, "acc")
         self.assertEqual(result.refresh_token, "ref")
+        self.assertIsNotNone(auth.last_ksef_token_payload)
+        assert auth.last_ksef_token_payload is not None
+        self.assertEqual(auth.last_ksef_token_payload.public_key_id, "key-id")
 
         class StubAuthClientNoneXades(StubAuthClient):
             def submit_xades_auth_request(
@@ -479,10 +487,13 @@ class WorkflowsTests(unittest.TestCase):
         result = workflow.open_session(
             form_code=_form_code(),
             public_certificate=rsa_cert.certificate_pem,
+            public_key_id="key-id",
             access_token="token",
             upo_v43=True,
         )
         self.assertEqual(result.session_reference_number, "ref")
+        open_online_calls = [call for call in sessions.calls if call[0] == "open_online"]
+        self.assertEqual(open_online_calls[0][1].encryption.public_key_id, "key-id")
         workflow.send_invoice(
             session_reference_number="ref",
             invoice_xml=b"<xml/>",
@@ -517,12 +528,15 @@ class WorkflowsTests(unittest.TestCase):
             form_code=_form_code(),
             zip_bytes=zip_bytes,
             public_certificate=rsa_cert.certificate_pem,
+            public_key_id="key-id",
             access_token="token",
             offline_mode=True,
             upo_v43=True,
             parallelism=1,
         )
         self.assertEqual(ref, "ref")
+        open_batch_calls = [call for call in sessions.calls if call[0] == "open_batch"]
+        self.assertEqual(open_batch_calls[0][1].encryption.public_key_id, "key-id")
 
     def test_batch_session_workflow_without_offline_mode_flag(self):
         sessions = StubSessionsClient()
@@ -728,12 +742,16 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
             result = await coord.authenticate_with_ksef_token(
                 token="token",
                 public_certificate="cert",
+                public_key_id="async-key-id",
                 context_identifier_type="nip",
                 context_identifier_value="123",
                 poll_interval_seconds=0,
                 max_attempts=1,
             )
         self.assertEqual(result.tokens.access_token.token, "acc")
+        self.assertIsNotNone(auth.last_ksef_token_payload)
+        assert auth.last_ksef_token_payload is not None
+        self.assertEqual(auth.last_ksef_token_payload.public_key_id, "async-key-id")
 
         rsa_cert = generate_rsa_cert()
         auth_xades = StubAsyncAuthClient([200])
@@ -849,9 +867,12 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
         result = await workflow.open_session(
             form_code=_form_code(),
             public_certificate=rsa_cert.certificate_pem,
+            public_key_id="online-key-id",
             access_token="token",
             upo_v43=True,
         )
+        open_online_calls = [call for call in sessions.calls if call[0] == "open_online"]
+        self.assertEqual(open_online_calls[0][1].encryption.public_key_id, "online-key-id")
         await workflow.send_invoice(
             session_reference_number="ref",
             invoice_xml=b"<xml/>",
@@ -866,11 +887,14 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
             form_code=_form_code(),
             zip_bytes=zip_bytes,
             public_certificate=rsa_cert.certificate_pem,
+            public_key_id="batch-key-id",
             access_token="token",
             offline_mode=True,
             upo_v43=True,
         )
         self.assertEqual(ref, "ref")
+        open_batch_calls = [call for call in sessions.calls if call[0] == "open_batch"]
+        self.assertEqual(open_batch_calls[0][1].encryption.public_key_id, "batch-key-id")
 
     async def test_async_batch_session_workflow_without_offline_mode_flag(self):
         sessions = StubAsyncSessionsClient()
