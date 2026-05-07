@@ -43,6 +43,7 @@ def build_ksef_token_auth_request(
     context_identifier_type: str,
     context_identifier_value: str,
     encrypted_token_base64: str,
+    public_key_id: str | None = None,
     authorization_policy: AuthorizationPolicy | None = None,
 ) -> InitTokenAuthenticationRequest:
     return InitTokenAuthenticationRequest(
@@ -52,6 +53,7 @@ def build_ksef_token_auth_request(
             value=context_identifier_value,
         ),
         encrypted_token=encrypted_token_base64,
+        public_key_id=public_key_id,
         authorization_policy=authorization_policy,
     )
 

@@ -134,13 +134,18 @@ class CryptoTests(unittest.TestCase):
 
     def test_build_encryption_data(self):
         rsa_cert = generate_rsa_cert()
-        encryption = crypto.build_encryption_data(rsa_cert.certificate_pem)
+        encryption = crypto.build_encryption_data(
+            rsa_cert.certificate_pem,
+            public_key_id="key-id",
+        )
         self.assertEqual(len(encryption.key), 32)
         self.assertEqual(len(encryption.iv), 16)
         encryption_info = encryption.encryption_info
         self.assertIsNotNone(encryption_info)
         assert encryption_info is not None
         self.assertTrue(encryption_info.encrypted_symmetric_key)
+        self.assertEqual(encryption_info.public_key_id, "key-id")
+        self.assertEqual(encryption_info.to_dict()["publicKeyId"], "key-id")
 
     def test_encrypt_rsa_oaep(self):
         rsa_cert = generate_rsa_cert()

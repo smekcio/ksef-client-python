@@ -38,9 +38,12 @@ class AuthServiceTests(unittest.TestCase):
             context_identifier_type="nip",
             context_identifier_value="123",
             encrypted_token_base64="enc",
+            public_key_id="key-id",
             authorization_policy=None,
         )
         self.assertEqual(payload.encrypted_token, "enc")
+        self.assertEqual(payload.public_key_id, "key-id")
+        self.assertEqual(payload.to_dict()["publicKeyId"], "key-id")
         self.assertEqual(payload.challenge, "c")
         self.assertEqual(payload.context_identifier.value, "123")
 
