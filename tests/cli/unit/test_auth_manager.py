@@ -354,12 +354,26 @@ def test_status_and_logout(monkeypatch) -> None:
 def test_select_certificate_and_require_non_empty_errors() -> None:
     cert = manager._select_certificate(
         [
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-OLD",
+                "publicKeyId": "key-old",
+                "validFrom": "2026-01-01T00:00:00Z",
+                "validTo": "2999-01-01T00:00:00Z",
+            },
             {"usage": ["KsefTokenEncryption"], "certificate": ""},
-            {"usage": ["KsefTokenEncryption"], "certificate": "CERT"},
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-NEW",
+                "publicKeyId": "key-new",
+                "validFrom": "2026-02-01T00:00:00Z",
+                "validTo": "2999-01-01T00:00:00Z",
+            },
         ],
         "KsefTokenEncryption",
     )
-    assert cert == "CERT"
+    assert cert.certificate == "CERT-NEW"
+    assert cert.public_key_id == "key-new"
 
     with pytest.raises(CliError) as cert_error:
         manager._select_certificate([], "KsefTokenEncryption")
@@ -376,11 +390,40 @@ def test_select_certificate_supports_object_payloads() -> None:
             SimpleNamespace(
                 usage=[SimpleNamespace(value="KsefTokenEncryption")],
                 certificate="CERT-OBJ",
+                public_key_id="key-obj",
             )
         ],
         "KsefTokenEncryption",
     )
-    assert cert == "CERT-OBJ"
+    assert cert.certificate == "CERT-OBJ"
+    assert cert.public_key_id == "key-obj"
+
+
+def test_select_certificate_ignores_invalid_and_future_validity() -> None:
+    cert = manager._select_certificate(
+        [
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-FUTURE",
+                "validFrom": "2999-01-01T00:00:00Z",
+            },
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-INVALID",
+                "publicKeyId": "key-invalid",
+                "validFrom": "not-a-date",
+            },
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-NAIVE",
+                "validFrom": "2026-01-01T00:00:00",
+            },
+        ],
+        "KsefTokenEncryption",
+    )
+
+    assert cert.certificate == "CERT-NAIVE"
+    assert cert.public_key_id is None
 
 
 def test_resolve_base_url_prefers_provided_value() -> None:

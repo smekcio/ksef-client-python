@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,12 @@ from ..exit_codes import ExitCode
 from ..sdk.factory import create_client
 from .keyring_store import clear_tokens, get_tokens, save_tokens
 from .token_cache import clear_cached_metadata, get_cached_metadata, set_cached_metadata
+
+
+@dataclass(frozen=True)
+class SelectedPublicKeyCertificate:
+    certificate: str
+    public_key_id: str | None = None
 
 
 def _extract_ksef_token_reference_number(token: str) -> str | None:
@@ -87,7 +95,46 @@ def _collect_active_token_reference_numbers(
     return matched_references
 
 
-def _select_certificate(certs: list[Any], usage_name: str) -> str:
+def _parse_certificate_datetime(value: Any) -> datetime | None:
+    if value in {None, ""}:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _is_current_certificate(cert: Any, now: datetime) -> bool:
+    if isinstance(cert, dict):
+        valid_from_raw = cert.get("validFrom")
+        valid_to_raw = cert.get("validTo")
+    else:
+        valid_from_raw = getattr(cert, "valid_from", None)
+        valid_to_raw = getattr(cert, "valid_to", None)
+    valid_from = _parse_certificate_datetime(valid_from_raw)
+    valid_to = _parse_certificate_datetime(valid_to_raw)
+    if valid_from is not None and valid_from > now:
+        return False
+    return not (valid_to is not None and valid_to < now)
+
+
+def _certificate_sort_key(cert: Any) -> tuple[bool, datetime]:
+    if isinstance(cert, dict):
+        valid_from_raw = cert.get("validFrom")
+    else:
+        valid_from_raw = getattr(cert, "valid_from", None)
+    valid_from = _parse_certificate_datetime(valid_from_raw)
+    if valid_from is None:
+        return (False, datetime.min.replace(tzinfo=timezone.utc))
+    return (True, valid_from)
+
+
+def _select_certificate(certs: list[Any], usage_name: str) -> SelectedPublicKeyCertificate:
+    now = datetime.now(timezone.utc)
+    candidates = []
     for cert in certs:
         if isinstance(cert, dict):
             usage = cert.get("usage")
@@ -98,8 +145,20 @@ def _select_certificate(certs: list[Any], usage_name: str) -> str:
         usage_values = (
             [str(getattr(item, "value", item)) for item in usage] if isinstance(usage, list) else []
         )
-        if usage_name in usage_values and certificate:
-            return str(certificate)
+        if usage_name in usage_values and certificate and _is_current_certificate(cert, now):
+            candidates.append(cert)
+    if candidates:
+        selected = max(candidates, key=_certificate_sort_key)
+        if isinstance(selected, dict):
+            certificate = selected.get("certificate")
+            public_key_id = selected.get("publicKeyId")
+        else:
+            certificate = getattr(selected, "certificate", None)
+            public_key_id = getattr(selected, "public_key_id", None)
+        return SelectedPublicKeyCertificate(
+            certificate=str(certificate),
+            public_key_id=str(public_key_id) if public_key_id is not None else None,
+        )
     raise CliError(
         f"Missing KSeF public certificate usage: {usage_name}.",
         ExitCode.API_ERROR,
@@ -184,7 +243,7 @@ def login_with_token(
         token_cert_pem = _select_certificate(certs, "KsefTokenEncryption")
         result = AuthCoordinator(client.auth).authenticate_with_ksef_token(
             token=safe_token,
-            public_certificate=token_cert_pem,
+            public_certificate=token_cert_pem.certificate,
             context_identifier_type=safe_context_type,
             context_identifier_value=safe_context_value,
             poll_interval_seconds=poll_interval,

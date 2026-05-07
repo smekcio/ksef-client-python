@@ -31,6 +31,7 @@ from ksef_client.clients.security import (
     AsyncSecurityClient,
     SecurityClient,
     _normalize_certificate_usage,
+    _select_public_key_certificate,
 )
 from ksef_client.clients.sessions import AsyncSessionsClient, SessionsClient
 from ksef_client.clients.testdata import AsyncTestDataClient, TestDataClient
@@ -495,10 +496,20 @@ class ClientsTests(unittest.TestCase):
         security_certificates = [
             m.PublicKeyCertificate.from_dict(
                 {
-                    "certificate": "pem-1",
+                    "certificate": "pem-old",
+                    "publicKeyId": "key-old",
                     "usage": ["KsefTokenEncryption"],
                     "validFrom": "2026-01-01T00:00:00Z",
-                    "validTo": "2026-12-31T23:59:59Z",
+                    "validTo": "2999-12-31T23:59:59Z",
+                }
+            ),
+            m.PublicKeyCertificate.from_dict(
+                {
+                    "certificate": "pem-new",
+                    "publicKeyId": "key-new",
+                    "usage": ["KsefTokenEncryption"],
+                    "validFrom": "2026-02-01T00:00:00Z",
+                    "validTo": "2999-12-31T23:59:59Z",
                 }
             )
         ]
@@ -508,11 +519,12 @@ class ClientsTests(unittest.TestCase):
             selected = security.get_public_key_certificate(
                 m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION
             )
-            self.assertEqual(selected.certificate, "pem-1")
+            self.assertEqual(selected.certificate, "pem-new")
+            self.assertEqual(selected.public_key_id, "key-new")
             selected_pem = security.get_public_key_certificate_pem("KsefTokenEncryption")
-            self.assertEqual(selected_pem, "pem-1")
+            self.assertEqual(selected_pem, "pem-new")
             selected_from_str = security.get_public_key_certificate("KsefTokenEncryption")
-            self.assertEqual(selected_from_str.certificate, "pem-1")
+            self.assertEqual(selected_from_str.certificate, "pem-new")
             self.assertEqual(
                 _normalize_certificate_usage("ksef_token_encryption"),
                 m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
@@ -521,6 +533,28 @@ class ClientsTests(unittest.TestCase):
                 security.get_public_key_certificate("SymmetricKeyEncryption")
             with self.assertRaises(ValueError):
                 _normalize_certificate_usage("bad-usage")
+
+        selected_edge = _select_public_key_certificate(
+            [
+                m.PublicKeyCertificate(
+                    certificate="future",
+                    usage=[m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION],
+                    valid_from="2999-01-01T00:00:00Z",
+                ),
+                m.PublicKeyCertificate(
+                    certificate="invalid-date",
+                    usage=[m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION],
+                    valid_from="not-a-date",
+                ),
+                m.PublicKeyCertificate(
+                    certificate="naive",
+                    usage=[m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION],
+                    valid_from="2026-01-01T00:00:00",
+                ),
+            ],
+            m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
+        )
+        self.assertEqual(selected_edge.certificate, "naive")
 
         testdata = TestDataClient(self.http)
         with (
@@ -883,10 +917,20 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         security_certificates = [
             m.PublicKeyCertificate.from_dict(
                 {
-                    "certificate": "pem-1",
+                    "certificate": "pem-old",
+                    "publicKeyId": "key-old",
                     "usage": ["SymmetricKeyEncryption"],
                     "validFrom": "2026-01-01T00:00:00Z",
-                    "validTo": "2026-12-31T23:59:59Z",
+                    "validTo": "2999-12-31T23:59:59Z",
+                }
+            ),
+            m.PublicKeyCertificate.from_dict(
+                {
+                    "certificate": "pem-new",
+                    "publicKeyId": "key-new",
+                    "usage": ["SymmetricKeyEncryption"],
+                    "validFrom": "2026-02-01T00:00:00Z",
+                    "validTo": "2999-12-31T23:59:59Z",
                 }
             )
         ]
@@ -896,15 +940,16 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             selected = await security.get_public_key_certificate(
                 m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION
             )
-            self.assertEqual(selected.certificate, "pem-1")
+            self.assertEqual(selected.certificate, "pem-new")
+            self.assertEqual(selected.public_key_id, "key-new")
             selected_pem = await security.get_public_key_certificate_pem(
                 "SymmetricKeyEncryption"
             )
-            self.assertEqual(selected_pem, "pem-1")
+            self.assertEqual(selected_pem, "pem-new")
             selected_from_str = await security.get_public_key_certificate(
                 "SymmetricKeyEncryption"
             )
-            self.assertEqual(selected_from_str.certificate, "pem-1")
+            self.assertEqual(selected_from_str.certificate, "pem-new")
             self.assertEqual(
                 _normalize_certificate_usage("symmetric-key-encryption"),
                 m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION,

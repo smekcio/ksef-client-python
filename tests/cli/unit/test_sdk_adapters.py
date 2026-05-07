@@ -330,6 +330,34 @@ def test_list_invoices_rejects_invalid_date_type(monkeypatch) -> None:
     assert exc.value.code == ExitCode.VALIDATION_ERROR
 
 
+def test_select_certificate_uses_current_newest_valid_from() -> None:
+    cert = adapters._select_certificate(
+        [
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-FUTURE",
+                "validFrom": "2999-01-01T00:00:00Z",
+            },
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-INVALID",
+                "publicKeyId": "key-invalid",
+                "validFrom": "not-a-date",
+            },
+            {
+                "usage": ["KsefTokenEncryption"],
+                "certificate": "CERT-NAIVE",
+                "publicKeyId": "key-naive",
+                "validFrom": "2026-01-01T00:00:00",
+            },
+        ],
+        "KsefTokenEncryption",
+    )
+
+    assert cert.certificate == "CERT-NAIVE"
+    assert cert.public_key_id == "key-naive"
+
+
 def test_get_lighthouse_status_success(monkeypatch) -> None:
     seen: dict[str, object] = {}
 
