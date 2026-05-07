@@ -6,6 +6,13 @@
 
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
 
+## [0.12.2](https://github.com/smekcio/ksef-client-python/compare/v0.12.1...v0.12.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* **ci:** pin demo xades auth request schema to 2.0 ([39eb7fb](https://github.com/smekcio/ksef-client-python/commit/39eb7fbf60fd729c3c7c1f4d787108aaa2eb447c))
+
 ## [0.12.1](https://github.com/smekcio/ksef-client-python/compare/v0.12.0...v0.12.1) (2026-04-22)
 
 
