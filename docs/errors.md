@@ -32,7 +32,7 @@ Specjalny przypadek dla `429 Too Many Requests`.
 
 ## Problem Details i `exc.problem`
 
-KSeF API 2.4.0 rozszerza odpowiedzi błędów o format `application/problem+json`.
+KSeF API 2.5.0 rozszerza odpowiedzi błędów o format `application/problem+json`.
 
 SDK mapuje `exc.problem` do jednego z modeli:
 

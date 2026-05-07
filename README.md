@@ -12,16 +12,10 @@ Projekt odwzorowuje oficjalne przepływy KSeF i zapewnia spójny model pracy w d
 
 ## 🔄 Kompatybilność
 
-Aktualna kompatybilność: **KSeF API `v2.4.0`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.4.0/api-changelog.md#wersja-240)).
+Aktualna kompatybilność: **KSeF API `v2.5.0`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.5.0/api-changelog.md#wersja-250)).
 
 Od tej wersji publiczne payloady requestów SDK są **typed-only**. Do metod klientów przekazuj
 obiekty `ksef_client.models.*`, a nie surowe `dict`.
-
-> [!WARNING]
-> **Breaking change:** domyślna gałąź repo zawiera już zmianę publicznego kontraktu SDK.
-> Request payloady do klientów są `typed-only`, a wiele odpowiedzi jest teraz zwracanych jako modele
-> zamiast surowych `dict`. Jeśli integracja buduje requesty jako słowniki albo czyta odpowiedzi przez
-> `response["field"]`, wymaga migracji. Szczegóły i przykłady: [`docs/migration-typed-model-api.md`](docs/migration-typed-model-api.md).
 
 ## 🧭 Spis treści
 
