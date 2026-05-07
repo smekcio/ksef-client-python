@@ -363,6 +363,7 @@ jobs:
           KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64: ${{ secrets.KSEF_DEMO_XADES_PRIVATE_KEY_PEM_B64 }}
           KSEF_DEMO_XADES_PRIVATE_KEY_PASSWORD: ${{ secrets.KSEF_DEMO_XADES_PRIVATE_KEY_PASSWORD }}
           KSEF_DEMO_XADES_SUBJECT_IDENTIFIER_TYPE: certificateSubject
+          KSEF_DEMO_XADES_AUTH_REQUEST_SCHEMA_VERSION: "2.0"
         run: |
           python -m pytest -q --maxfail=1 --disable-warnings \
             tests/test_e2e_token_flows.py::test_e2e_demo_environment_full_flow_xades
