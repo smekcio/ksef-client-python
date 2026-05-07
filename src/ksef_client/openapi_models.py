@@ -954,6 +954,7 @@ class EffectiveSubjectLimits(OpenApiModel):
 class EncryptionInfo(OpenApiModel):
     encrypted_symmetric_key: str = field(metadata={"json_key": "encryptedSymmetricKey"})
     initialization_vector: str = field(metadata={"json_key": "initializationVector"})
+    public_key_id: Optional[str] = field(default=None, metadata={"json_key": "publicKeyId"})
 
 @dataclass(frozen=True)
 class EnrollCertificateRequest(OpenApiModel):
@@ -1238,6 +1239,7 @@ class InitTokenAuthenticationRequest(OpenApiModel):
     context_identifier: AuthenticationContextIdentifier = field(metadata={"json_key": "contextIdentifier"})
     encrypted_token: str = field(metadata={"json_key": "encryptedToken"})
     authorization_policy: Optional[AuthorizationPolicy] = field(default=None, metadata={"json_key": "authorizationPolicy"})
+    public_key_id: Optional[str] = field(default=None, metadata={"json_key": "publicKeyId"})
 
 @dataclass(frozen=True)
 class InvoiceExportRequest(OpenApiModel):
@@ -1606,6 +1608,8 @@ class PersonalPermissionsTargetIdentifier(OpenApiModel):
 @dataclass(frozen=True)
 class PublicKeyCertificate(OpenApiModel):
     certificate: str
+    certificate_id: str = field(metadata={"json_key": "certificateId"})
+    public_key_id: str = field(metadata={"json_key": "publicKeyId"})
     usage: list[PublicKeyCertificateUsage]
     valid_from: str = field(metadata={"json_key": "validFrom"})
     valid_to: str = field(metadata={"json_key": "validTo"})

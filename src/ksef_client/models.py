@@ -408,6 +408,8 @@ class LighthouseStatusResponse:
 class PublicKeyCertificate:
     certificate: str
     usage: list[PublicKeyCertificateUsage] = field(default_factory=list)
+    certificate_id: str | None = None
+    public_key_id: str | None = None
     valid_from: str | None = None
     valid_to: str | None = None
 
@@ -418,6 +420,10 @@ class PublicKeyCertificate:
         return PublicKeyCertificate(
             certificate=str(data.get("certificate", "")),
             usage=[PublicKeyCertificateUsage(str(item)) for item in usage_values],
+            certificate_id=(
+                str(data["certificateId"]) if data.get("certificateId") is not None else None
+            ),
+            public_key_id=str(data["publicKeyId"]) if data.get("publicKeyId") is not None else None,
             valid_from=str(data["validFrom"]) if data.get("validFrom") is not None else None,
             valid_to=str(data["validTo"]) if data.get("validTo") is not None else None,
         )
@@ -427,6 +433,10 @@ class PublicKeyCertificate:
             "certificate": self.certificate,
             "usage": [item.value for item in self.usage],
         }
+        if not omit_none or self.certificate_id is not None:
+            payload["certificateId"] = self.certificate_id
+        if not omit_none or self.public_key_id is not None:
+            payload["publicKeyId"] = self.public_key_id
         if not omit_none or self.valid_from is not None:
             payload["validFrom"] = self.valid_from
         if not omit_none or self.valid_to is not None:

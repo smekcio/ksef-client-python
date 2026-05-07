@@ -276,13 +276,19 @@ class ModelsTests(unittest.TestCase):
         cert = models.PublicKeyCertificate.from_dict(
             {
                 "certificate": "pem",
+                "certificateId": "cert-id",
+                "publicKeyId": "key-id",
                 "usage": ["KsefTokenEncryption"],
                 "validFrom": "2026-01-01T00:00:00Z",
                 "validTo": "2026-12-31T23:59:59Z",
             }
         )
+        self.assertEqual(cert.certificate_id, "cert-id")
+        self.assertEqual(cert.public_key_id, "key-id")
         self.assertEqual(cert.valid_from, "2026-01-01T00:00:00Z")
         self.assertEqual(cert.valid_to, "2026-12-31T23:59:59Z")
+        self.assertEqual(cert.to_dict()["certificateId"], "cert-id")
+        self.assertEqual(cert.to_dict()["publicKeyId"], "key-id")
         self.assertEqual(cert.to_dict()["validFrom"], "2026-01-01T00:00:00Z")
         self.assertEqual(cert.to_dict()["validTo"], "2026-12-31T23:59:59Z")
 
