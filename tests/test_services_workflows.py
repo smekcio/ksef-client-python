@@ -130,6 +130,17 @@ def _invoice_package(url: str = "https://download") -> m.InvoicePackage:
     )
 
 
+def _empty_invoice_package() -> m.InvoicePackage:
+    return m.InvoicePackage.from_dict(
+        {
+            "invoiceCount": 0,
+            "size": 0,
+            "isTruncated": False,
+            "parts": [],
+        }
+    )
+
+
 def _form_code() -> m.FormCode:
     return m.FormCode(system_code="FA", schema_version="1-0E", value="FA")
 
@@ -622,6 +633,27 @@ class WorkflowsTests(unittest.TestCase):
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
         self.assertIn("inv.xml", result.invoice_xml_files)
 
+    def test_export_workflow_empty_invoice_package_returns_empty_result(self):
+        encryption = workflows.EncryptionData(
+            key=generate_symmetric_key(),
+            iv=generate_iv(),
+            encryption_info=None,
+        )
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.ExportWorkflow(cast(InvoicesClient, DummyInvoices()), RecordingHttp())
+        with patch.object(
+            workflow._download_helper,
+            "download_parts_with_hash",
+            side_effect=AssertionError("empty export package should not be downloaded"),
+        ):
+            result = workflow.download_and_process_package(_empty_invoice_package(), encryption)
+
+        self.assertEqual(result.metadata_summaries, [])
+        self.assertEqual(result.invoice_xml_files, {})
+
     def test_export_workflow_ignores_non_xml_non_metadata_files(self):
         key = generate_symmetric_key()
         iv = generate_iv()
@@ -962,6 +994,33 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await workflow.download_and_process_package(_invoice_package("u"), encryption)
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
+
+    async def test_async_export_workflow_empty_invoice_package_returns_empty_result(self):
+        encryption = workflows.EncryptionData(
+            key=generate_symmetric_key(),
+            iv=generate_iv(),
+            encryption_info=None,
+        )
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.AsyncExportWorkflow(
+            cast(AsyncInvoicesClient, DummyInvoices()),
+            RecordingAsyncHttp(),
+        )
+        with patch.object(
+            workflow._download_helper,
+            "download_parts_with_hash",
+            AsyncMock(side_effect=AssertionError("empty export package should not be downloaded")),
+        ):
+            result = await workflow.download_and_process_package(
+                _empty_invoice_package(),
+                encryption,
+            )
+
+        self.assertEqual(result.metadata_summaries, [])
+        self.assertEqual(result.invoice_xml_files, {})
 
     async def test_async_export_workflow_ignores_non_xml_non_metadata_files(self):
         key = generate_symmetric_key()
