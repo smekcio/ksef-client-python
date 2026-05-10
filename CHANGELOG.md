@@ -6,6 +6,17 @@
 
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
 
+## 0.12.4 (2026-05-10)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* fix: handle empty invoice export packages by @smekcio in https://github.com/smekcio/ksef-client-python/pull/61
+
+
+**Full Changelog**: https://github.com/smekcio/ksef-client-python/compare/v0.12.3...v0.12.4
+
 ## 0.12.3 (2026-05-07)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
