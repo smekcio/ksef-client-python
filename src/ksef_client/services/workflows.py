@@ -965,6 +965,9 @@ class ExportWorkflow:
         package: InvoicePackage,
         encryption_data: EncryptionData,
     ) -> PackageProcessingResult:
+        if package.invoice_count == 0:
+            return PackageProcessingResult(metadata_summaries=[], invoice_xml_files={})
+
         encrypted_parts_with_hash = self._download_helper.download_parts_with_hash(package.parts)
         for index, (part_bytes, part_hash) in enumerate(encrypted_parts_with_hash, start=1):
             _validate_export_part_hash(
@@ -1016,6 +1019,9 @@ class AsyncExportWorkflow:
         package: InvoicePackage,
         encryption_data: EncryptionData,
     ) -> PackageProcessingResult:
+        if package.invoice_count == 0:
+            return PackageProcessingResult(metadata_summaries=[], invoice_xml_files={})
+
         encrypted_parts_with_hash = await self._download_helper.download_parts_with_hash(
             package.parts
         )
