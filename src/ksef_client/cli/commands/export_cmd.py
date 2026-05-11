@@ -80,8 +80,8 @@ def export_run(
     subject_type: str = typer.Option(
         "Subject1", "--subject-type", help="KSeF subject type filter."
     ),
-    restrict_to_permanent_storage_hwm_date: bool = typer.Option(
-        False,
+    restrict_to_permanent_storage_hwm_date: bool | None = typer.Option(
+        None,
         "--restrict-to-permanent-storage-hwm-date/--no-restrict-to-permanent-storage-hwm-date",
         help="Use PermanentStorageHwmDate guard from API for incremental export.",
     ),

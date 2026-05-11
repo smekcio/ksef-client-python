@@ -56,6 +56,19 @@ def test_export_run_only_metadata_flag(runner, monkeypatch, tmp_path) -> None:
     assert seen["only_metadata"] is True
 
 
+def test_export_run_defaults_hwm_guard_to_none(runner, monkeypatch, tmp_path) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_run(**kwargs):
+        seen.update(kwargs)
+        return {"reference_number": "EXP-HWM-DEFAULT"}
+
+    monkeypatch.setattr(export_cmd, "run_export", _fake_run)
+    result = runner.invoke(app, ["export", "run", "--out", str(tmp_path)])
+    assert result.exit_code == 0
+    assert seen["restrict_to_permanent_storage_hwm_date"] is None
+
+
 def test_export_run_validation_error_exit(runner, monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         export_cmd,

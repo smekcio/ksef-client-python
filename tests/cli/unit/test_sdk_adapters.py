@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -2636,7 +2635,7 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
     assert result["metadata_count"] == 1
     assert result["only_metadata"] is False
     assert result["date_type"] == "Issue"
-    assert result["restrict_to_permanent_storage_hwm_date"] is False
+    assert result["restrict_to_permanent_storage_hwm_date"] is None
     payload = seen["payload"]
     assert isinstance(payload, m.InvoiceExportRequest)
     assert payload.only_metadata is False
@@ -2644,7 +2643,8 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
     assert seen["encryption_cert"] == "CERT"
     assert seen["public_key_id"] == "key-id"
     assert payload.filters.date_range.date_type == m.InvoiceQueryDateType.ISSUE
-    assert payload.filters.date_range.restrict_to_permanent_storage_hwm_date is False
+    assert payload.filters.date_range.restrict_to_permanent_storage_hwm_date is None
+    assert "restrictToPermanentStorageHwmDate" not in payload.filters.date_range.to_dict()
     assert (tmp_path / "_metadata.json").exists()
     assert (tmp_path / "a.xml").read_text(encoding="utf-8") == "<xml/>"
 
@@ -2741,7 +2741,7 @@ def test_run_export_only_metadata_success(monkeypatch, tmp_path) -> None:
     assert list(tmp_path.glob("*.xml")) == []
 
 
-def test_run_export_incremental_hwm_filters(monkeypatch) -> None:
+def test_run_export_incremental_hwm_filters(monkeypatch, tmp_path) -> None:
     seen: dict[str, object] = {}
 
     class _Security:
@@ -2795,8 +2795,6 @@ def test_run_export_incremental_hwm_filters(monkeypatch) -> None:
     monkeypatch.setattr(adapters, "ExportWorkflow", _FakeExportWorkflow)
     monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
 
-    out_dir = Path("build_test_export_hwm")
-    out_dir.mkdir(parents=True, exist_ok=True)
     result = adapters.run_export(
         profile="demo",
         base_url="https://example.invalid",
@@ -2807,7 +2805,7 @@ def test_run_export_incremental_hwm_filters(monkeypatch) -> None:
         restrict_to_permanent_storage_hwm_date=True,
         poll_interval=0.01,
         max_attempts=2,
-        out=str(out_dir),
+        out=str(tmp_path),
     )
 
     assert result["reference_number"] == "EXP-HWM"
@@ -2817,6 +2815,28 @@ def test_run_export_incremental_hwm_filters(monkeypatch) -> None:
     assert isinstance(payload, m.InvoiceExportRequest)
     assert payload.filters.date_range.date_type == m.InvoiceQueryDateType.PERMANENTSTORAGE
     assert payload.filters.date_range.restrict_to_permanent_storage_hwm_date is True
+
+
+def test_run_export_rejects_hwm_guard_for_issue_date_type(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+
+    with pytest.raises(CliError) as exc:
+        adapters.run_export(
+            profile="demo",
+            base_url="https://example.invalid",
+            date_from="2026-01-01",
+            date_to="2026-01-31",
+            date_type="Issue",
+            subject_type="Subject1",
+            restrict_to_permanent_storage_hwm_date=True,
+            poll_interval=0.01,
+            max_attempts=2,
+            out=str(tmp_path),
+        )
+
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+    assert exc.value.hint is not None
+    assert "PermanentStorage" in exc.value.hint
 
 
 def test_export_run_cli_passes_incremental_options(monkeypatch) -> None:
