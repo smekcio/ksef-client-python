@@ -2835,6 +2835,7 @@ def test_run_export_rejects_hwm_guard_for_issue_date_type(monkeypatch, tmp_path)
         )
 
     assert exc.value.code == ExitCode.VALIDATION_ERROR
+    assert exc.value.hint is not None
     assert "PermanentStorage" in exc.value.hint
 
 
