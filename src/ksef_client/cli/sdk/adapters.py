@@ -1606,7 +1606,7 @@ def run_export(
     date_to: str | None,
     date_type: str = m.InvoiceQueryDateType.ISSUE.value,
     subject_type: str,
-    restrict_to_permanent_storage_hwm_date: bool = False,
+    restrict_to_permanent_storage_hwm_date: bool | None = None,
     only_metadata: bool = False,
     poll_interval: float,
     max_attempts: int,
@@ -1616,6 +1616,15 @@ def run_export(
     _validate_polling_options(poll_interval, max_attempts)
     from_iso, to_iso = _normalize_date_range(date_from, date_to)
     date_type_enum = _require_invoice_query_date_type(date_type)
+    restrict_hwm = restrict_to_permanent_storage_hwm_date
+    if date_type_enum is not m.InvoiceQueryDateType.PERMANENTSTORAGE:
+        if restrict_hwm is True:
+            raise CliError(
+                "PermanentStorageHwmDate guard can only be used with PermanentStorage date type.",
+                ExitCode.VALIDATION_ERROR,
+                "Use --date-type PermanentStorage or remove the HWM guard flag.",
+            )
+        restrict_hwm = None
     out_dir = Path(out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1636,7 +1645,7 @@ def run_export(
                     date_type=date_type_enum,
                     from_=from_iso,
                     to=to_iso,
-                    restrict_to_permanent_storage_hwm_date=restrict_to_permanent_storage_hwm_date,
+                    restrict_to_permanent_storage_hwm_date=restrict_hwm,
                 ),
             ),
         )
@@ -1699,7 +1708,7 @@ def run_export(
         "from": from_iso,
         "to": to_iso,
         "date_type": date_type_enum.value,
-        "restrict_to_permanent_storage_hwm_date": restrict_to_permanent_storage_hwm_date,
+        "restrict_to_permanent_storage_hwm_date": restrict_hwm,
     }
 
 
