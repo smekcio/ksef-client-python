@@ -44,6 +44,7 @@ from ksef_client.documents.fa3.template import REQUIRED_HEADERS, create_error_re
 from ksef_client.documents.fa3.xml import (
     FA3XmlValidationError,
     _basic_xml_validation,
+    _schema_resolver,
     _vat_rate,
     validate_fa3_xml_xsd,
 )
@@ -625,6 +626,14 @@ def test_xsd_validation_accepts_basic_generated_invoice_and_rejects_invalid_xml(
 
     with pytest.raises(FA3XmlValidationError):
         validate_fa3_xml_xsd(b"<Faktura />")
+
+
+def test_schema_resolver_ignores_unknown_schema() -> None:
+    from lxml import etree
+
+    resolver = _schema_resolver(etree)
+
+    assert resolver.resolve("NieznanySchemat.xsd", None, None) is None
 
 
 def _write_valid_row(

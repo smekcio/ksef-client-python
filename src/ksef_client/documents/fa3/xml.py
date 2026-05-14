@@ -73,6 +73,7 @@ def _schema_resolver(etree: Any) -> Any:
                 "schemat_FA(3)_v1-0E.xsd",
                 "StrukturyDanych_v10-0E.xsd",
                 "ElementarneTypyDanych_v10-0E.xsd",
+                "KodyKrajow_v10-0E.xsd",
             }
             if file_name not in known:
                 return None
