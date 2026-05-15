@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import zipfile
+from dataclasses import replace
 from datetime import date, datetime
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -13,18 +15,23 @@ import pytest
 from ksef_client.documents.fa3 import (
     AdditionalDescription,
     Address,
+    AdvancePayment,
     Annotation,
+    AnnotationSet,
     Attachment,
     AttachmentBlock,
     AttachmentTable,
+    AuthorizedPartyRole,
     BankAccount,
     BasicInvoiceBuilder,
     Contact,
+    CorrectedAdvanceState,
     CorrectionInvoiceBuilder,
     CorrectionReference,
     CorrectionType,
     CoverageStatus,
     Discount,
+    ExciseRefund,
     FA3BatchDraft,
     FA3Draft,
     FA3Importer,
@@ -34,14 +41,19 @@ from ksef_client.documents.fa3 import (
     FA3InvoiceKind,
     FA3Party,
     FA3Template,
+    Footer,
     GTUCode,
     ImportMode,
     InvoiceLine,
     LineIdentifiers,
     LineProcedure,
+    MarginProcedure,
     NewTransportMeans,
+    OrderLine,
+    OrderLineProcedure,
     PartialPayment,
     Party,
+    PartyIdentifier,
     PaymentDue,
     PaymentMethod,
     PaymentTerms,
@@ -49,11 +61,16 @@ from ksef_client.documents.fa3 import (
     Settlement,
     SettlementAdjustment,
     SettlementInvoiceBuilder,
+    TaxSummary,
     ThirdPartyRole,
+    TransactionTerms,
+    Transport,
     TransportKind,
     VatClass,
     audit_fa3_xsd_coverage,
+    parse_fa3_xsd_elements,
 )
+from ksef_client.documents.fa3.domain import FA3InvoiceBuilderV2
 from ksef_client.documents.fa3.importer import (
     _cell,
     _column_from_message,
@@ -80,6 +97,11 @@ from ksef_client.documents.fa3.xml import (
     _schema_resolver,
     _vat_rate,
     validate_fa3_xml_xsd,
+)
+from ksef_client.documents.fa3.xsd_map import (
+    RAW_EXTENSION_PATHS,
+    SUPPORTED_BUILDER_PATHS,
+    UNSUPPORTED_PATHS,
 )
 
 openpyxl = pytest.importorskip("openpyxl")
@@ -909,7 +931,7 @@ def test_correction_builder_supports_many_refs_corrected_parties_and_before_afte
             correction_type=CorrectionType.TAX_BASE_OR_TAX,
         )
         .corrected_seller(seller)
-        .corrected_buyer(buyer)
+        .corrected_buyer(replace(buyer, buyer_id="BUYER-K"))
         .add_corrected_line_before_after(
             before=InvoiceLine.service(
                 "Usługa",
@@ -1094,6 +1116,612 @@ def test_raw_xml_extension_is_rejected_in_full_typed_sdk() -> None:
             .raw_extension("/Faktura/Stopka", "<Stopka />")
             .build()
         )
+
+
+def test_builder_fluent_paths_cover_annotations_payments_and_typed_sections() -> None:
+    seller = replace(
+        Party.polish_company(
+            nip="1234567890",
+            name="Sprzedawca",
+            address=Address.polish("Adres S", "Lokal 2", gln="5901234123457"),
+            contacts=(Contact(email="seller@example.com", phone="123456789"),),
+        ),
+        taxpayer_prefix="PL",
+        taxpayer_status="1",
+        eori="EORI-S",
+    )
+    buyer = replace(
+        Party.without_tax_id(name="Nabywca", address=Address.foreign("DE", "Buyer street")),
+        correspondence_address=Address.foreign("DE", "Correspondence", gln="4001234567890"),
+        contacts=(Contact(phone="987654321"),),
+        customer_number="CUST-1",
+        buyer_id="BUYER-1",
+    )
+    extra = replace(
+        Party.foreign_company(
+            identifier="EXT-1",
+            country_code="US",
+            name="External",
+            address=Address.foreign("US", "External street"),
+        ),
+        role=ThirdPartyRole.OTHER,
+        other_role_description="custom role",
+        share=Decimal("25"),
+        customer_number="EXTRA-1",
+    )
+    authorized = replace(
+        Party.polish_company(nip="2222222222", name="Pełnomocnik", address="Adres PU"),
+        authorized_role=AuthorizedPartyRole.BAILIFF,
+        contacts=(Contact(phone="555555555"),),
+    )
+    block = AttachmentBlock(
+        header="Blok",
+        metadata=(("meta", "value"),),
+        paragraphs=("Paragraf",),
+        tables=(
+            AttachmentTable(
+                headers=("A", "B"),
+                rows=(("1", "2"),),
+                column_types=("txt", "txt"),
+                description="Tabela",
+                footer=("Suma",),
+            ),
+        ),
+    )
+
+    invoice = (
+        FA3Invoice.basic("FV/COV/1")
+        .issued_on(date(2026, 4, 1))
+        .currency("eur")
+        .issue_place("Kraków")
+        .sale_date(date(2026, 3, 31))
+        .seller(seller)
+        .buyer(buyer)
+        .add_party(extra, ThirdPartyRole.OTHER)
+        .authorized_party(authorized, AuthorizedPartyRole.BAILIFF)
+        .add_goods_line(
+            "Towar",
+            quantity="2",
+            unit_net_price="50",
+            tax=VatClass.from_rate_code("4"),
+            discount=Discount.amount("5"),
+            identifiers=LineIdentifiers(
+                unique_id="u1",
+                internal_index="SKU",
+                gtin="5901234123457",
+                pkwiu="62.01",
+                cn="1234",
+                pkob="567",
+            ),
+            unit_gross_price=decimal_from_value("61.50", field_name="gross"),
+            net_amount=decimal_from_value("95", field_name="net"),
+            gross_amount=decimal_from_value("98.80", field_name="gross"),
+            vat_amount=decimal_from_value("3.80", field_name="vat"),
+            excise_amount=decimal_from_value("1.23", field_name="excise"),
+            gtu=GTUCode.GTU_01,
+            procedure=LineProcedure.IED,
+            currency_rate=decimal_from_value("4.123456", field_name="currency_rate"),
+            annex_15=True,
+        )
+        .cash_method()
+        .self_billing()
+        .reverse_charge()
+        .margin(MarginProcedure.ART)
+        .exemption("art. 43")
+        .payment_due(date(2026, 4, 15), method=PaymentMethod.CARD)
+        .payment_due_description(7, "dni", "odbiór")
+        .paid(date(2026, 4, 2))
+        .partially_paid(
+            "12.30",
+            date(2026, 4, 3),
+            other_method_description="barter",
+        )
+        .bank_account(
+            "12345678901234567890123456",
+            swift="TESTPLPW",
+            own_bank_account="1",
+            bank_name="Bank",
+            description="konto główne",
+        )
+        .bank_account("99999999999999999999999999", factor=True)
+        .cash_discount("2% za szybką płatność", "2.00")
+        .transaction_terms(
+            delivery_terms="EXW",
+            contractual_rate="4.123456",
+            contractual_currency="eur",
+            intermediary=True,
+        )
+        .contract(number="UM/COV/1", date=date(2026, 3, 1))
+        .order_reference(number="ZAM/COV/1", date=date(2026, 3, 2))
+        .batch_number("PARTIA-COV")
+        .transport(
+            TransportKind.OTHER,
+            other_kind_description="dron",
+            carrier=buyer,
+            order_number="TR/COV/1",
+            other_cargo_description="ładunek specjalny",
+            package_unit="karton",
+            started_at=datetime(2026, 4, 1, 8, 30),
+            finished_at=datetime(2026, 4, 1, 12, 0),
+            ship_from=Address.polish("Magazyn A"),
+            ship_via=(Address.polish("Hub"),),
+            ship_to=Address.polish("Magazyn B"),
+        )
+        .additional_description("key", "value")
+        .foreign_currency_rate("4.123456")
+        .fiscal_receipt_invoice(False)
+        .related_party_transaction(False)
+        .excise_refund(False)
+        .new_transport(
+            NewTransportMeans(
+                allowed_date=date(2026, 3, 1),
+                row_number=1,
+                kind="water",
+                hours_used="10",
+                serial_number="WATER-1",
+                make="Make",
+                model="Model",
+                color="Blue",
+                registry_number="REG",
+                manufacture_year="2026",
+                value="100",
+                tax_amount="23",
+                taxable_base="100",
+                tax_rate="23",
+            ),
+            intra_eu=True,
+        )
+        .with_section(
+            NewTransportMeans(
+                allowed_date=date(2026, 3, 2),
+                row_number=2,
+                kind="air",
+                hours_used="5",
+                serial_number="AIR-1",
+            )
+        )
+        .with_section(
+            NewTransportMeans(
+                allowed_date=date(2026, 3, 3),
+                row_number=3,
+                kind="land",
+                mileage="100",
+                serial_number="LAND-1",
+                approval_number="HOMOLOGACJA",
+                engine_capacity="1998",
+                engine_power="150",
+                tax_rate="23",
+            )
+        )
+        .with_section(AdditionalDescription.key_value("second", "value"))
+        .with_section(Footer.info("Info stopki"))
+        .with_section(Footer.registry(Registry.regon_entry("123456789")))
+        .with_section(ExciseRefund())
+        .with_section(CorrectedAdvanceState.create("10", currency_rate="4.1"))
+        .footer_info("Druga stopka")
+        .registry(Registry.bdo_entry("000012345"))
+        .attachment_text("Tekst", "Akapit")
+        .attachment_table(header="Tabela", columns=("A",), rows=(("1",),), description="Opis")
+        .attachment_block(block)
+        .build()
+    )
+
+    xml = invoice.to_xml().decode("utf-8")
+
+    assert "<PrefiksPodatnika>PL</PrefiksPodatnika>" in xml
+    assert "<BrakID>1</BrakID>" in xml
+    assert "<AdresKoresp>" in xml
+    assert "<TelefonPU>555555555</TelefonPU>" in xml
+    assert "<RolaInna>1</RolaInna>" in xml
+    assert "<Zaplacono>1</Zaplacono>" in xml
+    assert "<RachunekBankowyFaktora>" in xml
+    assert "<Skonto>" in xml
+    assert "<TransportInny>1</TransportInny>" in xml
+    assert "<WysylkaPrzez>" in xml
+    assert "<P_22C>10</P_22C>" in xml
+    assert "<P_22D>5</P_22D>" in xml
+    assert "<BDO>000012345</BDO>" in xml
+    assert "<Tekst>" in xml
+    assert "<Suma>" in xml
+
+    with pytest.raises(TypeError, match="Unsupported FA\\(3\\) typed section"):
+        FA3Invoice.basic("FV/UNSUPPORTED/1").with_section(object())
+
+    simplified_builder = FA3Invoice.simplified("UPR/OK/1")
+    simplified_builder.issued_on(date(2026, 1, 1))
+    simplified_builder.seller(seller)
+    simplified_builder.buyer(buyer)
+    simplified_builder.add_service_line("Line", quantity="1", unit_net_price="100")
+    simplified_builder.as_simplified_receipt_like()
+    simplified = simplified_builder.build()
+    assert simplified.total_gross == Decimal("123.00")
+
+    triangular_builder = FA3Invoice.basic("FV/TRI/1")
+    triangular_builder._merge_annotations(Annotation.simplified_triangular())
+    assert triangular_builder._annotations.simplified_triangular is True
+
+
+def test_domain_validation_and_value_object_branches() -> None:
+    assert PartyIdentifier.internal("INT").validate("party.identifier") == []
+    assert PartyIdentifier.none().validate("party.identifier") == []
+    assert PartyIdentifier.foreign("EXT", country_code="us").country_code == "US"
+    assert PartyIdentifier.eu_vat("", "123").validate("party.identifier")
+    assert PartyIdentifier.polish_nip("").validate("party.identifier")
+    assert Address.polish("").validate("party.address")
+    assert Address("", country_code="").validate("party.address")
+    assert Contact().validate("party.contact")
+    assert Party.foreign_company(
+        identifier="ABC",
+        country_code="us",
+        name="Foreign",
+        address="Addr",
+    ).identifier.country_code == "US"
+
+    invalid_party = replace(
+        Party.polish_company(nip="1234567890", name="", address=None),
+        correspondence_address=Address("", country_code=""),
+        contacts=(Contact(),),
+        share=Decimal("150"),
+    )
+    issues = invalid_party.validate("party", address_required=True)
+    assert any("nazwa" in issue.message for issue in issues)
+    assert any("udział" in issue.message for issue in issues)
+
+    assert Discount.percent("10").amount_for(Decimal("100")) == Decimal("10.00")
+    assert Discount.amount("3").amount_for(Decimal("100")) == Decimal("3.00")
+    assert Discount.amount("-1").validate("discount")
+    assert Discount.percent("101").validate("discount")
+
+    assert VatClass.from_vat_rate("zw").xml_rate == "zw"
+    assert VatClass.from_vat_rate("23").xml_rate == "23"
+    assert VatClass.from_vat_rate("22").xml_rate == "22"
+    assert VatClass.from_vat_rate("8").xml_rate == "8"
+    assert VatClass.from_vat_rate("7").xml_rate == "7"
+    assert VatClass.from_vat_rate("5").xml_rate == "5"
+    assert VatClass.from_vat_rate("0").xml_rate == "0 KR"
+    assert VatClass.from_vat_rate("17").xml_rate == "17"
+    assert VatClass.from_rate_code("0 WDT").summary_fields[0] == "P_13_6_2"
+    assert VatClass.from_rate_code("0 EX").summary_fields[0] == "P_13_6_3"
+    assert VatClass.from_rate_code("oo").xml_rate == "oo"
+    assert VatClass.from_rate_code("np II").xml_rate == "np II"
+    assert VatClass.from_rate_code("3").xml_rate == "3"
+    assert VatClass.outside_country().xml_rate == "np I"
+    assert VatClass.margin().xml_rate == "np I"
+    assert VatClass.xii("12").xii_rate == Decimal("12")
+    with pytest.raises(ValueError, match="Nieobsługiwana"):
+        VatClass.from_rate_code("bad")
+
+    bad_line = InvoiceLine.service("", quantity="0", unit_net_price="-1")
+    assert bad_line.validate("line")
+    corrected = InvoiceLine.corrected_before("Before", quantity="1", unit_net_price="10")
+    assert corrected.before_correction is True
+    after_line = InvoiceLine.corrected_after("After", quantity="1", unit_net_price="10")
+    assert after_line.before_correction is False
+
+    line = InvoiceLine.service(
+        "Summary",
+        quantity="2",
+        unit_net_price="100",
+        tax=VatClass.standard_23(),
+        discount=Discount.percent("10"),
+    )
+    summary = TaxSummary.from_lines((line,))
+    assert summary.gross_total == Decimal("221.40")
+    assert summary.lines[0].net_field == "P_13_1"
+
+
+def test_invoice_validation_branches_and_legacy_builder_helpers() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Seller", address="Addr")
+    buyer = Party.polish_company(nip="1111111111", name="Buyer", address="Addr")
+    line = InvoiceLine.service("Line", quantity="1", unit_net_price="100")
+
+    invoice = FA3Invoice(
+        invoice_number="",
+        issue_date=None,  # type: ignore[arg-type]
+        seller=replace(seller, address=None),
+        buyer=replace(buyer, is_jst_subunit=True, is_vat_group_member=True),
+        lines=(),
+        additional_parties=(replace(buyer, role=None),),
+        authorized_party=replace(seller, authorized_role=None),
+        raw_extensions=(),
+    )
+
+    messages = [issue.message for issue in invoice.validate().errors]
+    assert any("numer jest wymagany" in message for message in messages)
+    assert any("data jest wymagana" in message for message in messages)
+    assert any("co najmniej jednej pozycji" in message for message in messages)
+    assert any("rola jest wymagana" in message for message in messages)
+    assert any("JST wymaga" in message for message in messages)
+    assert any("GV wymaga" in message for message in messages)
+
+    correction = replace(
+        invoice,
+        invoice_number="KOR/1",
+        issue_date=date(2026, 1, 1),
+        seller=seller,
+        buyer=buyer,
+        lines=(line,),
+        kind=FA3InvoiceKind.CORRECTION,
+        additional_parties=(),
+        authorized_party=None,
+    )
+    assert any("przyczyna korekty" in issue.message for issue in correction.validate().errors)
+    assert any("fakturę korygowaną" in issue.message for issue in correction.validate().errors)
+
+    settlement = replace(
+        correction,
+        kind=FA3InvoiceKind.SETTLEMENT,
+        correction_reason=None,
+        corrected_invoices=(),
+    )
+    assert any("fakturę zaliczkową" in issue.message for issue in settlement.validate().errors)
+
+    raw = replace(
+        settlement,
+        kind=FA3InvoiceKind.BASIC,
+        advance_invoices=(),
+        raw_extensions=(object(),),  # type: ignore[arg-type]
+    )
+    assert any("RawXmlExtension" in issue.message for issue in raw.validate().errors)
+    assert replace(raw, lines=(line,), raw_extensions=()).total_net == Decimal("100.00")
+    assert replace(raw, lines=(line,), raw_extensions=()).total_vat == Decimal("23.00")
+
+    builder = (
+        FA3InvoiceBuilderV2("FV/V2/1", FA3InvoiceKind.BASIC)
+        .issued_on(date(2026, 1, 1))
+        .currency("eur")
+        .issue_place("Warszawa")
+        .sale_date(date(2026, 1, 2))
+        .period(date(2026, 1, 1), date(2026, 1, 31))
+        .seller(seller)
+        .buyer(buyer)
+        .add_party(replace(buyer, role=ThirdPartyRole.RECIPIENT), ThirdPartyRole.RECIPIENT)
+        .authorized_party(seller, AuthorizedPartyRole.REPRESENTATIVE)
+        .add_line("Line", quantity="1", unit_net_price="100")
+        .annotations(Annotation.self_billing())
+        .annotation_set(AnnotationSet.default())
+        .payment(PaymentTerms.transfer(due_date=date(2026, 2, 1)))
+        .settlement_details(Settlement(charges=(SettlementAdjustment.create("1", "charge"),)))
+        .attachment(Attachment.text("Header", "Paragraph"))
+    )
+    assert builder.validate().ok
+    assert b"<RodzajFaktury>VAT</RodzajFaktury>" in builder.to_xml()
+
+    invalid_builder = FA3InvoiceBuilderV2("", FA3InvoiceKind.BASIC)
+    assert not invalid_builder.validate().ok
+
+
+def test_correction_and_settlement_variant_edge_paths() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Seller", address="Addr")
+    buyer = Party.polish_company(nip="1111111111", name="Buyer", address="Addr")
+
+    limited_builder = FA3Invoice.simplified("UPR/LIMIT/1")
+    limited_builder.issued_on(date(2026, 1, 1))
+    limited_builder.seller(seller)
+    limited_builder.buyer(buyer)
+    limited_builder.add_service_line("Line", quantity="1", unit_net_price="451")
+    limited_builder.as_simplified_receipt_like()
+    with pytest.raises(ValueError, match="450 PLN"):
+        limited_builder.build()
+
+    correction_builder = FA3Invoice.advance_correction("KOR/ZAL/1")
+    correction_builder.issued_on(date(2026, 2, 1))
+    correction_builder.seller(seller)
+    correction_builder.buyer(buyer)
+    correction_builder.corrects_invoice(
+        number="ZAL/1",
+        issue_date=date(2026, 1, 1),
+        reason="Correction",
+        correction_type=CorrectionType.OTHER,
+        ksef_number="123456789012345678901234567890123456",
+    )
+    correction_builder.correction_type(CorrectionType.NO_TAX_IMPACT)
+    correction_builder.corrected_advance_state("100", currency_rate="4.123456")
+    correction_builder.advance_payment(amount="50", paid_on=date(2026, 1, 2), currency_rate="4.2")
+    correction = correction_builder.build()
+    correction_xml = correction.to_xml().decode("utf-8")
+    assert "<NrKSeF>1</NrKSeF>" in correction_xml
+    assert "<P_15ZK>100.00</P_15ZK>" in correction_xml
+    assert "<KursWalutyZK>4.123456</KursWalutyZK>" in correction_xml
+    assert "<KursWalutyZW>4.2</KursWalutyZW>" in correction_xml
+
+    settlement_builder = FA3Invoice.settlement_correction("KOR/ROZ/1")
+    settlement_builder.issued_on(date(2026, 2, 1))
+    settlement_builder.seller(seller)
+    settlement_builder.buyer(buyer)
+    settlement_builder.corrects_invoice(
+        number="ROZ/1",
+        issue_date=date(2026, 1, 1),
+        reason="Correction",
+    )
+    settlement_builder.settles_advances(
+        (("ZAL/1", None), (None, "123456789012345678901234567890123456"))
+    )
+    settlement_builder.document_discount("10", reason="Discount")
+    settlement_builder.remaining_to_pay("90")
+    settlement_builder.add_service_line("Line", quantity="1", unit_net_price="100")
+    settlement = settlement_builder.build()
+    settlement_xml = settlement.to_xml().decode("utf-8")
+    assert settlement_xml.count("<FakturaZaliczkowa>") == 2
+    assert "<NrKSeFFaZaliczkowej>" in settlement_xml
+    assert "<SumaOdliczen>10.00</SumaOdliczen>" in settlement_xml
+
+
+def test_order_lines_internal_ids_default_transport_and_settle_amount_xml() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Seller", address="Addr")
+    buyer = replace(
+        Party.without_tax_id(name="Internal buyer", address="Addr"),
+        identifier=PartyIdentifier.internal("INT-1"),
+    )
+
+    advance = (
+        FA3Invoice.advance("ZAL/ORDER/1")
+        .issued_on(date(2026, 1, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .advance_payment(amount="10")
+        .order(total_gross="123")
+        .order_line(
+            "Order line",
+            quantity="2",
+            unit_net_price="50",
+            tax=VatClass.xii("12"),
+            discount=Discount.percent("10"),
+            identifiers=LineIdentifiers(
+                unique_id="order-line-1",
+                internal_index="SKU-Z",
+                gtin="5901234123457",
+                pkwiu="62.01",
+                cn="1234",
+                pkob="5678",
+            ),
+            gtu=GTUCode.GTU_03,
+            procedure=OrderLineProcedure.WSTO_EE,
+            excise_amount="3.50",
+            annex_15=True,
+            before_correction=True,
+        )
+        .transaction_terms()
+        .build()
+    )
+    advance = replace(
+        advance,
+        transaction_terms=TransactionTerms(transports=(Transport(),)),
+        settlement_data=Settlement(amount_to_settle=Decimal("50.00")),
+    )
+    xml = advance.to_xml().decode("utf-8")
+
+    assert "<IDWew>INT-1</IDWew>" in xml
+    assert "<DoRozliczenia>50.00</DoRozliczenia>" in xml
+    assert "<RodzajTransportu>3</RodzajTransportu>" in xml
+    assert "<UU_IDZ>order-line-1</UU_IDZ>" in xml
+    assert "<IndeksZ>SKU-Z</IndeksZ>" in xml
+    assert "<GTINZ>5901234123457</GTINZ>" in xml
+    assert "<PKWiUZ>62.01</PKWiUZ>" in xml
+    assert "<CNZ>1234</CNZ>" in xml
+    assert "<PKOBZ>5678</PKOBZ>" in xml
+    assert "<P_12Z_XII>12</P_12Z_XII>" in xml
+    assert "<P_12Z_Zal_15>1</P_12Z_Zal_15>" in xml
+    assert "<GTUZ>GTU_03</GTUZ>" in xml
+    assert "<ProceduraZ>WSTO_EE</ProceduraZ>" in xml
+    assert "<KwotaAkcyzyZ>3.50</KwotaAkcyzyZ>" in xml
+    assert "<StanPrzedZ>1</StanPrzedZ>" in xml
+
+
+def test_section_factories_xsd_map_and_audit_edges(tmp_path: Path) -> None:
+    assert AdvancePayment.partial("10", paid_on=date(2026, 1, 1)).amount == Decimal("10")
+    assert CorrectedAdvanceState.create("10").currency_rate is None
+    assert OrderLine.create(
+        "Order",
+        quantity="1",
+        unit_net_price="100",
+        gtu=GTUCode.GTU_02,
+        procedure=OrderLineProcedure.IED,
+        identifiers=LineIdentifiers(unique_id="order-1"),
+        excise_amount="2",
+        annex_15=True,
+        before_correction=True,
+    ).effective_vat_amount == Decimal("23.00")
+    assert (
+        OrderLine.create(
+            "Order exempt",
+            quantity="1",
+            unit_net_price="100",
+            tax=VatClass.exempt("zw"),
+        ).effective_vat_amount
+        == Decimal("0.00")
+    )
+    assert Transport.create(
+        None,
+        ship_via=(Address.polish("Via"),),
+    ).kind is None
+    assert TransactionTerms(intermediary=True).intermediary is True
+    assert PaymentDue.date(date(2026, 1, 1)).due_date == date(2026, 1, 1)
+
+    assert SUPPORTED_BUILDER_PATHS["/Faktura"].startswith("full typed")
+    assert RAW_EXTENSION_PATHS == {}
+    assert UNSUPPORTED_PATHS == {}
+
+    no_invoice_schema = tmp_path / "no-faktura.xsd"
+    no_invoice_schema.write_text(
+        '<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" />',
+        encoding="utf-8",
+    )
+    assert parse_fa3_xsd_elements(no_invoice_schema) == []
+
+    class FakeResolver:
+        def resolve_filename(self, filename: str, context: object) -> tuple[str, object]:
+            return filename, context
+
+    class FakeEtree:
+        Resolver = FakeResolver
+
+    resolver = _schema_resolver(FakeEtree)
+    assert resolver.resolve("unknown.xsd", None, object()) is None
+
+
+def test_serializer_error_and_remaining_xml_branches() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Seller", address="Addr")
+    buyer = Party.polish_company(nip="1111111111", name="Buyer", address="Addr")
+
+    invalid = FA3Invoice(
+        invoice_number="",
+        issue_date=date(2026, 1, 1),
+        seller=seller,
+        buyer=buyer,
+        lines=(),
+    )
+    with pytest.raises(FA3XmlValidationError, match="co najmniej jednej pozycji"):
+        invalid.to_xml()
+
+    bad_seller = replace(
+        seller,
+        identifier=PartyIdentifier.foreign("SELLER", country_code="DE"),
+    )
+    with pytest.raises(FA3XmlValidationError, match="Podmiot1"):
+        replace(
+            invalid,
+            invoice_number="FV/BAD/1",
+            seller=bad_seller,
+            lines=(InvoiceLine.service("Line", quantity="1", unit_net_price="100"),),
+        ).to_xml(validate=False)
+
+    period_invoice = (
+        FA3Invoice.basic("FV/PERIOD/1")
+        .issued_on(date(2026, 1, 1))
+        .period(date(2026, 1, 1), date(2026, 1, 31))
+        .seller(seller)
+        .buyer(buyer)
+        .add_service_line(
+            "Line",
+            quantity="1",
+            unit_net_price="100",
+            tax=VatClass.xii("12"),
+            unique_id="line-period-1",
+            service_date=date(2026, 1, 15),
+        )
+        .payment(
+            PaymentTerms(
+                partial_payments=(
+                    PartialPayment.create(
+                        "10",
+                        date(2026, 1, 2),
+                        method=PaymentMethod.CASH.value,
+                    ),
+                ),
+                due_dates=(date(2026, 2, 1),),
+                other_method_description="other",
+            )
+        )
+        .build()
+    )
+    xml = period_invoice.to_xml().decode("utf-8")
+    assert "<OkresFa>" in xml
+    assert "<UU_ID>line-period-1</UU_ID>" in xml
+    assert "<P_6A>2026-01-15</P_6A>" in xml
+    assert "<P_12_XII>12</P_12_XII>" in xml
+    assert "<FormaPlatnosci>1</FormaPlatnosci>" in xml
+    assert "<PlatnoscInna>1</PlatnoscInna>" in xml
 
 
 def _write_valid_row(
