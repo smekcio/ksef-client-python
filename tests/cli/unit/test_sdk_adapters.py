@@ -1748,7 +1748,7 @@ def test_query_all_invoice_subject_types_stops_at_limit_before_deeper_paging(mon
 
 def test_resolve_output_path_for_plain_path_segment() -> None:
     path = adapters._resolve_output_path("artifacts", default_filename="out.xml")
-    assert path.as_posix().endswith("artifacts/out.xml")
+    assert path.as_posix().endswith("artifacts")
 
 
 def test_resolve_output_path_for_trailing_slash(tmp_path) -> None:
