@@ -30,9 +30,6 @@ xml = [
 fa3 = [
   "lxml>=5.0.0",
 ]
-fa3-xlsx = [
-  "openpyxl>=3.1.0",
-]
 qr = [
   "qrcode[pil]>=7.4.2",
   "pillow>=10.0.0",
@@ -81,5 +78,5 @@ no_implicit_optional = true
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["qrcode", "qrcode.*", "PIL", "PIL.*", "xmlsec", "lxml", "lxml.*", "openpyxl", "openpyxl.*"]
+module = ["qrcode", "qrcode.*", "PIL", "PIL.*", "xmlsec", "lxml", "lxml.*"]
 ignore_missing_imports = true

@@ -7,6 +7,7 @@ Katalog zawiera minimalne skrypty uruchomieniowe prezentujące podstawowe scenar
 - wysyłka faktury w sesji online (XML FA(3) z pliku),
 - resume sesji online z `OnlineSessionState`,
 - resume sesji batch z `BatchSessionState`.
+- SDK-only generowanie FA(3): builder, XML/XSD, batch ZIP, JSON draft.
 
 Polecenia w tym dokumencie zakładają uruchomienie z katalogu `ksef-client-python`.
 
@@ -124,4 +125,44 @@ Uruchomienie:
 
 ```bash
 python docs/examples/session_resume_batch.py
+```
+
+### `fa3_single_invoice_sdk.py`
+
+Buduje pojedyncza fakture FA(3) builderem i zapisuje XML po walidacji XSD.
+
+Uruchomienie:
+
+```bash
+python docs/examples/fa3_single_invoice_sdk.py
+```
+
+### `fa3_batch_zip_sdk.py`
+
+Buduje wiele faktur i pakuje XML-e do jednego ZIP-a.
+
+Uruchomienie:
+
+```bash
+python docs/examples/fa3_batch_zip_sdk.py
+```
+
+### `fa3_correction_settlement_sdk.py`
+
+Pokazuje warianty korekty i rozliczenia, zapisuje 2 XML-e po walidacji XSD.
+
+Uruchomienie:
+
+```bash
+python docs/examples/fa3_correction_settlement_sdk.py
+```
+
+### `fa3_json_roundtrip_sdk.py`
+
+Pokazuje round-trip JSON draft -> `FA3BatchDraft` -> ZIP XML.
+
+Uruchomienie:
+
+```bash
+python docs/examples/fa3_json_roundtrip_sdk.py
 ```

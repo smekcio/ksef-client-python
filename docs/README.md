@@ -72,6 +72,7 @@ Biblioteka udostępnia dwa poziomy użycia:
 - [Sesja interaktywna (online)](workflows/online-session.md)
 - [Sesja wsadowa (batch)](workflows/batch-session.md)
 - [Eksport (pobieranie paczek)](workflows/export.md)
+- [FA(3) SDK only](fa3-sdk.md)
 
 **CLI:**
 

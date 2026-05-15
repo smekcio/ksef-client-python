@@ -15,12 +15,6 @@ MONEY_QUANT = Decimal("0.01")
 QUANTITY_QUANT = Decimal("0.0001")
 
 
-class ImportMode(str, Enum):
-    FAIL_FAST = "FAIL_FAST"
-    PARTIAL_WITH_REPORT = "PARTIAL_WITH_REPORT"
-    VALIDATE_ONLY = "VALIDATE_ONLY"
-
-
 class FA3InvoiceKind(str, Enum):
     BASIC = "podstawowa"
     SIMPLIFIED = "uproszczona"
@@ -589,30 +583,6 @@ def _coerce_optional_decimal(
     if value in (None, ""):
         return None
     return decimal_from_value(value, field_name=field_name)
-
-
-@dataclass(frozen=True)
-class FA3InvalidRow:
-    row_number: int
-    invoice_number: str | None
-    row_data: dict[str, Any]
-    errors: tuple[FA3ValidationIssue, ...] = field(default_factory=tuple)
-    warnings: tuple[FA3ValidationIssue, ...] = field(default_factory=tuple)
-
-
-@dataclass
-class FA3ImportResult:
-    valid_drafts: list[FA3Draft] = field(default_factory=list)
-    invalid_rows: list[FA3InvalidRow] = field(default_factory=list)
-    errors: list[FA3ValidationIssue] = field(default_factory=list)
-    warnings: list[FA3ValidationIssue] = field(default_factory=list)
-    source_rows: list[dict[str, Any]] = field(default_factory=list)
-    headers: list[str] = field(default_factory=list)
-
-    def to_error_report_xlsx(self, path: str | Path) -> None:
-        from .template import create_error_report_xlsx
-
-        create_error_report_xlsx(self, path)
 
 
 @dataclass(frozen=True)

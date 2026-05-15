@@ -24,6 +24,7 @@ obiekty `ksef_client.models.*`, a nie surowe `dict`.
 - [Szybki start: CLI w 2-3 minuty](#szybki-start-cli-w-2-3-minuty)
 - [Szybki start: SDK](#szybki-start-sdk)
 - [Najważniejsze scenariusze SDK](#najważniejsze-scenariusze-sdk)
+- [FA(3) SDK](#fa3-sdk)
 - [Dokumentacja](#dokumentacja)
 - [Migracja typed model API](#migracja-typed-model-api)
 - [Testy i jakość](#testy-i-jakość)
@@ -35,6 +36,7 @@ obiekty `ksef_client.models.*`, a nie surowe `dict`.
 - Uwierzytelnianie: token KSeF i podpis XAdES, w tym `XadesKeyPair` dla PKCS#12 lub PEM.
 - Workflows wysyłki: sesje online i batch z ZIP, partiami i pre-signed URL.
 - Eksport/pobieranie: obsługa paczek i narzędzi do odszyfrowania/rozpakowania.
+- FA(3) SDK: buildery, drafty, serializacja XML, walidacja XSD i eksport wsadowy XML/ZIP.
 - Latarnia: publiczne endpointy dostępności KSeF (`client.lighthouse`, `ksef lighthouse ...`).
 - Narzędzia pomocnicze: AES/ZIP/Base64Url, linki weryfikacyjne, QR.
 - CLI `ksef`: szybka ścieżka od konfiguracji do pierwszych operacji: `init -> auth -> invoice/send/upo`.
@@ -62,6 +64,7 @@ pip install "ksef-client[xml,qr,cli]"
 ```
 
 - `xml` - podpis XAdES z `lxml` i `xmlsec`
+- `fa3` - rozszerza SDK FA(3) o walidację zgodności wygenerowanego XML z oficjalnymi schemami XSD (silnik `lxml`)
 - `qr` - generowanie PNG z kodami QR przez `qrcode` i `pillow`
 - `cli` - interfejs wiersza poleceń oparty o `typer`, `rich`, `keyring`
 
@@ -224,6 +227,24 @@ session_reference_number = BatchSessionWorkflow(client.sessions, client.http_cli
 status = client.lighthouse.get_status()
 messages = client.lighthouse.get_messages()
 ```
+
+## 🧾 FA(3) SDK
+
+Warstwa `ksef_client.documents.fa3` udostępnia programistyczny workflow dla FA(3):
+- budowanie dokumentu przez `FA3InvoiceBuilder`,
+- walidację biznesową (`build()`/`validate()`),
+- serializację XML FA(3) (`to_xml(...)`),
+- walidację XSD (`to_xml(xsd_validate=True)`),
+- eksport wsadowy XML (`to_xml_files(...)`, `to_xml_zip(...)`),
+- JSON draft do integracji (`to_dict`/`from_dict`, `to_json`/`from_json`).
+
+Przykłady:
+- `docs/examples/fa3_single_invoice_sdk.py`
+- `docs/examples/fa3_batch_zip_sdk.py`
+- `docs/examples/fa3_correction_settlement_sdk.py`
+- `docs/examples/fa3_json_roundtrip_sdk.py`
+
+Szczegóły: [`docs/fa3-sdk.md`](docs/fa3-sdk.md)
 
 ## 📚 Dokumentacja
 

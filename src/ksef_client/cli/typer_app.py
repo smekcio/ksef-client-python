@@ -7,7 +7,6 @@ import typer
 from .commands import (
     auth_cmd,
     export_cmd,
-    fa3_cmd,
     health_cmd,
     init_cmd,
     invoice_cmd,
@@ -88,7 +87,6 @@ app.add_typer(send_cmd.app, name="send")
 app.add_typer(session_cmd.app, name="session")
 app.add_typer(upo_cmd.app, name="upo")
 app.add_typer(export_cmd.app, name="export")
-app.add_typer(fa3_cmd.app, name="fa3")
 app.command("init")(init_cmd.init_command)
 
 
