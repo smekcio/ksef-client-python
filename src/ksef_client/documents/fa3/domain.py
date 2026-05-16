@@ -984,7 +984,7 @@ class FA3Invoice:
                 )
             )
         if self.kind in _CORRECTION_KINDS:
-            if not self.correction_reason:
+            if not str(self.correction_reason or "").strip():
                 errors.append(
                     FA3ValidationIssue(
                         "invoice.correction_reason: przyczyna korekty jest wymagana."
@@ -994,6 +994,14 @@ class FA3Invoice:
                 errors.append(
                     FA3ValidationIssue("invoice.corrected_invoices: podaj fakturę korygowaną.")
                 )
+            for index, corrected in enumerate(self.corrected_invoices, start=1):
+                if not corrected.invoice_number.strip():
+                    errors.append(
+                        FA3ValidationIssue(
+                            "invoice.corrected_invoices"
+                            f"[{index}].invoice_number: numer faktury korygowanej jest wymagany."
+                        )
+                    )
         settlement_kinds = {FA3InvoiceKind.SETTLEMENT, FA3InvoiceKind.SETTLEMENT_CORRECTION}
         if self.kind in settlement_kinds and not self.advance_invoices:
             errors.append(FA3ValidationIssue("invoice.advance_invoices: podaj fakturę zaliczkową."))

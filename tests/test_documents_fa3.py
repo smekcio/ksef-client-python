@@ -674,6 +674,66 @@ def test_draft_and_xml_validation_edges() -> None:
     with pytest.raises(ValueError, match="podaj numer faktury zaliczkowej albo numer KSeF"):
         settlement_builder_v2.build()
 
+    correction_with_blank_reason = FA3Invoice.correction("FV/BAD/CORRECTION-REASON")
+    correction_with_blank_reason.issued_on(date(2026, 1, 15))
+    correction_with_blank_reason.seller(
+        Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres")
+    )
+    correction_with_blank_reason.buyer(
+        Party.polish_company(nip="1111111111", name="Nabywca", address="Adres")
+    )
+    correction_with_blank_reason.add_service_line("Usluga", quantity="1", unit_net_price="1")
+    correction_with_blank_reason.corrects_invoice(
+        number="FV/OLD/1",
+        issue_date=date(2026, 1, 1),
+        reason="   ",
+    )
+    with pytest.raises(ValueError, match="invoice.correction_reason"):
+        correction_with_blank_reason.build()
+
+    correction_with_blank_corrected_number = FA3Invoice.correction("FV/BAD/CORRECTED-NUMBER")
+    correction_with_blank_corrected_number.issued_on(date(2026, 1, 15))
+    correction_with_blank_corrected_number.seller(
+        Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres")
+    )
+    correction_with_blank_corrected_number.buyer(
+        Party.polish_company(nip="1111111111", name="Nabywca", address="Adres")
+    )
+    correction_with_blank_corrected_number.add_service_line(
+        "Usluga", quantity="1", unit_net_price="1"
+    )
+    correction_with_blank_corrected_number.corrects_invoice(
+        number="   ",
+        issue_date=date(2026, 1, 1),
+        reason="Rabat",
+    )
+    with pytest.raises(
+        ValueError,
+        match="invoice.corrected_invoices\\[1\\]\\.invoice_number",
+    ):
+        correction_with_blank_corrected_number.build()
+
+    valid_correction_builder = FA3Invoice.correction("FV/OK/CORRECTION")
+    valid_correction_builder.issued_on(date(2026, 1, 15))
+    valid_correction_builder.seller(
+        Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres")
+    )
+    valid_correction_builder.buyer(
+        Party.polish_company(nip="1111111111", name="Nabywca", address="Adres")
+    )
+    valid_correction_builder.add_service_line("Usluga", quantity="1", unit_net_price="1")
+    valid_correction_builder.corrects_invoice(
+        number="FV/OLD/2",
+        issue_date=date(2026, 1, 1),
+        reason="Korekta danych",
+    )
+    valid_correction = valid_correction_builder.build()
+    valid_correction_xml = valid_correction.to_xml()
+    assert "<PrzyczynaKorekty>Korekta danych</PrzyczynaKorekty>" in valid_correction_xml.decode(
+        "utf-8"
+    )
+    assert "<NrFaKorygowanej>FV/OLD/2</NrFaKorygowanej>" in valid_correction_xml.decode("utf-8")
+
     empty_draft = FA3Draft(
         invoice_number="FV/EMPTY",
         issue_date=date(2026, 1, 15),
