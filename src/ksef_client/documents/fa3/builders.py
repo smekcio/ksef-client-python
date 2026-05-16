@@ -5,6 +5,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from typing_extensions import Self
+
 from .domain import (
     Annotation,
     Attachment,
@@ -388,7 +390,7 @@ class BaseFA3Builder(FA3InvoiceBuilderV2):
         )
         return self
 
-    def with_section(self, section: object) -> BaseFA3Builder:
+    def with_section(self, section: object) -> Self:
         if isinstance(section, AdditionalDescription):
             self._additional_descriptions.append(section)
         elif isinstance(section, Footer):
@@ -407,7 +409,7 @@ class BaseFA3Builder(FA3InvoiceBuilderV2):
             raise TypeError(f"Unsupported FA(3) typed section: {type(section).__name__}")
         return self
 
-    def attachment_text(self, header: str, *paragraphs: str) -> BaseFA3Builder:
+    def attachment_text(self, header: str, *paragraphs: str) -> Self:
         self._attachment = Attachment.text(header, *paragraphs)
         return self
 
@@ -418,12 +420,12 @@ class BaseFA3Builder(FA3InvoiceBuilderV2):
         columns: tuple[str, ...],
         rows: tuple[tuple[str, ...], ...],
         description: str | None = None,
-    ) -> BaseFA3Builder:
+    ) -> Self:
         table = AttachmentTable(headers=columns, rows=rows, description=description)
         self._attachment = Attachment((AttachmentBlock(header=header, tables=(table,)),))
         return self
 
-    def attachment_block(self, block: AttachmentBlock) -> BaseFA3Builder:
+    def attachment_block(self, block: AttachmentBlock) -> Self:
         current = self._attachment or Attachment(())
         self._attachment = Attachment((*current.blocks, block))
         return self

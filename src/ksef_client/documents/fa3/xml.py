@@ -187,6 +187,8 @@ def _domain_party(
     authorized: bool = False,
 ) -> None:
     node = ET.SubElement(root, _q(tag))
+    if third_party and party.buyer_id:
+        ET.SubElement(node, _q("IDNabywcy")).text = party.buyer_id
     if (seller or authorized) and party.taxpayer_prefix:
         ET.SubElement(node, _q("PrefiksPodatnika")).text = party.taxpayer_prefix
     if party.eori:
@@ -199,7 +201,8 @@ def _domain_party(
     for contact in party.contacts[:3]:
         contact_node = ET.SubElement(node, _q("DaneKontaktowe"))
         if contact.email:
-            ET.SubElement(contact_node, _q("Email")).text = contact.email
+            email_tag = "EmailPU" if authorized else "Email"
+            ET.SubElement(contact_node, _q(email_tag)).text = contact.email
         if contact.phone:
             phone_tag = "TelefonPU" if authorized else "Telefon"
             ET.SubElement(contact_node, _q(phone_tag)).text = contact.phone
@@ -310,18 +313,28 @@ def _domain_invoice(root: ET.Element, invoice: FA3Invoice) -> None:
 def _tax_summary(fa: ET.Element, invoice: FA3Invoice) -> None:
     summary: dict[str, Decimal] = {}
     vat_summary: dict[str, Decimal] = {}
+    vat_adjustments: dict[str, Decimal] = {}
     for line in invoice.lines:
-        net_tag, vat_tag, _vat_w_tag = line.tax.summary_fields
+        net_tag, vat_tag, vat_w_tag = line.tax.summary_fields
         summary[net_tag] = money(summary.get(net_tag, Decimal("0.00")) + line.effective_net_amount)
         if vat_tag:
             vat_summary[vat_tag] = money(
                 vat_summary.get(vat_tag, Decimal("0.00")) + line.effective_vat_amount
             )
+            if vat_w_tag and line.tax.vat_rate is not None and line.vat_amount is not None:
+                expected = money(line.effective_net_amount * (line.tax.vat_rate / Decimal("100")))
+                delta = money(line.effective_vat_amount - expected)
+                if delta != Decimal("0.00"):
+                    vat_adjustments[vat_w_tag] = money(
+                        vat_adjustments.get(vat_w_tag, Decimal("0.00")) + delta
+                    )
     for net_tag, vat_tag, _vat_w_tag in _TAX_SUMMARY_ORDER:
         if net_tag in summary:
             ET.SubElement(fa, _q(net_tag)).text = _amount(summary[net_tag])
             if vat_tag and vat_tag in vat_summary:
                 ET.SubElement(fa, _q(vat_tag)).text = _amount(vat_summary[vat_tag])
+        if _vat_w_tag and _vat_w_tag in vat_adjustments:
+            ET.SubElement(fa, _q(_vat_w_tag)).text = _amount(vat_adjustments[_vat_w_tag])
     ET.SubElement(fa, _q("P_15")).text = _amount(invoice.total_gross)
 
 
@@ -402,8 +415,17 @@ def _domain_correction(fa: ET.Element, invoice: FA3Invoice) -> None:
             ET.SubElement(node, _q("NrKSeFFaKorygowanej")).text = corrected.ksef_number
         else:
             ET.SubElement(node, _q("NrKSeFN")).text = "1"
+    if invoice.corrected_invoices:
+        first = invoice.corrected_invoices[0]
+        period = ET.SubElement(fa, _q("OkresFaKorygowanej"))
+        period.text = first.issue_date.isoformat()
+        ET.SubElement(fa, _q("NrFaKorygowany")).text = first.invoice_number
     if invoice.corrected_seller is not None:
         node = ET.SubElement(fa, _q("Podmiot1K"))
+        if invoice.corrected_seller.taxpayer_prefix:
+            ET.SubElement(node, _q("PrefiksPodatnika")).text = (
+                invoice.corrected_seller.taxpayer_prefix
+            )
         _party_identity(node, invoice.corrected_seller, seller=True)
         if invoice.corrected_seller.address is not None:
             _address(node, "Adres", invoice.corrected_seller.address)
@@ -702,13 +724,14 @@ def _new_transport_means(parent: ET.Element, means: NewTransportMeans) -> None:
             ET.SubElement(node, _q("P_22D1")).text = means.serial_number
     else:
         ET.SubElement(node, _q("P_22B")).text = means.mileage or "0"
+        # XSD allows exactly one optional identifier from the P_22B1..P_22B4 choice.
         if means.serial_number:
             ET.SubElement(node, _q("P_22B1")).text = means.serial_number
-        if means.engine_capacity:
+        elif means.engine_capacity:
             ET.SubElement(node, _q("P_22B2")).text = means.engine_capacity
-        if means.engine_power:
+        elif means.engine_power:
             ET.SubElement(node, _q("P_22B3")).text = means.engine_power
-        if means.approval_number:
+        elif means.approval_number:
             ET.SubElement(node, _q("P_22B4")).text = means.approval_number
         if means.tax_rate:
             ET.SubElement(node, _q("P_22BT")).text = means.tax_rate
