@@ -824,6 +824,8 @@ class FA3Invoice:
     settlement_data: Settlement | None = None
     correction_reason: str | None = None
     correction_type: str | None = None
+    corrected_period: str | None = None
+    corrected_invoice_number_override: str | None = None
     corrected_invoices: tuple[CorrectionReference, ...] = ()
     corrected_seller: InvoiceParty | None = None
     corrected_buyers: tuple[InvoiceParty, ...] = ()
@@ -1089,6 +1091,8 @@ class FA3InvoiceBuilderV2:
     _settlement: Settlement | None = None
     _correction_reason: str | None = None
     _correction_type: str | None = None
+    _corrected_period: str | None = None
+    _corrected_invoice_number_override: str | None = None
     _corrected_invoices: list[CorrectionReference] = field(default_factory=list)
     _advance_invoices: list[AdvanceInvoiceReference] = field(default_factory=list)
     _attachment: Attachment | None = None
@@ -1191,6 +1195,14 @@ class FA3InvoiceBuilderV2:
         )
         return self
 
+    def corrected_period(self, value: str) -> Self:
+        self._corrected_period = value
+        return self
+
+    def corrected_invoice_number_override(self, value: str) -> Self:
+        self._corrected_invoice_number_override = value
+        return self
+
     def settles_advance(
         self,
         *,
@@ -1228,6 +1240,8 @@ class FA3InvoiceBuilderV2:
             settlement_data=self._settlement,
             correction_reason=self._correction_reason,
             correction_type=self._correction_type,
+            corrected_period=self._corrected_period,
+            corrected_invoice_number_override=self._corrected_invoice_number_override,
             corrected_invoices=tuple(self._corrected_invoices),
             advance_invoices=tuple(self._advance_invoices),
             attachment=self._attachment,

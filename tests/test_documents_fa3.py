@@ -1232,6 +1232,70 @@ def test_correction_before_after_uses_delta_totals_and_xsd_valid() -> None:
     assert "<StanPrzed>1</StanPrzed>" in xml
 
 
+def test_correction_period_and_invoice_override_are_explicit_only() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
+    buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")
+
+    base_builder = (
+        FA3Invoice.correction("KOR/EXPLICIT/1")
+        .issued_on(date(2026, 2, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .corrects_invoice(
+            number="FV/BASE/1",
+            issue_date=date(2026, 1, 15),
+            reason="Rabat po sprzedaży",
+        )
+        .add_corrected_line_before_after(
+            before=InvoiceLine.service(
+                "Usługa",
+                quantity="1",
+                unit_net_price="100.00",
+                tax=VatClass.standard_23(),
+            ),
+            after=InvoiceLine.service(
+                "Usługa",
+                quantity="1",
+                unit_net_price="80.00",
+                tax=VatClass.standard_23(),
+            ),
+        )
+    )
+
+    xml_default = base_builder.build().to_xml(xsd_validate=True).decode("utf-8")
+    assert "<DaneFaKorygowanej>" in xml_default
+    assert "<OkresFaKorygowanej>" not in xml_default
+    assert "<NrFaKorygowany>" not in xml_default
+
+    xml_period = (
+        base_builder.corrected_period("2026-01").build().to_xml(xsd_validate=True).decode("utf-8")
+    )
+    assert "<OkresFaKorygowanej>2026-01</OkresFaKorygowanej>" in xml_period
+    assert "<NrFaKorygowany>" not in xml_period
+
+    xml_number = (
+        base_builder
+        .corrected_period("")
+        .corrected_invoice_number_override("FV/KOR/POPRAWNY/1")
+        .build()
+        .to_xml(xsd_validate=True)
+        .decode("utf-8")
+    )
+    assert "<NrFaKorygowany>FV/KOR/POPRAWNY/1</NrFaKorygowany>" in xml_number
+    assert "<OkresFaKorygowanej>" not in xml_number
+
+    xml_both = (
+        base_builder
+        .corrected_period("2026-Q1")
+        .corrected_invoice_number_override("FV/KOR/POPRAWNY/2")
+        .build()
+        .to_xml(xsd_validate=True)
+        .decode("utf-8")
+    )
+    assert "<OkresFaKorygowanej>2026-Q1</OkresFaKorygowanej>" in xml_both
+    assert "<NrFaKorygowany>FV/KOR/POPRAWNY/2</NrFaKorygowany>" in xml_both
+
+
 def test_advance_and_settlement_builders_generate_order_and_references() -> None:
     seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
     buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")

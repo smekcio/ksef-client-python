@@ -447,11 +447,10 @@ def _domain_correction(fa: ET.Element, invoice: FA3Invoice) -> None:
             ET.SubElement(node, _q("NrKSeFFaKorygowanej")).text = corrected.ksef_number
         else:
             ET.SubElement(node, _q("NrKSeFN")).text = "1"
-    if invoice.corrected_invoices:
-        first = invoice.corrected_invoices[0]
-        period = ET.SubElement(fa, _q("OkresFaKorygowanej"))
-        period.text = first.issue_date.isoformat()
-        ET.SubElement(fa, _q("NrFaKorygowany")).text = first.invoice_number
+    if invoice.corrected_period:
+        ET.SubElement(fa, _q("OkresFaKorygowanej")).text = invoice.corrected_period
+    if invoice.corrected_invoice_number_override:
+        ET.SubElement(fa, _q("NrFaKorygowany")).text = invoice.corrected_invoice_number_override
     if invoice.corrected_seller is not None:
         node = ET.SubElement(fa, _q("Podmiot1K"))
         if invoice.corrected_seller.taxpayer_prefix:

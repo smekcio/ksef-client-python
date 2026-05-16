@@ -551,6 +551,14 @@ class CorrectionInvoiceBuilder(BaseFA3Builder):
         self._correction_type = enum_value(value)
         return self
 
+    def corrected_period(self, value: str) -> CorrectionInvoiceBuilder:
+        self._corrected_period = value
+        return self
+
+    def corrected_invoice_number_override(self, value: str) -> CorrectionInvoiceBuilder:
+        self._corrected_invoice_number_override = value
+        return self
+
     def corrected_seller(self, party: InvoiceParty) -> CorrectionInvoiceBuilder:
         self._corrected_seller = party
         return self
