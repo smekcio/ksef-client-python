@@ -70,6 +70,7 @@ class BaseFA3Builder(FA3InvoiceBuilderV2):
         self._corrected_advance_state: CorrectedAdvanceState | None = None
         self._footer: Footer | None = None
         self._simplified_receipt_like = False
+        self._order_total_explicit = False
 
     def add_goods_line(
         self,
@@ -649,6 +650,7 @@ class AdvanceInvoiceBuilder(BaseFA3Builder):
     def order(self, *, total_gross: Decimal | str | int | float) -> AdvanceInvoiceBuilder:
         current_lines = self._order.lines if self._order else ()
         self._order = Order.create(total_gross, current_lines)
+        self._order_total_explicit = True
         return self
 
     def order_line(
@@ -673,13 +675,22 @@ class AdvanceInvoiceBuilder(BaseFA3Builder):
             identifiers=identifiers,
             **kwargs,
         )
-        total = (
-            self._order.total_gross
-            if self._order
-            else line.effective_net_amount + line.effective_vat_amount
-        )
         existing_lines = self._order.lines if self._order else ()
-        self._order = Order(total_gross=total, lines=(*existing_lines, line))
+        updated_lines = (*existing_lines, line)
+        if self._order is not None and self._order_total_explicit:
+            total = self._order.total_gross
+        else:
+            total = money(
+                sum(
+                    (
+                        entry.effective_net_amount + entry.effective_vat_amount
+                        for entry in updated_lines
+                    ),
+                    Decimal("0.00"),
+                )
+            )
+            self._order_total_explicit = False
+        self._order = Order(total_gross=total, lines=updated_lines)
         return self
 
 

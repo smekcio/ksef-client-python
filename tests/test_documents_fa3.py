@@ -1067,7 +1067,7 @@ def test_domain_invoice_builds_discount_annotations_parties_payment_and_attachme
         .settlement_details(
             Settlement(
                 deductions=(SettlementAdjustment.create("10", "Rabat dokumentu"),),
-                amount_due=decimal_from_value("261.40", field_name="do_zaplaty"),
+                amount_due=decimal_from_value("241.60", field_name="do_zaplaty"),
             )
         )
         .attachment(
@@ -1329,6 +1329,85 @@ def test_correction_before_after_uses_delta_totals_and_xsd_valid() -> None:
     assert "<P_14_1>-4.60</P_14_1>" in xml
     assert "<P_15>-24.60</P_15>" in xml
     assert "<StanPrzed>1</StanPrzed>" in xml
+
+
+def test_advance_order_line_auto_recalculates_total_gross_for_multiple_rows() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Seller", address="Addr")
+    buyer = Party.polish_company(nip="1111111111", name="Buyer", address="Addr")
+
+    invoice = (
+        FA3Invoice.advance("ZAL/ORDER/AUTO/1")
+        .issued_on(date(2026, 1, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .order_line("L1", quantity="1", unit_net_price="100", tax=VatClass.standard_23())
+        .order_line("L2", quantity="1", unit_net_price="200", tax=VatClass.standard_23())
+        .build()
+    )
+    xml = invoice.to_xml().decode("utf-8")
+
+    assert invoice.order is not None
+    assert invoice.order.total_gross == Decimal("369.00")
+    assert "<WartoscZamowienia>369.00</WartoscZamowienia>" in xml
+
+
+def test_advance_order_explicit_total_is_preserved_after_adding_more_rows() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Seller", address="Addr")
+    buyer = Party.polish_company(nip="1111111111", name="Buyer", address="Addr")
+
+    invoice = (
+        FA3Invoice.advance("ZAL/ORDER/EXPLICIT/1")
+        .issued_on(date(2026, 1, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .order(total_gross="999.99")
+        .order_line("L1", quantity="1", unit_net_price="100", tax=VatClass.standard_23())
+        .order_line("L2", quantity="1", unit_net_price="200", tax=VatClass.standard_23())
+        .build()
+    )
+    xml = invoice.to_xml().decode("utf-8")
+
+    assert invoice.order is not None
+    assert invoice.order.total_gross == Decimal("999.99")
+    assert "<WartoscZamowienia>999.99</WartoscZamowienia>" in xml
+
+
+def test_settlement_amount_due_must_match_invoice_plus_adjustments() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Seller", address="Addr")
+    buyer = Party.polish_company(nip="1111111111", name="Buyer", address="Addr")
+    consistent = (
+        FA3Invoice.basic("FV/SETTLEMENT/CONSISTENT/1")
+        .issued_on(date(2026, 1, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .add_service_line("L1", quantity="1", unit_net_price="100", tax=VatClass.standard_23())
+        .settlement_details(
+            Settlement(
+                charges=(SettlementAdjustment.create("10", "Charge"),),
+                deductions=(SettlementAdjustment.create("3", "Deduction"),),
+                amount_due=Decimal("130.00"),
+            )
+        )
+        .build()
+    )
+    assert "<DoZaplaty>130.00</DoZaplaty>" in consistent.to_xml(xsd_validate=True).decode("utf-8")
+
+    inconsistent_builder = (
+        FA3Invoice.basic("FV/SETTLEMENT/INCONSISTENT/1")
+        .issued_on(date(2026, 1, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .add_service_line("L1", quantity="1", unit_net_price="100", tax=VatClass.standard_23())
+        .settlement_details(
+            Settlement(
+                charges=(SettlementAdjustment.create("10", "Charge"),),
+                deductions=(SettlementAdjustment.create("3", "Deduction"),),
+                amount_due=Decimal("999.00"),
+            )
+        )
+    )
+    with pytest.raises(ValueError, match="Rozliczenie niespójne"):
+        inconsistent_builder.build()
 
 
 def test_correction_period_and_invoice_override_are_explicit_only() -> None:
@@ -2042,7 +2121,7 @@ def test_correction_and_settlement_variant_edge_paths() -> None:
         (("ZAL/1", None), (None, "123456789012345678901234567890123456"))
     )
     settlement_builder.document_discount("10", reason="Discount")
-    settlement_builder.remaining_to_pay("90")
+    settlement_builder.remaining_to_pay("113")
     settlement_builder.add_service_line("Line", quantity="1", unit_net_price="100")
     settlement = settlement_builder.build()
     settlement_xml = settlement.to_xml().decode("utf-8")
@@ -3135,7 +3214,7 @@ def _audit_correction_ksef_invoice() -> FA3Invoice:
         .issued_on(date(2026, 2, 15))
         .seller(seller)
         .buyer(buyer)
-        .remaining_to_pay("100.00")
+        .remaining_to_pay("-12.30")
         .corrects(
             "FV/OLD/1",
             date(2026, 1, 10),

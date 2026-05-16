@@ -997,6 +997,26 @@ class FA3Invoice:
         settlement_kinds = {FA3InvoiceKind.SETTLEMENT, FA3InvoiceKind.SETTLEMENT_CORRECTION}
         if self.kind in settlement_kinds and not self.advance_invoices:
             errors.append(FA3ValidationIssue("invoice.advance_invoices: podaj fakturę zaliczkową."))
+        if self.settlement_data is not None and self.settlement_data.amount_due is not None:
+            charges_total = money(
+                sum((charge.amount for charge in self.settlement_data.charges), Decimal("0.00"))
+            )
+            deductions_total = money(
+                sum(
+                    (deduction.amount for deduction in self.settlement_data.deductions),
+                    Decimal("0.00"),
+                )
+            )
+            expected_due = money(self.total_gross + charges_total - deductions_total)
+            provided_due = money(self.settlement_data.amount_due)
+            if provided_due != expected_due:
+                errors.append(
+                    FA3ValidationIssue(
+                        "invoice.settlement_data.amount_due: Rozliczenie niespójne; "
+                        f"oczekiwane DoZaplaty={expected_due:.2f} "
+                        f"(P_15 + SumaObciazen - SumaOdliczen), otrzymano {provided_due:.2f}."
+                    )
+                )
         if self.buyer.is_jst_subunit and not any(
             str(getattr(party.role, "value", party.role)) == ThirdPartyRole.JST_SUBUNIT.value
             for party in self.additional_parties
