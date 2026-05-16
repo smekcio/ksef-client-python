@@ -1,12 +1,13 @@
 # Przykłady (Python)
 
 Katalog zawiera minimalne skrypty uruchomieniowe prezentujące podstawowe scenariusze:
+
 - autoryzacja tokenem KSeF (uzyskanie `accessToken` i `refreshToken`),
 - autoryzacja podpisem XAdES (certyfikat + klucz prywatny albo kontener PKCS#12),
 - wyszukiwanie metadanych faktur,
 - wysyłka faktury w sesji online (XML FA(3) z pliku),
 - resume sesji online z `OnlineSessionState`,
-- resume sesji batch z `BatchSessionState`.
+- resume sesji batch z `BatchSessionState`,
 - SDK-only generowanie FA(3): builder, XML/XSD, batch ZIP, JSON draft.
 
 Polecenia w tym dokumencie zakładają uruchomienie z katalogu `ksef-client-python`.
@@ -16,6 +17,12 @@ Polecenia w tym dokumencie zakładają uruchomienie z katalogu `ksef-client-pyth
 - Python `>= 3.10`
 - Zainstalowana biblioteka lokalnie: `pip install -e .`
 - Dostęp do środowiska KSeF oraz dane uwierzytelniające
+
+Dla przykładów FA(3) z walidacją XSD zainstaluj dodatkowo:
+
+```bash
+pip install -e .[fa3]
+```
 
 ## Zmienne środowiskowe
 
@@ -127,9 +134,17 @@ Uruchomienie:
 python docs/examples/session_resume_batch.py
 ```
 
+## FA(3) SDK only
+
+Pełny opis klas, metod i workflow FA(3) jest w [`../fa3-sdk.md`](../fa3-sdk.md) oraz
+[`../workflows/fa3.md`](../workflows/fa3.md).
+
 ### `fa3_single_invoice_sdk.py`
 
-Buduje pojedyncza fakture FA(3) builderem i zapisuje XML po walidacji XSD.
+Buduje pojedynczą fakturę FA(3) prostym draftowym builderem `FA3InvoiceBuilder`, waliduje XML przez XSD
+i zapisuje wynik do `artifacts/fa3-single.xml`.
+
+Workflow: draft → `build()` → `to_xml(xsd_validate=True)` → plik XML.
 
 Uruchomienie:
 
@@ -139,7 +154,10 @@ python docs/examples/fa3_single_invoice_sdk.py
 
 ### `fa3_batch_zip_sdk.py`
 
-Buduje wiele faktur i pakuje XML-e do jednego ZIP-a.
+Buduje dwie faktury draftowe i zapisuje jeden ZIP z XML-ami do `artifacts/fa3-batch.zip`.
+
+Workflow: wiele draftów → `FA3BatchDraft` → `to_xml_zip(...)`. ZIP można później przekazać do
+`BatchSessionWorkflow`.
 
 Uruchomienie:
 
@@ -149,7 +167,10 @@ python docs/examples/fa3_batch_zip_sdk.py
 
 ### `fa3_correction_settlement_sdk.py`
 
-Pokazuje warianty korekty i rozliczenia, zapisuje 2 XML-e po walidacji XSD.
+Pokazuje nowszy typed API: `FA3Invoice.correction(...)` i `FA3Invoice.settlement(...)`. Generuje dwa
+XML-e po walidacji XSD w `artifacts/fa3-special-cases/`.
+
+Workflow: typed builder → korekta/rozliczenie → `build()` → `to_xml(xsd_validate=True)`.
 
 Uruchomienie:
 
@@ -159,7 +180,10 @@ python docs/examples/fa3_correction_settlement_sdk.py
 
 ### `fa3_json_roundtrip_sdk.py`
 
-Pokazuje round-trip JSON draft -> `FA3BatchDraft` -> ZIP XML.
+Pokazuje integrację JSON: zapisuje `FA3BatchDraft` do `artifacts/fa3-json/draft.json`, odczytuje go ponownie
+i generuje `artifacts/fa3-json/draft.zip`.
+
+Workflow: draft → `FA3BatchDraft.to_json(...)` → `FA3BatchDraft.from_json(...)` → `to_xml_zip(...)`.
 
 Uruchomienie:
 

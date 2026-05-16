@@ -230,13 +230,9 @@ messages = client.lighthouse.get_messages()
 
 ## 🧾 FA(3) SDK
 
-Warstwa `ksef_client.documents.fa3` udostępnia programistyczny workflow dla FA(3):
-- budowanie dokumentu przez `FA3InvoiceBuilder`,
-- walidację biznesową (`build()`/`validate()`),
-- serializację XML FA(3) (`to_xml(...)`),
-- walidację XSD (`to_xml(xsd_validate=True)`),
-- eksport wsadowy XML (`to_xml_files(...)`, `to_xml_zip(...)`),
-- JSON draft do integracji (`to_dict`/`from_dict`, `to_json`/`from_json`).
+Warstwa `ksef_client.documents.fa3` udostępnia SDK-only workflow dla FA(3): typed buildery
+`FA3Invoice...`, prostsze drafty `FA3Draft`/`FA3BatchDraft`, serializację XML, walidację XSD i
+przygotowanie XML/ZIP do sesji online albo batch.
 
 Przykłady:
 - `docs/examples/fa3_single_invoice_sdk.py`
@@ -244,7 +240,7 @@ Przykłady:
 - `docs/examples/fa3_correction_settlement_sdk.py`
 - `docs/examples/fa3_json_roundtrip_sdk.py`
 
-Szczegóły: [`docs/fa3-sdk.md`](docs/fa3-sdk.md)
+Szczegóły: [`docs/fa3-sdk.md`](docs/fa3-sdk.md), workflow: [`docs/workflows/fa3.md`](docs/workflows/fa3.md)
 
 ## 📚 Dokumentacja
 
