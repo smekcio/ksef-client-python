@@ -79,6 +79,7 @@ from ksef_client.documents.fa3.models import (
     FA3Line,
     FA3ValidationIssue,
     _coerce_optional_decimal,
+    _first_non_empty_text,
     _optional_decimal,
     _optional_iso_date,
     _parse_iso_date,
@@ -237,7 +238,10 @@ def test_models_cover_human_aliases_and_validation_edges() -> None:
         }
     )
     assert zero_quantity_line.quantity == Decimal("0")
-    assert any("ilość musi być większa od zera" in issue.message for issue in zero_quantity_line.validate()[0])
+    assert any(
+        "ilość musi być większa od zera" in issue.message
+        for issue in zero_quantity_line.validate()[0]
+    )
 
     zero_draft = FA3Draft.from_dict(
         {
@@ -344,6 +348,78 @@ def test_models_cover_human_aliases_and_validation_edges() -> None:
     assert str(gross_override_line.effective_gross_amount) == "99.00"
 
 
+@pytest.mark.parametrize(
+    ("payload", "keys", "expected"),
+    [
+        (
+            {"numer_faktury": "", "invoice_number": "FV/1"},
+            ("numer_faktury", "invoice_number"),
+            "FV/1",
+        ),
+        (
+            {"numer_faktury": "   ", "invoice_number": "FV/2"},
+            ("numer_faktury", "invoice_number"),
+            "FV/2",
+        ),
+        ({"waluta": "", "currency": "eur"}, ("waluta", "currency"), "eur"),
+        ({"forma": "   ", "method": "gotowka"}, ("forma", "method"), "gotowka"),
+    ],
+)
+def test_first_non_empty_text_alias_fallback(
+    payload: dict[str, Any],
+    keys: tuple[str, ...],
+    expected: str,
+) -> None:
+    assert _first_non_empty_text(payload, *keys) == expected
+
+
+def test_fa3draft_from_dict_prefers_non_empty_text_aliases() -> None:
+    draft = FA3Draft.from_dict(
+        {
+            "numer_faktury": "",
+            "invoice_number": "FV/ALIAS/1",
+            "data_wystawienia": "2026-01-15",
+            "waluta": "   ",
+            "currency": "eur",
+            "miejsce_wystawienia": "   ",
+            "issue_place": "Warszawa",
+            "sprzedawca": {"nazwa": "S", "nip": "1234567890"},
+            "nabywca": {"nazwa": "B", "nip": "1111111111"},
+            "pozycje": [{"opis": "Line", "ilosc": 1, "cena_netto": 10, "vat": "23"}],
+        }
+    )
+    assert draft.invoice_number == "FV/ALIAS/1"
+    assert draft.currency == "EUR"
+    assert draft.issue_place == "Warszawa"
+
+
+def test_fa3draft_from_dict_preserves_structural_values_with_aliases() -> None:
+    draft_zero = FA3Draft.from_dict(
+        {
+            "numer_faktury": "FV/STRUCT/0",
+            "data_wystawienia": "2026-01-15",
+            "sprzedawca": {"nazwa": "S", "nip": "1234567890"},
+            "nabywca": {"nazwa": "B", "nip": "1111111111"},
+            "pozycje": [{"opis": "Line", "ilosc": 1, "cena_netto": 10, "vat": "23"}],
+            "rozliczenie": {"kwota": 0},
+            "settlement": {"amount": 9},
+        }
+    )
+    assert draft_zero.settlement_amount == Decimal("0")
+
+    draft_empty_lines = FA3Draft.from_dict(
+        {
+            "numer_faktury": "FV/STRUCT/LINES",
+            "data_wystawienia": "2026-01-15",
+            "sprzedawca": {"nazwa": "S", "nip": "1234567890"},
+            "nabywca": {"nazwa": "B", "nip": "1111111111"},
+            "pozycje": [],
+            "lines": [{"opis": "Fallback", "ilosc": 1, "cena_netto": 10, "vat": "23"}],
+        }
+    )
+    assert draft_empty_lines.lines == []
+
+
 def test_draft_and_xml_validation_edges() -> None:
     invalid_builder = FA3InvoiceBuilder(
         invoice_number="",
@@ -422,8 +498,8 @@ def test_draft_and_xml_validation_edges() -> None:
     invoice_with_empty_advance_ref = FA3Invoice(
         invoice_number="FV/ROZ/BAD-XML",
         issue_date=date(2026, 1, 15),
-        seller=FA3Party(name="S", tax_id="1"),
-        buyer=FA3Party(name="B", tax_id="2"),
+        seller=Party.polish_company(nip="1234567890", name="S", address="Adres"),
+        buyer=Party.polish_company(nip="1111111111", name="B", address="Adres"),
         lines=(
             InvoiceLine.service(
                 "Usługa",
@@ -434,8 +510,49 @@ def test_draft_and_xml_validation_edges() -> None:
         kind=FA3InvoiceKind.SETTLEMENT,
         advance_invoices=(AdvanceInvoiceReference(),),
     )
-    with pytest.raises(FA3XmlValidationError, match="podaj numer faktury zaliczkowej albo numer KSeF"):
+    with pytest.raises(
+        FA3XmlValidationError,
+        match="podaj numer faktury zaliczkowej albo numer KSeF",
+    ):
         invoice_with_empty_advance_ref.to_xml(validate=False)
+    invoice_with_both_advance_refs = replace(
+        invoice_with_empty_advance_ref,
+        advance_invoices=(
+            AdvanceInvoiceReference(
+                invoice_number="FV/ZAL/1",
+                ksef_number="1234567890-20260101-AAAA-BB",
+            ),
+        ),
+    )
+    with pytest.raises(
+        FA3XmlValidationError,
+        match="podaj numer faktury zaliczkowej albo numer KSeF, nie oba",
+    ):
+        invoice_with_both_advance_refs.to_xml(validate=False)
+
+    draft_with_both_advance_refs = FA3Draft(
+        invoice_number="FV/DRAFT/BAD",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="S", tax_id="1"),
+        buyer=FA3Party(name="B", tax_id="2"),
+        lines=[
+            FA3Line(
+                description="Usluga",
+                quantity=Decimal("1"),
+                unit="szt",
+                unit_net_price=Decimal("1"),
+                vat_rate=Decimal("23"),
+            ),
+        ],
+        kind=FA3InvoiceKind.SETTLEMENT,
+        advance_invoice_number="FV/ZAL/1",
+        advance_ksef_number="1234567890-20260101-AAAA-BB",
+    )
+    with pytest.raises(
+        FA3XmlValidationError,
+        match="invoice.advance_invoice_number",
+    ):
+        draft_with_both_advance_refs.to_xml(validate=False)
 
     invoice_with_mixed_sale_period = FA3Invoice(
         invoice_number="FV/BAD/PERIOD",

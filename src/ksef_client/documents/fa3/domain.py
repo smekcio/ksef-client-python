@@ -955,7 +955,9 @@ class FA3Invoice:
 
     def _validate_xml_shape(self) -> list[FA3ValidationIssue]:
         issues: list[FA3ValidationIssue] = []
-        if self.sale_date is not None and (self.period_from is not None or self.period_to is not None):
+        if self.sale_date is not None and (
+            self.period_from is not None or self.period_to is not None
+        ):
             issues.append(
                 FA3ValidationIssue(
                     "invoice.sale_date: podaj date sprzedazy albo okres faktury, nie oba."
@@ -983,13 +985,15 @@ class FA3Invoice:
             if not has_invoice_number and not has_ksef_number:
                 issues.append(
                     FA3ValidationIssue(
-                        f"invoice.advance_invoices[{index}]: podaj numer faktury zaliczkowej albo numer KSeF."
+                        f"invoice.advance_invoices[{index}]: podaj numer faktury zaliczkowej "
+                        "albo numer KSeF."
                     )
                 )
             if has_invoice_number and has_ksef_number:
                 issues.append(
                     FA3ValidationIssue(
-                        f"invoice.advance_invoices[{index}]: podaj numer faktury zaliczkowej albo numer KSeF, nie oba."
+                        f"invoice.advance_invoices[{index}]: podaj numer faktury zaliczkowej "
+                        "albo numer KSeF, nie oba."
                     )
                 )
         return issues

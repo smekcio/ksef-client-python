@@ -310,6 +310,17 @@ def _first_present_value(data: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _first_non_empty_text(data: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = data.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
 @dataclass(frozen=True)
 class FA3Draft:
     invoice_number: str
@@ -425,7 +436,8 @@ class FA3Draft:
         if has_invoice_number and has_ksef_number:
             issues.append(
                 FA3ValidationIssue(
-                    "invoice.advance_invoice_number: podaj numer faktury zaliczkowej albo numer KSeF, nie oba."
+                    "invoice.advance_invoice_number: podaj numer faktury zaliczkowej "
+                    "albo numer KSeF, nie oba."
                 )
             )
         return issues
@@ -469,24 +481,26 @@ class FA3Draft:
         issue_date = _first_present_value(data, "data_wystawienia", "issue_date", "issueDate")
         return cls(
             invoice_number=str(
-                _first_present_value(data, "numer_faktury", "invoice_number", "invoiceNumber")
+                _first_non_empty_text(data, "numer_faktury", "invoice_number", "invoiceNumber")
                 or ""
             ),
             kind=FA3InvoiceKind.parse(
                 _first_present_value(data, "typ_faktury", "kind") or FA3InvoiceKind.BASIC
             ),
             issue_date=_parse_iso_date(issue_date),
-            currency=str(_first_present_value(data, "waluta", "currency") or "PLN").upper(),
-            issue_place=str(_first_present_value(data, "miejsce_wystawienia", "issue_place") or ""),
+            currency=str(_first_non_empty_text(data, "waluta", "currency") or "PLN").upper(),
+            issue_place=str(
+                _first_non_empty_text(data, "miejsce_wystawienia", "issue_place") or ""
+            ),
             seller=FA3Party.from_dict(_first_present_value(data, "sprzedawca", "seller") or {}),
             buyer=FA3Party.from_dict(_first_present_value(data, "nabywca", "buyer") or {}),
             lines=[FA3Line.from_dict(line) for line in lines_data],
             payment_due_date=_optional_iso_date(
                 _first_present_value(payment, "termin", "due_date")
             ),
-            payment_method=_first_present_value(payment, "forma", "method"),
-            correction_reason=_first_present_value(correction, "przyczyna", "reason"),
-            corrected_invoice_number=_first_present_value(
+            payment_method=_first_non_empty_text(payment, "forma", "method"),
+            correction_reason=_first_non_empty_text(correction, "przyczyna", "reason"),
+            corrected_invoice_number=_first_non_empty_text(
                 correction,
                 "numer_faktury_korygowanej",
                 "invoice_number",
@@ -494,17 +508,17 @@ class FA3Draft:
             corrected_invoice_date=_optional_iso_date(
                 _first_present_value(correction, "data_faktury_korygowanej", "invoice_date")
             ),
-            corrected_ksef_number=_first_present_value(
+            corrected_ksef_number=_first_non_empty_text(
                 correction,
                 "numer_ksef_faktury_korygowanej",
                 "ksef_number",
             ),
-            advance_invoice_number=_first_present_value(
+            advance_invoice_number=_first_non_empty_text(
                 advance,
                 "numer_faktury_zaliczkowej",
                 "invoice_number",
             ),
-            advance_ksef_number=_first_present_value(
+            advance_ksef_number=_first_non_empty_text(
                 advance,
                 "numer_ksef_faktury_zaliczkowej",
                 "ksef_number",
