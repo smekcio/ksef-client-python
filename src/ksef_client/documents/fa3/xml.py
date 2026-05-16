@@ -722,9 +722,9 @@ def _domain_order_line(parent: ET.Element, index: int, line: OrderLine) -> None:
     if line.annex_15:
         ET.SubElement(row, _q("P_12Z_Zal_15")).text = "1"
     if line.gtu:
-        ET.SubElement(row, _q("GTUZ")).text = line.gtu
+        ET.SubElement(row, _q("GTUZ")).text = enum_value(line.gtu)
     if line.procedure:
-        ET.SubElement(row, _q("ProceduraZ")).text = line.procedure
+        ET.SubElement(row, _q("ProceduraZ")).text = enum_value(line.procedure)
     if line.excise_amount is not None:
         ET.SubElement(row, _q("KwotaAkcyzyZ")).text = _amount(line.excise_amount)
     if line.before_correction:

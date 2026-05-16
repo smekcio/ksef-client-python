@@ -1932,6 +1932,20 @@ def test_correction_and_settlement_variant_edge_paths() -> None:
     seller = Party.polish_company(nip="1234567890", name="Seller", address="Addr")
     buyer = Party.polish_company(nip="1111111111", name="Buyer", address="Addr")
 
+    allowed_builder = FA3Invoice.simplified("UPR/LIMIT/OK")
+    allowed_builder.issued_on(date(2026, 1, 1))
+    allowed_builder.seller(seller)
+    allowed_builder.buyer(buyer)
+    allowed_builder.add_service_line(
+        "Line",
+        quantity="1",
+        unit_net_price="450",
+        tax=VatClass.exempt("art. 113"),
+    )
+    allowed_builder.as_simplified_receipt_like()
+    allowed_invoice = allowed_builder.build()
+    assert allowed_invoice.total_gross == Decimal("450.00")
+
     limited_builder = FA3Invoice.simplified("UPR/LIMIT/1")
     limited_builder.issued_on(date(2026, 1, 1))
     limited_builder.seller(seller)
@@ -1940,6 +1954,16 @@ def test_correction_and_settlement_variant_edge_paths() -> None:
     limited_builder.as_simplified_receipt_like()
     with pytest.raises(ValueError, match="450 PLN"):
         limited_builder.build()
+
+    foreign_currency_builder = FA3Invoice.simplified("UPR/LIMIT/EUR")
+    foreign_currency_builder.issued_on(date(2026, 1, 1))
+    foreign_currency_builder.currency("EUR")
+    foreign_currency_builder.seller(seller)
+    foreign_currency_builder.buyer(buyer)
+    foreign_currency_builder.add_service_line("Line", quantity="1", unit_net_price="100")
+    foreign_currency_builder.as_simplified_receipt_like()
+    with pytest.raises(ValueError, match="wymaga waluty PLN"):
+        foreign_currency_builder.build()
 
     correction_builder = FA3Invoice.advance_correction("KOR/ZAL/1")
     correction_builder.issued_on(date(2026, 2, 1))
@@ -2043,6 +2067,32 @@ def test_order_lines_internal_ids_default_transport_and_settle_amount_xml() -> N
     assert "<ProceduraZ>WSTO_EE</ProceduraZ>" in xml
     assert "<KwotaAkcyzyZ>3.50</KwotaAkcyzyZ>" in xml
     assert "<StanPrzedZ>1</StanPrzedZ>" in xml
+
+
+def test_order_line_direct_enums_are_normalized_in_order_xml() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Seller", address="Addr")
+    buyer = Party.polish_company(nip="1111111111", name="Buyer", address="Addr")
+    order_line = OrderLine(
+        description="Order direct enum",
+        quantity=Decimal("1"),
+        unit_net_price=Decimal("100"),
+        tax=VatClass.standard_23(),
+        gtu=GTUCode.GTU_03,
+        procedure=OrderLineProcedure.WSTO_EE,
+    )
+    invoice = (
+        FA3Invoice.advance("ZAL/ORDER/ENUM/1")
+        .issued_on(date(2026, 1, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .order(total_gross="123")
+        .build()
+    )
+    invoice = replace(invoice, order=invoice.order and replace(invoice.order, lines=(order_line,)))
+    xml = invoice.to_xml().decode("utf-8")
+
+    assert "<GTUZ>GTU_03</GTUZ>" in xml
+    assert "<ProceduraZ>WSTO_EE</ProceduraZ>" in xml
 
 
 def test_section_factories_xsd_map_and_audit_edges(tmp_path: Path) -> None:

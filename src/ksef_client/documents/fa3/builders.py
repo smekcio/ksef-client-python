@@ -535,10 +535,17 @@ class SimplifiedInvoiceBuilder(BaseFA3Builder):
 
     def build(self) -> FA3Invoice:
         invoice = super().build()
-        if self._simplified_receipt_like and invoice.total_gross > money(Decimal("450.00")):
-            raise ValueError(
-                "invoice.total_gross: faktura uproszczona paragonowa nie może przekroczyć 450 PLN."
-            )
+        if self._simplified_receipt_like:
+            if invoice.currency.upper() != "PLN":
+                raise ValueError(
+                    "invoice.currency: faktura uproszczona paragonowa z limitem 450 PLN "
+                    "wymaga waluty PLN."
+                )
+            if invoice.total_gross > money(Decimal("450.00")):
+                raise ValueError(
+                    "invoice.total_gross: faktura uproszczona paragonowa nie może "
+                    "przekroczyć 450 PLN."
+                )
         return invoice
 
 
