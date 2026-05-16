@@ -1172,8 +1172,18 @@ def test_transaction_terms_allow_explicit_toggle_and_clear() -> None:
         .seller(Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S"))
         .buyer(Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N"))
         .add_service_line("Usługa", quantity="1", unit_net_price="100.00")
-        .transaction_terms(delivery_terms="EXW", intermediary=True)
-        .transaction_terms(delivery_terms=None, intermediary=False)
+        .transaction_terms(
+            delivery_terms="EXW",
+            contractual_rate="4.123456",
+            contractual_currency="eur",
+            intermediary=True,
+        )
+        .transaction_terms(
+            delivery_terms=None,
+            contractual_rate=None,
+            contractual_currency=None,
+            intermediary=False,
+        )
         .build()
     )
 
@@ -1181,9 +1191,13 @@ def test_transaction_terms_allow_explicit_toggle_and_clear() -> None:
 
     assert invoice.transaction_terms is not None
     assert invoice.transaction_terms.delivery_terms is None
+    assert invoice.transaction_terms.contractual_rate is None
+    assert invoice.transaction_terms.contractual_currency is None
     assert invoice.transaction_terms.intermediary is False
     assert "<PodmiotPosredniczacy>1</PodmiotPosredniczacy>" not in xml
     assert "<WarunkiDostawy>" not in xml
+    assert "<KursUmowny>" not in xml
+    assert "<WalutaUmowna>" not in xml
 
 
 def test_correction_builder_supports_many_refs_corrected_parties_and_before_after() -> None:
