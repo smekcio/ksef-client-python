@@ -52,6 +52,9 @@ def draft_to_xml(
     validate: bool = True,
     xsd_validate: bool = False,
 ) -> bytes:
+    structure_errors = draft._validate_xml_shape()
+    if structure_errors:
+        raise FA3XmlValidationError("; ".join(issue.message for issue in structure_errors))
     if validate:
         errors, _warnings = draft.validate()
         if errors:
@@ -79,6 +82,9 @@ def invoice_to_xml(
     validate: bool = True,
     xsd_validate: bool = False,
 ) -> bytes:
+    structure_errors = invoice._validate_xml_shape()
+    if structure_errors:
+        raise FA3XmlValidationError("; ".join(issue.message for issue in structure_errors))
     if validate:
         result = invoice.validate()
         if result.errors:

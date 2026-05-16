@@ -70,7 +70,11 @@ from ksef_client.documents.fa3 import (
     parse_fa3_xsd_elements,
 )
 from ksef_client.documents.fa3 import xsd_audit as xsd_audit_module
-from ksef_client.documents.fa3.domain import FA3InvoiceBuilderV2, TaxCategoryKind
+from ksef_client.documents.fa3.domain import (
+    AdvanceInvoiceReference,
+    FA3InvoiceBuilderV2,
+    TaxCategoryKind,
+)
 from ksef_client.documents.fa3.models import (
     FA3Line,
     FA3ValidationIssue,
@@ -212,6 +216,77 @@ def test_models_cover_human_aliases_and_validation_edges() -> None:
         "7.89",
         field_name="kwota",
     )
+    zero_line = FA3Line.from_dict(
+        {
+            "opis": "Gratis",
+            "ilosc": 1,
+            "jm": "szt",
+            "cena_netto": 0,
+            "vat": "zw",
+        }
+    )
+    assert zero_line.quantity == Decimal("1")
+    assert zero_line.unit_net_price == Decimal("0")
+    zero_quantity_line = FA3Line.from_dict(
+        {
+            "opis": "Zero qty",
+            "ilosc": 0,
+            "jm": "szt",
+            "cena_netto": 10,
+            "vat": "23",
+        }
+    )
+    assert zero_quantity_line.quantity == Decimal("0")
+    assert any("ilość musi być większa od zera" in issue.message for issue in zero_quantity_line.validate()[0])
+
+    zero_draft = FA3Draft.from_dict(
+        {
+            "numer_faktury": "FV/ZERO/1",
+            "data_wystawienia": "2026-01-15",
+            "sprzedawca": {
+                "nazwa": "Sprzedawca",
+                "nip": "1234567890",
+                "adres": "Adres S",
+                "kraj": "PL",
+            },
+            "nabywca": {
+                "nazwa": "Nabywca",
+                "nip": "1111111111",
+                "adres": "Adres N",
+                "kraj": "PL",
+            },
+            "pozycje": [
+                {
+                    "opis": "Gratis",
+                    "ilosc": 1,
+                    "jm": "szt",
+                    "cena_netto": 0,
+                    "vat": "zw",
+                }
+            ],
+        }
+    )
+    assert zero_draft.lines[0].unit_net_price == Decimal("0")
+    assert "<P_9A>0.00</P_9A>" in zero_draft.to_xml().decode("utf-8")
+    empty_lines_keep_priority = FA3Draft.from_dict(
+        {
+            "numer_faktury": "FV/EMPTY-LINES/1",
+            "data_wystawienia": "2026-01-15",
+            "sprzedawca": {"nazwa": "Sprzedawca", "nip": "1234567890"},
+            "nabywca": {"nazwa": "Nabywca", "nip": "1111111111"},
+            "pozycje": [],
+            "lines": [
+                {
+                    "opis": "Should not win",
+                    "ilosc": 1,
+                    "cena_netto": 10,
+                    "vat": "23",
+                }
+            ],
+        }
+    )
+    assert empty_lines_keep_priority.lines == []
+
     with pytest.raises(ValueError, match="Nieznany typ"):
         FA3InvoiceKind.parse("dziwna")
     with pytest.raises(ValueError, match="wymagane"):
@@ -330,6 +405,86 @@ def test_draft_and_xml_validation_edges() -> None:
     correction_without_number.add_line("Usługa", quantity="1", unit_net_price="1")
     with pytest.raises(ValueError, match="numer faktury korygowanej"):
         correction_without_number.build()
+
+    settlement_with_both_refs = FA3InvoiceBuilder(
+        invoice_number="FV/ROZ/BAD-BOTH",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="S", tax_id="1"),
+        buyer=FA3Party(name="B", tax_id="2"),
+        kind=FA3InvoiceKind.SETTLEMENT,
+        advance_invoice_number="FV/ZAL/1",
+        advance_ksef_number="1234567890-20260101-AAAA-BB",
+    )
+    settlement_with_both_refs.add_line("Usługa", quantity="1", unit_net_price="1")
+    with pytest.raises(ValueError, match="albo numer KSeF, nie oba"):
+        settlement_with_both_refs.build()
+
+    invoice_with_empty_advance_ref = FA3Invoice(
+        invoice_number="FV/ROZ/BAD-XML",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="S", tax_id="1"),
+        buyer=FA3Party(name="B", tax_id="2"),
+        lines=(
+            InvoiceLine.service(
+                "Usługa",
+                quantity="1",
+                unit_net_price="1",
+            ),
+        ),
+        kind=FA3InvoiceKind.SETTLEMENT,
+        advance_invoices=(AdvanceInvoiceReference(),),
+    )
+    with pytest.raises(FA3XmlValidationError, match="podaj numer faktury zaliczkowej albo numer KSeF"):
+        invoice_with_empty_advance_ref.to_xml(validate=False)
+
+    invoice_with_mixed_sale_period = FA3Invoice(
+        invoice_number="FV/BAD/PERIOD",
+        issue_date=date(2026, 1, 15),
+        seller=Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres"),
+        buyer=Party.polish_company(nip="1111111111", name="Nabywca", address="Adres"),
+        lines=(InvoiceLine.service("Usluga", quantity="1", unit_net_price="1"),),
+        sale_date=date(2026, 1, 14),
+        period_from=date(2026, 1, 1),
+        period_to=date(2026, 1, 31),
+    )
+    with pytest.raises(ValueError, match="sale_date"):
+        invoice_with_mixed_sale_period.to_xml()
+
+    invoice_with_mixed_payment = FA3Invoice(
+        invoice_number="FV/BAD/PAY",
+        issue_date=date(2026, 1, 15),
+        seller=Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres"),
+        buyer=Party.polish_company(nip="1111111111", name="Nabywca", address="Adres"),
+        lines=(InvoiceLine.service("Usluga", quantity="1", unit_net_price="1"),),
+        payment_terms=PaymentTerms(
+            paid_date=date(2026, 1, 15),
+            partial_payments=(PartialPayment.create("1", date(2026, 1, 14)),),
+        ),
+    )
+    with pytest.raises(ValueError, match="payment_terms"):
+        invoice_with_mixed_payment.to_xml()
+
+    invoice_with_half_period = FA3Invoice(
+        invoice_number="FV/BAD/HALF-PERIOD",
+        issue_date=date(2026, 1, 15),
+        seller=Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres"),
+        buyer=Party.polish_company(nip="1111111111", name="Nabywca", address="Adres"),
+        lines=(InvoiceLine.service("Usluga", quantity="1", unit_net_price="1"),),
+        period_from=date(2026, 1, 1),
+    )
+    with pytest.raises(ValueError, match="okres faktury wymaga obu dat"):
+        invoice_with_half_period.to_xml()
+
+    settlement_builder_v2 = (
+        FA3InvoiceBuilderV2("FV/BAD/ADVREF", FA3InvoiceKind.SETTLEMENT)
+        .issued_on(date(2026, 1, 15))
+        .seller(Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres"))
+        .buyer(Party.polish_company(nip="1111111111", name="Nabywca", address="Adres"))
+        .add_line("Usluga", quantity="1", unit_net_price="1")
+        .settles_advance()
+    )
+    with pytest.raises(ValueError, match="podaj numer faktury zaliczkowej albo numer KSeF"):
+        settlement_builder_v2.build()
 
     empty_draft = FA3Draft(
         invoice_number="FV/EMPTY",
@@ -1022,11 +1177,6 @@ def test_builder_fluent_paths_cover_annotations_payments_and_typed_sections() ->
         .payment_due(date(2026, 4, 15), method=PaymentMethod.CARD)
         .payment_due_description(7, "dni", "odbiór")
         .paid(date(2026, 4, 2))
-        .partially_paid(
-            "12.30",
-            date(2026, 4, 3),
-            other_method_description="barter",
-        )
         .bank_account(
             "12345678901234567890123456",
             swift="TESTPLPW",
@@ -1254,7 +1404,6 @@ def test_invoice_validation_branches_and_legacy_builder_helpers() -> None:
         .currency("eur")
         .issue_place("Warszawa")
         .sale_date(date(2026, 1, 2))
-        .period(date(2026, 1, 1), date(2026, 1, 31))
         .seller(seller)
         .buyer(buyer)
         .add_party(replace(buyer, role=ThirdPartyRole.RECIPIENT), ThirdPartyRole.RECIPIENT)
@@ -1807,7 +1956,6 @@ def _audit_coverage_invoice_rich() -> FA3Invoice:
         .payment_due(date(2026, 4, 15), method=PaymentMethod.CARD)
         .payment_due_description(7, "dni", "odbior")
         .paid(date(2026, 4, 2))
-        .partially_paid("12.30", date(2026, 4, 3), other_method_description="barter")
         .bank_account(
             "12345678901234567890123456",
             swift="TESTPLPW",

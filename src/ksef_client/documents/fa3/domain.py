@@ -739,7 +739,6 @@ class PaymentTerms:
             bank_accounts=(bank_account,) if bank_account else (),
         )
 
-
 @dataclass(frozen=True)
 class AttachmentTable:
     headers: tuple[str, ...]
@@ -946,12 +945,54 @@ class FA3Invoice:
                     "invoice.raw_extensions: RawXmlExtension nie jest wspierany w typed FA(3) SDK."
                 )
             )
+        errors.extend(self._validate_xml_shape())
         return FA3ValidationResult(tuple(errors), tuple(warnings))
 
     def to_xml(self, *, validate: bool = True, xsd_validate: bool = False) -> bytes:
         from .xml import invoice_to_xml
 
         return invoice_to_xml(self, validate=validate, xsd_validate=xsd_validate)
+
+    def _validate_xml_shape(self) -> list[FA3ValidationIssue]:
+        issues: list[FA3ValidationIssue] = []
+        if self.sale_date is not None and (self.period_from is not None or self.period_to is not None):
+            issues.append(
+                FA3ValidationIssue(
+                    "invoice.sale_date: podaj date sprzedazy albo okres faktury, nie oba."
+                )
+            )
+        if (self.period_from is None) ^ (self.period_to is None):
+            issues.append(
+                FA3ValidationIssue(
+                    "invoice.period: okres faktury wymaga obu dat: od i do."
+                )
+            )
+        if (
+            self.payment_terms is not None
+            and self.payment_terms.paid_date is not None
+            and self.payment_terms.partial_payments
+        ):
+            issues.append(
+                FA3ValidationIssue(
+                    "invoice.payment_terms: podaj date zaplaty albo platnosci czesciowe, nie oba."
+                )
+            )
+        for index, advance_invoice in enumerate(self.advance_invoices, start=1):
+            has_invoice_number = bool(str(advance_invoice.invoice_number or "").strip())
+            has_ksef_number = bool(str(advance_invoice.ksef_number or "").strip())
+            if not has_invoice_number and not has_ksef_number:
+                issues.append(
+                    FA3ValidationIssue(
+                        f"invoice.advance_invoices[{index}]: podaj numer faktury zaliczkowej albo numer KSeF."
+                    )
+                )
+            if has_invoice_number and has_ksef_number:
+                issues.append(
+                    FA3ValidationIssue(
+                        f"invoice.advance_invoices[{index}]: podaj numer faktury zaliczkowej albo numer KSeF, nie oba."
+                    )
+                )
+        return issues
 
 
 @dataclass

@@ -273,11 +273,11 @@ class FA3Line:
         return cls(
             description=str(data.get("opis") or data.get("description") or ""),
             quantity=decimal_from_value(
-                data.get("ilosc") or data.get("quantity"), field_name="ilosc"
+                _first_present_value(data, "ilosc", "quantity"), field_name="ilosc"
             ),
             unit=str(data.get("jm") or data.get("unit") or "szt"),
             unit_net_price=decimal_from_value(
-                data.get("cena_netto") or data.get("unit_net_price") or data.get("unitNetPrice"),
+                _first_present_value(data, "cena_netto", "unit_net_price", "unitNetPrice"),
                 field_name="cena_netto",
             ),
             vat_rate=parse_vat_rate(vat_value),
@@ -299,6 +299,14 @@ def _optional_decimal(data: dict[str, Any], *keys: str) -> Decimal | None:
         value = data.get(key)
         if value not in (None, ""):
             return decimal_from_value(value, field_name=key)
+    return None
+
+
+def _first_present_value(data: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = data.get(key)
+        if value is not None:
+            return value
     return None
 
 
@@ -353,6 +361,7 @@ class FA3Draft:
             errors.extend(line_errors)
             warnings.extend(line_warnings)
         errors.extend(self._validate_kind_specific())
+        errors.extend(self._validate_xml_shape())
         numbered_errors = [self._tag_issue(issue) for issue in errors]
         numbered_warnings = [self._tag_issue(issue) for issue in warnings]
         return numbered_errors, numbered_warnings
@@ -409,6 +418,18 @@ class FA3Draft:
             )
         return issues
 
+    def _validate_xml_shape(self) -> list[FA3ValidationIssue]:
+        issues: list[FA3ValidationIssue] = []
+        has_invoice_number = bool(str(self.advance_invoice_number or "").strip())
+        has_ksef_number = bool(str(self.advance_ksef_number or "").strip())
+        if has_invoice_number and has_ksef_number:
+            issues.append(
+                FA3ValidationIssue(
+                    "invoice.advance_invoice_number: podaj numer faktury zaliczkowej albo numer KSeF, nie oba."
+                )
+            )
+        return issues
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "numer_faktury": self.invoice_number,
@@ -440,42 +461,54 @@ class FA3Draft:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> FA3Draft:
-        payment = data.get("platnosc") or data.get("payment") or {}
-        correction = data.get("korekta") or data.get("correction") or {}
-        advance = data.get("zaliczka") or data.get("advance") or {}
-        settlement = data.get("rozliczenie") or data.get("settlement") or {}
-        lines_data = data.get("pozycje") or data.get("lines") or []
-        issue_date = data.get("data_wystawienia") or data.get("issue_date") or data.get("issueDate")
+        payment = _first_present_value(data, "platnosc", "payment") or {}
+        correction = _first_present_value(data, "korekta", "correction") or {}
+        advance = _first_present_value(data, "zaliczka", "advance") or {}
+        settlement = _first_present_value(data, "rozliczenie", "settlement") or {}
+        lines_data = _first_present_value(data, "pozycje", "lines") or []
+        issue_date = _first_present_value(data, "data_wystawienia", "issue_date", "issueDate")
         return cls(
             invoice_number=str(
-                data.get("numer_faktury")
-                or data.get("invoice_number")
-                or data.get("invoiceNumber")
+                _first_present_value(data, "numer_faktury", "invoice_number", "invoiceNumber")
                 or ""
             ),
             kind=FA3InvoiceKind.parse(
-                data.get("typ_faktury") or data.get("kind") or FA3InvoiceKind.BASIC
+                _first_present_value(data, "typ_faktury", "kind") or FA3InvoiceKind.BASIC
             ),
             issue_date=_parse_iso_date(issue_date),
-            currency=str(data.get("waluta") or data.get("currency") or "PLN").upper(),
-            issue_place=str(data.get("miejsce_wystawienia") or data.get("issue_place") or ""),
-            seller=FA3Party.from_dict(data.get("sprzedawca") or data.get("seller") or {}),
-            buyer=FA3Party.from_dict(data.get("nabywca") or data.get("buyer") or {}),
+            currency=str(_first_present_value(data, "waluta", "currency") or "PLN").upper(),
+            issue_place=str(_first_present_value(data, "miejsce_wystawienia", "issue_place") or ""),
+            seller=FA3Party.from_dict(_first_present_value(data, "sprzedawca", "seller") or {}),
+            buyer=FA3Party.from_dict(_first_present_value(data, "nabywca", "buyer") or {}),
             lines=[FA3Line.from_dict(line) for line in lines_data],
-            payment_due_date=_optional_iso_date(payment.get("termin") or payment.get("due_date")),
-            payment_method=payment.get("forma") or payment.get("method"),
-            correction_reason=correction.get("przyczyna") or correction.get("reason"),
-            corrected_invoice_number=correction.get("numer_faktury_korygowanej")
-            or correction.get("invoice_number"),
-            corrected_invoice_date=_optional_iso_date(
-                correction.get("data_faktury_korygowanej") or correction.get("invoice_date")
+            payment_due_date=_optional_iso_date(
+                _first_present_value(payment, "termin", "due_date")
             ),
-            corrected_ksef_number=correction.get("numer_ksef_faktury_korygowanej")
-            or correction.get("ksef_number"),
-            advance_invoice_number=advance.get("numer_faktury_zaliczkowej")
-            or advance.get("invoice_number"),
-            advance_ksef_number=advance.get("numer_ksef_faktury_zaliczkowej")
-            or advance.get("ksef_number"),
+            payment_method=_first_present_value(payment, "forma", "method"),
+            correction_reason=_first_present_value(correction, "przyczyna", "reason"),
+            corrected_invoice_number=_first_present_value(
+                correction,
+                "numer_faktury_korygowanej",
+                "invoice_number",
+            ),
+            corrected_invoice_date=_optional_iso_date(
+                _first_present_value(correction, "data_faktury_korygowanej", "invoice_date")
+            ),
+            corrected_ksef_number=_first_present_value(
+                correction,
+                "numer_ksef_faktury_korygowanej",
+                "ksef_number",
+            ),
+            advance_invoice_number=_first_present_value(
+                advance,
+                "numer_faktury_zaliczkowej",
+                "invoice_number",
+            ),
+            advance_ksef_number=_first_present_value(
+                advance,
+                "numer_ksef_faktury_zaliczkowej",
+                "ksef_number",
+            ),
             settlement_amount=_optional_decimal(settlement, "kwota", "amount"),
         )
 
