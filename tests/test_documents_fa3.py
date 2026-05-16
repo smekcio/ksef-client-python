@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import runpy
 import zipfile
 from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
+from importlib import resources
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -161,6 +163,32 @@ def test_json_batch_roundtrip_xml_files_and_zip(tmp_path: Path) -> None:
     zip_path = loaded.to_xml_zip(tmp_path / "fa3.zip")
     with zipfile.ZipFile(BytesIO(zip_path.read_bytes())) as zf:
         assert zf.namelist() == ["FV_JSON_1.xml"]
+
+
+def test_correction_settlement_example_runs_and_writes_xsd_valid_xml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    example = Path(__file__).parents[1] / "docs" / "examples" / "fa3_correction_settlement_sdk.py"
+    monkeypatch.chdir(tmp_path)
+
+    runpy.run_path(str(example), run_name="__main__")
+
+    correction = tmp_path / "artifacts" / "fa3-special-cases" / "correction.xml"
+    settlement = tmp_path / "artifacts" / "fa3-special-cases" / "settlement.xml"
+    assert correction.exists()
+    assert settlement.exists()
+    validate_fa3_xml_xsd(correction.read_bytes())
+    validate_fa3_xml_xsd(settlement.read_bytes())
+
+
+def test_packaged_fa3_xsd_files_have_no_trailing_whitespace() -> None:
+    schema_root = resources.files("ksef_client.documents.fa3.schemas")
+
+    for schema in schema_root.iterdir():
+        if schema.name.endswith(".xsd"):
+            for line_number, line in enumerate(schema.read_bytes().splitlines(), start=1):
+                assert line.rstrip(b" \t") == line, f"{schema.name}:{line_number}"
 
 
 @pytest.mark.parametrize(("kind", "code", "extra"), ALL_INVOICE_KIND_CASES)
@@ -1037,6 +1065,48 @@ def test_correction_builder_supports_many_refs_corrected_parties_and_before_afte
     assert "<TypKorekty>1</TypKorekty>" in xml
     assert "<Podmiot1K>" in xml
     assert "<Podmiot2K>" in xml
+    assert "<StanPrzed>1</StanPrzed>" in xml
+
+
+def test_correction_before_after_uses_delta_totals_and_xsd_valid() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
+    buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")
+
+    invoice = (
+        FA3Invoice.correction("KOR/DELTA/1")
+        .issued_on(date(2026, 2, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .corrects_invoice(
+            number="FV/BASE/1",
+            issue_date=date(2026, 1, 15),
+            reason="Rabat po sprzedaży",
+        )
+        .add_corrected_line_before_after(
+            before=InvoiceLine.service(
+                "Usługa",
+                quantity="1",
+                unit_net_price="100.00",
+                tax=VatClass.standard_23(),
+            ),
+            after=InvoiceLine.service(
+                "Usługa",
+                quantity="1",
+                unit_net_price="80.00",
+                tax=VatClass.standard_23(),
+            ),
+        )
+        .build()
+    )
+
+    xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+
+    assert invoice.total_net == Decimal("-20.00")
+    assert invoice.total_vat == Decimal("-4.60")
+    assert invoice.total_gross == Decimal("-24.60")
+    assert "<P_13_1>-20.00</P_13_1>" in xml
+    assert "<P_14_1>-4.60</P_14_1>" in xml
+    assert "<P_15>-24.60</P_15>" in xml
     assert "<StanPrzed>1</StanPrzed>" in xml
 
 

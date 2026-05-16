@@ -1,42 +1,63 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
 from pathlib import Path
 
-from ksef_client.documents.fa3 import FA3InvoiceBuilder, FA3InvoiceKind, FA3Party
+from ksef_client.documents.fa3 import FA3Invoice, InvoiceLine, Party, VatClass
 
 
 def main() -> None:
-    seller = FA3Party(name="Sprzedawca Sp. z o.o.", tax_id="1234567890", address="ul. Prosta 1")
-    buyer = FA3Party(name="Nabywca S.A.", tax_id="1111111111", address="ul. Jasna 2")
+    seller = Party.polish_company(
+        nip="1234567890",
+        name="Sprzedawca Sp. z o.o.",
+        address="ul. Prosta 1",
+    )
+    buyer = Party.polish_company(
+        nip="1111111111",
+        name="Nabywca S.A.",
+        address="ul. Jasna 2",
+    )
 
     correction = (
-        FA3InvoiceBuilder(
-            invoice_number="FV/KOR/001/2026",
-            issue_date=date(2026, 5, 16),
-            seller=seller,
-            buyer=buyer,
-            kind=FA3InvoiceKind.CORRECTION,
-            correction_reason="Rabat posprzedazowy",
-            corrected_invoice_number="FV/BASE/001/2026",
-            corrected_invoice_date=date(2026, 5, 1),
+        FA3Invoice.correction("FV/KOR/001/2026")
+        .issued_on(date(2026, 5, 16))
+        .seller(seller)
+        .buyer(buyer)
+        .corrects_invoice(
+            number="FV/BASE/001/2026",
+            issue_date=date(2026, 5, 1),
+            reason="Rabat posprzedazowy",
         )
-        .add_line("Korekta pozycji", quantity="1", unit_net_price="-200", vat_rate="23")
+        .add_corrected_line_before_after(
+            before=InvoiceLine.service(
+                "Usluga konsultingowa",
+                quantity="1",
+                unit_net_price="1000",
+                tax=VatClass.standard_23(),
+            ),
+            after=InvoiceLine.service(
+                "Usluga konsultingowa",
+                quantity="1",
+                unit_net_price="800",
+                tax=VatClass.standard_23(),
+            ),
+        )
         .build()
     )
 
     settlement = (
-        FA3InvoiceBuilder(
-            invoice_number="FV/ROZ/001/2026",
-            issue_date=date(2026, 5, 16),
-            seller=seller,
-            buyer=buyer,
-            kind=FA3InvoiceKind.SETTLEMENT,
-            advance_invoice_number="FV/ZAL/001/2026",
-            settlement_amount=Decimal("1230.00"),
+        FA3Invoice.settlement("FV/ROZ/001/2026")
+        .issued_on(date(2026, 5, 16))
+        .seller(seller)
+        .buyer(buyer)
+        .settles_advance(invoice_number="FV/ZAL/001/2026")
+        .add_service_line(
+            "Rozliczenie zaliczki",
+            quantity="1",
+            unit_net_price="1000",
+            tax=VatClass.standard_23(),
         )
-        .add_line("Rozliczenie zaliczki", quantity="1", unit_net_price="1000", vat_rate="23")
+        .remaining_to_pay("1230.00")
         .build()
     )
 

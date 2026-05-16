@@ -322,14 +322,16 @@ def _tax_summary(fa: ET.Element, invoice: FA3Invoice) -> None:
     vat_adjustments: dict[str, Decimal] = {}
     for line in invoice.lines:
         net_tag, vat_tag, vat_w_tag = line.tax.summary_fields
-        summary[net_tag] = money(summary.get(net_tag, Decimal("0.00")) + line.effective_net_amount)
+        net_amount = invoice._signed_line_amount(line, line.effective_net_amount)
+        vat_amount = invoice._signed_line_amount(line, line.effective_vat_amount)
+        summary[net_tag] = money(summary.get(net_tag, Decimal("0.00")) + net_amount)
         if vat_tag:
             vat_summary[vat_tag] = money(
-                vat_summary.get(vat_tag, Decimal("0.00")) + line.effective_vat_amount
+                vat_summary.get(vat_tag, Decimal("0.00")) + vat_amount
             )
             if vat_w_tag and line.tax.vat_rate is not None and line.vat_amount is not None:
-                expected = money(line.effective_net_amount * (line.tax.vat_rate / Decimal("100")))
-                delta = money(line.effective_vat_amount - expected)
+                expected = money(net_amount * (line.tax.vat_rate / Decimal("100")))
+                delta = money(vat_amount - expected)
                 if delta != Decimal("0.00"):
                     vat_adjustments[vat_w_tag] = money(
                         vat_adjustments.get(vat_w_tag, Decimal("0.00")) + delta

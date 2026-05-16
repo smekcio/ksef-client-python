@@ -40,6 +40,13 @@ if TYPE_CHECKING:
     )
 
 
+_CORRECTION_KINDS = {
+    FA3InvoiceKind.CORRECTION,
+    FA3InvoiceKind.ADVANCE_CORRECTION,
+    FA3InvoiceKind.SETTLEMENT_CORRECTION,
+}
+
+
 class PartyIdentifierKind(str, Enum):
     NIP = "NIP"
     EU_VAT = "EU_VAT"
@@ -861,15 +868,44 @@ class FA3Invoice:
 
     @property
     def total_net(self) -> Decimal:
-        return money(sum((line.effective_net_amount for line in self.lines), Decimal("0.00")))
+        return money(
+            sum(
+                (
+                    self._signed_line_amount(line, line.effective_net_amount)
+                    for line in self.lines
+                ),
+                Decimal("0.00"),
+            )
+        )
 
     @property
     def total_vat(self) -> Decimal:
-        return money(sum((line.effective_vat_amount for line in self.lines), Decimal("0.00")))
+        return money(
+            sum(
+                (
+                    self._signed_line_amount(line, line.effective_vat_amount)
+                    for line in self.lines
+                ),
+                Decimal("0.00"),
+            )
+        )
 
     @property
     def total_gross(self) -> Decimal:
-        return money(sum((line.effective_gross_amount for line in self.lines), Decimal("0.00")))
+        return money(
+            sum(
+                (
+                    self._signed_line_amount(line, line.effective_gross_amount)
+                    for line in self.lines
+                ),
+                Decimal("0.00"),
+            )
+        )
+
+    def _signed_line_amount(self, line: InvoiceLine, amount: Decimal) -> Decimal:
+        if self.kind in _CORRECTION_KINDS and line.before_correction and amount > 0:
+            return -amount
+        return amount
 
     def validate(self) -> FA3ValidationResult:
         errors: list[FA3ValidationIssue] = []
@@ -906,12 +942,7 @@ class FA3Invoice:
                     address_required=True,
                 )
             )
-        correction_kinds = {
-            FA3InvoiceKind.CORRECTION,
-            FA3InvoiceKind.ADVANCE_CORRECTION,
-            FA3InvoiceKind.SETTLEMENT_CORRECTION,
-        }
-        if self.kind in correction_kinds:
+        if self.kind in _CORRECTION_KINDS:
             if not self.correction_reason:
                 errors.append(
                     FA3ValidationIssue(
