@@ -34,3 +34,17 @@ pip install -e .[fa3]
 - `docs/examples/fa3_batch_zip_sdk.py`
 - `docs/examples/fa3_correction_settlement_sdk.py`
 - `docs/examples/fa3_json_roundtrip_sdk.py`
+## Audyt pokrycia XSD
+
+Funkcja `audit_fa3_xsd_coverage(...)` realizuje audyt oparty o dowody:
+
+- `SUPPORTED`: ścieżka XSD wystąpiła w XML wygenerowanym przez scenariusz testowy i XML przeszedł walidację XSD,
+- `PARTIALLY_SUPPORTED`: istnieje mapowanie w SDK, ale brak dowodu wykonania w korpusie scenariuszy,
+- `UNSUPPORTED`: brak mapowania i brak dowodu wykonania.
+
+W praktyce audyt składa się z trzech warstw:
+1. inwentaryzacji elementów ze schemy FA(3),
+2. klasyfikacji ścieżek względem mapowania SDK,
+3. agregacji śladów z XML wygenerowanych przez scenariusze testowe.
+
+Aby domknąć brak pokrycia, należy dodać scenariusz, który generuje brakującą ścieżkę oraz przechodzi `xsd_validate=True`.

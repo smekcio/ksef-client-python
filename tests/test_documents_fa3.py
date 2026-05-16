@@ -64,6 +64,7 @@ from ksef_client.documents.fa3 import (
     Transport,
     TransportKind,
     VatClass,
+    XsdElement,
     audit_fa3_xsd_coverage,
     parse_fa3_xsd_elements,
 )
@@ -85,6 +86,7 @@ from ksef_client.documents.fa3.xml import (
     _vat_rate,
     validate_fa3_xml_xsd,
 )
+from ksef_client.documents.fa3 import xsd_audit as xsd_audit_module
 from ksef_client.documents.fa3.xsd_map import (
     RAW_EXTENSION_PATHS,
     SUPPORTED_BUILDER_PATHS,
@@ -391,22 +393,114 @@ def test_schema_resolver_ignores_unknown_schema() -> None:
 
 
 def test_xsd_coverage_audit_lists_key_fa3_sections() -> None:
-    report = audit_fa3_xsd_coverage()
+    report = audit_fa3_xsd_coverage(_audit_evidence_xml_cases())
 
     paths = {entry.path: entry.status for entry in report.coverage}
 
     assert len(paths) == len({element.path for element in report.elements})
     assert not report.by_status(CoverageStatus.RAW_EXTENSION)
     assert not report.by_status(CoverageStatus.UNSUPPORTED)
+    assert report.by_status(CoverageStatus.PARTIALLY_SUPPORTED)
     assert paths["/Faktura/Podmiot1"] is CoverageStatus.SUPPORTED
     assert paths["/Faktura/Podmiot2"] is CoverageStatus.SUPPORTED
     assert paths["/Faktura/Fa/Adnotacje"] is CoverageStatus.SUPPORTED
     assert paths["/Faktura/Fa/FaWiersz"] is CoverageStatus.SUPPORTED
     assert paths["/Faktura/Fa/Podmiot1K"] is CoverageStatus.SUPPORTED
     assert paths["/Faktura/Fa/Podmiot2K"] is CoverageStatus.SUPPORTED
-    assert paths["/Faktura/Fa/Zamowienie"] is CoverageStatus.SUPPORTED
     assert paths["/Faktura/Fa/WarunkiTransakcji"] is CoverageStatus.SUPPORTED
     assert paths["/Faktura/Zalacznik"] is CoverageStatus.SUPPORTED
+    coverage_by_path = {entry.path: entry for entry in report.coverage}
+    assert coverage_by_path["/Faktura/Fa/WarunkiTransakcji"].evidence_sources
+    assert coverage_by_path["/Faktura/Zalacznik"].evidence_sources
+
+
+def test_xsd_coverage_audit_without_evidence_reports_missing_proof() -> None:
+    report = audit_fa3_xsd_coverage()
+    assert report.by_status(CoverageStatus.SUPPORTED) == ()
+    assert report.by_status(CoverageStatus.PARTIALLY_SUPPORTED)
+
+
+def test_xsd_audit_helper_branches_for_notes_and_path_matching() -> None:
+    assert xsd_audit_module._local_xml_name("{ns}Tag") == "Tag"
+    assert xsd_audit_module._local_xml_name("Tag") == "Tag"
+
+    assert xsd_audit_module._match_path("/A/B", {"/A": "root"}) == "root"
+    assert xsd_audit_module._match_path("/X", {"/A": "root"}) is None
+
+    assert (
+        xsd_audit_module._coverage_note(
+            "/Faktura",
+            status=CoverageStatus.SUPPORTED,
+            evidence_sources=(),
+        )
+        == "root invoice document"
+    )
+    assert (
+        xsd_audit_module._coverage_note(
+            "/Faktura/Fa/Adnotacje/P_16",
+            status=CoverageStatus.SUPPORTED,
+            evidence_sources=(),
+        )
+        == "typed annotation section"
+    )
+    assert (
+        xsd_audit_module._coverage_note(
+            "/Faktura/Fa/Platnosc/TerminPlatnosci",
+            status=CoverageStatus.SUPPORTED,
+            evidence_sources=(),
+        )
+        == "typed payment section"
+    )
+    assert (
+        xsd_audit_module._coverage_note(
+            "/Faktura/Fa/FaWiersz/P_7",
+            status=CoverageStatus.SUPPORTED,
+            evidence_sources=(),
+        )
+        == "typed line section"
+    )
+    assert (
+        xsd_audit_module._coverage_note(
+            "/Faktura/Fa/InnaSekcja",
+            status=CoverageStatus.SUPPORTED,
+            evidence_sources=(),
+        )
+        == "typed SDK model and serializer coverage"
+    )
+
+
+def test_xsd_audit_entry_statuses_cover_raw_and_unsupported_paths() -> None:
+    raw_map = xsd_audit_module.RAW_EXTENSION_PATHS
+    unsupported_map = xsd_audit_module.UNSUPPORTED_PATHS
+    supported_map = xsd_audit_module.SUPPORTED_BUILDER_PATHS
+    try:
+        xsd_audit_module.RAW_EXTENSION_PATHS = {"/Faktura/Raw": "raw"}
+        xsd_audit_module.UNSUPPORTED_PATHS = {"/Faktura/Nope": "unsupported"}
+        xsd_audit_module.SUPPORTED_BUILDER_PATHS = {"/Faktura/Mapped": "mapped"}
+        raw_entry = xsd_audit_module._entry_for_element(
+            XsdElement("/Faktura/Raw", "Raw", None, "1", "1"),
+            evidence_sources=(),
+        )
+        unsupported_entry = xsd_audit_module._entry_for_element(
+            XsdElement("/Faktura/Nope", "Nope", None, "1", "1"),
+            evidence_sources=(),
+        )
+        mapped_entry = xsd_audit_module._entry_for_element(
+            XsdElement("/Faktura/Mapped", "Mapped", None, "1", "1"),
+            evidence_sources=(),
+        )
+        no_map_entry = xsd_audit_module._entry_for_element(
+            XsdElement("/Faktura/Unmapped", "Unmapped", None, "1", "1"),
+            evidence_sources=(),
+        )
+        assert raw_entry.status is CoverageStatus.RAW_EXTENSION
+        assert unsupported_entry.status is CoverageStatus.UNSUPPORTED
+        assert mapped_entry.status is CoverageStatus.PARTIALLY_SUPPORTED
+        assert no_map_entry.status is CoverageStatus.UNSUPPORTED
+    finally:
+        xsd_audit_module.RAW_EXTENSION_PATHS = raw_map
+        xsd_audit_module.UNSUPPORTED_PATHS = unsupported_map
+        xsd_audit_module.SUPPORTED_BUILDER_PATHS = supported_map
 
 
 def test_xsd_enum_values_match_public_fa3_enums() -> None:
@@ -1442,3 +1536,248 @@ def _draft(
     builder.add_line("Usługa", quantity="1", unit_net_price="100", vat_rate="23")
     return builder.build()
 
+def _audit_evidence_xml_cases() -> dict[str, bytes]:
+    evidence: dict[str, bytes] = {}
+    for kind, code, extra in ALL_INVOICE_KIND_CASES:
+        draft = _draft(f"FV/AUD/{code}", kind=kind, **extra)
+        evidence[f"kind:{kind.value}"] = draft.to_xml(xsd_validate=True)
+    evidence["typed:full"] = _audit_attachment_invoice().to_xml(xsd_validate=True)
+    evidence["typed:coverage"] = _audit_coverage_invoice().to_xml(xsd_validate=True)
+    evidence["typed:correction-parties"] = _audit_correction_parties_invoice().to_xml(
+        xsd_validate=True
+    )
+    evidence["typed:order"] = _audit_order_invoice().to_xml(xsd_validate=True)
+    return evidence
+
+
+def _audit_full_typed_invoice() -> FA3Invoice:
+    seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
+    buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")
+    return (
+        FA3Invoice.basic("FV/AUD/FULL")
+        .issued_on(date(2026, 3, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .foreign_currency_rate("4.123456")
+        .fiscal_receipt_invoice()
+        .additional_description("projekt", "FA3 audit")
+        .new_transport(
+            NewTransportMeans(
+                allowed_date=date(2026, 2, 20),
+                row_number=1,
+                kind="land",
+                mileage="1000",
+                serial_number="VIN123",
+                make="Marka",
+                model="Model",
+            )
+        )
+        .add_goods_line("Pojazd", quantity="1", unit_net_price="100000", tax=VatClass.standard_23())
+        .payment(
+            PaymentTerms(
+                due_terms=(PaymentDue.description(14, "dni", "data wystawienia"),),
+                method=PaymentMethod.TRANSFER.value,
+                bank_accounts=(BankAccount(number="12345678901234567890123456"),),
+            )
+        )
+        .contract(number="UM/AUD/1", date=date(2026, 2, 1))
+        .order_reference(number="ZAM/AUD/1", date=date(2026, 2, 2))
+        .transaction_terms(
+            delivery_terms="DAP",
+            contractual_rate="4.123456",
+            contractual_currency="EUR",
+        )
+        .transport(
+            TransportKind.ROAD,
+            carrier=buyer,
+            order_number="TR/AUD/1",
+            cargo_description="1",
+        )
+        .footer_info("Stopka audytu")
+        .registry(Registry.krs_entry("0000123456", full_name="Sprzedawca sp. z o.o."))
+        .attachment(
+            Attachment(
+                (
+                    AttachmentBlock(
+                        header="Załącznik",
+                        tables=(
+                            AttachmentTable(
+                                headers=("Nazwa", "Kwota"),
+                                rows=(("Pojazd", "123000.00"),),
+                                column_types=("txt", "dec"),
+                            ),
+                        ),
+                    ),
+                )
+            )
+        )
+        .build()
+    )
+
+
+def _audit_coverage_invoice() -> FA3Invoice:
+    seller = replace(
+        Party.polish_company(
+            nip="1234567890",
+            name="Sprzedawca",
+            address=Address.polish("Adres S", "Lokal 2", gln="5901234123457"),
+            contacts=(Contact(email="seller@example.com", phone="123456789"),),
+        ),
+        taxpayer_prefix="PL",
+        taxpayer_status="1",
+        eori="EORI-S",
+    )
+    buyer = replace(
+        Party.without_tax_id(name="Nabywca", address=Address.foreign("DE", "Buyer street")),
+        correspondence_address=Address.foreign("DE", "Correspondence", gln="4001234567890"),
+        contacts=(Contact(phone="987654321"),),
+    )
+    return (
+        FA3Invoice.basic("FV/AUD/COV")
+        .issued_on(date(2026, 4, 1))
+        .currency("eur")
+        .issue_place("Kraków")
+        .seller(seller)
+        .buyer(buyer)
+        .add_goods_line(
+            "Towar",
+            quantity="2",
+            unit_net_price="50",
+            tax=VatClass.from_rate_code("4"),
+            gtu=GTUCode.GTU_01,
+            procedure=LineProcedure.IED,
+            annex_15=True,
+        )
+        .payment_due(date(2026, 4, 15), method=PaymentMethod.CARD)
+        .build()
+    )
+
+
+def _audit_attachment_invoice() -> FA3Invoice:
+    seller = Party.polish_company(
+        nip="1234567890",
+        name="Sprzedawca",
+        address=Address.polish("ul. Prosta 1"),
+    )
+    buyer = Party.polish_company(
+        nip="1111111111",
+        name="Nabywca",
+        address=Address.polish("ul. Odbiorcy 2"),
+    )
+    extra = Party.foreign_company(
+        identifier="DE123456789",
+        country_code="DE",
+        name="Odbiorca DE",
+        address=Address.foreign("DE", "Berlin, Hauptstrasse 1"),
+    )
+    return (
+        FA3Invoice.basic("FV/AUD/ATT")
+        .issued_on(date(2026, 1, 15))
+        .issue_place("Warszawa")
+        .seller(seller)
+        .buyer(buyer)
+        .add_party(extra, ThirdPartyRole.RECIPIENT)
+        .add_line(
+            "Us�uga A",
+            quantity="2",
+            unit_net_price="100",
+            tax=VatClass.standard_23(),
+            discount=Discount.percent("10"),
+            gtu="GTU_12",
+            procedure="WSTO_EE",
+            annex_15=True,
+        )
+        .add_line(
+            "Us�uga zwolniona",
+            quantity="1",
+            unit_net_price="50",
+            tax=VatClass.exempt("art. 43 ust. 1 ustawy"),
+        )
+        .annotations(Annotation.split_payment(), Annotation.cash_method())
+        .payment(
+            PaymentTerms.transfer(
+                due_date=date(2026, 1, 31),
+                bank_account=BankAccount(number="12345678901234567890123456"),
+            )
+        )
+        .settlement_details(
+            Settlement(
+                deductions=(SettlementAdjustment.create("10", "Rabat dokumentu"),),
+                amount_due=decimal_from_value("261.40", field_name="do_zaplaty"),
+            )
+        )
+        .attachment(
+            Attachment(
+                (
+                    AttachmentBlock(
+                        header="Rozliczenie",
+                        metadata=(("�r�d�o", "SDK"),),
+                        paragraphs=("Opis dodatkowy",),
+                        tables=(
+                            AttachmentTable(
+                                headers=("Nazwa", "Kwota"),
+                                rows=(("Rabat", "10.00"),),
+                                column_types=("txt", "dec"),
+                            ),
+                        ),
+                    ),
+                )
+            )
+        )
+        .build()
+    )
+
+
+def _audit_correction_parties_invoice() -> FA3Invoice:
+    seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
+    buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")
+    return (
+        FA3Invoice.correction("KOR/AUD/1")
+        .issued_on(date(2026, 2, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .corrects_many(
+            (
+                CorrectionReference("FV/1/2026", date(2026, 1, 1)),
+                CorrectionReference("FV/2/2026", date(2026, 1, 2)),
+            ),
+            reason="Rabat po sprzeda�y",
+            correction_type=CorrectionType.TAX_BASE_OR_TAX,
+        )
+        .corrected_seller(seller)
+        .corrected_buyer(replace(buyer, buyer_id="BUYER-K"))
+        .add_corrected_line_before_after(
+            before=InvoiceLine.service(
+                "Us�uga",
+                quantity="1",
+                unit_net_price="1000.00",
+                tax=VatClass.standard_23(),
+            ),
+            after=InvoiceLine.service(
+                "Us�uga",
+                quantity="1",
+                unit_net_price="900.00",
+                tax=VatClass.standard_23(),
+            ),
+        )
+        .build()
+    )
+
+
+def _audit_order_invoice() -> FA3Invoice:
+    seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
+    buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")
+    return (
+        FA3Invoice.advance("ZAL/AUD/1")
+        .issued_on(date(2026, 2, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .add_service_line(
+            "Us�uga zaliczkowa",
+            quantity="1",
+            unit_net_price="1000",
+            tax=VatClass.standard_23(),
+        )
+        .order_reference(number="ZAM/1", date=date(2026, 1, 20))
+        .build()
+    )
