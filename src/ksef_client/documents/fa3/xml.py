@@ -313,7 +313,7 @@ def _domain_invoice(root: ET.Element, invoice: FA3Invoice) -> None:
     for index, line in enumerate(invoice.lines, start=1):
         _domain_line(fa, index, line)
     _domain_settlement(fa, invoice.settlement_data)
-    _domain_payment(fa, invoice.payment_terms)
+    _domain_payment(fa, invoice.payment_terms, invoice.total_gross)
     _domain_transaction_terms(fa, invoice.transaction_terms)
     _domain_order(fa, invoice.order)
 
@@ -582,7 +582,11 @@ def _domain_settlement(fa: ET.Element, settlement: Settlement | None) -> None:
         ET.SubElement(node, _q("DoRozliczenia")).text = _amount(settlement.amount_to_settle)
 
 
-def _domain_payment(fa: ET.Element, payment: PaymentTerms | None) -> None:
+def _domain_payment(
+    fa: ET.Element,
+    payment: PaymentTerms | None,
+    total_gross: Decimal,
+) -> None:
     if payment is None:
         return
     node = ET.SubElement(fa, _q("Platnosc"))
@@ -590,7 +594,11 @@ def _domain_payment(fa: ET.Element, payment: PaymentTerms | None) -> None:
         ET.SubElement(node, _q("Zaplacono")).text = "1"
         ET.SubElement(node, _q("DataZaplaty")).text = payment.paid_date.isoformat()
     elif payment.partial_payments:
-        ET.SubElement(node, _q("ZnacznikZaplatyCzesciowej")).text = "1"
+        paid_total = money(
+            sum((partial.amount for partial in payment.partial_payments), Decimal("0.00"))
+        )
+        marker = "2" if paid_total == money(total_gross) else "1"
+        ET.SubElement(node, _q("ZnacznikZaplatyCzesciowej")).text = marker
         for partial in payment.partial_payments:
             _partial_payment(node, partial)
     due_terms = payment.due_terms or tuple(PaymentDue.date(value) for value in payment.due_dates)

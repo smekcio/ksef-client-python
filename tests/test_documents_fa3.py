@@ -609,6 +609,49 @@ def test_draft_and_xml_validation_edges() -> None:
     with pytest.raises(ValueError, match="payment_terms"):
         invoice_with_mixed_payment.to_xml()
 
+    invoice_with_conflicting_settlement_choice = replace(
+        invoice_with_mixed_payment,
+        invoice_number="FV/BAD/SETTLEMENT-CHOICE",
+        payment_terms=None,
+        settlement_data=Settlement(
+            amount_due=Decimal("10.00"),
+            amount_to_settle=Decimal("1.00"),
+        ),
+    )
+    with pytest.raises(ValueError, match="DoZaplaty albo DoRozliczenia"):
+        invoice_with_conflicting_settlement_choice.to_xml()
+
+    invoice_with_conflicting_payment_method = replace(
+        invoice_with_mixed_payment,
+        invoice_number="FV/BAD/PAYMENT-METHOD",
+        payment_terms=PaymentTerms(
+            method=PaymentMethod.CASH.value,
+            other_method_description="kompensata",
+        ),
+    )
+    with pytest.raises(ValueError, match="forme platnosci albo opis innej formy"):
+        invoice_with_conflicting_payment_method.to_xml()
+
+    invoice_with_conflicting_partial_payment_method = replace(
+        invoice_with_mixed_payment,
+        invoice_number="FV/BAD/PAYMENT-METHOD-PARTIAL",
+        payment_terms=PaymentTerms(
+            partial_payments=(
+                PartialPayment.create(
+                    "1",
+                    date(2026, 1, 14),
+                    method=PaymentMethod.CASH.value,
+                    other_method_description="kompensata",
+                ),
+            ),
+        ),
+    )
+    with pytest.raises(
+        ValueError,
+        match="partial_payments\\[1\\].*forme platnosci albo opis innej formy",
+    ):
+        invoice_with_conflicting_partial_payment_method.to_xml()
+
     invoice_with_half_period = FA3Invoice(
         invoice_number="FV/BAD/HALF-PERIOD",
         issue_date=date(2026, 1, 15),
@@ -2228,7 +2271,7 @@ def test_serializer_error_and_remaining_xml_branches() -> None:
                     ),
                 ),
                 due_dates=(date(2026, 2, 1),),
-                other_method_description="other",
+                method=PaymentMethod.CASH.value,
             )
         )
         .build()
@@ -2239,7 +2282,38 @@ def test_serializer_error_and_remaining_xml_branches() -> None:
     assert "<P_6A>2026-01-15</P_6A>" in xml
     assert "<P_12_XII>12</P_12_XII>" in xml
     assert "<FormaPlatnosci>1</FormaPlatnosci>" in xml
-    assert "<PlatnoscInna>1</PlatnoscInna>" in xml
+    assert "<ZnacznikZaplatyCzesciowej>1</ZnacznikZaplatyCzesciowej>" in xml
+    assert "<PlatnoscInna>1</PlatnoscInna>" not in xml
+
+
+def test_partial_payment_marker_uses_total_gross_to_select_1_or_2() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Seller", address="Addr")
+    buyer = Party.polish_company(nip="1111111111", name="Buyer", address="Addr")
+
+    fully_paid = (
+        FA3Invoice.basic("FV/PARTIAL/MARKER/2")
+        .issued_on(date(2026, 1, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .add_service_line("Line", quantity="1", unit_net_price="100", tax=VatClass.standard_23())
+        .partially_paid("60", date(2026, 1, 2), method=PaymentMethod.TRANSFER)
+        .partially_paid("63", date(2026, 1, 3), method=PaymentMethod.CARD)
+        .build()
+    )
+    fully_paid_xml = fully_paid.to_xml().decode("utf-8")
+    assert "<ZnacznikZaplatyCzesciowej>2</ZnacznikZaplatyCzesciowej>" in fully_paid_xml
+
+    partially_paid = (
+        FA3Invoice.basic("FV/PARTIAL/MARKER/1")
+        .issued_on(date(2026, 1, 1))
+        .seller(seller)
+        .buyer(buyer)
+        .add_service_line("Line", quantity="1", unit_net_price="100", tax=VatClass.standard_23())
+        .partially_paid("100", date(2026, 1, 2), method=PaymentMethod.TRANSFER)
+        .build()
+    )
+    partially_paid_xml = partially_paid.to_xml().decode("utf-8")
+    assert "<ZnacznikZaplatyCzesciowej>1</ZnacznikZaplatyCzesciowej>" in partially_paid_xml
 
 
 def _draft(
@@ -2810,7 +2884,7 @@ def _audit_period_invoice() -> FA3Invoice:
                     PartialPayment.create("10", date(2026, 1, 2), method=PaymentMethod.CASH.value),
                 ),
                 due_dates=(date(2026, 2, 1),),
-                other_method_description="other",
+                other_method_description="kompensata",
             )
         )
         .build()

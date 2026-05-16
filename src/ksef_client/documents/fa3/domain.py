@@ -1051,6 +1051,35 @@ class FA3Invoice:
                     "invoice.payment_terms: podaj date zaplaty albo platnosci czesciowe, nie oba."
                 )
             )
+        if (
+            self.settlement_data is not None
+            and self.settlement_data.amount_due is not None
+            and self.settlement_data.amount_to_settle is not None
+        ):
+            issues.append(
+                FA3ValidationIssue(
+                    "invoice.settlement_data: podaj DoZaplaty albo DoRozliczenia, nie oba."
+                )
+            )
+        if (
+            self.payment_terms is not None
+            and self.payment_terms.method
+            and self.payment_terms.other_method_description
+        ):
+            issues.append(
+                FA3ValidationIssue(
+                    "invoice.payment_terms: podaj forme platnosci albo opis innej formy, nie oba."
+                )
+            )
+        if self.payment_terms is not None:
+            for index, partial in enumerate(self.payment_terms.partial_payments, start=1):
+                if partial.method and partial.other_method_description:
+                    issues.append(
+                        FA3ValidationIssue(
+                            "invoice.payment_terms.partial_payments"
+                            f"[{index}]: podaj forme platnosci albo opis innej formy, nie oba."
+                        )
+                    )
         for index, advance_invoice in enumerate(self.advance_invoices, start=1):
             has_invoice_number = bool(str(advance_invoice.invoice_number or "").strip())
             has_ksef_number = bool(str(advance_invoice.ksef_number or "").strip())
