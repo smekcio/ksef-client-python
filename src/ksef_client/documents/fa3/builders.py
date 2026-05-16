@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Final
 
 from typing_extensions import Self
 
@@ -44,6 +44,13 @@ from .sections import (
     Transport,
     enum_value,
 )
+
+
+class _UnsetType:
+    pass
+
+
+_UNSET: Final = _UnsetType()
 
 
 class BaseFA3Builder(FA3InvoiceBuilderV2):
@@ -236,26 +243,49 @@ class BaseFA3Builder(FA3InvoiceBuilderV2):
     def transaction_terms(
         self,
         *,
-        delivery_terms: str | None = None,
-        contractual_rate: Decimal | str | int | float | None = None,
-        contractual_currency: str | None = None,
-        intermediary: bool = False,
+        delivery_terms: str | None | _UnsetType = _UNSET,
+        contractual_rate: Decimal | str | int | float | None | _UnsetType = _UNSET,
+        contractual_currency: str | None | _UnsetType = _UNSET,
+        intermediary: bool | _UnsetType = _UNSET,
     ) -> BaseFA3Builder:
         current = self._transaction_terms or TransactionTerms()
+        next_delivery_terms: str | None
+        if isinstance(delivery_terms, _UnsetType):
+            next_delivery_terms = current.delivery_terms
+        else:
+            next_delivery_terms = delivery_terms
+
+        next_contractual_rate: Decimal | None
+        if isinstance(contractual_rate, _UnsetType):
+            next_contractual_rate = current.contractual_rate
+        elif contractual_rate is None:
+            next_contractual_rate = None
+        else:
+            next_contractual_rate = decimal_from_value(
+                contractual_rate,
+                field_name="contractual_rate",
+            )
+
+        next_contractual_currency: str | None
+        if isinstance(contractual_currency, _UnsetType):
+            next_contractual_currency = current.contractual_currency
+        else:
+            next_contractual_currency = (
+                contractual_currency.upper() if contractual_currency else None
+            )
+
+        next_intermediary: bool
+        if isinstance(intermediary, _UnsetType):
+            next_intermediary = current.intermediary
+        else:
+            next_intermediary = intermediary
+
         self._transaction_terms = replace(
             current,
-            delivery_terms=delivery_terms or current.delivery_terms,
-            contractual_rate=(
-                decimal_from_value(contractual_rate, field_name="contractual_rate")
-                if contractual_rate is not None
-                else current.contractual_rate
-            ),
-            contractual_currency=(
-                contractual_currency.upper()
-                if contractual_currency
-                else current.contractual_currency
-            ),
-            intermediary=intermediary or current.intermediary,
+            delivery_terms=next_delivery_terms,
+            contractual_rate=next_contractual_rate,
+            contractual_currency=next_contractual_currency,
+            intermediary=next_intermediary,
         )
         return self
 

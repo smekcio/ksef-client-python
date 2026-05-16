@@ -538,7 +538,7 @@ def _domain_line(fa: ET.Element, index: int, line: InvoiceLine) -> None:
     ET.SubElement(row, _q("P_11")).text = _amount(line.effective_net_amount)
     if line.gross_amount is not None:
         ET.SubElement(row, _q("P_11A")).text = _amount(line.effective_gross_amount)
-    if line.vat_amount is not None:
+    if line.tax.vat_rate is not None or line.vat_amount is not None:
         ET.SubElement(row, _q("P_11Vat")).text = _amount(line.effective_vat_amount)
     if line.tax.xml_rate:
         ET.SubElement(row, _q("P_12")).text = line.tax.xml_rate

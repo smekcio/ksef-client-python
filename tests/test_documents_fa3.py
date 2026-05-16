@@ -1144,6 +1144,48 @@ def test_convenient_basic_builder_uses_enums_and_transaction_sections() -> None:
     assert "<WZ>WZ/1/2026</WZ>" in xml
 
 
+def test_domain_line_emits_p_11_vat_without_manual_override() -> None:
+    invoice = (
+        FA3Invoice.basic("FV/VAT/ROW/1")
+        .issued_on(date(2026, 1, 15))
+        .seller(Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S"))
+        .buyer(Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N"))
+        .add_service_line(
+            "Usługa",
+            quantity="1",
+            unit_net_price="100.00",
+            tax=VatClass.standard_23(),
+        )
+        .build()
+    )
+
+    xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+
+    assert "<P_11>100.00</P_11>" in xml
+    assert "<P_11Vat>23.00</P_11Vat>" in xml
+
+
+def test_transaction_terms_allow_explicit_toggle_and_clear() -> None:
+    invoice = (
+        FA3Invoice.basic("FV/TERMS/1")
+        .issued_on(date(2026, 1, 15))
+        .seller(Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S"))
+        .buyer(Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N"))
+        .add_service_line("Usługa", quantity="1", unit_net_price="100.00")
+        .transaction_terms(delivery_terms="EXW", intermediary=True)
+        .transaction_terms(delivery_terms=None, intermediary=False)
+        .build()
+    )
+
+    xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+
+    assert invoice.transaction_terms is not None
+    assert invoice.transaction_terms.delivery_terms is None
+    assert invoice.transaction_terms.intermediary is False
+    assert "<PodmiotPosredniczacy>1</PodmiotPosredniczacy>" not in xml
+    assert "<WarunkiDostawy>" not in xml
+
+
 def test_correction_builder_supports_many_refs_corrected_parties_and_before_after() -> None:
     seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
     buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")
