@@ -271,7 +271,9 @@ def _address(node: ET.Element, tag: str, address: Address) -> None:
 def _third_party_role(node: ET.Element, party: InvoiceParty) -> None:
     role = party.role
     role_value = getattr(role, "value", role)
-    if str(role_value) == "11" and party.other_role_description:
+    if str(role_value) == "other":
+        if not party.other_role_description:
+            raise FA3XmlValidationError("Podmiot3/RolaInna wymaga opisu roli.")
         ET.SubElement(node, _q("RolaInna")).text = "1"
         ET.SubElement(node, _q("OpisRoli")).text = party.other_role_description
     else:
@@ -959,8 +961,14 @@ def _payment_code(value: str) -> str:
         "gotówka": "1",
         "gotowka": "1",
         "karta": "2",
+        "bon": "3",
+        "czek": "4",
+        "kredyt": "5",
         "przelew": "6",
-        "kompensata": "7",
+        "mobilna": "7",
+        "platnosc mobilna": "7",
+        "płatność mobilna": "7",
+        "mobile": "7",
     }
     return aliases.get(value.strip().lower(), value)
 

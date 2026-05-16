@@ -162,19 +162,24 @@ class Contact:
 
 
 class ThirdPartyRole(str, Enum):
-    ORIGINAL_ENTITY = "1"
-    ADDITIONAL_BUYER = "2"
-    RECIPIENT = "3"
-    PAYER = "4"
+    FACTOR = "1"
+    RECIPIENT = "2"
+    ORIGINAL_ENTITY = "3"
+    ADDITIONAL_BUYER = "4"
+    INVOICE_ISSUER = "5"
+    PAYER = "6"
+    JST_SELLER = "7"
     JST_SUBUNIT = "8"
+    VAT_GROUP_SELLER = "9"
     VAT_GROUP_MEMBER = "10"
-    OTHER = "11"
+    EMPLOYEE = "11"
+    OTHER = "other"
 
 
 class AuthorizedPartyRole(str, Enum):
-    REPRESENTATIVE = "1"
+    ENFORCEMENT_AUTHORITY = "1"
     BAILIFF = "2"
-    ENFORCEMENT_AUTHORITY = "3"
+    REPRESENTATIVE = "3"
 
 
 @dataclass(frozen=True)
@@ -273,6 +278,16 @@ class InvoiceParty:
             issues.extend(contact.validate(f"{path}.contacts[{index}]"))
         if self.share is not None and not (Decimal("0") < self.share <= Decimal("100")):
             issues.append(FA3ValidationIssue(f"{path}: udział musi być z zakresu 0-100."))
+        role_value = str(getattr(self.role, "value", self.role))
+        if role_value == ThirdPartyRole.OTHER.value and not str(
+            self.other_role_description or ""
+        ).strip():
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.other_role_description: opis roli jest wymagany dla innego podmiotu.",
+                    column=path,
+                )
+            )
         return issues
 
 
@@ -399,7 +414,11 @@ class TaxCategory:
 
     @classmethod
     def outside_country_2(cls) -> TaxCategory:
-        return cls(TaxCategoryKind.OUTSIDE_COUNTRY, None, "np II")
+        return cls(TaxCategoryKind.SERVICE_ARTICLE_100, None, "np II")
+
+    @classmethod
+    def service_article_100(cls) -> TaxCategory:
+        return cls.outside_country_2()
 
     @classmethod
     def reverse_charge(cls) -> TaxCategory:

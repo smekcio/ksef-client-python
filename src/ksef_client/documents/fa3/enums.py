@@ -18,7 +18,7 @@ class PaymentMethod(str, Enum):
     CHECK = "4"
     CREDIT = "5"
     TRANSFER = "6"
-    COMPENSATION = "7"
+    MOBILE = "7"
 
 
 class VatRateCode(str, Enum):
@@ -81,7 +81,7 @@ class TransportKind(str, Enum):
     AIR = "4"
     POSTAL = "5"
     FIXED_TRANSPORT = "7"
-    OTHER = "8"
+    INLAND_WATERWAY = "8"
 
 
 class MarginProcedure(str, Enum):

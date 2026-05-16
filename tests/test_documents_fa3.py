@@ -851,6 +851,101 @@ def test_xsd_enum_values_match_public_fa3_enums() -> None:
     ) == {kind.value for kind in TransportKind}
 
 
+def test_business_enum_values_match_fa3_xsd_semantics() -> None:
+    assert AuthorizedPartyRole.ENFORCEMENT_AUTHORITY.value == "1"
+    assert AuthorizedPartyRole.BAILIFF.value == "2"
+    assert AuthorizedPartyRole.REPRESENTATIVE.value == "3"
+
+    assert ThirdPartyRole.FACTOR.value == "1"
+    assert ThirdPartyRole.RECIPIENT.value == "2"
+    assert ThirdPartyRole.ORIGINAL_ENTITY.value == "3"
+    assert ThirdPartyRole.ADDITIONAL_BUYER.value == "4"
+    assert ThirdPartyRole.INVOICE_ISSUER.value == "5"
+    assert ThirdPartyRole.PAYER.value == "6"
+    assert ThirdPartyRole.JST_SELLER.value == "7"
+    assert ThirdPartyRole.JST_SUBUNIT.value == "8"
+    assert ThirdPartyRole.VAT_GROUP_SELLER.value == "9"
+    assert ThirdPartyRole.VAT_GROUP_MEMBER.value == "10"
+    assert ThirdPartyRole.EMPLOYEE.value == "11"
+    assert ThirdPartyRole.OTHER.value == "other"
+
+    assert PaymentMethod.MOBILE.value == "7"
+    assert not hasattr(PaymentMethod, "COMPENSATION")
+    assert TransportKind.INLAND_WATERWAY.value == "8"
+    assert not hasattr(TransportKind, "OTHER")
+
+
+def test_fa3_business_semantics_for_roles_np_ii_payment_and_transport() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
+    buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")
+    authorized = Party.polish_company(nip="2222222222", name="Przedstawiciel", address="Adres P")
+    original_entity = Party.polish_company(nip="3333333333", name="Pierwotny", address="Adres O")
+    other_party = Party.foreign_company(
+        identifier="EXT-1",
+        country_code="US",
+        name="Inny",
+        address="Adres I",
+    )
+
+    invoice = (
+        FA3Invoice.basic("FV/SEM/1")
+        .issued_on(date(2026, 5, 16))
+        .seller(seller)
+        .buyer(buyer)
+        .authorized_party(authorized, AuthorizedPartyRole.REPRESENTATIVE)
+        .add_party(original_entity, ThirdPartyRole.ORIGINAL_ENTITY)
+        .add_party(
+            replace(other_party, other_role_description="broker techniczny"),
+            ThirdPartyRole.OTHER,
+        )
+        .add_service_line(
+            "Usluga art. 100",
+            quantity="1",
+            unit_net_price="100",
+            tax=VatClass.from_rate_code("np II"),
+        )
+        .payment_due(date(2026, 6, 1), method=PaymentMethod.MOBILE)
+        .transport("other", other_kind_description="dron")
+        .transport(TransportKind.INLAND_WATERWAY)
+        .build()
+    )
+
+    assert VatClass.from_rate_code("np II").summary_fields[0] == "P_13_9"
+    xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+    assert "<RolaPU>3</RolaPU>" in xml
+    assert "<Rola>3</Rola>" in xml
+    assert "<RolaInna>1</RolaInna>" in xml
+    assert "<OpisRoli>broker techniczny</OpisRoli>" in xml
+    assert "<P_13_9>100.00</P_13_9>" in xml
+    assert "<P_13_8>" not in xml
+    assert "<FormaPlatnosci>7</FormaPlatnosci>" in xml
+    assert "<TransportInny>1</TransportInny>" in xml
+    assert "<OpisInnegoTransportu>dron</OpisInnegoTransportu>" in xml
+    assert "<RodzajTransportu>8</RodzajTransportu>" in xml
+
+
+def test_other_third_party_role_requires_description() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
+    buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")
+    other_party = Party.foreign_company(
+        identifier="EXT-1",
+        country_code="US",
+        name="Inny",
+        address="Adres I",
+    )
+
+    with pytest.raises(ValueError, match="other_role_description"):
+        (
+            FA3Invoice.basic("FV/SEM/2")
+            .issued_on(date(2026, 5, 16))
+            .seller(seller)
+            .buyer(buyer)
+            .add_party(other_party, ThirdPartyRole.OTHER)
+            .add_service_line("Usluga", quantity="1", unit_net_price="100")
+            .build()
+        )
+
+
 def test_domain_invoice_builds_discount_annotations_parties_payment_and_attachment_xml() -> None:
     seller = Party.polish_company(
         nip="1234567890",
@@ -1453,7 +1548,7 @@ def test_builder_fluent_paths_cover_annotations_payments_and_typed_sections() ->
         .order_reference(number="ZAM/COV/1", date=date(2026, 3, 2))
         .batch_number("PARTIA-COV")
         .transport(
-            TransportKind.OTHER,
+            "other",
             other_kind_description="dron",
             carrier=buyer,
             order_number="TR/COV/1",
@@ -2232,7 +2327,7 @@ def _audit_coverage_invoice_rich() -> FA3Invoice:
         .order_reference(number="ZAM/COV/1", date=date(2026, 3, 2))
         .batch_number("PARTIA-COV")
         .transport(
-            TransportKind.OTHER,
+            "other",
             other_kind_description="dron",
             carrier=buyer,
             order_number="TR/COV/1",
