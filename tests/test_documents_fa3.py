@@ -1861,6 +1861,13 @@ def test_invoice_validation_branches_and_legacy_builder_helpers() -> None:
     assert builder.validate().ok
     assert b"<RodzajFaktury>VAT</RodzajFaktury>" in builder.to_xml()
 
+    correction_builder_v2 = FA3InvoiceBuilderV2("KOR/V2/1", FA3InvoiceKind.CORRECTION)
+    assert correction_builder_v2.corrected_period("2026-01") is correction_builder_v2
+    assert (
+        correction_builder_v2.corrected_invoice_number_override("FV/KOR/POPRAWNY/1")
+        is correction_builder_v2
+    )
+
     invalid_builder = FA3InvoiceBuilderV2("", FA3InvoiceKind.BASIC)
     assert not invalid_builder.validate().ok
 
