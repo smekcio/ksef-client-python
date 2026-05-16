@@ -2956,6 +2956,8 @@ def _audit_correction_ksef_invoice() -> FA3Invoice:
             ksef_number="1234567890-20260110-AAAAAA-BBBBBB-CC",
         )
         .corrected_seller(seller)
+        .corrected_period("2026-01")
+        .corrected_invoice_number_override("FV/OLD/CORRECT/1")
         .with_section(CorrectedAdvanceState.create("50.00", currency_rate="4.123456"))
         .settles_advance(ksef_number="1234567890-20260109-AAAAAA-BBBBBB-CC")
         .add_corrected_line_before_after(
