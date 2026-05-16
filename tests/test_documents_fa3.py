@@ -911,6 +911,7 @@ def test_fa3_business_semantics_for_roles_np_ii_payment_and_transport() -> None:
     )
 
     assert VatClass.from_rate_code("np II").summary_fields[0] == "P_13_9"
+    assert VatClass.service_article_100().summary_fields[0] == "P_13_9"
     xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
     assert "<RolaPU>3</RolaPU>" in xml
     assert "<Rola>3</Rola>" in xml
@@ -944,6 +945,32 @@ def test_other_third_party_role_requires_description() -> None:
             .add_service_line("Usluga", quantity="1", unit_net_price="100")
             .build()
         )
+
+
+def test_serializer_rejects_other_third_party_role_without_description() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
+    buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")
+    other_party = replace(
+        Party.foreign_company(
+            identifier="EXT-1",
+            country_code="US",
+            name="Inny",
+            address="Adres I",
+        ),
+        role=ThirdPartyRole.OTHER,
+    )
+    invoice = (
+        FA3Invoice.basic("FV/SEM/3")
+        .issued_on(date(2026, 5, 16))
+        .seller(seller)
+        .buyer(buyer)
+        .add_service_line("Usluga", quantity="1", unit_net_price="100")
+        .build()
+    )
+
+    malformed = replace(invoice, additional_parties=(other_party,))
+    with pytest.raises(FA3XmlValidationError, match="RolaInna"):
+        malformed.to_xml(validate=False)
 
 
 def test_domain_invoice_builds_discount_annotations_parties_payment_and_attachment_xml() -> None:
