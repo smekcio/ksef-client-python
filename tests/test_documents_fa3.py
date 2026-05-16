@@ -68,6 +68,7 @@ from ksef_client.documents.fa3 import (
     audit_fa3_xsd_coverage,
     parse_fa3_xsd_elements,
 )
+from ksef_client.documents.fa3 import xsd_audit as xsd_audit_module
 from ksef_client.documents.fa3.domain import FA3InvoiceBuilderV2
 from ksef_client.documents.fa3.models import (
     FA3Line,
@@ -86,7 +87,6 @@ from ksef_client.documents.fa3.xml import (
     _vat_rate,
     validate_fa3_xml_xsd,
 )
-from ksef_client.documents.fa3 import xsd_audit as xsd_audit_module
 from ksef_client.documents.fa3.xsd_map import (
     RAW_EXTENSION_PATHS,
     SUPPORTED_BUILDER_PATHS,
