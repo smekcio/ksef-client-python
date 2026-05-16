@@ -1149,11 +1149,81 @@ def test_advance_and_settlement_builders_generate_order_and_references() -> None
 
     assert "<RodzajFaktury>ZAL</RodzajFaktury>" in advance_xml
     assert "<ZaliczkaCzesciowa>" in advance_xml
+    assert "<P_13_1>1000.00</P_13_1>" in advance_xml
+    assert "<P_14_1>230.00</P_14_1>" in advance_xml
+    assert "<P_15>1230.00</P_15>" in advance_xml
+    assert "<P_15Z>1230.00</P_15Z>" in advance_xml
     assert "<Zamowienie>" in advance_xml
     assert "<ZamowienieWiersz>" in advance_xml
     assert "<RodzajFaktury>ROZ</RodzajFaktury>" in settlement_xml
     assert "<FakturaZaliczkowa>" in settlement_xml
     assert "<DoZaplaty>3770.00</DoZaplaty>" in settlement_xml
+
+
+def test_advance_payment_business_totals_are_xsd_valid_without_invoice_lines() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
+    buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")
+    builder = FA3Invoice.advance("ZAL/BIZ/1")
+    builder.issued_on(date(2026, 1, 10))
+    builder.currency("EUR")
+    builder.foreign_currency_rate("4")
+    builder.seller(seller)
+    builder.buyer(buyer)
+    builder.advance_payment(amount="1230.00", tax=VatClass.standard_23())
+    builder.advance_payment(amount="100.00", tax=VatClass.exempt("art. 43"))
+    invoice = builder.build()
+
+    xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+
+    assert invoice.total_net == Decimal("1100.00")
+    assert invoice.total_vat == Decimal("230.00")
+    assert invoice.total_gross == Decimal("1330.00")
+    assert "<P_13_1>1000.00</P_13_1>" in xml
+    assert "<P_14_1>230.00</P_14_1>" in xml
+    assert "<P_14_1W>920.00</P_14_1W>" in xml
+    assert "<P_13_7>100.00</P_13_7>" in xml
+    assert "<P_15>1330.00</P_15>" in xml
+    assert "<P_15Z>1230.00</P_15Z>" in xml
+    assert "<P_15Z>100.00</P_15Z>" in xml
+    assert "<FaWiersz>" not in xml
+
+
+def test_foreign_currency_vat_w_fields_are_business_amounts_not_override_deltas() -> None:
+    seller = Party.polish_company(nip="1234567890", name="Sprzedawca", address="Adres S")
+    buyer = Party.polish_company(nip="1111111111", name="Nabywca", address="Adres N")
+    foreign_invoice = (
+        FA3Invoice.basic("FV/EUR/1")
+        .issued_on(date(2026, 1, 10))
+        .currency("EUR")
+        .foreign_currency_rate("4")
+        .seller(seller)
+        .buyer(buyer)
+        .add_service_line("Usluga", quantity="1", unit_net_price="100", tax=VatClass.standard_23())
+        .build()
+    )
+    pln_override_invoice = (
+        FA3Invoice.basic("FV/PLN/OVERRIDE/1")
+        .issued_on(date(2026, 1, 10))
+        .seller(seller)
+        .buyer(buyer)
+        .add_service_line(
+            "Usluga",
+            quantity="1",
+            unit_net_price="100",
+            tax=VatClass.standard_23(),
+            vat_amount=decimal_from_value("30.00", field_name="vat"),
+        )
+        .build()
+    )
+
+    foreign_xml = foreign_invoice.to_xml(xsd_validate=True).decode("utf-8")
+    pln_xml = pln_override_invoice.to_xml(xsd_validate=True).decode("utf-8")
+
+    assert "<P_14_1>23.00</P_14_1>" in foreign_xml
+    assert "<P_14_1W>92.00</P_14_1W>" in foreign_xml
+    assert "<KursWalutyZ>4</KursWalutyZ>" in foreign_xml
+    assert "<P_14_1>30.00</P_14_1>" in pln_xml
+    assert "<P_14_1W>" not in pln_xml
 
 
 def test_full_typed_sdk_sections_are_xsd_valid() -> None:
@@ -2454,6 +2524,8 @@ def _audit_multi_vat_invoice() -> FA3Invoice:
     return (
         FA3Invoice.basic("FV/AUD/VAT")
         .issued_on(date(2026, 2, 1))
+        .currency("EUR")
+        .foreign_currency_rate("4")
         .seller(seller)
         .buyer(buyer)
         .add_service_line("S23", quantity="1", unit_net_price="100", tax=VatClass.standard_23())

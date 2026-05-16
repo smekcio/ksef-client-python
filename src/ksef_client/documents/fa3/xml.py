@@ -319,7 +319,7 @@ def _domain_invoice(root: ET.Element, invoice: FA3Invoice) -> None:
 def _tax_summary(fa: ET.Element, invoice: FA3Invoice) -> None:
     summary: dict[str, Decimal] = {}
     vat_summary: dict[str, Decimal] = {}
-    vat_adjustments: dict[str, Decimal] = {}
+    foreign_vat_summary: dict[str, Decimal] = {}
     for line in invoice.lines:
         net_tag, vat_tag, vat_w_tag = line.tax.summary_fields
         net_amount = invoice._signed_line_amount(line, line.effective_net_amount)
@@ -329,20 +329,42 @@ def _tax_summary(fa: ET.Element, invoice: FA3Invoice) -> None:
             vat_summary[vat_tag] = money(
                 vat_summary.get(vat_tag, Decimal("0.00")) + vat_amount
             )
-            if vat_w_tag and line.tax.vat_rate is not None and line.vat_amount is not None:
-                expected = money(net_amount * (line.tax.vat_rate / Decimal("100")))
-                delta = money(vat_amount - expected)
-                if delta != Decimal("0.00"):
-                    vat_adjustments[vat_w_tag] = money(
-                        vat_adjustments.get(vat_w_tag, Decimal("0.00")) + delta
-                    )
+            line_currency_rate = line.currency_rate or invoice.foreign_currency_rate
+            if (
+                vat_w_tag
+                and line_currency_rate is not None
+                and invoice.currency.upper() != "PLN"
+            ):
+                foreign_vat_summary[vat_w_tag] = money(
+                    foreign_vat_summary.get(vat_w_tag, Decimal("0.00"))
+                    + money(vat_amount * line_currency_rate)
+                )
+    for payment in invoice.advance_payments:
+        net_tag, vat_tag, vat_w_tag = payment.tax.summary_fields
+        net_amount = invoice._advance_payment_net_amount(payment)
+        vat_amount = invoice._advance_payment_vat_amount(payment)
+        summary[net_tag] = money(summary.get(net_tag, Decimal("0.00")) + net_amount)
+        if vat_tag:
+            vat_summary[vat_tag] = money(
+                vat_summary.get(vat_tag, Decimal("0.00")) + vat_amount
+            )
+            payment_currency_rate = payment.currency_rate or invoice.foreign_currency_rate
+            if (
+                vat_w_tag
+                and payment_currency_rate is not None
+                and invoice.currency.upper() != "PLN"
+            ):
+                foreign_vat_summary[vat_w_tag] = money(
+                    foreign_vat_summary.get(vat_w_tag, Decimal("0.00"))
+                    + money(vat_amount * payment_currency_rate)
+                )
     for net_tag, vat_tag, _vat_w_tag in _TAX_SUMMARY_ORDER:
         if net_tag in summary:
             ET.SubElement(fa, _q(net_tag)).text = _amount(summary[net_tag])
             if vat_tag and vat_tag in vat_summary:
                 ET.SubElement(fa, _q(vat_tag)).text = _amount(vat_summary[vat_tag])
-        if _vat_w_tag and _vat_w_tag in vat_adjustments:
-            ET.SubElement(fa, _q(_vat_w_tag)).text = _amount(vat_adjustments[_vat_w_tag])
+        if _vat_w_tag and _vat_w_tag in foreign_vat_summary:
+            ET.SubElement(fa, _q(_vat_w_tag)).text = _amount(foreign_vat_summary[_vat_w_tag])
     ET.SubElement(fa, _q("P_15")).text = _amount(invoice.total_gross)
 
 

@@ -868,44 +868,64 @@ class FA3Invoice:
 
     @property
     def total_net(self) -> Decimal:
-        return money(
-            sum(
-                (
-                    self._signed_line_amount(line, line.effective_net_amount)
-                    for line in self.lines
-                ),
-                Decimal("0.00"),
-            )
+        line_total = sum(
+            (
+                self._signed_line_amount(line, line.effective_net_amount)
+                for line in self.lines
+            ),
+            Decimal("0.00"),
         )
+        advance_total = sum(
+            (self._advance_payment_net_amount(payment) for payment in self.advance_payments),
+            Decimal("0.00"),
+        )
+        return money(line_total + advance_total)
 
     @property
     def total_vat(self) -> Decimal:
-        return money(
-            sum(
-                (
-                    self._signed_line_amount(line, line.effective_vat_amount)
-                    for line in self.lines
-                ),
-                Decimal("0.00"),
-            )
+        line_total = sum(
+            (
+                self._signed_line_amount(line, line.effective_vat_amount)
+                for line in self.lines
+            ),
+            Decimal("0.00"),
         )
+        advance_total = sum(
+            (self._advance_payment_vat_amount(payment) for payment in self.advance_payments),
+            Decimal("0.00"),
+        )
+        return money(line_total + advance_total)
 
     @property
     def total_gross(self) -> Decimal:
-        return money(
-            sum(
-                (
-                    self._signed_line_amount(line, line.effective_gross_amount)
-                    for line in self.lines
-                ),
-                Decimal("0.00"),
-            )
+        line_total = sum(
+            (
+                self._signed_line_amount(line, line.effective_gross_amount)
+                for line in self.lines
+            ),
+            Decimal("0.00"),
         )
+        advance_total = sum(
+            (payment.amount for payment in self.advance_payments),
+            Decimal("0.00"),
+        )
+        return money(line_total + advance_total)
 
     def _signed_line_amount(self, line: InvoiceLine, amount: Decimal) -> Decimal:
         if self.kind in _CORRECTION_KINDS and line.before_correction and amount > 0:
             return -amount
         return amount
+
+    def _advance_payment_net_amount(self, payment: AdvancePayment) -> Decimal:
+        if payment.tax.vat_rate is None:
+            return money(payment.amount)
+        divisor = Decimal("1") + (payment.tax.vat_rate / Decimal("100"))
+        return money(payment.amount / divisor)
+
+    def _advance_payment_vat_amount(self, payment: AdvancePayment) -> Decimal:
+        if payment.tax.vat_rate is None:
+            return Decimal("0.00")
+        return money(payment.amount - self._advance_payment_net_amount(payment))
 
     def validate(self) -> FA3ValidationResult:
         errors: list[FA3ValidationIssue] = []
