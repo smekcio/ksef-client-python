@@ -1751,6 +1751,12 @@ def test_resolve_output_path_for_plain_path_segment() -> None:
     assert path.as_posix().endswith("artifacts")
 
 
+def test_resolve_output_path_for_trailing_slash(tmp_path) -> None:
+    raw = f"{(tmp_path / 'new-artifacts').as_posix()}/"
+    path = adapters._resolve_output_path(raw, default_filename="out.xml")
+    assert path.as_posix().endswith("new-artifacts/out.xml")
+
+
 def test_resolve_output_path_uses_default_name_for_existing_directory(tmp_path) -> None:
     target_dir = tmp_path / "artifacts"
     target_dir.mkdir()

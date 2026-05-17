@@ -4,87 +4,98 @@
 [![PyPI - License](https://img.shields.io/pypi/l/ksef-client)](https://github.com/smekcio/ksef-client-python/blob/main/LICENSE)
 [![PyPI - Version](https://img.shields.io/pypi/v/ksef-client)](https://pypi.org/project/ksef-client/)
 
-`ksef-client-python` to produkcyjne SDK do integracji z KSeF API, publikowane na PyPI jako **`ksef-client`**.
+**KSeF Client Python** to SDK i narzędzia CLI dla integracji z Krajowym Systemem e-Faktur.
+Pakiet jest publikowany na PyPI jako **`ksef-client`** i obsługuje aktualny kontrakt
+**KSeF API `v2.5.0`** ([changelog API](https://github.com/CIRFMF/ksef-docs/blob/2.5.0/api-changelog.md#wersja-250)).
 
-Projekt odwzorowuje oficjalne przepływy KSeF i zapewnia spójny model pracy w dwóch warstwach:
-- **SDK Python API** do integracji aplikacyjnych,
-- **CLI** do diagnostyki i operacji bez pisania kodu.
+Biblioteka pomaga integrować aplikacje napisane w Pythonie z KSeF bez ręcznego
+składania żądań HTTP, szyfrowania, podpisów, obsługi sesji i pobierania paczek faktur.
 
-## 🔄 Kompatybilność
+Najważniejsze cechy:
 
-Aktualna kompatybilność: **KSeF API `v2.5.0`** ([api-changelog.md](https://github.com/CIRFMF/ksef-docs/blob/2.5.0/api-changelog.md#wersja-250)).
-
-Od tej wersji publiczne payloady requestów SDK są **typed-only**. Do metod klientów przekazuj
-obiekty `ksef_client.models.*`, a nie surowe `dict`.
+- **typowane modele** `ksef_client.models` zamiast surowych słowników dla publicznych żądań SDK,
+- **klient synchroniczny i asynchroniczny**: `KsefClient` oraz `AsyncKsefClient`,
+- **CLI `ksef`** do konfiguracji, diagnostyki, uwierzytelniania, wysyłki i pobierania faktur,
+- **uwierzytelnianie tokenem KSeF i XAdES**, w tym obsługa PKCS#12 oraz PEM,
+- **sesje online i wsadowe**, eksport faktur, UPO, linki weryfikacyjne, QR i Latarnia KSeF,
+- **FA(3)**: budowanie XML faktur, walidacja XSD i przygotowanie paczek ZIP,
+- narzędzia pomocnicze do szyfrowania, ZIP, Base64Url i obsługi adresów pre-signed URL.
 
 ## 🧭 Spis treści
 
-- [Zakres funkcjonalny](#zakres-funkcjonalny)
+- [Kiedy użyć tej biblioteki](#kiedy-użyć-tej-biblioteki)
 - [Instalacja](#instalacja)
-- [Szybki start: CLI w 2-3 minuty](#szybki-start-cli-w-2-3-minuty)
+- [Szybki start: CLI](#szybki-start-cli)
 - [Szybki start: SDK](#szybki-start-sdk)
-- [Najważniejsze scenariusze SDK](#najważniejsze-scenariusze-sdk)
+- [FA(3) SDK](#fa3-sdk)
+- [Najważniejsze możliwości](#najważniejsze-możliwości)
 - [Dokumentacja](#dokumentacja)
-- [Migracja typed model API](#migracja-typed-model-api)
-- [Testy i jakość](#testy-i-jakość)
+- [Jakość i rozwój](#jakość-i-rozwój)
 - [Kontrybucja](#kontrybucja)
 
-## ✅ Zakres funkcjonalny
+## ✅ Kiedy użyć tej biblioteki
 
-- Klienci API: `KsefClient`, `AsyncKsefClient`, mapujące endpointy KSeF.
-- Uwierzytelnianie: token KSeF i podpis XAdES, w tym `XadesKeyPair` dla PKCS#12 lub PEM.
-- Workflows wysyłki: sesje online i batch z ZIP, partiami i pre-signed URL.
-- Eksport/pobieranie: obsługa paczek i narzędzi do odszyfrowania/rozpakowania.
-- Latarnia: publiczne endpointy dostępności KSeF (`client.lighthouse`, `ksef lighthouse ...`).
-- Narzędzia pomocnicze: AES/ZIP/Base64Url, linki weryfikacyjne, QR.
-- CLI `ksef`: szybka ścieżka od konfiguracji do pierwszych operacji: `init -> auth -> invoice/send/upo`.
+Użyj `ksef-client`, jeżeli potrzebujesz:
+
+- zbudować integrację z KSeF API w aplikacji napisanej w Pythonie,
+- szybko sprawdzić konfigurację środowiska KSeF z terminala,
+- obsłużyć pełny przepływ uwierzytelnienia, wysyłki faktury i pobrania UPO,
+- pracować na typowanych modelach zamiast utrzymywać własne słowniki i mapowania JSON,
+- korzystać z gotowych scenariuszy dla sesji online, sesji wsadowych i eksportu faktur,
+- przygotowywać XML FA(3) programistycznie i walidować go z oficjalnym XSD,
+- testować integrację w środowiskach TEST/DEMO przed przejściem na PROD.
+
+Publiczny kontrakt SDK jest typowany: do metod klientów przekazuj obiekty `ksef_client.models.*`,
+a nie surowe `dict`. Jeżeli migrujesz starszą integrację, zacznij od
+[`docs/migration-typed-model-api.md`](docs/migration-typed-model-api.md).
 
 ## 📦 Instalacja
 
-Wymagania: Python `>= 3.10`.
+Wymagany Python: **`>= 3.10`**.
 
-Podstawowe SDK (bez zależności CLI):
+Podstawowe SDK:
 
 ```bash
 pip install ksef-client
 ```
 
-SDK + CLI:
+SDK z interfejsem CLI:
 
 ```bash
 pip install "ksef-client[cli]"
+```
+
+Pełniejszy zestaw z obsługą XAdES, FA(3), QR i CLI:
+
+```bash
+pip install "ksef-client[xml,fa3,qr,cli]"
 ```
 
 Dodatki opcjonalne:
 
-```bash
-pip install "ksef-client[xml,qr,cli]"
-```
+- `cli` — komenda `ksef` oraz zależności `typer`, `rich`, `keyring`,
+- `xml` — podpis XAdES przez `lxml` i `xmlsec`,
+- `fa3` — walidacja XSD dla XML FA(3) przez `lxml`,
+- `qr` — generowanie kodów QR w PNG przez `qrcode` i `pillow`.
 
-- `xml` - podpis XAdES z `lxml` i `xmlsec`
-- `qr` - generowanie PNG z kodami QR przez `qrcode` i `pillow`
-- `cli` - interfejs wiersza poleceń oparty o `typer`, `rich`, `keyring`
-
-Po podstawowej instalacji `pip install ksef-client` pakiet SDK jest gotowy do użycia, ale komenda `ksef`
-zwróci kontrolowany komunikat o brakujących zależnościach CLI. Aby uruchamiać CLI, doinstaluj extra `cli`.
+Po instalacji samego `ksef-client` SDK jest gotowe do użycia w kodzie. Jeżeli uruchomisz wtedy
+komendę `ksef`, otrzymasz czytelną instrukcję doinstalowania dodatku `cli`, zamiast tracebacka.
 
 ## 🚀 Szybki start: CLI
 
-CLI `ksef` zostało zaprojektowane tak, aby skrócić wejście w SDK do minimum.
-
-Najpierw zainstaluj zależności CLI:
+CLI jest najkrótszą ścieżką do sprawdzenia profilu, uwierzytelnienia i podstawowych operacji bez pisania kodu.
 
 ```bash
 pip install "ksef-client[cli]"
 ```
 
-1. Utwórz i aktywuj profil:
+1. Utwórz profil i ustaw go jako aktywny:
 
 ```bash
 ksef init --non-interactive --name demo --env DEMO --context-type nip --context-value <NIP> --set-active
 ```
 
-2. Zaloguj się tokenem i sprawdź sesję:
+2. Zaloguj się tokenem KSeF i sprawdź stan sesji:
 
 ```bash
 ksef auth login-token --ksef-token <KSEF_TOKEN>
@@ -92,7 +103,7 @@ ksef auth status
 ksef profile show
 ```
 
-Alternatywnie, logowanie certyfikatem XAdES:
+Alternatywnie możesz zalogować się certyfikatem XAdES:
 
 ```bash
 ksef auth login-xades --pkcs12-path ./cert.p12 --pkcs12-password <HASLO_CERTYFIKATU>
@@ -107,36 +118,36 @@ ksef send online --invoice ./fa.xml --wait-upo --save-upo ./out/upo-online.xml
 ksef invoice download --ksef-number <KSEF_NUMBER> --out ./out/
 ```
 
-Najważniejsze grupy komend:
-- onboarding/profiles: `init`, `profile ...`
-- auth: `auth login-token`, `auth login-xades`, `auth status`, `auth refresh`, `auth revoke-self-token`, `auth logout`
-- operacje: `invoice ...`, `send ...`, `upo ...`, `export ...`
-- diagnostyka: `health check`
-- latarnia: `lighthouse status`, `lighthouse messages`
-  - komendy Latarni sa publiczne (dzialaja bez logowania; bez profilu domyslnie uzywana jest latarnia test)
+Najczęściej używane grupy komend:
 
-Pełna specyfikacja CLI: [`docs/cli/README.md`](docs/cli/README.md)
+- konfiguracja profili: `init`, `profile ...`,
+- uwierzytelnianie: `auth login-token`, `auth login-xades`, `auth status`, `auth refresh`, `auth revoke-self-token`, `auth logout`,
+- faktury i sesje: `invoice ...`, `send ...`, `upo ...`, `export ...`,
+- diagnostyka: `health check`,
+- Latarnia KSeF: `lighthouse status`, `lighthouse messages`.
 
-## 🛠️ Troubleshooting CLI
+Komendy Latarni są publiczne i działają bez logowania. Jeżeli nie masz aktywnego profilu, CLI używa domyślnie
+środowiska testowego Latarni.
 
-Jeśli po `pip install ksef-client` uruchomisz `ksef`, komenda nie zakończy się tracebackiem, tylko czytelną
-instrukcją doinstalowania CLI:
-
-```text
-Install CLI dependencies with: pip install "ksef-client[cli]"
-```
-
-To zachowanie jest celowe: bazowa instalacja obejmuje SDK, a CLI pozostaje opcjonalne.
+Pełna specyfikacja CLI: [`docs/cli/README.md`](docs/cli/README.md).
 
 ## 🧩 Szybki start: SDK
 
-Minimalny przebieg integracji:
-- uzyskanie `access_token` przez token KSeF lub XAdES,
-- wykonanie pierwszego wywołania API, np. listowania metadanych faktur.
+Minimalny przepływ w kodzie zwykle wygląda tak:
+
+1. tworzysz klienta dla wybranego środowiska,
+2. pobierasz publiczny certyfikat KSeF do szyfrowania tokena,
+3. uzyskujesz `access_token`,
+4. wykonujesz wywołanie API na typowanych modelach.
 
 ```python
-from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment, models as m
+from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
+from ksef_client import models as m
 from ksef_client.services import AuthCoordinator
+
+KSEF_TOKEN = "<TOKEN_KSEF>"
+CONTEXT_TYPE = "nip"
+CONTEXT_VALUE = "5265877635"
 
 with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as client:
     token_cert_pem = client.security.get_public_key_certificate_pem(
@@ -146,8 +157,10 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
     access_token = AuthCoordinator(client.auth).authenticate_with_ksef_token(
         token=KSEF_TOKEN,
         public_certificate=token_cert_pem,
-        context_identifier_type="nip",
-        context_identifier_value="5265877635",
+        context_identifier_type=CONTEXT_TYPE,
+        context_identifier_value=CONTEXT_VALUE,
+        max_attempts=90,
+        poll_interval_seconds=2.0,
     ).access_token
 
     metadata = client.invoices.query_invoice_metadata_by_date_range(
@@ -158,98 +171,94 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
         access_token=access_token,
         page_size=10,
     )
+
+print(f"Liczba faktur: {len(metadata.invoices)}")
 ```
 
-## 🔐 Najważniejsze scenariusze SDK
+### 📤 Wysyłka faktury w sesji online
 
-### Autoryzacja tokenem KSeF
+Do wysyłki faktur używaj scenariusza `OnlineSessionWorkflow`. Aktualny model pracy to:
+`open_session() -> session.send_invoice() -> session.close()`.
 
-```python
-tokens = AuthCoordinator(client.auth).authenticate_with_ksef_token(
-    token=KSEF_TOKEN,
-    public_certificate=token_cert_pem,
-    context_identifier_type="nip",
-    context_identifier_value="5265877635",
-).tokens
-```
-
-### Autoryzacja certyfikatem XAdES
-
-Wymaga dodatku `xml`: `pip install "ksef-client[xml]"`.
+Poniższy fragment zakłada, że jesteś wewnątrz bloku `with KsefClient(...) as client:` i masz już `access_token` z poprzedniego kroku.
 
 ```python
-from ksef_client.services import XadesKeyPair
+from pathlib import Path
 
-key_pair = XadesKeyPair.from_pkcs12_file(pkcs12_path="cert.p12", pkcs12_password="***")
-tokens = AuthCoordinator(client.auth).authenticate_with_xades_key_pair(
-    key_pair=key_pair,
-    context_identifier_type="nip",
-    context_identifier_value="5265877635",
-    subject_identifier_type="certificateSubject",
-    enforce_xades_compliance=False,
-).tokens
-```
-
-### Wysyłka faktury w sesji online
-
-```python
-from ksef_client.services.workflows import OnlineSessionWorkflow
-
-send_result = OnlineSessionWorkflow(client.sessions).send_invoice(
-    session_reference_number=session_reference_number,
-    invoice_xml=invoice_xml_fa3_bytes,
-    encryption_data=encryption_data,
-    access_token=access_token,
-)
-```
-
-### Wysyłka wsadowa batch ZIP
-
-```python
-from ksef_client.services.workflows import BatchSessionWorkflow
 from ksef_client import models as m
+from ksef_client.services import OnlineSessionWorkflow
 
-session_reference_number = BatchSessionWorkflow(client.sessions, client.http_client).open_upload_and_close(
+invoice_xml = Path("./fa.xml").read_bytes()
+
+symmetric_cert_pem = client.security.get_public_key_certificate_pem(
+    m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION,
+)
+
+workflow = OnlineSessionWorkflow(client.sessions)
+session = workflow.open_session(
     form_code=m.FormCode(system_code="FA (3)", schema_version="1-0E", value="FA"),
-    zip_bytes=zip_bytes,
     public_certificate=symmetric_cert_pem,
     access_token=access_token,
-    parallelism=4,
 )
+
+send_result = session.send_invoice(invoice_xml, access_token=access_token)
+session.close(access_token=access_token)
+
+print(send_result.reference_number)
 ```
 
-### Odczyt statusu Latarni
+Pełne, uruchamialne przykłady znajdują się w [`docs/examples/`](docs/examples/README.md).
 
-```python
-status = client.lighthouse.get_status()
-messages = client.lighthouse.get_messages()
-```
+## 🧾 FA(3) SDK
+
+Warstwa `ksef_client.documents.fa3` służy do programistycznego przygotowania faktur FA(3) przed wysyłką do KSeF. Zakres tej warstwy obejmuje:
+
+- typed buildery dla faktur podstawowych, korekt, zaliczek i rozliczeń zaliczek,
+- prostsze drafty `FA3Draft` / `FA3BatchDraft` przydatne dla integracji JSON i generowania ZIP,
+- serializację do XML oraz opcjonalną walidację XSD przez `to_xml(xsd_validate=True)`,
+- przygotowanie XML do sesji online i paczek ZIP do sesji wsadowych.
+
+Walidacja XSD używa dodatku `fa3` (`pip install "ksef-client[fa3]"` albo lokalnie `pip install -e .[fa3]`).
+
+Szczegóły: [`docs/fa3-sdk.md`](docs/fa3-sdk.md) oraz [`docs/workflows/fa3.md`](docs/workflows/fa3.md).
+
+Przykłady uruchomieniowe:
+
+- [`docs/examples/fa3_single_invoice_sdk.py`](docs/examples/fa3_single_invoice_sdk.py) — pojedyncza faktura FA(3) do XML,
+- [`docs/examples/fa3_batch_zip_sdk.py`](docs/examples/fa3_batch_zip_sdk.py) — wiele faktur FA(3) do ZIP,
+- [`docs/examples/fa3_correction_settlement_sdk.py`](docs/examples/fa3_correction_settlement_sdk.py) — korekta i rozliczenie zaliczki,
+- [`docs/examples/fa3_json_roundtrip_sdk.py`](docs/examples/fa3_json_roundtrip_sdk.py) — JSON draft → ZIP XML.
+
+## 🧰 Najważniejsze możliwości
+
+| Obszar | Co dostajesz |
+| --- | --- |
+| Klienci API | `KsefClient`, `AsyncKsefClient` i podklienci mapujący endpointy KSeF. |
+| Modele | Typowane modele żądań i odpowiedzi w `ksef_client.models`. |
+| Uwierzytelnianie | Token KSeF, XAdES, odświeżanie tokenów i unieważnianie bieżącego tokena. |
+| Sesje | Sesje online i wsadowe, obsługa ZIP, części, szyfrowania i zamykania sesji. |
+| Faktury | Lista metadanych, pobieranie faktur, eksport paczek i narzędzia do ich przetwarzania. |
+| FA(3) | Buildery, drafty, XML, walidacja XSD i ZIP do sesji wsadowych. |
+| UPO | Sprawdzanie statusów i pobieranie urzędowego poświadczenia odbioru. |
+| CLI | Operacje administracyjne i diagnostyczne bez pisania kodu. |
+| Latarnia | Publiczny status dostępności KSeF i komunikaty serwisowe. |
+| QR i linki | Linki weryfikacyjne, podpisy i generowanie kodów QR. |
 
 ## 📚 Dokumentacja
 
-Dokumentacja SDK znajduje się w `docs/`:
-- indeks: [`docs/README.md`](docs/README.md)
-- start: [`docs/getting-started.md`](docs/getting-started.md)
-- konfiguracja: [`docs/configuration.md`](docs/configuration.md)
-- błędy i retry: [`docs/errors.md`](docs/errors.md)
-- API: [`docs/api/README.md`](docs/api/README.md)
-- migracja typed model API: [`docs/migration-typed-model-api.md`](docs/migration-typed-model-api.md)
-- workflows: [`docs/workflows/README.md`](docs/workflows/README.md)
-- usługi: [`docs/services/README.md`](docs/services/README.md)
-- utils: [`docs/utils/README.md`](docs/utils/README.md)
-- przykłady: [`docs/examples/README.md`](docs/examples/README.md)
+Główna dokumentacja znajduje się w katalogu [`docs/`](docs/README.md):
 
-## 🔁 Migracja typed model API
+- [pierwsze kroki](docs/getting-started.md),
+- [konfiguracja klienta](docs/configuration.md),
+- [błędy, retry i limity](docs/errors.md),
+- [referencja API](docs/api/README.md),
+- [scenariusze sesji i eksportu](docs/workflows/README.md),
+- [usługi pomocnicze](docs/services/README.md),
+- [narzędzia użytkowe](docs/utils/README.md),
+- [przykłady Python](docs/examples/README.md),
+- [migracja z `dict` na typowane modele](docs/migration-typed-model-api.md).
 
-Jeśli przechodzisz ze starszej integracji opartej o `dict`, zacznij od krótkiego przewodnika:
-[`docs/migration-typed-model-api.md`](docs/migration-typed-model-api.md).
-
-## 🧪 Testy i jakość
-
-[![Python E2E TEST token](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=job%3A%22E2E+TEST+%28token%29%22)
-[![Python E2E TEST cert](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=job%3A%22E2E+TEST+%28xades%29%22)
-[![Python E2E DEMO token](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=job%3A%22E2E+DEMO+%28token%29%22)
-[![Python E2E DEMO cert](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml/badge.svg)](https://github.com/smekcio/ksef-client-python/actions/workflows/python-e2e.yml?query=job%3A%22E2E+DEMO+%28xades%29%22)
+## 🧪 Jakość i rozwój
 
 Instalacja zależności developerskich:
 
@@ -257,50 +266,33 @@ Instalacja zależności developerskich:
 pip install -r requirements-dev.txt
 ```
 
-Uruchomienie testów:
+Podstawowe sprawdzenia lokalne:
 
 ```bash
 pytest
-```
-
-Uruchomienie testów z kontrolą pokrycia:
-
-```bash
 pytest --cov=ksef_client --cov-report=term-missing --cov-fail-under=100
-```
-
-Synchronizacja wygenerowanych artefaktów z aktualna oficjalna specyfikacja KSeF:
-
-```bash
-python tools/sync_generated.py
-```
-
-Walidacja, że `src/ksef_client/openapi_models.py` i `src/ksef_client/models.pyi` sa zgodne z generatorami:
-
-```bash
-python tools/sync_generated.py --check
 python tools/lint.py
 ```
 
-Walidacja strict-live bez fallbacku do snapshotu:
+Repozytorium zawiera też narzędzia do synchronizacji modeli ze specyfikacją KSeF oraz kontroli pokrycia
+obsługiwanych endpointów:
 
 ```bash
-python tools/sync_generated.py --check --no-fallback
-python tools/check_coverage.py --no-fallback --src src/ksef_client/clients
+python tools/sync_generated.py --check
+python tools/check_coverage.py --src src/ksef_client/clients
 ```
 
-Przy pracy bez `--input` narzędzia próbują najpierw pobrać oficjalną specyfikację KSeF, a przy
-niedostępności endpointu przechodzą na ostatni snapshot zapisany w repo.
-
-Testy E2E w `tests/test_e2e_token_flows.py` wymagają osobnej konfiguracji środowiska i danych dostępowych.
+Testy E2E wymagają osobnej konfiguracji środowiska KSeF i danych dostępowych. Szczegóły scenariuszy oraz
+zmiennych środowiskowych są opisane w dokumentacji i testach.
 
 ## 🤝 Kontrybucja
 
-Wkład w rozwój projektu przyjmowany jest w formie pull requestów i zgłoszeń Issues.
+Zgłoszenia błędów, propozycje zmian i pull requesty są mile widziane.
 
-Rekomendowany przebieg:
-- opisz problem lub propozycję zmiany w Issue,
+Rekomendowany przebieg pracy:
+
+- opisz problem albo propozycję w Issue,
 - pracuj w osobnej gałęzi,
-- dołącz testy dla zmian zachowania,
-- utrzymaj jakość: `pytest`, `pytest --cov=ksef_client --cov-fail-under=100`,
-- opisz zakres i uzasadnienie zmian w PR.
+- dodaj testy dla zmian zachowania,
+- uruchom lokalnie `python tools/lint.py` oraz testy,
+- w PR opisz zakres zmiany, uzasadnienie i sposób weryfikacji.
