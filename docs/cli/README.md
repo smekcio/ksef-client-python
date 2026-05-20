@@ -467,7 +467,9 @@ Usage: ksef send batch [OPTIONS]
 
 Options:
   --zip TEXT
+  --tar-gz TEXT
   --dir TEXT
+  --archive-format TEXT    [default: zip]
   --system-code TEXT        [default: FA (3)]
   --schema-version TEXT     [default: 1-0E]
   --form-value TEXT         [default: FA]
@@ -484,7 +486,9 @@ Options:
 ```
 
 Walidacja:
-- dokladnie jedno z `--zip` albo `--dir`.
+- dokladnie jedno z `--zip`, `--tar-gz` albo `--dir`.
+- `--archive-format zip|targz` dotyczy budowania paczki z `--dir`; gotowy `--tar-gz`
+  automatycznie uzywa kompresji `TarGz`.
 - `--save-session <id>` zapisuje lokalny checkpoint resumable sesji pod wskazanym identyfikatorem.
 - Przy udanym zakonczeniu komenda nadal zamyka sesje; checkpoint sluzy glownie do inspekcji
   oraz odzyskania flow po przerwaniu lub bledzie po zapisaniu checkpointu.
@@ -756,6 +760,7 @@ Options:
   --subject-type TEXT        [default: Subject1]
   --restrict-to-permanent-storage-hwm-date / --no-restrict-to-permanent-storage-hwm-date
   --only-metadata
+  --compression TEXT        [default: zip]
   --poll-interval FLOAT      [default: 2.0]
   --max-attempts INTEGER     [default: 120]
   --out TEXT                 [required]
@@ -764,6 +769,7 @@ Options:
 
 Uwagi:
 - `--only-metadata` pobiera tylko `_metadata.json` bez XML faktur.
+- `--compression zip|targz` wybiera `compressionType` w `InvoiceExportRequest`; ZIP pozostaje domyslny.
 - dla eksportu przyrostowego uzyj `--date-type PermanentStorage` razem z `--restrict-to-permanent-storage-hwm-date`.
 
 ## Exit codes

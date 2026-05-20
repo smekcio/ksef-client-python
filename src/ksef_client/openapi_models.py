@@ -156,6 +156,10 @@ class CommonSessionStatus(OpenApiEnum):
     FAILED = "Failed"
     CANCELLED = "Cancelled"
 
+class CompressionType(OpenApiEnum):
+    ZIP = "Zip"
+    TARGZ = "TarGz"
+
 class CurrencyCode(OpenApiEnum):
     AED = "AED"
     AFN = "AFN"
@@ -717,6 +721,8 @@ RetryAfter: TypeAlias = int
 
 Sha256HashBase64: TypeAlias = str
 
+SystemWarning: TypeAlias = str
+
 @dataclass(frozen=True)
 class AllowedIps(OpenApiModel):
     ip4_addresses: Optional[list[str]] = field(default=None, metadata={"json_key": "ip4Addresses"})
@@ -837,6 +843,7 @@ class BatchFileInfo(OpenApiModel):
     file_hash: Sha256HashBase64 = field(metadata={"json_key": "fileHash"})
     file_parts: list[BatchFilePartInfo] = field(metadata={"json_key": "fileParts"})
     file_size: int = field(metadata={"json_key": "fileSize"})
+    compression_type: Optional[CompressionType] = field(default=None, metadata={"json_key": "compressionType"})
 
 @dataclass(frozen=True)
 class BatchFilePartInfo(OpenApiModel):
@@ -1245,6 +1252,7 @@ class InitTokenAuthenticationRequest(OpenApiModel):
 class InvoiceExportRequest(OpenApiModel):
     encryption: EncryptionInfo
     filters: InvoiceQueryFilters
+    compression_type: Optional[CompressionType] = field(default=None, metadata={"json_key": "compressionType"})
     only_metadata: Optional[bool] = field(default=None, metadata={"json_key": "onlyMetadata"})
 
 @dataclass(frozen=True)

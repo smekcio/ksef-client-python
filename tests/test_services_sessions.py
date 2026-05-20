@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from ksef_client import models as m
+from ksef_client.services import sessions as session_module
 from ksef_client.services.sessions import (
     AsyncBatchSessionHandle,
     BatchSessionHandle,
@@ -480,6 +481,35 @@ def test_batch_workflow_resume_validates_zip_and_upload_progress() -> None:
             session.get_state(),
             zip_bytes=build_zip({"changed.xml": b"<x/>"}),
             access_token="token",
+        )
+
+
+def test_resume_batch_file_compression_alignment_handles_legacy_state() -> None:
+    batch_file = m.BatchFileInfo(
+        file_size=1,
+        file_hash="hash",
+        file_parts=[],
+    )
+    assert (
+        session_module._align_resume_batch_file_compression_type(
+            batch_file,
+            state_batch_file=batch_file,
+            compression_type=m.CompressionType.ZIP,
+        )
+        is batch_file
+    )
+
+    targz_state_batch_file = m.BatchFileInfo(
+        file_size=1,
+        file_hash="hash",
+        file_parts=[],
+        compression_type=m.CompressionType.TARGZ,
+    )
+    with pytest.raises(ValueError, match="compression type"):
+        session_module._align_resume_batch_file_compression_type(
+            batch_file,
+            state_batch_file=targz_state_batch_file,
+            compression_type=m.CompressionType.ZIP,
         )
 
 

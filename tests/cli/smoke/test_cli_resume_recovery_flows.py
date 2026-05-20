@@ -220,8 +220,8 @@ def test_cli_batch_partial_upload_can_resume_after_logical_restart(
         def __init__(self, sessions, http_client) -> None:
             _ = (sessions, http_client)
 
-        def resume_session(self, state, *, zip_bytes, access_token=None):
-            _ = (state, zip_bytes, access_token)
+        def resume_session(self, state, **kwargs):
+            _ = (state, kwargs)
             return _FirstUploadHandle()
 
     monkeypatch.setattr(session_ops, "BatchSessionWorkflow", _FirstUploadWorkflow)
@@ -250,8 +250,8 @@ def test_cli_batch_partial_upload_can_resume_after_logical_restart(
         def __init__(self, sessions, http_client) -> None:
             _ = (sessions, http_client)
 
-        def resume_session(self, state, *, zip_bytes, access_token=None):
-            _ = (state, zip_bytes, access_token)
+        def resume_session(self, state, **kwargs):
+            _ = (state, kwargs)
             return _SecondUploadHandle()
 
     monkeypatch.setattr(session_ops, "BatchSessionWorkflow", _SecondUploadWorkflow)
@@ -299,7 +299,8 @@ def test_cli_batch_resume_rejects_changed_payload_source(
             return _OpenHandle()
 
     class _UnexpectedResumeWorkflow(_OpenWorkflow):
-        def resume_session(self, state, *, zip_bytes, access_token=None):
+        def resume_session(self, state, **kwargs):
+            _ = (state, kwargs)
             raise AssertionError("payload mismatch should fail before resume_session")
 
     monkeypatch.setattr(session_ops, "BatchSessionWorkflow", _OpenWorkflow)
@@ -536,8 +537,8 @@ def test_cli_send_batch_save_session_can_recover_via_session_commands(
         def __init__(self, sessions, http_client) -> None:
             _ = (sessions, http_client)
 
-        def resume_session(self, state, *, zip_bytes, access_token=None):
-            _ = (state, zip_bytes, access_token)
+        def resume_session(self, state, **kwargs):
+            _ = (state, kwargs)
             return _RecoveredBatchHandle()
 
     monkeypatch.setattr(session_ops, "BatchSessionWorkflow", _RecoveredBatchWorkflow)

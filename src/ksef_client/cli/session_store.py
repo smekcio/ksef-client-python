@@ -140,7 +140,7 @@ class BatchPayloadSource:
     source_size: int
 
     def __post_init__(self) -> None:
-        if self.kind not in {"zip", "directory"}:
+        if self.kind not in {"zip", "tar_gz", "directory", "tar_gz_directory"}:
             raise ValueError(f"Invalid payload source kind: {self.kind!r}.")
         if self.path.strip() == "":
             raise ValueError("Invalid payload source path: expected non-empty string.")

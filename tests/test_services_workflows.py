@@ -15,7 +15,7 @@ from ksef_client.http import HttpResponse
 from ksef_client.services import workflows
 from ksef_client.services.crypto import encrypt_aes_cbc_pkcs7, generate_iv, generate_symmetric_key
 from ksef_client.services.xades import XadesKeyPair
-from ksef_client.utils.zip_utils import build_zip
+from ksef_client.utils.zip_utils import build_tar_gz, build_zip
 from tests.helpers import generate_rsa_cert
 
 
@@ -632,6 +632,87 @@ class WorkflowsTests(unittest.TestCase):
             result = workflow.download_and_process_package(_invoice_package("u"), encryption)
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
         self.assertIn("inv.xml", result.invoice_xml_files)
+
+    def test_export_workflow_processes_tar_gz_package(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        files = {
+            "_metadata.json": json.dumps({"invoices": [{"ksefNumber": "1"}]}).encode("utf-8"),
+            "inv.xml": b"<xml/>",
+        }
+        archive = build_tar_gz(files)
+        encrypted = encrypt_aes_cbc_pkcs7(archive, key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.ExportWorkflow(cast(InvoicesClient, DummyInvoices()), RecordingHttp())
+        with patch.object(
+            workflow._download_helper,
+            "download_parts_with_hash",
+            return_value=[(encrypted, _sha256_b64(encrypted))],
+        ):
+            result = workflow.download_and_process_package(
+                _invoice_package("u"),
+                encryption,
+                compression_type=m.CompressionType.TARGZ,
+            )
+        self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
+        self.assertEqual(result.invoice_xml_files["inv.xml"], "<xml/>")
+
+    def test_batch_workflow_accepts_archive_bytes(self):
+        sessions = StubSessionsClient()
+        workflow = workflows.BatchSessionWorkflow(sessions, RecordingHttp())
+        rsa_cert = generate_rsa_cert()
+        archive = build_tar_gz({"a.xml": b"<xml/>"})
+        session = workflow.open_session(
+            form_code=_form_code(),
+            archive_bytes=archive,
+            compression_type=m.CompressionType.TARGZ,
+            public_certificate=rsa_cert.certificate_pem,
+            access_token="token",
+        )
+        self.assertEqual(session.reference_number, "ref")
+        open_batch_calls = [call for call in sessions.calls if call[0] == "open_batch"]
+        self.assertEqual(open_batch_calls[0][1].batch_file.file_size, len(archive))
+        self.assertEqual(
+            open_batch_calls[0][1].batch_file.compression_type,
+            m.CompressionType.TARGZ,
+        )
+
+    def test_batch_workflow_rejects_ambiguous_archive_payload(self):
+        sessions = StubSessionsClient()
+        workflow = workflows.BatchSessionWorkflow(sessions, RecordingHttp())
+        rsa_cert = generate_rsa_cert()
+        with self.assertRaisesRegex(ValueError, "either zip_bytes or archive_bytes"):
+            workflow.open_session(
+                form_code=_form_code(),
+                zip_bytes=build_zip({"a.xml": b"<xml/>"}),
+                archive_bytes=build_tar_gz({"a.xml": b"<xml/>"}),
+                public_certificate=rsa_cert.certificate_pem,
+                access_token="token",
+            )
+
+    def test_batch_workflow_rejects_missing_archive_payload(self):
+        sessions = StubSessionsClient()
+        workflow = workflows.BatchSessionWorkflow(sessions, RecordingHttp())
+        rsa_cert = generate_rsa_cert()
+        with self.assertRaisesRegex(ValueError, "archive payload is required"):
+            workflow.open_session(
+                form_code=_form_code(),
+                public_certificate=rsa_cert.certificate_pem,
+                access_token="token",
+            )
+
+    def test_compression_type_helpers_accept_aliases_and_reject_unknown_values(self):
+        self.assertEqual(workflows._normalize_compression_type("Zip"), m.CompressionType.ZIP)
+        self.assertEqual(workflows._normalize_compression_type("targz"), m.CompressionType.TARGZ)
+        self.assertEqual(workflows._normalize_compression_type("TarGz"), m.CompressionType.TARGZ)
+        with self.assertRaisesRegex(ValueError, "Unsupported compression type"):
+            workflows._normalize_compression_type("rar")
+        with self.assertRaisesRegex(ValueError, "Unsupported compression type"):
+            workflows._unpack_export_archive(b"", compression_type=cast(Any, "rar"))
 
     def test_export_workflow_empty_invoice_package_returns_empty_result(self):
         encryption = workflows.EncryptionData(

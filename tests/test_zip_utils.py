@@ -1,9 +1,18 @@
+import tarfile
 import unittest
 import zipfile
 from io import BytesIO
 from unittest.mock import patch
 
-from ksef_client.utils.zip_utils import build_zip, split_bytes, unzip_bytes, unzip_bytes_safe
+from ksef_client.utils.zip_utils import (
+    build_tar_gz,
+    build_zip,
+    split_bytes,
+    untar_gz_bytes,
+    untar_gz_bytes_safe,
+    unzip_bytes,
+    unzip_bytes_safe,
+)
 
 
 class ZipUtilsTests(unittest.TestCase):
@@ -23,6 +32,85 @@ class ZipUtilsTests(unittest.TestCase):
         self.assertEqual(first, second)
         with zipfile.ZipFile(BytesIO(first), "r") as zf:
             self.assertEqual(zf.getinfo("a.txt").date_time, (1980, 1, 1, 0, 0, 0))
+
+    def test_tar_gz_roundtrip(self):
+        archive = build_tar_gz({"a.txt": b"hello", "dir/b.txt": b"world"})
+        unpacked = untar_gz_bytes(archive)
+        self.assertEqual(unpacked["a.txt"], b"hello")
+        self.assertEqual(unpacked["dir/b.txt"], b"world")
+
+    def test_build_tar_gz_is_deterministic(self):
+        files = {"a.txt": b"hello", "b.txt": b"world"}
+
+        first = build_tar_gz(files)
+        second = build_tar_gz(files)
+
+        self.assertEqual(first, second)
+        with tarfile.open(fileobj=BytesIO(first), mode="r:gz") as tf:
+            self.assertEqual(tf.getmember("a.txt").mtime, 0)
+
+    def test_untar_gz_safe_rejects_invalid_limits(self):
+        archive = build_tar_gz({"a.txt": b"hello"})
+        with self.assertRaises(ValueError):
+            untar_gz_bytes_safe(archive, max_files=0)
+        with self.assertRaises(ValueError):
+            untar_gz_bytes_safe(archive, max_total_uncompressed_size=0)
+        with self.assertRaises(ValueError):
+            untar_gz_bytes_safe(archive, max_file_uncompressed_size=0)
+        with self.assertRaises(ValueError):
+            untar_gz_bytes_safe(archive, max_compression_ratio=0)
+
+    def test_untar_gz_safe_skips_directories_and_limits_files(self):
+        buffer = BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as tf:
+            dir_info = tarfile.TarInfo("dir")
+            dir_info.type = tarfile.DIRTYPE
+            tf.addfile(dir_info)
+            for name in ("dir/a.txt", "dir/b.txt"):
+                payload = b"hello"
+                info = tarfile.TarInfo(name)
+                info.size = len(payload)
+                tf.addfile(info, BytesIO(payload))
+
+        archive = buffer.getvalue()
+        self.assertEqual(untar_gz_bytes_safe(archive)["dir/a.txt"], b"hello")
+        with self.assertRaises(ValueError):
+            untar_gz_bytes_safe(archive, max_files=1)
+
+    def test_untar_gz_safe_limits_content(self):
+        archive = build_tar_gz({"a.txt": b"a" * 10})
+        with self.assertRaises(ValueError):
+            untar_gz_bytes_safe(archive, max_total_uncompressed_size=5)
+        with self.assertRaises(ValueError):
+            untar_gz_bytes_safe(archive, max_file_uncompressed_size=5)
+
+    def test_untar_gz_safe_limits_compression_ratio(self):
+        archive = build_tar_gz({"a.txt": b"a" * 1024})
+        with self.assertRaises(ValueError):
+            untar_gz_bytes_safe(archive, max_compression_ratio=0.1)
+
+    def test_untar_gz_safe_rejects_unreadable_file_entry(self):
+        archive = build_tar_gz({"a.txt": b"hello"})
+        with (
+            patch.object(tarfile.TarFile, "extractfile", return_value=None),
+            self.assertRaises(ValueError),
+        ):
+            untar_gz_bytes_safe(archive)
+
+    def test_untar_gz_safe_rejects_unsafe_paths(self):
+        for name in ("/abs/a.txt", "../a.txt", "C:/temp/a.txt"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                build_tar_gz({name: b"hello"})
+
+    def test_untar_gz_safe_rejects_links(self):
+        buffer = BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as tf:
+            info = tarfile.TarInfo("link")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "target"
+            tf.addfile(info)
+        with self.assertRaises(ValueError):
+            untar_gz_bytes_safe(buffer.getvalue())
 
     def test_unzip_limits_max_files(self):
         files = {"a.txt": b"hello", "b.txt": b"world"}

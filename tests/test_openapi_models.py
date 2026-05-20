@@ -133,6 +133,25 @@ class OpenApiModelsTests(unittest.TestCase):
         self.assertTrue(parsed.to_dict()["onlyMetadata"])
         self.assertEqual(parsed.to_dict()["encryption"]["publicKeyId"], "key-id")
 
+    def test_invoice_export_request_supports_tar_gz_compression(self):
+        payload = {
+            "encryption": {
+                "encryptedSymmetricKey": "enc",
+                "initializationVector": "iv",
+            },
+            "filters": {
+                "subjectType": "Subject1",
+                "dateRange": {
+                    "dateType": "Issue",
+                    "from": "2026-01-01T00:00:00Z",
+                },
+            },
+            "compressionType": "TarGz",
+        }
+        parsed = m.InvoiceExportRequest.from_dict(payload)
+        self.assertEqual(parsed.compression_type, m.CompressionType.TARGZ)
+        self.assertEqual(parsed.to_dict()["compressionType"], "TarGz")
+
     def test_token_permission_type_contains_introspection(self):
         values = {item.value for item in m.TokenPermissionType}
         self.assertIn("Introspection", values)

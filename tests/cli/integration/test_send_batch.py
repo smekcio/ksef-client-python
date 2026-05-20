@@ -50,6 +50,34 @@ def test_send_batch_success(runner, monkeypatch, tmp_path) -> None:
     assert seen["save_upo_overwrite"] is False
 
 
+def test_send_batch_tar_gz_option(runner, monkeypatch, tmp_path) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_send(**kwargs):
+        seen.update(kwargs)
+        return {"session_ref": "BATCH-TARGZ"}
+
+    monkeypatch.setattr(send_cmd, "send_batch_invoices", _fake_send)
+    tar_gz_path = tmp_path / "batch.tar.gz"
+    tar_gz_path.write_bytes(b"tgz")
+
+    result = runner.invoke(
+        app,
+        [
+            "send",
+            "batch",
+            "--tar-gz",
+            str(tar_gz_path),
+            "--archive-format",
+            "targz",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["tar_gz_path"] == str(tar_gz_path)
+    assert seen["archive_format"] == "targz"
+
+
 def test_send_batch_fa_rr_form_code(runner, monkeypatch, tmp_path) -> None:
     seen: dict[str, object] = {}
 

@@ -39,6 +39,7 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
     export_request = m.InvoiceExportRequest(
         encryption=encryption.encryption_info,
         only_metadata=False,
+        compression_type=m.CompressionType.ZIP,
         filters=m.InvoiceQueryFilters(
             subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
             date_range=m.InvoiceQueryDateRange(
@@ -65,7 +66,11 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
         time.sleep(2)
 
     export = ExportWorkflow(client.invoices, client.http_client)
-    result = export.download_and_process_package(package, encryption)
+    result = export.download_and_process_package(
+        package,
+        encryption,
+        compression_type=m.CompressionType.ZIP,
+    )
 
 print(len(result.metadata_summaries), len(result.invoice_xml_files))
 ```
@@ -74,6 +79,8 @@ print(len(result.metadata_summaries), len(result.invoice_xml_files))
 
 - Części paczki są dostępne pod `package.parts[].url` i są pobierane **bez Bearer tokena** (pre-signed URL).
 - Ustaw `onlyMetadata=True`, jeśli potrzebujesz wyłącznie `_metadata.json` bez XML faktur.
+- KSeF API 2.6.0 obsługuje `compressionType=Zip` albo `compressionType=TarGz`; domyślnie używaj ZIP,
+  a TarGz wybierz przy większych paczkach z wieloma podobnymi XML.
 - Dla każdego pobranego (zaszyfrowanego) partu workflow liczy hash `SHA-256` (base64) i porównuje z `x-ms-meta-hash`, jeśli nagłówek jest obecny.
 - Domyślnie (`KsefClientOptions.require_export_part_hash=True`) brak `x-ms-meta-hash` powoduje `ValueError`.
 - Niezgodność hash (`x-ms-meta-hash` vs. wyliczony hash) zawsze powoduje `ValueError`.
@@ -94,6 +101,7 @@ ksef export run \
   --date-type PermanentStorage \
   --restrict-to-permanent-storage-hwm-date \
   --subject-type Subject1 \
+  --compression targz \
   --out ./out/export
 ```
 
@@ -102,6 +110,7 @@ Mapowanie opcji CLI na payload eksportu:
 - `--restrict-to-permanent-storage-hwm-date` -> `filters.dateRange.restrictToPermanentStorageHwmDate`
 - `--subject-type` -> `filters.subjectType`
 - `--only-metadata` -> `onlyMetadata`
+- `--compression zip|targz` -> `compressionType`
 
 Uwagi:
 - Dla synchronizacji przyrostowej/HWM uzyj `--date-type PermanentStorage` razem z `--restrict-to-permanent-storage-hwm-date`.

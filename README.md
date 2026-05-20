@@ -6,7 +6,7 @@
 
 **KSeF Client Python** to SDK i narzędzia CLI dla integracji z Krajowym Systemem e-Faktur.
 Pakiet jest publikowany na PyPI jako **`ksef-client`** i obsługuje aktualny kontrakt
-**KSeF API `v2.5.0`** ([changelog API](https://github.com/CIRFMF/ksef-docs/blob/2.5.0/api-changelog.md#wersja-250)).
+**KSeF API `v2.6.0`** ([changelog API](https://github.com/CIRFMF/ksef-api/blob/main/api-changelog.md#wersja-260)).
 
 Biblioteka pomaga integrować aplikacje napisane w Pythonie z KSeF bez ręcznego
 składania żądań HTTP, szyfrowania, podpisów, obsługi sesji i pobierania paczek faktur.
@@ -18,8 +18,8 @@ Najważniejsze cechy:
 - **CLI `ksef`** do konfiguracji, diagnostyki, uwierzytelniania, wysyłki i pobierania faktur,
 - **uwierzytelnianie tokenem KSeF i XAdES**, w tym obsługa PKCS#12 oraz PEM,
 - **sesje online i wsadowe**, eksport faktur, UPO, linki weryfikacyjne, QR i Latarnia KSeF,
-- **FA(3)**: budowanie XML faktur, walidacja XSD i przygotowanie paczek ZIP,
-- narzędzia pomocnicze do szyfrowania, ZIP, Base64Url i obsługi adresów pre-signed URL.
+- **FA(3)**: budowanie XML faktur, walidacja XSD i przygotowanie paczek ZIP/TarGz,
+- narzędzia pomocnicze do szyfrowania, ZIP/TarGz, Base64Url i obsługi adresów pre-signed URL.
 
 ## 🧭 Spis treści
 

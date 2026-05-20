@@ -42,6 +42,7 @@ Wymagane minimum w modelu:
 
 Opcjonalnie:
 - `onlyMetadata=True` – eksport zwraca wyłącznie `_metadata.json` bez XML faktur.
+- `compressionType=CompressionType.TARGZ` – eksport zwraca paczkę TarGz zamiast domyślnego ZIP.
 
 Uwaga dla `filters.dateRange`:
 - ISO date-time bez offsetu jest normalizowany do `Europe/Warsaw` przed wysyłką requestu.

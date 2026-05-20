@@ -106,6 +106,13 @@ def _validate_presigned_url_security(options: KsefClientOptions, url: str) -> No
         )
 
 
+def _handle_system_warning(options: KsefClientOptions, response: httpx.Response) -> None:
+    warning = response.headers.get("X-System-Warning")
+    if not warning or options.system_warning_handler is None:
+        return
+    options.system_warning_handler(warning)
+
+
 def _parse_retry_after(value: str | None) -> int | None:
     if value is None:
         return None
@@ -250,6 +257,7 @@ class BaseHttpClient:
             json=json,
             content=data,
         )
+        _handle_system_warning(self._options, response)
 
         if (
             expected_status
@@ -364,6 +372,7 @@ class AsyncBaseHttpClient:
             json=json,
             content=data,
         )
+        _handle_system_warning(self._options, response)
 
         if (
             expected_status

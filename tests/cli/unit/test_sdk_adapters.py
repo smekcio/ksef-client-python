@@ -1131,6 +1131,239 @@ def test_send_batch_invoices_success_with_dir(monkeypatch, tmp_path) -> None:
     assert len(call["zip_bytes"]) > 0
 
 
+def test_send_batch_invoices_returns_system_warnings(monkeypatch, tmp_path) -> None:
+    class _Security:
+        def get_public_key_certificates(self):
+            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+
+    class _BatchWorkflow:
+        def __init__(self, sessions, http_client):
+            _ = (sessions, http_client)
+
+        def open_upload_and_close(self, **kwargs):
+            _ = kwargs
+            return "SES-BATCH-WARN"
+
+    def _fake_create_client(base_url, access_token=None, system_warning_handler=None):
+        _ = (base_url, access_token)
+        if system_warning_handler is not None:
+            system_warning_handler("future warning")
+        return _FakeClient(
+            sessions=SimpleNamespace(),
+            security=_Security(),
+            http_client=SimpleNamespace(),
+        )
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(adapters, "BatchSessionWorkflow", _BatchWorkflow)
+    monkeypatch.setattr(adapters, "create_client", _fake_create_client)
+
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    (batch_dir / "a.xml").write_text("<a/>", encoding="utf-8")
+
+    result = adapters.send_batch_invoices(
+        profile="demo",
+        base_url="https://example.invalid",
+        zip_path=None,
+        directory=str(batch_dir),
+        system_code="FA (3)",
+        schema_version="1-0E",
+        form_value="FA",
+        parallelism=1,
+        upo_v43=False,
+        wait_status=False,
+        wait_upo=False,
+        poll_interval=1.0,
+        max_attempts=1,
+        save_upo=None,
+    )
+
+    assert result["system_warnings"] == ["future warning"]
+
+
+def test_batch_tar_gz_helpers_validate_sources(tmp_path) -> None:
+    missing = tmp_path / "missing.tar.gz"
+    with pytest.raises(CliError):
+        adapters._load_batch_tar_gz(str(missing))
+
+    empty = tmp_path / "empty.tar.gz"
+    empty.write_bytes(b"")
+    with pytest.raises(CliError):
+        adapters._load_batch_tar_gz(str(empty))
+
+    archive = tmp_path / "batch.tar.gz"
+    archive.write_bytes(b"tgz")
+    assert adapters._load_batch_tar_gz(str(archive)) == b"tgz"
+
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    (batch_dir / "a.xml").write_text("<a/>", encoding="utf-8")
+    assert adapters._build_tar_gz_from_directory(str(batch_dir))
+
+
+def test_cli_compression_type_validation() -> None:
+    assert adapters._require_cli_compression_type("tar.gz") == m.CompressionType.TARGZ
+    with pytest.raises(CliError):
+        adapters._require_cli_compression_type("rar")
+
+
+def test_export_package_download_helper_preserves_unrelated_type_errors() -> None:
+    class _Workflow:
+        def download_and_process_package(self, *args, **kwargs):
+            _ = (args, kwargs)
+            raise TypeError("boom")
+
+    with pytest.raises(TypeError, match="boom"):
+        adapters._download_and_process_export_package(
+            _Workflow(),
+            object(),
+            cast(Any, object()),
+            compression_type=m.CompressionType.ZIP,
+        )
+
+
+def test_client_warning_context_preserves_unrelated_type_errors(monkeypatch) -> None:
+    def _raise_type_error(*args, **kwargs):
+        _ = (args, kwargs)
+        raise TypeError("boom")
+
+    monkeypatch.setattr(adapters, "create_client", _raise_type_error)
+    with (
+        pytest.raises(TypeError, match="boom"),
+        adapters._create_client_collecting_system_warnings(
+            "https://example.invalid",
+            access_token="token",
+        ),
+    ):
+        pass
+
+
+def test_build_batch_payload_source_requires_payload() -> None:
+    with pytest.raises(ValueError):
+        adapters._build_batch_payload_source(
+            zip_path=None,
+            directory=".",
+        )
+
+
+def test_send_batch_invoices_supports_tar_gz_file(monkeypatch, tmp_path) -> None:
+    class _Security:
+        def get_public_key_certificates(self):
+            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+
+    class _BatchWorkflow:
+        def __init__(self, sessions, http_client):
+            _ = (sessions, http_client)
+            self.calls: list[dict[str, object]] = []
+
+        def open_upload_and_close(self, **kwargs):
+            self.calls.append(kwargs)
+            return "SES-BATCH-TARGZ"
+
+    workflow_holder: dict[str, _BatchWorkflow] = {}
+
+    def _batch_factory(sessions, http_client):
+        workflow = _BatchWorkflow(sessions, http_client)
+        workflow_holder["workflow"] = workflow
+        return workflow
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(adapters, "BatchSessionWorkflow", _batch_factory)
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(
+            sessions=SimpleNamespace(),
+            security=_Security(),
+            http_client=SimpleNamespace(),
+        ),
+    )
+
+    tar_gz_path = tmp_path / "batch.tar.gz"
+    tar_gz_path.write_bytes(b"tgz")
+    result = adapters.send_batch_invoices(
+        profile="demo",
+        base_url="https://example.invalid",
+        zip_path=None,
+        tar_gz_path=str(tar_gz_path),
+        directory=None,
+        system_code="FA (3)",
+        schema_version="1-0E",
+        form_value="FA",
+        parallelism=1,
+        upo_v43=False,
+        wait_status=False,
+        wait_upo=False,
+        poll_interval=1.0,
+        max_attempts=1,
+        save_upo=None,
+    )
+
+    assert result["compression_type"] == "TarGz"
+    call = workflow_holder["workflow"].calls[0]
+    assert call["zip_bytes"] is None
+    assert call["archive_bytes"] == b"tgz"
+
+
+def test_send_batch_invoices_supports_tar_gz_directory(monkeypatch, tmp_path) -> None:
+    class _Security:
+        def get_public_key_certificates(self):
+            return [{"usage": ["SymmetricKeyEncryption"], "certificate": "CERT"}]
+
+    class _BatchWorkflow:
+        def __init__(self, sessions, http_client):
+            _ = (sessions, http_client)
+            self.calls: list[dict[str, object]] = []
+
+        def open_upload_and_close(self, **kwargs):
+            self.calls.append(kwargs)
+            return "SES-BATCH-DIR-TARGZ"
+
+    workflow_holder: dict[str, _BatchWorkflow] = {}
+
+    def _batch_factory(sessions, http_client):
+        workflow = _BatchWorkflow(sessions, http_client)
+        workflow_holder["workflow"] = workflow
+        return workflow
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(adapters, "BatchSessionWorkflow", _batch_factory)
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(
+            sessions=SimpleNamespace(),
+            security=_Security(),
+            http_client=SimpleNamespace(),
+        ),
+    )
+
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    (batch_dir / "a.xml").write_text("<a/>", encoding="utf-8")
+    result = adapters.send_batch_invoices(
+        profile="demo",
+        base_url="https://example.invalid",
+        zip_path=None,
+        directory=str(batch_dir),
+        archive_format="targz",
+        system_code="FA (3)",
+        schema_version="1-0E",
+        form_value="FA",
+        parallelism=1,
+        upo_v43=False,
+        wait_status=False,
+        wait_upo=False,
+        poll_interval=1.0,
+        max_attempts=1,
+        save_upo=None,
+    )
+
+    assert result["compression_type"] == "TarGz"
+    assert workflow_holder["workflow"].calls[0]["archive_bytes"]
+
+
 def test_send_batch_invoices_validates_input_source(monkeypatch) -> None:
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
 
@@ -2616,13 +2849,15 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
         return fake_encryption
 
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
-    monkeypatch.setattr(
-        adapters,
-        "create_client",
-        lambda base_url, access_token=None: _FakeClient(
+    def _fake_create_client(base_url, access_token=None, system_warning_handler=None):
+        _ = (base_url, access_token)
+        if system_warning_handler is not None:
+            system_warning_handler("future warning")
+        return _FakeClient(
             invoices=_Invoices(), security=_Security(), http_client=SimpleNamespace()
-        ),
-    )
+        )
+
+    monkeypatch.setattr(adapters, "create_client", _fake_create_client)
     monkeypatch.setattr(adapters, "build_encryption_data", _build_encryption_data)
     monkeypatch.setattr(adapters, "ExportWorkflow", _FakeExportWorkflow)
     monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
@@ -2642,9 +2877,11 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
     assert result["only_metadata"] is False
     assert result["date_type"] == "Issue"
     assert result["restrict_to_permanent_storage_hwm_date"] is None
+    assert result["system_warnings"] == ["future warning"]
     payload = seen["payload"]
     assert isinstance(payload, m.InvoiceExportRequest)
     assert payload.only_metadata is False
+    assert payload.compression_type == m.CompressionType.ZIP
     assert payload.encryption.public_key_id == "key-id"
     assert seen["encryption_cert"] == "CERT"
     assert seen["public_key_id"] == "key-id"
@@ -2743,6 +2980,7 @@ def test_run_export_only_metadata_success(monkeypatch, tmp_path) -> None:
     payload = seen["payload"]
     assert isinstance(payload, m.InvoiceExportRequest)
     assert payload.only_metadata is True
+    assert payload.compression_type == m.CompressionType.ZIP
     assert (tmp_path / "_metadata.json").exists()
     assert list(tmp_path.glob("*.xml")) == []
 

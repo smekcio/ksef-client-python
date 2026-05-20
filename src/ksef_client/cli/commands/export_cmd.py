@@ -90,6 +90,9 @@ def export_run(
         "--only-metadata",
         help="Export only _metadata.json without invoice XML files.",
     ),
+    compression: str = typer.Option(
+        "zip", "--compression", help="Export package compression (zip or targz)."
+    ),
     poll_interval: float = typer.Option(
         2.0, "--poll-interval", help="Polling interval in seconds."
     ),
@@ -113,6 +116,7 @@ def export_run(
             subject_type=subject_type,
             restrict_to_permanent_storage_hwm_date=restrict_to_permanent_storage_hwm_date,
             only_metadata=only_metadata,
+            compression=compression,
             poll_interval=poll_interval,
             max_attempts=max_attempts,
             out=out,

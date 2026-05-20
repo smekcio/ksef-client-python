@@ -161,8 +161,8 @@ def test_cli_batch_session_resume_flow(runner, monkeypatch, tmp_path: Path) -> N
             _ = kwargs
             return _BatchHandle(batch_state)
 
-        def resume_session(self, state, *, zip_bytes, access_token=None):
-            _ = (zip_bytes, access_token)
+        def resume_session(self, state, **kwargs):
+            _ = kwargs
             return _BatchHandle(state)
 
     monkeypatch.setattr(session_ops, "BatchSessionWorkflow", _BatchWorkflow)

@@ -3,7 +3,8 @@ from __future__ import annotations
 import calendar
 import json
 import time
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,7 +18,7 @@ from ksef_client.services.workflows import (
     ExportWorkflow,
     OnlineSessionWorkflow,
 )
-from ksef_client.utils.zip_utils import build_zip
+from ksef_client.utils.zip_utils import build_tar_gz, build_zip
 
 from ..auth.keyring_store import get_tokens
 from ..errors import CliError
@@ -49,6 +50,11 @@ _INVOICE_SORT_DATE_FIELDS = {
     m.InvoiceQueryDateType.PERMANENTSTORAGE.value: (
         ("permanent_storage_date", "permanentStorageDate"),
     ),
+}
+_COMPRESSION_TYPE_BY_CLI_VALUE = {
+    "zip": m.CompressionType.ZIP,
+    "targz": m.CompressionType.TARGZ,
+    "tar.gz": m.CompressionType.TARGZ,
 }
 
 
@@ -679,7 +685,25 @@ def _load_batch_zip(zip_path: str) -> bytes:
     return data
 
 
-def _build_zip_from_directory(directory: str) -> bytes:
+def _load_batch_tar_gz(tar_gz_path: str) -> bytes:
+    path = Path(tar_gz_path)
+    if not path.exists() or not path.is_file():
+        raise CliError(
+            f"TarGz file does not exist: {path}",
+            ExitCode.IO_ERROR,
+            "Use --tar-gz with an existing tar.gz file path.",
+        )
+    data = path.read_bytes()
+    if not data:
+        raise CliError(
+            "TarGz file is empty.",
+            ExitCode.IO_ERROR,
+            "Provide a non-empty tar.gz file.",
+        )
+    return data
+
+
+def _collect_xml_files(directory: str) -> dict[str, bytes]:
     root = Path(directory)
     if not root.exists() or not root.is_dir():
         raise CliError(
@@ -698,25 +722,95 @@ def _build_zip_from_directory(directory: str) -> bytes:
         raise CliError(
             "No XML files found in batch directory.",
             ExitCode.VALIDATION_ERROR,
-            "Add XML invoices to directory or use --zip.",
+            "Add XML invoices to directory or use --zip/--tar-gz.",
         )
 
-    return build_zip(files)
+    return files
+
+
+def _build_zip_from_directory(directory: str) -> bytes:
+    return build_zip(_collect_xml_files(directory))
+
+
+def _build_tar_gz_from_directory(directory: str) -> bytes:
+    return build_tar_gz(_collect_xml_files(directory))
+
+
+def _require_cli_compression_type(value: str) -> m.CompressionType:
+    compression_type = _COMPRESSION_TYPE_BY_CLI_VALUE.get(value.strip().lower())
+    if compression_type is None:
+        raise CliError(
+            "Invalid compression type.",
+            ExitCode.VALIDATION_ERROR,
+            "Use zip or targz.",
+        )
+    return compression_type
+
+
+def _download_and_process_export_package(
+    workflow: Any,
+    package: Any,
+    encryption: EncryptionData,
+    *,
+    compression_type: m.CompressionType,
+) -> Any:
+    try:
+        return workflow.download_and_process_package(
+            package,
+            encryption,
+            compression_type=compression_type,
+        )
+    except TypeError as exc:
+        if "compression_type" not in str(exc):
+            raise
+        return workflow.download_and_process_package(package, encryption)
+
+
+@contextmanager
+def _create_client_collecting_system_warnings(
+    base_url: str,
+    *,
+    access_token: str | None,
+) -> Iterator[tuple[Any, list[str]]]:
+    system_warnings: list[str] = []
+    try:
+        with create_client(
+            base_url,
+            access_token=access_token,
+            system_warning_handler=system_warnings.append,
+        ) as client:
+            yield client, system_warnings
+    except TypeError as exc:
+        if "system_warning_handler" not in str(exc):
+            raise
+        with create_client(base_url, access_token=access_token) as client:
+            yield client, system_warnings
 
 
 def _build_batch_payload_source(
     *,
     zip_path: str | None,
+    tar_gz_path: str | None = None,
     directory: str | None,
-    zip_bytes: bytes,
+    zip_bytes: bytes | None = None,
+    archive_bytes: bytes | None = None,
+    compression_type: m.CompressionType = m.CompressionType.ZIP,
 ) -> BatchPayloadSource:
-    if zip_path:
-        path = str(Path(zip_path).resolve())
-        source_kind = "zip"
+    payload_bytes = archive_bytes if archive_bytes is not None else zip_bytes
+    if payload_bytes is None:
+        raise ValueError("Batch archive payload is required.")
+    if zip_path or tar_gz_path:
+        source_path = zip_path or tar_gz_path or ""
+        path = str(Path(source_path).resolve())
+        source_kind = "zip" if zip_path else "tar_gz"
     else:
         path = str(Path(directory or "").resolve())
-        source_kind = "directory"
-    metadata = get_file_metadata(zip_bytes)
+        source_kind = (
+            "tar_gz_directory"
+            if compression_type is m.CompressionType.TARGZ
+            else "directory"
+        )
+    metadata = get_file_metadata(payload_bytes)
     return BatchPayloadSource(
         kind=source_kind,
         path=path,
@@ -1388,7 +1482,9 @@ def send_batch_invoices(
     profile: str,
     base_url: str,
     zip_path: str | None,
+    tar_gz_path: str | None = None,
     directory: str | None,
+    archive_format: str = "zip",
     system_code: str,
     schema_version: str,
     form_value: str,
@@ -1403,13 +1499,16 @@ def send_batch_invoices(
     save_upo_overwrite: bool = False,
 ) -> dict[str, Any]:
     access_token = _require_access_token(profile)
-    selected = [bool(zip_path), bool(directory)]
+    selected = [bool(zip_path), bool(tar_gz_path), bool(directory)]
     if sum(1 for flag in selected if flag) != 1:
         raise CliError(
             "Select exactly one batch input source.",
             ExitCode.VALIDATION_ERROR,
-            "Use one of: --zip or --dir.",
+            "Use one of: --zip, --tar-gz or --dir.",
         )
+    compression_type = _require_cli_compression_type(
+        "targz" if tar_gz_path else archive_format
+    )
     if parallelism <= 0:
         raise CliError(
             "Invalid parallelism.",
@@ -1426,16 +1525,28 @@ def send_batch_invoices(
         _validate_polling_options(poll_interval, max_attempts)
 
     form_code = _build_form_code(system_code, schema_version, form_value)
-    zip_bytes = (
-        _load_batch_zip(zip_path or "") if zip_path else _build_zip_from_directory(directory or "")
-    )
-    payload_source = _build_batch_payload_source(
-        zip_path=zip_path,
-        directory=directory,
-        zip_bytes=zip_bytes,
-    )
+    if zip_path:
+        archive_bytes = _load_batch_zip(zip_path)
+    elif tar_gz_path:
+        archive_bytes = _load_batch_tar_gz(tar_gz_path)
+    elif compression_type is m.CompressionType.TARGZ:
+        archive_bytes = _build_tar_gz_from_directory(directory or "")
+    else:
+        archive_bytes = _build_zip_from_directory(directory or "")
+    payload_source_kwargs: dict[str, Any] = {
+        "zip_path": zip_path,
+        "directory": directory,
+        "zip_bytes": archive_bytes,
+        "compression_type": compression_type,
+    }
+    if tar_gz_path is not None:
+        payload_source_kwargs["tar_gz_path"] = tar_gz_path
+    payload_source = _build_batch_payload_source(**payload_source_kwargs)
 
-    with create_client(base_url, access_token=access_token) as client:
+    with _create_client_collecting_system_warnings(
+        base_url,
+        access_token=access_token,
+    ) as (client, system_warnings):
         certs = client.security.get_public_key_certificates()
         symmetric_cert = _select_certificate(certs, "SymmetricKeyEncryption")
         workflow = BatchSessionWorkflow(client.sessions, client.http_client)
@@ -1443,7 +1554,11 @@ def send_batch_invoices(
         if save_session is None:
             session_ref = workflow.open_upload_and_close(
                 form_code=form_code,
-                zip_bytes=zip_bytes,
+                zip_bytes=archive_bytes if compression_type is m.CompressionType.ZIP else None,
+                archive_bytes=(
+                    archive_bytes if compression_type is m.CompressionType.TARGZ else None
+                ),
+                compression_type=compression_type,
                 public_certificate=symmetric_cert.certificate,
                 public_key_id=symmetric_cert.public_key_id,
                 access_token=access_token,
@@ -1453,7 +1568,11 @@ def send_batch_invoices(
         else:
             session = workflow.open_session(
                 form_code=form_code,
-                zip_bytes=zip_bytes,
+                zip_bytes=archive_bytes if compression_type is m.CompressionType.ZIP else None,
+                archive_bytes=(
+                    archive_bytes if compression_type is m.CompressionType.TARGZ else None
+                ),
+                compression_type=compression_type,
                 public_certificate=symmetric_cert.certificate,
                 public_key_id=symmetric_cert.public_key_id,
                 access_token=access_token,
@@ -1507,6 +1626,7 @@ def send_batch_invoices(
 
         result: dict[str, Any] = {
             "session_ref": session_ref,
+            "compression_type": compression_type.value,
         }
         if checkpoint is not None:
             result["session_id"] = checkpoint.id
@@ -1560,6 +1680,8 @@ def send_batch_invoices(
                 else:
                     result["upo_path"] = ""
 
+        if system_warnings:
+            result["system_warnings"] = list(system_warnings)
         return result
 
 
@@ -1608,6 +1730,7 @@ def run_export(
     subject_type: str,
     restrict_to_permanent_storage_hwm_date: bool | None = None,
     only_metadata: bool = False,
+    compression: str = "zip",
     poll_interval: float,
     max_attempts: int,
     out: str,
@@ -1627,8 +1750,12 @@ def run_export(
         restrict_hwm = None
     out_dir = Path(out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+    compression_type = _require_cli_compression_type(compression)
 
-    with create_client(base_url, access_token=access_token) as client:
+    with _create_client_collecting_system_warnings(
+        base_url,
+        access_token=access_token,
+    ) as (client, system_warnings):
         certs = client.security.get_public_key_certificates()
         symmetric_cert = _select_certificate(certs, "SymmetricKeyEncryption")
         encryption = build_encryption_data(
@@ -1639,6 +1766,7 @@ def run_export(
         payload = m.InvoiceExportRequest(
             encryption=encryption_info,
             only_metadata=only_metadata,
+            compression_type=compression_type,
             filters=m.InvoiceQueryFilters(
                 subject_type=_require_invoice_query_subject_type(subject_type),
                 date_range=m.InvoiceQueryDateRange(
@@ -1679,7 +1807,12 @@ def run_export(
             package = m.InvoicePackage.from_dict(package)
 
         workflow = ExportWorkflow(client.invoices, client.http_client)
-        processed = workflow.download_and_process_package(package, encryption)
+        processed = _download_and_process_export_package(
+            workflow,
+            package,
+            encryption,
+            compression_type=compression_type,
+        )
 
     metadata_path = out_dir / "_metadata.json"
     metadata_payload = {"invoices": processed.metadata_summaries}
@@ -1696,7 +1829,7 @@ def run_export(
         files_saved += 1
 
     code, description, _ = _extract_status_fields(export_status)
-    return {
+    result = {
         "reference_number": reference_number,
         "status_code": code,
         "status_description": description,
@@ -1704,12 +1837,16 @@ def run_export(
         "metadata_count": len(processed.metadata_summaries),
         "xml_files_count": files_saved,
         "only_metadata": only_metadata,
+        "compression_type": compression_type.value,
         "out_dir": str(out_dir),
         "from": from_iso,
         "to": to_iso,
         "date_type": date_type_enum.value,
         "restrict_to_permanent_storage_hwm_date": restrict_hwm,
     }
+    if system_warnings:
+        result["system_warnings"] = list(system_warnings)
+    return result
 
 
 def get_export_status(
