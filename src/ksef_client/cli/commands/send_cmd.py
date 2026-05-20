@@ -136,8 +136,14 @@ def send_online(
 def send_batch(
     ctx: typer.Context,
     zip_path: str | None = typer.Option(None, "--zip", help="Path to input ZIP with invoices."),
+    tar_gz_path: str | None = typer.Option(
+        None, "--tar-gz", help="Path to input tar.gz with invoices."
+    ),
     directory: str | None = typer.Option(
-        None, "--dir", help="Directory with XML files to ZIP and upload."
+        None, "--dir", help="Directory with XML files to archive and upload."
+    ),
+    archive_format: str = typer.Option(
+        "zip", "--archive-format", help="Archive format for --dir input (zip or targz)."
     ),
     system_code: str = typer.Option("FA (3)", "--system-code", help="Form code systemCode."),
     schema_version: str = typer.Option("1-0E", "--schema-version", help="Form code schemaVersion."),
@@ -186,7 +192,9 @@ def send_batch(
             profile=profile,
             base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
             zip_path=zip_path,
+            tar_gz_path=tar_gz_path,
             directory=directory,
+            archive_format=archive_format,
             system_code=system_code,
             schema_version=schema_version,
             form_value=form_value,

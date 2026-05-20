@@ -4,7 +4,7 @@ import base64
 import binascii
 import json
 from collections.abc import Callable, Collection, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from .. import models as m
@@ -870,6 +870,7 @@ class BatchSessionHandle:
         uploader: _BatchUploader,
         access_token: str | None = None,
         zip_bytes: bytes | None = None,
+        compression_type: m.CompressionType | None = None,
     ) -> BatchSessionHandle:
         encryption_data = _restore_encryption_data(
             symmetric_key_base64=state.symmetric_key_base64,
@@ -882,9 +883,14 @@ class BatchSessionHandle:
                 encryption_data.key,
                 encryption_data.iv,
             )
+            prepared_batch_file = _align_resume_batch_file_compression_type(
+                prepared_batch_file,
+                state_batch_file=state.batch_file,
+                compression_type=compression_type,
+            )
             if prepared_batch_file.to_dict() != state.batch_file.to_dict():
                 raise ValueError(
-                    "Provided ZIP content does not match stored batch session state."
+                    "Provided archive content does not match stored batch session state."
                 )
             encrypted_parts = _indexed_parts(prepared_parts)
         return cls(
@@ -1011,6 +1017,7 @@ class AsyncBatchSessionHandle:
         uploader: _AsyncBatchUploader,
         access_token: str | None = None,
         zip_bytes: bytes | None = None,
+        compression_type: m.CompressionType | None = None,
     ) -> AsyncBatchSessionHandle:
         encryption_data = _restore_encryption_data(
             symmetric_key_base64=state.symmetric_key_base64,
@@ -1023,9 +1030,14 @@ class AsyncBatchSessionHandle:
                 encryption_data.key,
                 encryption_data.iv,
             )
+            prepared_batch_file = _align_resume_batch_file_compression_type(
+                prepared_batch_file,
+                state_batch_file=state.batch_file,
+                compression_type=compression_type,
+            )
             if prepared_batch_file.to_dict() != state.batch_file.to_dict():
                 raise ValueError(
-                    "Provided ZIP content does not match stored batch session state."
+                    "Provided archive content does not match stored batch session state."
                 )
             encrypted_parts = _indexed_parts(prepared_parts)
         return cls(
@@ -1041,6 +1053,22 @@ class AsyncBatchSessionHandle:
             offline_mode=state.offline_mode,
             _encrypted_parts=encrypted_parts,
         )
+
+
+def _align_resume_batch_file_compression_type(
+    batch_file: m.BatchFileInfo,
+    *,
+    state_batch_file: m.BatchFileInfo,
+    compression_type: m.CompressionType | None,
+) -> m.BatchFileInfo:
+    expected_compression_type = state_batch_file.compression_type
+    if expected_compression_type is None:
+        return batch_file
+    if compression_type is not None and compression_type != expected_compression_type:
+        raise ValueError(
+            "Provided archive compression type does not match stored batch session state."
+        )
+    return replace(batch_file, compression_type=expected_compression_type)
 
 
 __all__ = [

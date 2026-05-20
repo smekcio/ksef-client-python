@@ -18,6 +18,7 @@ options = KsefClientOptions(
     strict_presigned_url_validation=True,
     allowed_presigned_hosts=None,
     allow_private_network_presigned_urls=False,
+    system_warning_handler=None,
     base_qr_url=None,
     base_lighthouse_url=None,
 )
@@ -107,6 +108,11 @@ Domyślnie `None` (brak allowlisty). Jeśli ustawione, host pre-signed URL musi 
 ### `allow_private_network_presigned_urls`
 
 Domyślnie `False`. Gdy `False`, blokowane są hosty IP prywatne/link-local/reserved dla żądań `skip_auth=True`. Ustaw `True` wyłącznie w kontrolowanym środowisku.
+
+### `system_warning_handler`
+
+Opcjonalny callback `Callable[[str], None]` wywoływany, gdy KSeF zwróci nagłówek
+`X-System-Warning`. Nagłówek przenosi ostrzeżenia techniczne i nie oznacza błędu operacji.
 
 ## Przekazywanie `access_token`
 

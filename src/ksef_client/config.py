@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from importlib import metadata
@@ -51,6 +52,7 @@ class KsefClientOptions:
     strict_presigned_url_validation: bool = True
     allowed_presigned_hosts: list[str] | None = None
     allow_private_network_presigned_urls: bool = False
+    system_warning_handler: Callable[[str], None] | None = None
     user_agent: str = field(default_factory=_default_user_agent)
 
     def normalized_base_url(self) -> str:

@@ -4,6 +4,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
+from ksef_client import models as m
 from ksef_client.services import BatchSessionHandle, BatchUploadHelper
 from ksef_client.services.crypto import get_file_metadata
 from ksef_client.services.workflows import BatchSessionWorkflow, OnlineSessionWorkflow
@@ -65,9 +66,33 @@ def _build_batch_payload_source(
     )
 
 
-def _load_batch_source_bytes(source: BatchPayloadSource) -> bytes:
+def _batch_source_compression_type(
+    source: BatchPayloadSource,
+    *,
+    state_batch_file: m.BatchFileInfo | None = None,
+) -> m.CompressionType:
+    if source.kind in {"tar_gz", "tar_gz_directory"}:
+        return m.CompressionType.TARGZ
+    if source.kind == "directory" and state_batch_file is not None:
+        return state_batch_file.compression_type or m.CompressionType.ZIP
+    return m.CompressionType.ZIP
+
+
+def _load_batch_source_bytes(
+    source: BatchPayloadSource,
+    *,
+    compression_type: m.CompressionType | None = None,
+) -> bytes:
     if source.kind == "zip":
         zip_bytes = adapters._load_batch_zip(source.path)
+    elif source.kind == "tar_gz":
+        zip_bytes = adapters._load_batch_tar_gz(source.path)
+    elif (
+        source.kind == "tar_gz_directory"
+        or source.kind == "directory"
+        and compression_type is m.CompressionType.TARGZ
+    ):
+        zip_bytes = adapters._build_tar_gz_from_directory(source.path)
     else:
         zip_bytes = adapters._build_zip_from_directory(source.path)
 
@@ -79,7 +104,7 @@ def _load_batch_source_bytes(source: BatchPayloadSource) -> bytes:
         raise CliError(
             "Batch payload source changed since session checkpoint was created.",
             ExitCode.VALIDATION_ERROR,
-            "Restore the original ZIP/directory contents or open a new batch session.",
+            "Restore the original ZIP/TarGz/directory contents or open a new batch session.",
         )
     return zip_bytes
 
@@ -412,14 +437,25 @@ def upload_batch_session(
             "--parallelism must be greater than zero.",
         )
 
-    zip_bytes = _load_batch_source_bytes(checkpoint.payload_source)
+    compression_type = _batch_source_compression_type(
+        checkpoint.payload_source,
+        state_batch_file=checkpoint.session_state.batch_file,
+    )
+    archive_bytes = _load_batch_source_bytes(
+        checkpoint.payload_source,
+        compression_type=compression_type,
+    )
     uploaded_ordinals = sorted(set(checkpoint.uploaded_ordinals))
 
     with adapters.create_client(checkpoint.base_url, access_token=access_token) as client:
         workflow = BatchSessionWorkflow(client.sessions, client.http_client)
         session = workflow.resume_session(
             checkpoint.session_state,
-            zip_bytes=zip_bytes,
+            zip_bytes=archive_bytes if compression_type is m.CompressionType.ZIP else None,
+            archive_bytes=(
+                archive_bytes if compression_type is m.CompressionType.TARGZ else None
+            ),
+            compression_type=compression_type,
             access_token=access_token,
         )
 

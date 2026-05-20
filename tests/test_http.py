@@ -51,6 +51,25 @@ class HttpTests(unittest.TestCase):
             client.close()
             close_mock.assert_called_once()
 
+    def test_system_warning_handler_receives_response_header(self):
+        warnings: list[str] = []
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl",
+            system_warning_handler=warnings.append,
+        )
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(200, headers={"X-System-Warning": "future warning"})
+        with patch.object(client._client, "request", Mock(return_value=response)):
+            client.request("GET", "/path")
+        self.assertEqual(warnings, ["future warning"])
+
+    def test_system_warning_handler_is_optional(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(200, headers={"X-System-Warning": "future warning"})
+        with patch.object(client._client, "request", Mock(return_value=response)):
+            client.request("GET", "/path")
+
     def test_custom_headers_applied(self):
         options = KsefClientOptions(
             base_url="https://api-test.ksef.mf.gov.pl",

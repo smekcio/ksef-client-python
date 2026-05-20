@@ -111,6 +111,36 @@ def test_build_batch_payload_source_and_load_source_bytes(monkeypatch, tmp_path:
     loaded = session_ops._load_batch_source_bytes(payload_source)
     assert loaded == b"zip!"
 
+    tar_source = replace(payload_source, kind="tar_gz", path=str(zip_path))
+    monkeypatch.setattr(
+        session_ops.adapters, "_load_batch_tar_gz", lambda path: Path(path).read_bytes()
+    )
+    assert session_ops._load_batch_source_bytes(tar_source) == b"zip!"
+    assert (
+        session_ops._batch_source_compression_type(tar_source)
+        is m.CompressionType.TARGZ
+    )
+
+    tar_dir_bytes = b"tgz-dir!"
+    tar_dir_metadata = session_ops.get_file_metadata(tar_dir_bytes)
+    tar_dir_source = replace(
+        payload_source,
+        kind="tar_gz_directory",
+        path=str(tmp_path),
+        source_sha256_base64=tar_dir_metadata.sha256_base64,
+        source_size=tar_dir_metadata.file_size,
+    )
+    monkeypatch.setattr(
+        session_ops.adapters,
+        "_build_tar_gz_from_directory",
+        lambda path: tar_dir_bytes,
+    )
+    assert session_ops._load_batch_source_bytes(tar_dir_source) == tar_dir_bytes
+    assert (
+        session_ops._batch_source_compression_type(tar_dir_source)
+        is m.CompressionType.TARGZ
+    )
+
     with pytest.raises(CliError) as mismatch_exc:
         session_ops._load_batch_source_bytes(
             replace(
@@ -567,11 +597,23 @@ def test_upload_batch_session_validates_parallelism_and_updates_progress(monkeyp
         def __init__(self, sessions, http_client) -> None:
             _ = (sessions, http_client)
 
-        def resume_session(self, state, *, zip_bytes, access_token=None):
-            _ = (state, zip_bytes, access_token)
+        def resume_session(
+            self,
+            state,
+            *,
+            zip_bytes=None,
+            archive_bytes=None,
+            compression_type=None,
+            access_token=None,
+        ):
+            _ = (state, zip_bytes, archive_bytes, compression_type, access_token)
             return _Handle()
 
-    monkeypatch.setattr(session_ops, "_load_batch_source_bytes", lambda source: b"zip!")
+    monkeypatch.setattr(
+        session_ops,
+        "_load_batch_source_bytes",
+        lambda source, **kwargs: b"zip!",
+    )
     monkeypatch.setattr(session_ops, "BatchSessionWorkflow", _Workflow)
     monkeypatch.setattr(
         session_ops.adapters,
@@ -601,6 +643,82 @@ def test_upload_batch_session_validates_parallelism_and_updates_progress(monkeyp
 
     assert result["uploaded_count"] == 1
     assert updated[-1].uploaded_ordinals == [1]
+
+
+def test_upload_batch_session_resumes_tar_gz_payload(monkeypatch) -> None:
+    checkpoint = _batch_checkpoint()
+    checkpoint = replace(
+        checkpoint,
+        payload_source=replace(checkpoint.payload_source, kind="tar_gz"),
+        session_state=replace(
+            checkpoint.session_state,
+            batch_file=replace(
+                checkpoint.session_state.batch_file,
+                compression_type=m.CompressionType.TARGZ,
+            ),
+        ),
+    )
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(session_ops, "load_checkpoint", lambda profile, session_id: checkpoint)
+    monkeypatch.setattr(session_ops.adapters, "_require_access_token", lambda profile: "token")
+    monkeypatch.setattr(
+        session_ops,
+        "_load_batch_source_bytes",
+        lambda source, **kwargs: b"tgz!",
+    )
+
+    class _Handle:
+        def upload_parts(
+            self, *, parallelism=1, skip_ordinals=None, progress_callback=None
+        ) -> None:
+            _ = (parallelism, skip_ordinals)
+            if progress_callback is not None:
+                progress_callback(1)
+
+    class _Workflow:
+        def __init__(self, sessions, http_client) -> None:
+            _ = (sessions, http_client)
+
+        def resume_session(
+            self,
+            state,
+            *,
+            zip_bytes=None,
+            archive_bytes=None,
+            compression_type=None,
+            access_token=None,
+        ):
+            seen.update(
+                zip_bytes=zip_bytes,
+                archive_bytes=archive_bytes,
+                compression_type=compression_type,
+                access_token=access_token,
+            )
+            return _Handle()
+
+    monkeypatch.setattr(session_ops, "BatchSessionWorkflow", _Workflow)
+    monkeypatch.setattr(
+        session_ops.adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=object(), http_client=object()),
+    )
+    monkeypatch.setattr(
+        session_ops,
+        "update_checkpoint",
+        lambda checkpoint, **changes: replace(checkpoint, **cast(Any, changes)),
+    )
+
+    result = session_ops.upload_batch_session(
+        profile="demo",
+        session_id="resume-batch",
+        parallelism=1,
+    )
+
+    assert result["uploaded_count"] == 1
+    assert seen["zip_bytes"] is None
+    assert seen["archive_bytes"] == b"tgz!"
+    assert seen["compression_type"] is m.CompressionType.TARGZ
 
 
 def test_upload_batch_session_rejects_closed_checkpoint(monkeypatch) -> None:

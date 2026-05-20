@@ -1,6 +1,6 @@
 # Workflow: sesja wsadowa (batch)
 
-Scenariusz obejmuje: przygotowanie ZIP z wieloma XML, podział na części <=100MB, szyfrowanie,
+Scenariusz obejmuje: przygotowanie ZIP albo TarGz z wieloma XML, podział na części <=100MB, szyfrowanie,
 otwarcie sesji wsadowej, serializację lekkiego stanu JSON, wznowienie po restarcie procesu,
 wysyłkę brakujących partów na pre-signed URL oraz zamknięcie sesji.
 
@@ -15,7 +15,7 @@ Rekomendowane podejście:
 ```python
 from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment, models as m
 from ksef_client.services import AuthCoordinator, BatchSessionState, BatchSessionWorkflow
-from ksef_client.utils import build_zip
+from ksef_client.utils import build_tar_gz, build_zip
 
 KSEF_TOKEN = "<TOKEN_KSEF>"
 CONTEXT_TYPE = "nip"
@@ -58,6 +58,16 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
         upo_v43=False,
     )
     state_json = session.get_state().to_json()
+
+    # KSeF API 2.6.0 dopuszcza także TarGz jako alternatywny format archiwum.
+    tar_gz_bytes = build_tar_gz({"invoice1.xml": b"""<Invoice>...</Invoice>"""})
+    session_targz = workflow.open_session(
+        form_code=FORM_CODE,
+        archive_bytes=tar_gz_bytes,
+        compression_type=m.CompressionType.TARGZ,
+        public_certificate=sym_cert,
+        access_token=access_token,
+    )
 
 # Proces 2: nowy klient + resume z JSON i tym samym ZIP-em
 state = BatchSessionState.from_json(state_json)
@@ -121,11 +131,12 @@ To rozróżnienie jest celowe:
 
 `resume_session(state, zip_bytes=...)` odtwarza zaszyfrowane party z podanego ZIP-a i porównuje
 odtworzone `BatchFileInfo` z danymi zapisanymi w `BatchSessionState`.
+Przy TarGz użyj `resume_session(state, archive_bytes=..., compression_type=m.CompressionType.TARGZ)`.
 
 Jeśli ZIP różni się od oryginału, workflow przerywa działanie błędem i nie próbuje uploadu.
 
 To oznacza, że po restarcie procesu musisz zachować:
-- ten sam ZIP wejściowy, albo
+- ten sam ZIP/TarGz wejściowy, albo
 - ten sam katalog źródłowy, z którego ponownie zbudujesz identyczny ZIP.
 
 ## Upload częściowy i checkpointing

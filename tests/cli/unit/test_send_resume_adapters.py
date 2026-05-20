@@ -432,7 +432,7 @@ def test_send_batch_invoices_handles_progress_checkpoint_edge_cases(
     monkeypatch.setattr(
         adapters,
         "_build_batch_payload_source",
-        lambda *, zip_path, directory, zip_bytes: adapters.BatchPayloadSource(
+        lambda *, zip_path, directory, zip_bytes, **kwargs: adapters.BatchPayloadSource(
             kind="zip",
             path=str(zip_path),
             source_sha256_base64="hash",
@@ -549,7 +549,7 @@ def test_send_batch_invoices_closes_session_when_checkpoint_save_fails(
     monkeypatch.setattr(
         adapters,
         "_build_batch_payload_source",
-        lambda *, zip_path, directory, zip_bytes: adapters.BatchPayloadSource(
+        lambda *, zip_path, directory, zip_bytes, **kwargs: adapters.BatchPayloadSource(
             kind="zip",
             path=str(zip_path),
             source_sha256_base64="hash",

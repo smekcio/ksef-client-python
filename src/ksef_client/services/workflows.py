@@ -6,7 +6,7 @@ import hashlib
 import time
 from collections.abc import Callable, Collection, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol, cast
 
 from ..clients.invoices import AsyncInvoicesClient, InvoicesClient
@@ -17,6 +17,7 @@ from ..models import (
     AuthenticationOperationStatusResponse,
     AuthenticationTokensResponse,
     AuthorizationPolicy,
+    CompressionType,
     EncryptionInfo,
     FormCode,
     InitTokenAuthenticationRequest,
@@ -30,7 +31,7 @@ from ..models import (
     SendInvoiceRequest,
     SendInvoiceResponse,
 )
-from ..utils.zip_utils import unzip_bytes_safe
+from ..utils.zip_utils import untar_gz_bytes_safe, unzip_bytes_safe
 from .auth import (
     DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
     build_auth_token_request_xml,
@@ -724,21 +725,37 @@ class BatchSessionWorkflow:
         self._sessions = sessions_client
         self._upload_helper = BatchUploadHelper(http_client)
 
+    def _resolve_archive_bytes(
+        self,
+        *,
+        zip_bytes: bytes | None,
+        archive_bytes: bytes | None,
+    ) -> bytes:
+        return _resolve_batch_archive_bytes(zip_bytes=zip_bytes, archive_bytes=archive_bytes)
+
     def open_session(
         self,
         *,
         form_code: FormCode,
-        zip_bytes: bytes,
+        zip_bytes: bytes | None = None,
+        archive_bytes: bytes | None = None,
+        compression_type: CompressionType | str = CompressionType.ZIP,
         public_certificate: str,
         public_key_id: str | None = None,
         access_token: str,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
     ) -> BatchSessionHandle:
+        normalized_compression_type = _normalize_compression_type(compression_type)
+        payload_bytes = self._resolve_archive_bytes(
+            zip_bytes=zip_bytes,
+            archive_bytes=archive_bytes,
+        )
         encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
         encrypted_parts, batch_file_info = encrypt_batch_parts(
-            zip_bytes, encryption.key, encryption.iv
+            payload_bytes, encryption.key, encryption.iv
         )
+        batch_file_info = replace(batch_file_info, compression_type=normalized_compression_type)
         response = self._sessions.open_batch_session(
             OpenBatchSessionRequest(
                 form_code=form_code,
@@ -767,22 +784,32 @@ class BatchSessionWorkflow:
         self,
         state: BatchSessionState,
         *,
-        zip_bytes: bytes,
+        zip_bytes: bytes | None = None,
+        archive_bytes: bytes | None = None,
+        compression_type: CompressionType | str = CompressionType.ZIP,
         access_token: str | None = None,
     ) -> BatchSessionHandle:
+        normalized_compression_type = _normalize_compression_type(compression_type)
+        payload_bytes = self._resolve_archive_bytes(
+            zip_bytes=zip_bytes,
+            archive_bytes=archive_bytes,
+        )
         return BatchSessionHandle.from_state(
             state,
             sessions_client=cast(_HandleSessionsClient, self._sessions),
             uploader=self._upload_helper,
             access_token=access_token,
-            zip_bytes=zip_bytes,
+            zip_bytes=payload_bytes,
+            compression_type=normalized_compression_type,
         )
 
     def open_upload_and_close(
         self,
         *,
         form_code: FormCode,
-        zip_bytes: bytes,
+        zip_bytes: bytes | None = None,
+        archive_bytes: bytes | None = None,
+        compression_type: CompressionType | str = CompressionType.ZIP,
         public_certificate: str,
         public_key_id: str | None = None,
         access_token: str,
@@ -793,6 +820,8 @@ class BatchSessionWorkflow:
         session = self.open_session(
             form_code=form_code,
             zip_bytes=zip_bytes,
+            archive_bytes=archive_bytes,
+            compression_type=compression_type,
             public_certificate=public_certificate,
             public_key_id=public_key_id,
             access_token=access_token,
@@ -811,21 +840,37 @@ class AsyncBatchSessionWorkflow:
         self._sessions = sessions_client
         self._upload_helper = AsyncBatchUploadHelper(http_client)
 
+    def _resolve_archive_bytes(
+        self,
+        *,
+        zip_bytes: bytes | None,
+        archive_bytes: bytes | None,
+    ) -> bytes:
+        return _resolve_batch_archive_bytes(zip_bytes=zip_bytes, archive_bytes=archive_bytes)
+
     async def open_session(
         self,
         *,
         form_code: FormCode,
-        zip_bytes: bytes,
+        zip_bytes: bytes | None = None,
+        archive_bytes: bytes | None = None,
+        compression_type: CompressionType | str = CompressionType.ZIP,
         public_certificate: str,
         public_key_id: str | None = None,
         access_token: str,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
     ) -> AsyncBatchSessionHandle:
+        normalized_compression_type = _normalize_compression_type(compression_type)
+        payload_bytes = self._resolve_archive_bytes(
+            zip_bytes=zip_bytes,
+            archive_bytes=archive_bytes,
+        )
         encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
         encrypted_parts, batch_file_info = encrypt_batch_parts(
-            zip_bytes, encryption.key, encryption.iv
+            payload_bytes, encryption.key, encryption.iv
         )
+        batch_file_info = replace(batch_file_info, compression_type=normalized_compression_type)
         response = await self._sessions.open_batch_session(
             OpenBatchSessionRequest(
                 form_code=form_code,
@@ -854,22 +899,32 @@ class AsyncBatchSessionWorkflow:
         self,
         state: BatchSessionState,
         *,
-        zip_bytes: bytes,
+        zip_bytes: bytes | None = None,
+        archive_bytes: bytes | None = None,
+        compression_type: CompressionType | str = CompressionType.ZIP,
         access_token: str | None = None,
     ) -> AsyncBatchSessionHandle:
+        normalized_compression_type = _normalize_compression_type(compression_type)
+        payload_bytes = self._resolve_archive_bytes(
+            zip_bytes=zip_bytes,
+            archive_bytes=archive_bytes,
+        )
         return AsyncBatchSessionHandle.from_state(
             state,
             sessions_client=cast(_HandleAsyncSessionsClient, self._sessions),
             uploader=self._upload_helper,
             access_token=access_token,
-            zip_bytes=zip_bytes,
+            zip_bytes=payload_bytes,
+            compression_type=normalized_compression_type,
         )
 
     async def open_upload_and_close(
         self,
         *,
         form_code: FormCode,
-        zip_bytes: bytes,
+        zip_bytes: bytes | None = None,
+        archive_bytes: bytes | None = None,
+        compression_type: CompressionType | str = CompressionType.ZIP,
         public_certificate: str,
         public_key_id: str | None = None,
         access_token: str,
@@ -881,6 +936,8 @@ class AsyncBatchSessionWorkflow:
         session = await self.open_session(
             form_code=form_code,
             zip_bytes=zip_bytes,
+            archive_bytes=archive_bytes,
+            compression_type=compression_type,
             public_certificate=public_certificate,
             public_key_id=public_key_id,
             access_token=access_token,
@@ -964,6 +1021,8 @@ class ExportWorkflow:
         self,
         package: InvoicePackage,
         encryption_data: EncryptionData,
+        *,
+        compression_type: CompressionType | str = CompressionType.ZIP,
     ) -> PackageProcessingResult:
         if package.invoice_count == 0:
             return PackageProcessingResult(metadata_summaries=[], invoice_xml_files={})
@@ -982,7 +1041,10 @@ class ExportWorkflow:
             for part in encrypted_parts
         ]
         archive_bytes = b"".join(decrypted_parts)
-        unzipped = unzip_bytes_safe(archive_bytes)
+        unzipped = _unpack_export_archive(
+            archive_bytes,
+            compression_type=_normalize_compression_type(compression_type),
+        )
 
         metadata_summaries: list[dict[str, Any]] = []
         invoice_xml_files: dict[str, str] = {}
@@ -1018,6 +1080,8 @@ class AsyncExportWorkflow:
         self,
         package: InvoicePackage,
         encryption_data: EncryptionData,
+        *,
+        compression_type: CompressionType | str = CompressionType.ZIP,
     ) -> PackageProcessingResult:
         if package.invoice_count == 0:
             return PackageProcessingResult(metadata_summaries=[], invoice_xml_files={})
@@ -1038,7 +1102,10 @@ class AsyncExportWorkflow:
             for part in encrypted_parts
         ]
         archive_bytes = b"".join(decrypted_parts)
-        unzipped = unzip_bytes_safe(archive_bytes)
+        unzipped = _unpack_export_archive(
+            archive_bytes,
+            compression_type=_normalize_compression_type(compression_type),
+        )
 
         metadata_summaries: list[dict[str, Any]] = []
         invoice_xml_files: dict[str, str] = {}
@@ -1068,6 +1135,49 @@ def _pair_requests_with_parts(
     ordered_requests = sorted(part_upload_requests, key=lambda request: request.ordinal_number)
     byte_parts = cast(Sequence[bytes], parts)
     return list(zip(ordered_requests, byte_parts, strict=True))
+
+
+def _normalize_compression_type(value: CompressionType | str) -> CompressionType:
+    if isinstance(value, CompressionType):
+        return value
+    normalized = value.strip()
+    aliases = {
+        "zip": CompressionType.ZIP,
+        "targz": CompressionType.TARGZ,
+        "tar.gz": CompressionType.TARGZ,
+        "TarGz": CompressionType.TARGZ,
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    for candidate in (CompressionType.ZIP, CompressionType.TARGZ):
+        if normalized == candidate.value:
+            return candidate
+    raise ValueError("Unsupported compression type. Use Zip or TarGz.")
+
+
+def _resolve_batch_archive_bytes(
+    *,
+    zip_bytes: bytes | None,
+    archive_bytes: bytes | None,
+) -> bytes:
+    if zip_bytes is not None and archive_bytes is not None:
+        raise ValueError("Pass either zip_bytes or archive_bytes, not both.")
+    payload = archive_bytes if archive_bytes is not None else zip_bytes
+    if payload is None:
+        raise ValueError("Batch archive payload is required.")
+    return payload
+
+
+def _unpack_export_archive(
+    archive_bytes: bytes,
+    *,
+    compression_type: CompressionType,
+) -> dict[str, bytes]:
+    if compression_type is CompressionType.ZIP:
+        return unzip_bytes_safe(archive_bytes)
+    if compression_type is CompressionType.TARGZ:
+        return untar_gz_bytes_safe(archive_bytes)
+    raise ValueError("Unsupported compression type. Use Zip or TarGz.")
 
 
 def _resolve_export_part_hash_requirement(

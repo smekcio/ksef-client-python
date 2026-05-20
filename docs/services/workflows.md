@@ -126,17 +126,22 @@ Async odpowiedniki:
 
 Scenariusz:
 1. budowa `EncryptionData` z `SymmetricKeyEncryption`,
-2. ZIP -> podział <=100MB -> szyfrowanie partów,
+2. ZIP/TarGz -> podział <=100MB -> szyfrowanie partów,
 3. `POST /sessions/batch` (open),
 4. zwrot handle'a gotowego do uploadu partów.
 
-### `BatchSessionWorkflow.resume_session(state, *, zip_bytes, access_token=None) -> BatchSessionHandle`
+Domyślny format pozostaje ZIP (`zip_bytes=...`). Dla KSeF API 2.6.0 można użyć
+`archive_bytes=...` z `compression_type=CompressionType.TARGZ`; wtedy `compressionType=TarGz`
+trafia do `BatchFileInfo`.
+
+### `BatchSessionWorkflow.resume_session(state, *, zip_bytes=None, archive_bytes=None, compression_type=CompressionType.ZIP, access_token=None) -> BatchSessionHandle`
 
 Wznawia sesję z `BatchSessionState` i odtwarza zaszyfrowane party na podstawie przekazanego
-`zip_bytes`.
+ZIP-a albo TarGz.
 
-Workflow weryfikuje, że odtworzony `BatchFileInfo` jest identyczny z zapisanym w stanie.
-Jeśli źródło batch się zmieniło, resume kończy się błędem i upload nie jest wykonywany.
+Workflow weryfikuje, że odtworzony `BatchFileInfo` oraz zapisany `compressionType` są zgodne
+ze stanem. Jeśli źródło batch albo format archiwum się zmieniły, resume kończy się błędem i upload
+nie jest wykonywany. Starsze checkpointy bez `compressionType` pozostają obsługiwane.
 
 ### `BatchSessionWorkflow.open_upload_and_close(...) -> str`
 
@@ -191,8 +196,9 @@ Async odpowiedniki:
 
 ### `ExportWorkflow.download_and_process_package(package, encryption_data) -> PackageProcessingResult`
 
-Pobiera wszystkie części paczki eksportu, odszyfrowuje je AES i skleja w ZIP.
-Potem rozpakowuje ZIP bezpiecznie (`unzip_bytes_safe`) i zwraca:
+Pobiera wszystkie części paczki eksportu, odszyfrowuje je AES i skleja w archiwum.
+Potem rozpakowuje ZIP albo TarGz bezpiecznie (`unzip_bytes_safe` / `untar_gz_bytes_safe`)
+i zwraca:
 - `metadata_summaries`
 - `invoice_xml_files`
 
