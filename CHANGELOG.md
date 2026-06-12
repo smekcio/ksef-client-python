@@ -4,6 +4,7 @@
 
 ### Features
 
+* **api:** refresh KSeF API 2.6.1 OpenAPI snapshot and documentation links
 * **api:** support KSeF API 2.6.0 OpenAPI, TarGz exports and system warning headers
 * **cli:** add TarGz batch input and export compression options
 
