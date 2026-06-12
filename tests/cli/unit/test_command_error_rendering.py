@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import typer
@@ -25,7 +25,7 @@ from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitErr
 
 
 def _ctx() -> typer.Context:
-    ctx = typer.Context(Command("cmd"))
+    ctx = typer.Context(cast(Any, Command("cmd")))
     ctx.obj = CliContext(profile="demo", json_output=True, verbose=0, no_color=True)
     return ctx
 

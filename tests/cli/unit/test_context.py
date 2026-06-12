@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 import typer
 from click import Command
@@ -13,7 +15,7 @@ def test_context_defaults() -> None:
 
 
 def test_require_context_raises_for_missing_obj() -> None:
-    ctx = typer.Context(Command("ctx"))
+    ctx = typer.Context(cast(Any, Command("ctx")))
     with pytest.raises(typer.BadParameter):
         require_context(ctx)
 

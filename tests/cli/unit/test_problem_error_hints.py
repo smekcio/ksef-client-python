@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import typer
@@ -57,7 +58,7 @@ class _RecordingRenderer:
 
 
 def _ctx() -> typer.Context:
-    ctx = typer.Context(Command("cmd"))
+    ctx = typer.Context(cast(Any, Command("cmd")))
     ctx.obj = CliContext(profile="demo", json_output=True, verbose=0, no_color=True)
     return ctx
 

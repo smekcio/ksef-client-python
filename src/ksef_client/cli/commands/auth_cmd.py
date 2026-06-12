@@ -4,7 +4,6 @@ import os
 import sys
 
 import typer
-from click.core import ParameterSource
 
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 
@@ -45,7 +44,7 @@ def _warn_if_secret_from_cli(
         source = ctx.get_parameter_source(parameter_name)
     except Exception:
         return
-    if source != ParameterSource.COMMANDLINE:
+    if getattr(source, "name", None) != "COMMANDLINE":
         return
     renderer.info(
         (
