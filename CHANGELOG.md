@@ -14,6 +14,17 @@
 
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
 
+## 0.16.0 (2026-07-27)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* feat: align with KSeF API 2.7.0 by @smekcio in https://github.com/smekcio/ksef-client-python/pull/77
+
+
+**Full Changelog**: https://github.com/smekcio/ksef-client-python/compare/v0.15.0...v0.16.0
+
 ## 0.15.0 (2026-06-12)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
