@@ -508,6 +508,7 @@ class PersonPermissionScope(OpenApiEnum):
     INTROSPECTION = "Introspection"
     SUBUNITMANAGE = "SubunitManage"
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
 
 class PersonPermissionSubjectDetailsType(OpenApiEnum):
     PERSONBYIDENTIFIER = "PersonByIdentifier"
@@ -522,6 +523,7 @@ class PersonPermissionType(OpenApiEnum):
     INTROSPECTION = "Introspection"
     SUBUNITMANAGE = "SubunitManage"
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
 
 class PersonPermissionsAuthorIdentifierType(OpenApiEnum):
     NIP = "Nip"
@@ -570,6 +572,7 @@ class PersonalPermissionScope(OpenApiEnum):
     SUBUNITMANAGE = "SubunitManage"
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
     VATUEMANAGE = "VatUeManage"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
 
 class PersonalPermissionType(OpenApiEnum):
     CREDENTIALSMANAGE = "CredentialsManage"
@@ -580,6 +583,7 @@ class PersonalPermissionType(OpenApiEnum):
     SUBUNITMANAGE = "SubunitManage"
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
     VATUEMANAGE = "VatUeManage"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
 
 class PersonalPermissionsAuthorizedIdentifierType(OpenApiEnum):
     NIP = "Nip"
@@ -671,6 +675,7 @@ class TestDataPermissionType(OpenApiEnum):
     CREDENTIALSMANAGE = "CredentialsManage"
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
     SUBUNITMANAGE = "SubunitManage"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
 
 class ThirdSubjectIdentifierType(OpenApiEnum):
     NIP = "Nip"
@@ -698,6 +703,7 @@ class TokenPermissionType(OpenApiEnum):
     SUBUNITMANAGE = "SubunitManage"
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
     INTROSPECTION = "Introspection"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
 
 Challenge: TypeAlias = str
 
@@ -744,6 +750,7 @@ class ApiRateLimitValuesOverride(OpenApiModel):
 @dataclass(frozen=True)
 class ApiRateLimitsOverride(OpenApiModel):
     batch_session: ApiRateLimitValuesOverride = field(metadata={"json_key": "batchSession"})
+    collective_identifier: ApiRateLimitValuesOverride = field(metadata={"json_key": "collectiveIdentifier"})
     invoice_download: ApiRateLimitValuesOverride = field(metadata={"json_key": "invoiceDownload"})
     invoice_export: ApiRateLimitValuesOverride = field(metadata={"json_key": "invoiceExport"})
     invoice_export_status: ApiRateLimitValuesOverride = field(metadata={"json_key": "invoiceExportStatus"})
@@ -927,6 +934,66 @@ class CheckAttachmentPermissionStatusResponse(OpenApiModel):
     revoked_date: Optional[str] = field(default=None, metadata={"json_key": "revokedDate"})
 
 @dataclass(frozen=True)
+class CollectiveIdentifierInvoice(OpenApiModel):
+    ksef_number: KsefNumber = field(metadata={"json_key": "ksefNumber"})
+    description: Optional[str] = None
+    payment: Optional[CollectiveIdentifierInvoicePayment] = None
+
+@dataclass(frozen=True)
+class CollectiveIdentifierInvoicePayment(OpenApiModel):
+    amount: float
+    currency: CurrencyCode
+
+@dataclass(frozen=True)
+class CollectiveIdentifierInvoicesQueryResponse(OpenApiModel):
+    invoices: list[CollectiveIdentifierInvoicesQueryResponseItem]
+    continuation_token: Optional[str] = field(default=None, metadata={"json_key": "continuationToken"})
+
+@dataclass(frozen=True)
+class CollectiveIdentifierInvoicesQueryResponseItem(OpenApiModel):
+    details_hidden: bool = field(metadata={"json_key": "detailsHidden"})
+    ksef_number: KsefNumber = field(metadata={"json_key": "ksefNumber"})
+    description: Optional[str] = None
+    payment: Optional[CollectiveIdentifierInvoicesQueryResponseItemPayment] = None
+
+@dataclass(frozen=True)
+class CollectiveIdentifierInvoicesQueryResponseItemPayment(OpenApiModel):
+    amount: float
+    currency: str
+
+@dataclass(frozen=True)
+class CollectiveIdentifiersByKsefNumberQueryResponse(OpenApiModel):
+    collective_identifiers: list[CollectiveIdentifiersByKsefNumberQueryResponseItem] = field(metadata={"json_key": "collectiveIdentifiers"})
+    continuation_token: Optional[str] = field(default=None, metadata={"json_key": "continuationToken"})
+
+@dataclass(frozen=True)
+class CollectiveIdentifiersByKsefNumberQueryResponseItem(OpenApiModel):
+    collective_identifier_number: str = field(metadata={"json_key": "collectiveIdentifierNumber"})
+    created_in_current_context: bool = field(metadata={"json_key": "createdInCurrentContext"})
+    date_created: str = field(metadata={"json_key": "dateCreated"})
+
+@dataclass(frozen=True)
+class CollectiveIdentifiersQueryRequest(OpenApiModel):
+    date_created_from: str = field(metadata={"json_key": "dateCreatedFrom"})
+    date_created_to: str = field(metadata={"json_key": "dateCreatedTo"})
+    collective_identifier_number: Optional[str] = field(default=None, metadata={"json_key": "collectiveIdentifierNumber"})
+    created_in_current_context: Optional[bool] = field(default=None, metadata={"json_key": "createdInCurrentContext"})
+    invoice_count_from: Optional[int] = field(default=None, metadata={"json_key": "invoiceCountFrom"})
+    invoice_count_to: Optional[int] = field(default=None, metadata={"json_key": "invoiceCountTo"})
+
+@dataclass(frozen=True)
+class CollectiveIdentifiersQueryResponse(OpenApiModel):
+    collective_identifiers: list[CollectiveIdentifiersQueryResponseItem] = field(metadata={"json_key": "collectiveIdentifiers"})
+    continuation_token: Optional[str] = field(default=None, metadata={"json_key": "continuationToken"})
+
+@dataclass(frozen=True)
+class CollectiveIdentifiersQueryResponseItem(OpenApiModel):
+    collective_identifier_number: str = field(metadata={"json_key": "collectiveIdentifierNumber"})
+    created_in_current_context: bool = field(metadata={"json_key": "createdInCurrentContext"})
+    date_created: str = field(metadata={"json_key": "dateCreated"})
+    invoice_count: int = field(metadata={"json_key": "invoiceCount"})
+
+@dataclass(frozen=True)
 class EffectiveApiRateLimitValues(OpenApiModel):
     per_hour: int = field(metadata={"json_key": "perHour"})
     per_minute: int = field(metadata={"json_key": "perMinute"})
@@ -935,6 +1002,7 @@ class EffectiveApiRateLimitValues(OpenApiModel):
 @dataclass(frozen=True)
 class EffectiveApiRateLimits(OpenApiModel):
     batch_session: EffectiveApiRateLimitValues = field(metadata={"json_key": "batchSession"})
+    collective_identifier: EffectiveApiRateLimitValues = field(metadata={"json_key": "collectiveIdentifier"})
     invoice_download: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceDownload"})
     invoice_export: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceExport"})
     invoice_export_status: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceExportStatus"})
@@ -1196,6 +1264,14 @@ class FormCode(OpenApiModel):
     schema_version: str = field(metadata={"json_key": "schemaVersion"})
     system_code: str = field(metadata={"json_key": "systemCode"})
     value: str
+
+@dataclass(frozen=True)
+class GenerateCollectiveIdentifierRequest(OpenApiModel):
+    invoices: list[CollectiveIdentifierInvoice]
+
+@dataclass(frozen=True)
+class GenerateCollectiveIdentifierResponse(OpenApiModel):
+    collective_identifier_number: str = field(metadata={"json_key": "collectiveIdentifierNumber"})
 
 @dataclass(frozen=True)
 class GenerateTokenRequest(OpenApiModel):
@@ -1918,6 +1994,10 @@ class TestDataPermissionsGrantRequest(OpenApiModel):
 class TestDataPermissionsRevokeRequest(OpenApiModel):
     authorized_identifier: TestDataAuthorizedIdentifier = field(metadata={"json_key": "authorizedIdentifier"})
     context_identifier: TestDataContextIdentifier = field(metadata={"json_key": "contextIdentifier"})
+
+@dataclass(frozen=True)
+class TestDataUpdateCertificateRequest(OpenApiModel):
+    valid_to: str = field(metadata={"json_key": "validTo"})
 
 @dataclass(frozen=True)
 class TokenAuthorIdentifierTypeIdentifier(OpenApiModel):

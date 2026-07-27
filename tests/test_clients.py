@@ -8,6 +8,10 @@ from ksef_client import models as m
 from ksef_client.clients.auth import AsyncAuthClient, AuthClient, _parse_init_response
 from ksef_client.clients.base import _serialize_json_payload
 from ksef_client.clients.certificates import AsyncCertificatesClient, CertificatesClient
+from ksef_client.clients.collective_identifiers import (
+    AsyncCollectiveIdentifiersClient,
+    CollectiveIdentifiersClient,
+)
 from ksef_client.clients.invoices import (
     AsyncInvoicesClient,
     InvoicesClient,
@@ -478,6 +482,67 @@ class ClientsTests(unittest.TestCase):
             self.assertIsNone(request_model.call_args.kwargs["params"])
             self.assertIsNone(request_model.call_args.kwargs["headers"])
 
+        collective = CollectiveIdentifiersClient(self.http)
+        with patch.object(
+            collective, "_request_model", Mock(return_value=object())
+        ) as request_model:
+            collective.generate(payload, access_token="token")
+            collective.query(
+                payload,
+                access_token="token",
+                page_size=10,
+                continuation_token="cont",
+            )
+            collective.list_invoices(
+                "1111111111-IZ202607-65ED02180000-E7",
+                access_token="token",
+                page_size=5,
+                continuation_token="next",
+            )
+            collective.list_by_ksef_number(
+                "5265877635-20250826-0100001AF629-AF",
+                access_token="token",
+                page_size=3,
+                continuation_token="page-2",
+            )
+            self.assertEqual(request_model.call_args_list[0].kwargs["expected_status"], {201})
+            self.assertEqual(
+                request_model.call_args_list[1].kwargs["params"], {"pageSize": 10}
+            )
+            self.assertEqual(
+                request_model.call_args_list[1].kwargs["headers"],
+                {"x-continuation-token": "cont"},
+            )
+            self.assertEqual(
+                request_model.call_args_list[2].args[1],
+                "/collective-identifiers/1111111111-IZ202607-65ED02180000-E7/invoices",
+            )
+            self.assertEqual(
+                request_model.call_args_list[3].args[1],
+                "/collective-identifiers/ksef/5265877635-20250826-0100001AF629-AF",
+            )
+        with patch.object(
+            collective, "_request_model", Mock(return_value=object())
+        ) as request_model:
+            collective.query(payload, access_token="token", continuation_token="")
+            collective.list_invoices(
+                "1111111111-IZ202607-65ED02180000-E7", access_token="token"
+            )
+            collective.list_by_ksef_number(
+                "5265877635-20250826-0100001AF629-AF", access_token="token"
+            )
+            self.assertIsNone(request_model.call_args_list[0].kwargs["params"])
+            self.assertIsNone(request_model.call_args_list[0].kwargs["headers"])
+            self.assertIsNone(request_model.call_args_list[1].kwargs["params"])
+            self.assertIsNone(request_model.call_args_list[1].kwargs["headers"])
+            self.assertIsNone(request_model.call_args_list[2].kwargs["params"])
+            self.assertIsNone(request_model.call_args_list[2].kwargs["headers"])
+        with patch.object(collective, "_request_model", Mock(return_value=object())):
+            with self.assertRaises(ValueError):
+                collective.list_invoices("bad-iz", access_token="token")
+            with self.assertRaises(ValueError):
+                collective.list_by_ksef_number("bad-ksef", access_token="token")
+
         limits = LimitsClient(self.http)
         with patch.object(limits, "_request_model", Mock(return_value=object())):
             limits.get_context_limits("token")
@@ -578,8 +643,17 @@ class ClientsTests(unittest.TestCase):
             testdata.set_rate_limits(payload, access_token="token")
             testdata.reset_rate_limits(access_token="token")
             testdata.restore_production_rate_limits(access_token="token")
-            self.assertEqual(request_json.call_count, 10)
+            testdata.update_certificate("ABCDEF0123456789", payload, access_token="token")
+            self.assertEqual(request_json.call_count, 11)
             self.assertEqual(request_model.call_count, 7)
+            self.assertEqual(
+                request_json.call_args_list[-1].args[1],
+                "/testdata/certificates/ABCDEF0123456789",
+            )
+        with patch.object(testdata, "_request_json", Mock()) as request_json:
+            with self.assertRaises(ValueError):
+                testdata.update_certificate("not-a-serial", payload, access_token="token")
+            request_json.assert_not_called()
 
         peppol = PeppolClient(self.http)
         with patch.object(peppol, "_request_model", Mock(return_value=object())) as request_model:
@@ -899,6 +973,59 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             await tokens.list_tokens(access_token="token", continuation_token="")
             self.assertIsNone(request_model.call_args.kwargs["headers"])
 
+        collective = AsyncCollectiveIdentifiersClient(self.http)
+        with patch.object(
+            collective, "_request_model", AsyncMock(return_value=object())
+        ) as request_model:
+            await collective.generate(payload, access_token="token")
+            await collective.query(
+                payload,
+                access_token="token",
+                page_size=10,
+                continuation_token="cont",
+            )
+            await collective.list_invoices(
+                "1111111111-IZ202607-65ED02180000-E7",
+                access_token="token",
+                page_size=5,
+                continuation_token="next",
+            )
+            await collective.list_by_ksef_number(
+                "5265877635-20250826-0100001AF629-AF",
+                access_token="token",
+                page_size=3,
+                continuation_token="page-2",
+            )
+            self.assertEqual(request_model.call_args_list[0].kwargs["expected_status"], {201})
+            self.assertEqual(
+                request_model.call_args_list[1].kwargs["params"], {"pageSize": 10}
+            )
+            self.assertEqual(
+                request_model.call_args_list[1].kwargs["headers"],
+                {"x-continuation-token": "cont"},
+            )
+        with patch.object(
+            collective, "_request_model", AsyncMock(return_value=object())
+        ) as request_model:
+            await collective.query(payload, access_token="token", continuation_token="")
+            await collective.list_invoices(
+                "1111111111-IZ202607-65ED02180000-E7", access_token="token"
+            )
+            await collective.list_by_ksef_number(
+                "5265877635-20250826-0100001AF629-AF", access_token="token"
+            )
+            self.assertIsNone(request_model.call_args_list[0].kwargs["params"])
+            self.assertIsNone(request_model.call_args_list[0].kwargs["headers"])
+            self.assertIsNone(request_model.call_args_list[1].kwargs["params"])
+            self.assertIsNone(request_model.call_args_list[1].kwargs["headers"])
+            self.assertIsNone(request_model.call_args_list[2].kwargs["params"])
+            self.assertIsNone(request_model.call_args_list[2].kwargs["headers"])
+        with patch.object(collective, "_request_model", AsyncMock(return_value=object())):
+            with self.assertRaises(ValueError):
+                await collective.list_invoices("bad-iz", access_token="token")
+            with self.assertRaises(ValueError):
+                await collective.list_by_ksef_number("bad-ksef", access_token="token")
+
         limits = AsyncLimitsClient(self.http)
         with patch.object(limits, "_request_model", AsyncMock(return_value=object())):
             await limits.get_context_limits("token")
@@ -981,8 +1108,17 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             await testdata.set_rate_limits(payload, access_token="token")
             await testdata.reset_rate_limits(access_token="token")
             await testdata.restore_production_rate_limits(access_token="token")
-            self.assertEqual(request_json.await_count, 10)
+            await testdata.update_certificate(
+                "ABCDEF0123456789", payload, access_token="token"
+            )
+            self.assertEqual(request_json.await_count, 11)
             self.assertEqual(request_model.await_count, 7)
+        with patch.object(testdata, "_request_json", AsyncMock()) as request_json:
+            with self.assertRaises(ValueError):
+                await testdata.update_certificate(
+                    "not-a-serial", payload, access_token="token"
+                )
+            request_json.assert_not_awaited()
 
         peppol = AsyncPeppolClient(self.http)
         with patch.object(
