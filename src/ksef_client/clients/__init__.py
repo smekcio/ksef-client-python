@@ -1,5 +1,9 @@
 from .auth import AsyncAuthClient, AuthClient
 from .certificates import AsyncCertificatesClient, CertificatesClient
+from .collective_identifiers import (
+    AsyncCollectiveIdentifiersClient,
+    CollectiveIdentifiersClient,
+)
 from .invoices import AsyncInvoicesClient, InvoicesClient
 from .lighthouse import AsyncLighthouseClient, LighthouseClient
 from .limits import AsyncLimitsClient, LimitsClient
@@ -24,6 +28,8 @@ __all__ = [
     "AsyncPermissionsClient",
     "CertificatesClient",
     "AsyncCertificatesClient",
+    "CollectiveIdentifiersClient",
+    "AsyncCollectiveIdentifiersClient",
     "TokensClient",
     "AsyncTokensClient",
     "LimitsClient",

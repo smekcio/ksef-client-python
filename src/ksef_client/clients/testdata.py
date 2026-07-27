@@ -16,8 +16,10 @@ from ..models import (
     SubjectRemoveRequest,
     TestDataPermissionsGrantRequest,
     TestDataPermissionsRevokeRequest,
+    TestDataUpdateCertificateRequest,
     UnblockContextAuthenticationRequest,
 )
+from ..utils.certificate_serial import require_certificate_serial_number
 from .base import AsyncBaseApiClient, BaseApiClient
 
 
@@ -214,6 +216,22 @@ class TestDataClient(BaseApiClient):
             access_token=access_token,
         )
 
+    def update_certificate(
+        self,
+        serial_number: str,
+        request_payload: TestDataUpdateCertificateRequest,
+        *,
+        access_token: str | None = None,
+    ) -> None:
+        serial_number = require_certificate_serial_number(serial_number)
+        self._request_json(
+            "PUT",
+            f"/testdata/certificates/{serial_number}",
+            json=request_payload,
+            access_token=access_token,
+            expected_status={200},
+        )
+
 
 class AsyncTestDataClient(AsyncBaseApiClient):
     async def create_subject(
@@ -406,4 +424,20 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             "/testdata/rate-limits/production",
             response_model=EffectiveApiRateLimits,
             access_token=access_token,
+        )
+
+    async def update_certificate(
+        self,
+        serial_number: str,
+        request_payload: TestDataUpdateCertificateRequest,
+        *,
+        access_token: str | None = None,
+    ) -> None:
+        serial_number = require_certificate_serial_number(serial_number)
+        await self._request_json(
+            "PUT",
+            f"/testdata/certificates/{serial_number}",
+            json=request_payload,
+            access_token=access_token,
+            expected_status={200},
         )

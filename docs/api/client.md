@@ -10,6 +10,7 @@
 - `client.lighthouse`
 - `client.permissions`
 - `client.certificates`
+- `client.collective_identifiers`
 - `client.tokens`
 - `client.limits`
 - `client.rate_limits`

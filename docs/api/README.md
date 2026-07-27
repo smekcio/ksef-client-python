@@ -19,6 +19,7 @@ Jeśli migrujesz starszy kod oparty o `dict`, zobacz [`../migration-typed-model-
 - [`client.lighthouse`](lighthouse.md)
 - [`client.permissions`](permissions.md)
 - [`client.certificates`](certificates.md)
+- [`client.collective_identifiers`](collective-identifiers.md)
 - [`client.tokens`](tokens.md)
 - [`client.limits`](limits.md)
 - [`client.rate_limits`](rate-limits.md)

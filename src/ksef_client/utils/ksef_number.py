@@ -58,5 +58,12 @@ def validate_ksef_number(ksef_number: str) -> ValidationResult:
     return ValidationResult(True, "ok")
 
 
+def require_ksef_number(ksef_number: str) -> str:
+    result = validate_ksef_number(ksef_number)
+    if not result.is_valid:
+        raise ValueError(f"Invalid KSeF number: {result.message}")
+    return ksef_number
+
+
 def is_valid_ksef_number(ksef_number: str) -> bool:
     return validate_ksef_number(ksef_number).is_valid

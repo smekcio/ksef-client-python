@@ -155,6 +155,7 @@ class OpenApiModelsTests(unittest.TestCase):
     def test_token_permission_type_contains_introspection(self):
         values = {item.value for item in m.TokenPermissionType}
         self.assertIn("Introspection", values)
+        self.assertIn("CollectiveIdentifierManage", values)
 
     def test_authentication_challenge_response_contains_client_ip(self):
         payload = {

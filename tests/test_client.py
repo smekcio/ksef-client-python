@@ -17,6 +17,7 @@ class ClientTests(unittest.TestCase):
                 self.assertIs(ctx, client)
                 self.assertIsNotNone(client.http_client)
                 self.assertIsNotNone(client.lighthouse)
+                self.assertIsNotNone(client.collective_identifiers)
             close_mock.assert_called_once()
             lighthouse_close_mock.assert_called_once()
 
@@ -46,6 +47,7 @@ class AsyncClientTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(ctx, client)
                 self.assertIsNotNone(client.http_client)
                 self.assertIsNotNone(client.lighthouse)
+                self.assertIsNotNone(client.collective_identifiers)
             aclose_mock.assert_called_once()
             lighthouse_aclose_mock.assert_called_once()
 

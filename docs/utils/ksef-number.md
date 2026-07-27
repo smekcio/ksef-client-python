@@ -20,3 +20,8 @@ Walidacja sprawdza:
 ## `is_valid_ksef_number(ksef_number) -> bool`
 
 Skrót do `validate_ksef_number(...).is_valid`.
+
+## `require_ksef_number(ksef_number) -> str`
+
+Zwraca wartość albo rzuca `ValueError`. Używane m.in. przez
+`client.collective_identifiers.list_by_ksef_number`.

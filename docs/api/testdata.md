@@ -72,6 +72,17 @@ Endpoint: `POST /testdata/context/unblock`
 
 Odblokowuje możliwość uwierzytelniania dla wskazanego kontekstu.
 
+## Certyfikaty testowe
+
+### `update_certificate(serial_number, request_payload, access_token=None)`
+
+Endpoint: `PUT /testdata/certificates/{serialNumber}`
+
+Skraca okres ważności certyfikatu KSeF poprzez zmianę `validTo` (tylko środowiska testowe).
+Nowa data nie może być późniejsza niż obecna.
+
+`serial_number` musi mieć format `^[0-9A-F]{16}$` — SDK waliduje to przed requestem.
+
 ## Limity i rate limits (test)
 
 ### `change_session_limits(request_payload, access_token)`

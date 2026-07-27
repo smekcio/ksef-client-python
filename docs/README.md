@@ -4,7 +4,7 @@ Dokumentacja opisuje **publiczne API** biblioteki `ksef-client-python` (import: 
 
 Opis kontraktu API (OpenAPI) oraz dokumenty procesowe i ograniczenia systemu znajdują się w `ksef-docs/`.
 
-Kompatybilność SDK: **KSeF API `v2.6.0`**.
+Kompatybilność SDK: **KSeF API `v2.7.0`**.
 
 Publiczny kontrakt SDK używa typowanych modeli `ksef_client.models`. Payloady requestów są
 `typed-only`, a wiele metod klientów zwraca modele odpowiedzi zamiast surowych `dict`. Jeśli
@@ -61,6 +61,7 @@ Biblioteka udostępnia trzy poziomy użycia:
 - [`client.lighthouse`](api/lighthouse.md)
 - [`client.permissions`](api/permissions.md)
 - [`client.certificates`](api/certificates.md)
+- [`client.collective_identifiers`](api/collective-identifiers.md)
 - [`client.tokens`](api/tokens.md)
 - [`client.limits`](api/limits.md)
 - [`client.rate_limits`](api/rate-limits.md)

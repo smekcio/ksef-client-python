@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from .clients.auth import AsyncAuthClient, AuthClient
 from .clients.certificates import AsyncCertificatesClient, CertificatesClient
+from .clients.collective_identifiers import (
+    AsyncCollectiveIdentifiersClient,
+    CollectiveIdentifiersClient,
+)
 from .clients.invoices import AsyncInvoicesClient, InvoicesClient
 from .clients.lighthouse import AsyncLighthouseClient, LighthouseClient
 from .clients.limits import AsyncLimitsClient, LimitsClient
@@ -34,6 +38,7 @@ class KsefClient:
         )
         self.permissions = PermissionsClient(self._http)
         self.certificates = CertificatesClient(self._http)
+        self.collective_identifiers = CollectiveIdentifiersClient(self._http)
         self.tokens = TokensClient(self._http)
         self.limits = LimitsClient(self._http)
         self.rate_limits = RateLimitsClient(self._http)
@@ -76,6 +81,7 @@ class AsyncKsefClient:
         )
         self.permissions = AsyncPermissionsClient(self._http)
         self.certificates = AsyncCertificatesClient(self._http)
+        self.collective_identifiers = AsyncCollectiveIdentifiersClient(self._http)
         self.tokens = AsyncTokensClient(self._http)
         self.limits = AsyncLimitsClient(self._http)
         self.rate_limits = AsyncRateLimitsClient(self._http)
