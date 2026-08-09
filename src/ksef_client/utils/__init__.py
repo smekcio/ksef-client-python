@@ -9,6 +9,7 @@ from .collective_identifier import (
     require_collective_identifier_number,
     validate_collective_identifier_number,
 )
+from .fast_parser import fast_extract_ksef_metadata
 from .ksef_number import (
     ValidationResult,
     is_valid_ksef_number,
@@ -31,6 +32,7 @@ __all__ = [
     "b64decode",
     "b64url_encode",
     "b64url_decode",
+    "fast_extract_ksef_metadata",
     "validate_ksef_number",
     "require_ksef_number",
     "is_valid_ksef_number",
