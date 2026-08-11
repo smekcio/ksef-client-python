@@ -20,6 +20,10 @@ KSEF_INJECTION_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
 </Faktura>
 """
 
+KSEF_MALFORMED_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
+<Faktura><Podmiot1><DaneIdentyfikacyjne><NIP>5260250995</NIP><P_11>100.50</P_11>
+"""
+
 
 def test_fast_extract_ksef_metadata_correctness():
     res = fast_extract_ksef_metadata(KSEF_SAMPLE)
@@ -40,3 +44,9 @@ def test_fast_extract_ksef_metadata_injection_immunity():
     assert res["seller_nip"] == "5260250995"
     assert "9999999999" not in res["nips"]
     assert "8888888888" not in res["nips"]
+
+
+def test_fast_extract_ksef_metadata_malformed_graceful_handling():
+    res = fast_extract_ksef_metadata(KSEF_MALFORMED_SAMPLE)
+    assert res["seller_nip"] == "5260250995"
+    assert res["total_netto"] == Decimal("100.50")

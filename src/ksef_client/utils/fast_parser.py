@@ -1,18 +1,22 @@
 """High-performance streaming metadata parser for KSeF XML invoices using ElementTree.iterparse.
 
-Addresses all security and correctness standards:
-- XML Injection Immune (CDATA, comments, processing instructions)
-- ReDoS Free (Streaming Pull-Parser instead of regex)
-- Exact tag matching (P_11 vs P_11A/P_11Vat/P_11NettoZ)
-- High-precision Decimal monetary calculations
-- Full bytes and str input support
-- Structural Seller (Podmiot1) vs Buyer (Podmiot2) NIP extraction
+Features:
+- Stream-based XML parsing via ElementTree.iterparse (event-driven pull-parser)
+- Ignores CDATA sections, comments, PIs, and element attributes
+- Exact tag matching for P_11 (ignoring sub-elements such as P_11A, P_11Vat, etc.)
+- Precision Decimal monetary calculations with comma-to-dot normalization
+- Input support for str, bytes, and BufferedIOBase streams
+- Parent element tracking (Podmiot1 vs Podmiot2) for seller and buyer NIP identification
+- Graceful handling of XML syntax errors (ET.ParseError) to prevent batch pipeline crashes
 """
 
 from decimal import Decimal, InvalidOperation
 import io
+import logging
 from typing import Any
 import xml.etree.ElementTree as ET
+
+logger = logging.getLogger(__name__)
 
 
 def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> dict[str, Any]:
@@ -36,36 +40,39 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
 
     stack: list[str] = []
 
-    context = ET.iterparse(source, events=("start", "end"))
+    try:
+        context = ET.iterparse(source, events=("start", "end"))
 
-    for event, elem in context:
-        tag_name = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+        for event, elem in context:
+            tag_name = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
 
-        if event == "start":
-            stack.append(tag_name)
-        elif event == "end":
-            text = (elem.text or "").strip()
+            if event == "start":
+                stack.append(tag_name)
+            elif event == "end":
+                text = (elem.text or "").strip()
 
-            if tag_name == "NIP" and text:
-                nips.append(text)
-                if "Podmiot1" in stack and seller_nip is None:
-                    seller_nip = text
-                elif "Podmiot2" in stack and buyer_nip is None:
-                    buyer_nip = text
+                if tag_name == "NIP" and text:
+                    nips.append(text)
+                    if "Podmiot1" in stack and seller_nip is None:
+                        seller_nip = text
+                    elif "Podmiot2" in stack and buyer_nip is None:
+                        buyer_nip = text
 
-            elif tag_name == "P_11" and text:
-                sanitized_text = text.replace(",", ".")
-                try:
-                    amount = Decimal(sanitized_text)
-                    total_netto += amount
-                    item_count += 1
-                except (ValueError, InvalidOperation):
-                    pass
+                elif tag_name == "P_11" and text:
+                    sanitized_text = text.replace(",", ".")
+                    try:
+                        amount = Decimal(sanitized_text)
+                        total_netto += amount
+                        item_count += 1
+                    except (ValueError, InvalidOperation):
+                        pass
 
-            if stack and stack[-1] == tag_name:
-                stack.pop()
+                if stack and stack[-1] == tag_name:
+                    stack.pop()
 
-            elem.clear()
+                elem.clear()
+    except (ET.ParseError, Exception) as e:
+        logger.warning(f"KSeF XML stream parsing interrupted by exception: {e}")
 
     return {
         "seller_nip": seller_nip,
