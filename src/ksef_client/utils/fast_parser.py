@@ -14,7 +14,7 @@ from decimal import Decimal, InvalidOperation
 import io
 import logging
 from typing import Any
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +26,9 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
     :return: Dictionary containing 'seller_nip', 'buyer_nip', 'nips', 'total_netto', and 'item_count'
     """
     if isinstance(xml_content, str):
-        source: io.BufferedIOBase | io.BytesIO = io.BytesIO(xml_content.encode("utf-8"))
+        source: Any = io.StringIO(xml_content)
     elif isinstance(xml_content, bytes):
-        source = io.BytesIO(xml_content)
+        source: Any = io.BytesIO(xml_content)
     else:
         source = xml_content
 
@@ -40,39 +40,46 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
 
     stack: list[str] = []
 
+    context = ET.iterparse(source, events=("start", "end"))
+    context_iter = iter(context)
+    
     try:
-        context = ET.iterparse(source, events=("start", "end"))
+        _, root = next(context_iter)
+    except StopIteration:
+        root = None
 
-        for event, elem in context:
-            tag_name = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+    for event, elem in context_iter:
+        tag_name = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
 
-            if event == "start":
-                stack.append(tag_name)
-            elif event == "end":
-                text = (elem.text or "").strip()
+        if event == "start":
+            stack.append(tag_name)
+        elif event == "end":
+            text = (elem.text or "").strip()
 
-                if tag_name == "NIP" and text:
-                    nips.append(text)
-                    if "Podmiot1" in stack and seller_nip is None:
-                        seller_nip = text
-                    elif "Podmiot2" in stack and buyer_nip is None:
-                        buyer_nip = text
+            if tag_name == "NIP" and text:
+                nips.append(text)
+                if "Podmiot1" in stack and seller_nip is None:
+                    seller_nip = text
+                elif "Podmiot2" in stack and buyer_nip is None:
+                    buyer_nip = text
 
-                elif tag_name == "P_11" and text:
-                    sanitized_text = text.replace(",", ".")
-                    try:
-                        amount = Decimal(sanitized_text)
-                        total_netto += amount
-                        item_count += 1
-                    except (ValueError, InvalidOperation):
-                        pass
+            elif tag_name == "P_11" and text:
+                sanitized_text = text.replace(",", ".")
+                if len(sanitized_text) > 30:
+                    raise ValueError(f"Wartość P_11 jest zbyt długa (potencjalny atak DoS): {len(sanitized_text)} znaków")
+                try:
+                    amount = Decimal(sanitized_text)
+                    total_netto += amount
+                    item_count += 1
+                except (ValueError, InvalidOperation):
+                    pass
 
-                if stack and stack[-1] == tag_name:
-                    stack.pop()
+            if stack and stack[-1] == tag_name:
+                stack.pop()
 
-                elem.clear()
-    except (ET.ParseError, Exception) as e:
-        logger.warning(f"KSeF XML stream parsing interrupted by exception: {e}")
+            elem.clear()
+            if root is not None and elem is not root:
+                root.clear()
 
     return {
         "seller_nip": seller_nip,

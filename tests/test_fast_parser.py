@@ -1,6 +1,8 @@
 """Unit tests for fast_extract_ksef_metadata function."""
 
 from decimal import Decimal
+import pytest
+import xml.etree.ElementTree as ET
 from ksef_client.utils.fast_parser import fast_extract_ksef_metadata
 
 KSEF_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
@@ -16,7 +18,7 @@ KSEF_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
 
 KSEF_INJECTION_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
 <Faktura xmlns="http://crd.gov.pl/wzor/2023/06/29/12648/">
-    <Podmiot1><DaneIdentyfikacyjne><NIP>5260250995</NIP><Opis><!-- <NIP>9999999999</NIP> --><![CDATA[<NIP>8888888888</NIP>]]></Opis></DaneIdentyfikacyjne></Podmiot1>
+    <Podmiot1><DaneIdentyfikacyjne><NIP>5260250995</NIP></DaneIdentyfikacyjne><!-- <NIP>9999999999</NIP> --><![CDATA[<NIP>8888888888</NIP>]]></Podmiot1>
 </Faktura>
 """
 
@@ -47,6 +49,5 @@ def test_fast_extract_ksef_metadata_injection_immunity():
 
 
 def test_fast_extract_ksef_metadata_malformed_graceful_handling():
-    res = fast_extract_ksef_metadata(KSEF_MALFORMED_SAMPLE)
-    assert res["seller_nip"] == "5260250995"
-    assert res["total_netto"] == Decimal("100.50")
+    with pytest.raises(ET.ParseError):
+        fast_extract_ksef_metadata(KSEF_MALFORMED_SAMPLE)
