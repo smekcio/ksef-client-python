@@ -12,6 +12,7 @@ KSEF_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
     <Fa>
         <FaWiersz><P_11>100.50</P_11><P_11A>123.615</P_11A></FaWiersz>
         <FaWiersz><P_11>200.75</P_11><P_11Vat>23.115</P_11Vat></FaWiersz>
+        <FaWiersz><P_11>invalid</P_11></FaWiersz>
     </Fa>
 </Faktura>
 """
@@ -51,3 +52,22 @@ def test_fast_extract_ksef_metadata_injection_immunity():
 def test_fast_extract_ksef_metadata_malformed_graceful_handling():
     with pytest.raises(ET.ParseError):
         fast_extract_ksef_metadata(KSEF_MALFORMED_SAMPLE)
+
+
+def test_fast_extract_ksef_metadata_empty_stream():
+    with pytest.raises(ET.ParseError):
+        fast_extract_ksef_metadata("")
+
+
+def test_fast_extract_ksef_metadata_buffered_io():
+    import io
+    stream = io.BytesIO(KSEF_SAMPLE.encode("utf-8"))
+    res = fast_extract_ksef_metadata(stream)
+    assert res["seller_nip"] == "5260250995"
+    assert res["total_netto"] == Decimal("301.25")
+
+
+def test_fast_extract_ksef_metadata_too_long_p11():
+    xml = '<Faktura><Fa><FaWiersz><P_11>' + '1' * 35 + '</P_11></FaWiersz></Fa></Faktura>'
+    with pytest.raises(ValueError, match="Wartość P_11 jest zbyt długa"):
+        fast_extract_ksef_metadata(xml)
