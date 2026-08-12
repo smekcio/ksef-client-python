@@ -26,9 +26,9 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
     :return: Dictionary containing 'seller_nip', 'buyer_nip', 'nips', 'total_netto', and 'item_count'
     """
     if isinstance(xml_content, str):
-        source: Any = io.StringIO(xml_content)
+        source = io.StringIO(xml_content)  # type: ignore[assignment]
     elif isinstance(xml_content, bytes):
-        source: Any = io.BytesIO(xml_content)
+        source = io.BytesIO(xml_content)  # type: ignore[assignment]
     else:
         source = xml_content
 
@@ -46,7 +46,7 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
     try:
         _, root = next(context_iter)
     except StopIteration:
-        root = None
+        root = None  # pragma: no cover
 
     for event, elem in context_iter:
         tag_name = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
