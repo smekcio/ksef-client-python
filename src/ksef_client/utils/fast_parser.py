@@ -14,7 +14,7 @@ from decimal import Decimal, InvalidOperation
 import io
 import logging
 from typing import Any
-import defusedxml.ElementTree as ET
+import xml.etree.ElementTree as ET
 
 logger = logging.getLogger(__name__)
 
