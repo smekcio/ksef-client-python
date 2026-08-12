@@ -26,7 +26,7 @@ def _build_subject(info: dict[str, Any]) -> x509.Name:
         attributes.append(x509.NameAttribute(NameOID.COUNTRY_NAME, info["countryName"]))
     if info.get("organizationIdentifier"):
         attributes.append(
-            x509.NameAttribute(NameOID.ORGANIZATION_IDENTIFIER, info["organizationIdentifier"])
+            x509.NameAttribute(x509.ObjectIdentifier("2.5.4.97"), info["organizationIdentifier"])
         )
     if info.get("serialNumber"):
         attributes.append(x509.NameAttribute(NameOID.SERIAL_NUMBER, info["serialNumber"]))

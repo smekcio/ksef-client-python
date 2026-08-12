@@ -23,7 +23,7 @@ class CsrServiceTests(unittest.TestCase):
         self.assertEqual(subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME)[0].value, "KSeF")
         self.assertEqual(subject.get_attributes_for_oid(NameOID.COUNTRY_NAME)[0].value, "PL")
         self.assertEqual(
-            subject.get_attributes_for_oid(NameOID.ORGANIZATION_IDENTIFIER)[0].value, "ID"
+            subject.get_attributes_for_oid(x509.ObjectIdentifier("2.5.4.97"))[0].value, "ID"
         )
         self.assertEqual(subject.get_attributes_for_oid(NameOID.SERIAL_NUMBER)[0].value, "SN")
         self.assertEqual(
