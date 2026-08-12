@@ -252,7 +252,9 @@ class OpenApiModelsTests(unittest.TestCase):
             )
 
         spec = json.loads(openapi_path.read_text(encoding="utf-8"))
-        expected = set(spec["components"]["schemas"]["TokenPermissionType"]["enum"]).union({"CollectiveIdentifierManage"})
+        expected = set(
+            spec["components"]["schemas"]["TokenPermissionType"]["enum"]
+        ).union({"CollectiveIdentifierManage"})
         actual = {item.value for item in m.TokenPermissionType}
         self.assertSetEqual(actual, expected)
 

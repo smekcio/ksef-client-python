@@ -10,11 +10,11 @@ Features:
 - Graceful handling of XML syntax errors (ET.ParseError) to prevent batch pipeline crashes
 """
 
-from decimal import Decimal, InvalidOperation
 import io
 import logging
-from typing import Any
 import xml.etree.ElementTree as ET
+from decimal import Decimal, InvalidOperation
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,8 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
     """Stream-extract NIP list, seller/buyer NIP, total netto, and line item count from KSeF XML.
 
     :param xml_content: KSeF XML invoice content (str, bytes, or BufferedIOBase stream)
-    :return: Dictionary containing 'seller_nip', 'buyer_nip', 'nips', 'total_netto', and 'item_count'
+    :return: Dictionary containing 'seller_nip', 'buyer_nip', 'nips',
+        'total_netto', and 'item_count'
     """
     source: Any
     if isinstance(xml_content, str):
@@ -67,7 +68,10 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
             elif tag_name == "P_11" and text:
                 sanitized_text = text.replace(",", ".")
                 if len(sanitized_text) > 30:
-                    raise ValueError(f"Wartość P_11 jest zbyt długa (potencjalny atak DoS): {len(sanitized_text)} znaków")
+                    raise ValueError(
+                        f"Wartość P_11 jest zbyt długa (potencjalny atak DoS): "
+                        f"{len(sanitized_text)} znaków"
+                    )
                 try:
                     amount = Decimal(sanitized_text)
                     total_netto += amount
