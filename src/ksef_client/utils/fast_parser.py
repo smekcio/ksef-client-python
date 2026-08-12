@@ -25,10 +25,11 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
     :param xml_content: KSeF XML invoice content (str, bytes, or BufferedIOBase stream)
     :return: Dictionary containing 'seller_nip', 'buyer_nip', 'nips', 'total_netto', and 'item_count'
     """
+    source: Any
     if isinstance(xml_content, str):
-        source = io.StringIO(xml_content)  # type: ignore[assignment]
+        source = io.StringIO(xml_content)
     elif isinstance(xml_content, bytes):
-        source = io.BytesIO(xml_content)  # type: ignore[assignment]
+        source = io.BytesIO(xml_content)
     else:
         source = xml_content
 
