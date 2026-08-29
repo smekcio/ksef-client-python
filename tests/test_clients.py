@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -348,6 +349,100 @@ class ClientsTests(unittest.TestCase):
             omit_none=False
         )
         self.assertEqual(payload_copy["filters"]["dateRange"]["from"], "a")
+        skipped = _normalize_invoice_date_range_payload(
+            {"dateRange": {"from": "nope", "to": "also-nope"}}
+        )
+        self.assertEqual(skipped["dateRange"]["from"], "nope")
+        skipped_to = _normalize_invoice_date_range_payload(
+            {"dateRange": {"from": "2026-01-01T00:00:00Z", "to": 1}}
+        )
+        self.assertEqual(skipped_to["dateRange"]["from"], "2026-01-01T00:00:00Z")
+        skipped_to_str = _normalize_invoice_date_range_payload(
+            {"dateRange": {"from": "2026-01-01T00:00:00Z", "to": "nope"}}
+        )
+        self.assertEqual(skipped_to_str["dateRange"]["to"], "nope")
+        date_only = _normalize_invoice_date_range_payload(
+            {"dateRange": {"from": "2026-01-01", "to": "2026-01-02"}}
+        )
+        self.assertEqual(date_only["dateRange"]["from"], "2026-01-01")
+
+    def test_invoice_date_range_limit_is_100_days_utc(self):
+        accepted = _normalize_invoice_date_range_payload(
+            {
+                "dateRange": {
+                    "from": "2026-01-01T00:00:00Z",
+                    "to": "2026-04-11T23:59:59Z",
+                }
+            }
+        )
+        self.assertEqual(accepted["dateRange"]["from"], "2026-01-01T00:00:00Z")
+
+        with self.assertRaisesRegex(ValueError, "100 days"):
+            _normalize_invoice_date_range_payload(
+                {
+                    "dateRange": {
+                        "from": "2026-01-01T00:00:00Z",
+                        "to": "2026-04-12T00:00:00Z",
+                    }
+                }
+            )
+        with self.assertRaisesRegex(ValueError, "100 days"):
+            _normalize_invoice_date_range_payload(
+                {
+                    "filters": {
+                        "dateRange": {
+                            "from": "2026-01-01T00:00:00Z",
+                            "to": "2026-04-12T00:00:00Z",
+                        }
+                    }
+                }
+            )
+
+        past = (datetime.now(timezone.utc) - timedelta(days=101)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self.assertRaisesRegex(ValueError, "100 days"):
+            _normalize_invoice_date_range_payload({"dateRange": {"from": past}})
+
+        client = InvoicesClient(self.http)
+        with self.assertRaisesRegex(ValueError, "100 days"):
+            client.query_invoice_metadata(
+                cast(
+                    Any,
+                    JsonPayload(
+                        {
+                            "subjectType": "Subject1",
+                            "dateRange": {
+                                "dateType": "Issue",
+                                "from": "2026-01-01T00:00:00Z",
+                                "to": "2026-04-12T00:00:00Z",
+                            },
+                        }
+                    ),
+                ),
+                access_token="token",
+            )
+        with self.assertRaisesRegex(ValueError, "100 days"):
+            client.export_invoices(
+                cast(
+                    Any,
+                    JsonPayload(
+                        {
+                            "encryption": {
+                                "encryptedSymmetricKey": "abc",
+                                "initializationVector": "def",
+                            },
+                            "filters": {
+                                "subjectType": "Subject1",
+                                "dateRange": {
+                                    "dateType": "Issue",
+                                    "from": "2026-01-01T00:00:00Z",
+                                    "to": "2026-04-12T00:00:00Z",
+                                },
+                            },
+                        }
+                    ),
+                ),
+                access_token="token",
+            )
 
     def test_invoices_client_query_metadata_serializes_typed_payload_once(self):
         response = HttpResponse(
@@ -485,7 +580,8 @@ class ClientsTests(unittest.TestCase):
         collective = CollectiveIdentifiersClient(self.http)
         generate_payload = m.GenerateCollectiveIdentifierRequest(
             invoices=[
-                m.CollectiveIdentifierInvoice(ksef_number="5265877635-20250826-0100001AF629-AF")
+                m.CollectiveIdentifierInvoice(ksef_number="5265877635-20250826-0100001AF629-AF"),
+                m.CollectiveIdentifierInvoice(ksef_number="5265877635-20250827-0100001AF629-4A"),
             ]
         )
         query_payload = m.CollectiveIdentifiersQueryRequest(
@@ -981,7 +1077,8 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         collective = AsyncCollectiveIdentifiersClient(self.http)
         generate_payload = m.GenerateCollectiveIdentifierRequest(
             invoices=[
-                m.CollectiveIdentifierInvoice(ksef_number="5265877635-20250826-0100001AF629-AF")
+                m.CollectiveIdentifierInvoice(ksef_number="5265877635-20250826-0100001AF629-AF"),
+                m.CollectiveIdentifierInvoice(ksef_number="5265877635-20250827-0100001AF629-4A"),
             ]
         )
         query_payload = m.CollectiveIdentifiersQueryRequest(

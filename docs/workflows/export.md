@@ -66,11 +66,7 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
         time.sleep(2)
 
     export = ExportWorkflow(client.invoices, client.http_client)
-    result = export.download_and_process_package(
-        package,
-        encryption,
-        compression_type=m.CompressionType.ZIP,
-    )
+    result = export.download_and_process_package(package, encryption)
 
 print(len(result.metadata_summaries), len(result.invoice_xml_files))
 ```
@@ -79,8 +75,9 @@ print(len(result.metadata_summaries), len(result.invoice_xml_files))
 
 - Części paczki są dostępne pod `package.parts[].url` i są pobierane **bez Bearer tokena** (pre-signed URL).
 - Ustaw `onlyMetadata=True`, jeśli potrzebujesz wyłącznie `_metadata.json` bez XML faktur.
-- KSeF API 2.6.0 obsługuje `compressionType=Zip` albo `compressionType=TarGz`; domyślnie używaj ZIP,
-  a TarGz wybierz przy większych paczkach z wieloma podobnymi XML.
+- KSeF API 2.7.1 zwraca `package.compressionType`; `download_and_process_package(package, encryption)`
+  rozpakowuje ZIP albo TarGz według tego pola. Jawny argument `compression_type=` nadal nadpisuje wartość z paczki.
+- `filters.dateRange` w `POST /invoices/exports` ma limit **100 dni UTC** (jak query metadanych).
 - Dla każdego pobranego (zaszyfrowanego) partu workflow liczy hash `SHA-256` (base64) i porównuje z `x-ms-meta-hash`, jeśli nagłówek jest obecny.
 - Domyślnie (`KsefClientOptions.require_export_part_hash=True`) brak `x-ms-meta-hash` powoduje `ValueError`.
 - Niezgodność hash (`x-ms-meta-hash` vs. wyliczony hash) zawsze powoduje `ValueError`.

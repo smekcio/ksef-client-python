@@ -6,6 +6,7 @@ oraz helpery domenowe używane przez `client.collective_identifiers`.
 ## Stałe
 
 - `MAX_INVOICES_PER_IDENTIFIER` (500)
+- `MIN_INVOICES_PER_IDENTIFIER` (2)
 - `MAX_IDENTIFIERS_PER_INVOICE` (132)
 - `MAX_IDENTIFIERS_PER_INVOICES_QUERY` (10)
 - `MAX_QUERY_RANGE_DAYS` (100)
@@ -32,6 +33,8 @@ Normalizuje jeden numer albo listę (1–10, unikalne).
 ## `require_query_date_range(date_from, date_to) -> tuple[str, str]`
 
 ## `require_generate_invoices(invoices) -> list`
+
+Fail-fast: co najmniej 2 i najwyżej 500 unikalnych numerów KSeF.
 
 ## `make_collective_identifier_invoice(ksef_number, *, description=None, amount=None, currency=None)`
 

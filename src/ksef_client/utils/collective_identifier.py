@@ -18,6 +18,7 @@ COLLECTIVE_IDENTIFIER_PATTERN = re.compile(
 )
 
 MAX_INVOICES_PER_IDENTIFIER = 500
+MIN_INVOICES_PER_IDENTIFIER = 2
 MAX_IDENTIFIERS_PER_INVOICE = 132
 MAX_IDENTIFIERS_PER_INVOICES_QUERY = 10
 MAX_QUERY_RANGE_DAYS = 100
@@ -142,8 +143,10 @@ def require_generate_invoices(
 ) -> list[CollectiveIdentifierInvoice]:
     items = list(invoices)
     count = len(items)
-    if count < 1:
-        raise ValueError("Collective identifier requires at least one invoice")
+    if count < MIN_INVOICES_PER_IDENTIFIER:
+        raise ValueError(
+            f"Collective identifier requires at least {MIN_INVOICES_PER_IDENTIFIER} invoices"
+        )
     if count > MAX_INVOICES_PER_IDENTIFIER:
         raise ValueError(
             f"Collective identifier cannot contain more than {MAX_INVOICES_PER_IDENTIFIER} invoices"

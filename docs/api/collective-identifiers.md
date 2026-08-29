@@ -3,9 +3,9 @@
 Obsługa identyfikatorów zbiorczych (IZ) wprowadzonych w KSeF API 2.7.0
 i zaktualizowanych w 2.7.1.
 
-IZ grupuje już wystawione faktury tego samego sprzedawcy (do 500 numerów KSeF) pod jednym
-numerem płatniczym. Jedna faktura może należeć do maksymalnie 132 identyfikatorów zbiorczych
-w ramach kontekstu.
+IZ grupuje już wystawione faktury tego samego sprzedawcy (co najmniej 2 i do 500 numerów KSeF)
+pod jednym numerem płatniczym. Jedna faktura może należeć do maksymalnie 132 identyfikatorów
+zbiorczych w ramach kontekstu.
 
 ## Uprawnienia
 
@@ -16,7 +16,7 @@ Wymagane jest **jedno z**: `InvoiceRead`, `InvoiceWrite`, `CollectiveIdentifierM
 
 | Limit | Wartość |
 | --- | --- |
-| Faktury w jednym IZ | 500 |
+| Faktury w jednym IZ | 2–500 (OpenAPI `minItems` / `maxItems`) |
 | IZ na jedną fakturę (w kontekście) | 132 |
 | Zakres `dateCreatedFrom`–`dateCreatedTo` | 100 dni |
 | `pageSize` query / by-ksef | 10–200 (domyślnie 10) |
@@ -32,8 +32,10 @@ Kody błędów `generate`:
 | `71002` | Faktura jest już przypisana do maksymalnej liczby IZ |
 
 Stałe i mapowanie kodów: `ksef_client.utils.collective_identifier`
-(`MAX_INVOICES_PER_IDENTIFIER`, `COLLECTIVE_IDENTIFIER_EXCEPTION_CODES`).
+(`MIN_INVOICES_PER_IDENTIFIER`, `MAX_INVOICES_PER_IDENTIFIER`, `COLLECTIVE_IDENTIFIER_EXCEPTION_CODES`).
 Błędy API nadal przychodzą jako `KsefApiError`.
+Górny limit 500 w `generate()` to limit schematu OpenAPI; efektywny limit kontekstu na TEST to
+`GET /limits/context` → `collective_identifier.max_invoices` (nadpisywany testdata).
 
 ## Scenariusz
 
@@ -45,7 +47,10 @@ Błędy API nadal przychodzą jako `KsefApiError`.
 from ksef_client.utils.collective_identifier import make_collective_identifier_invoice
 
 response = client.collective_identifiers.generate_for_ksef_numbers(
-    ["5265877635-20250826-0100001AF629-AF"],
+    [
+        "5265877635-20250826-0100001AF629-AF",
+        "5265877635-20250827-0100001AF629-4A",
+    ],
     access_token=access_token,
 )
 print(response.collective_identifier_number)
@@ -59,8 +64,13 @@ invoice = make_collective_identifier_invoice(
     amount=Decimal("150.00"),
     currency="PLN",
 )
+invoice_2 = make_collective_identifier_invoice(
+    "5265877635-20250827-0100001AF629-4A",
+    amount=Decimal("80.00"),
+    currency="PLN",
+)
 client.collective_identifiers.generate(
-    GenerateCollectiveIdentifierRequest(invoices=[invoice]),
+    GenerateCollectiveIdentifierRequest(invoices=[invoice, invoice_2]),
     access_token=access_token,
 )
 ```
@@ -71,7 +81,7 @@ jest też zwracany w body odpowiedzi (`continuationToken`). Helpery `iter_query`
 
 SDK waliduje format `collective_identifier_number` oraz `ksef_number` przed wysłaniem
 żądania (`ValueError` przy niepoprawnym formacie/sumie kontrolnej). Dodatkowo fail-fast:
-liczba faktur 1–500, unikalne numery KSeF, zakres dat ≤ 100 dni, `pageSize` 10–200
+liczba faktur 2–500, unikalne numery KSeF, zakres dat ≤ 100 dni, `pageSize` 10–200
 (query / by-ksef) albo 10–500 (`list_invoices`), maksymalnie 10 numerów IZ w `list_invoices`.
 
 CLI: `ksef iz generate|query|invoices|by-ksef`.
@@ -81,6 +91,7 @@ CLI: `ksef iz generate|query|invoices|by-ksef`.
 Endpoint: `POST /collective-identifiers` (`201`).
 
 Generuje identyfikator zbiorczy dla listy faktur (numery KSeF) tego samego sprzedawcy.
+OpenAPI wymaga co najmniej dwóch faktur (`minItems: 2`); górny limit schematu to 500.
 
 ## `generate_for_ksef_numbers(ksef_numbers, access_token, descriptions=None)`
 

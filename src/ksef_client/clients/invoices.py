@@ -20,6 +20,7 @@ from ..models import (
 from .base import AsyncBaseApiClient, BaseApiClient, _serialize_json_payload
 
 _OFFSET_SUFFIX_RE = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
+INVOICE_QUERY_MAX_RANGE_DAYS = 100
 
 
 class _SerializedInvoicePayload(dict[str, Any]):
@@ -79,7 +80,44 @@ def _normalize_invoice_date_range_payload(request_payload: dict[str, Any]) -> di
             value = date_range.get(field_name)
             if isinstance(value, str):
                 date_range[field_name] = _normalize_datetime_without_offset(value)
+        _enforce_invoice_date_range_limit(date_range)
     return normalized
+
+
+def _parse_invoice_range_datetime(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _enforce_invoice_date_range_limit(date_range: dict[str, Any]) -> None:
+    from_value = date_range.get("from")
+    if not isinstance(from_value, str):
+        return
+    parsed_from = _parse_invoice_range_datetime(from_value)
+    if parsed_from is None:
+        return
+
+    to_value = date_range.get("to")
+    parsed_to: datetime | None
+    if to_value is None:
+        parsed_to = datetime.now(timezone.utc)
+    elif isinstance(to_value, str):
+        parsed_to = _parse_invoice_range_datetime(to_value)
+        if parsed_to is None:
+            return
+    else:
+        return
+
+    if (parsed_to.date() - parsed_from.date()).days > INVOICE_QUERY_MAX_RANGE_DAYS:
+        raise ValueError(
+            "Invoice query/export date range cannot exceed "
+            f"{INVOICE_QUERY_MAX_RANGE_DAYS} days (UTC)"
+        )
 
 
 def _normalize_invoice_query_subject_type(

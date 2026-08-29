@@ -20,6 +20,7 @@ from ksef_client.utils.collective_identifier import (
 )
 
 _KSEF = "5265877635-20250826-0100001AF629-AF"
+_KSEF_2 = "5265877635-20250827-0100001AF629-4A"
 _IZ = "1111111111-IZ202607-65ED02180000-E7"
 
 
@@ -78,6 +79,8 @@ class CollectiveIdentifierDomainTests(unittest.TestCase):
     def test_require_generate_invoices_empty_and_too_many(self) -> None:
         with self.assertRaises(ValueError):
             require_generate_invoices([])
+        with self.assertRaisesRegex(ValueError, "at least 2 invoices"):
+            require_generate_invoices([_invoice()])
         with self.assertRaises(ValueError):
             require_generate_invoices([_invoice() for _ in range(MAX_INVOICES_PER_IDENTIFIER + 1)])
 
@@ -123,7 +126,7 @@ class CollectiveIdentifierDomainTests(unittest.TestCase):
             description="x" * (MAX_INVOICE_DESCRIPTION_LENGTH + 1),
         )
         with self.assertRaises(ValueError):
-            require_generate_invoices([invoice])
+            require_generate_invoices([invoice, _invoice(_KSEF_2)])
 
     def test_query_date_range_invalid_and_naive_datetimes(self) -> None:
         with self.assertRaises(ValueError):
@@ -147,9 +150,9 @@ class CollectiveIdentifiersClientTests(unittest.TestCase):
             self.client, "_request_model", Mock(return_value=object())
         ) as request_model:
             self.client.generate_for_ksef_numbers(
-                [_KSEF],
+                [_KSEF, _KSEF_2],
                 access_token="token",
-                descriptions=["batch"],
+                descriptions=["batch", "other"],
             )
         payload = request_model.call_args.kwargs["json"]
         self.assertIsInstance(payload, m.GenerateCollectiveIdentifierRequest)
@@ -333,7 +336,7 @@ class CollectiveIdentifiersClientTests(unittest.TestCase):
 
     def test_generate_for_ksef_numbers_without_descriptions(self) -> None:
         with patch.object(self.client, "_request_model", Mock(return_value=object())):
-            self.client.generate_for_ksef_numbers([_KSEF], access_token="token")
+            self.client.generate_for_ksef_numbers([_KSEF, _KSEF_2], access_token="token")
 
 
 class AsyncCollectiveIdentifiersClientTests(unittest.IsolatedAsyncioTestCase):
@@ -344,11 +347,11 @@ class AsyncCollectiveIdentifiersClientTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             self.client, "_request_model", AsyncMock(return_value=object())
         ) as request_model:
-            await self.client.generate_for_ksef_numbers([_KSEF], access_token="token")
+            await self.client.generate_for_ksef_numbers([_KSEF, _KSEF_2], access_token="token")
             await self.client.generate_for_ksef_numbers(
-                [_KSEF],
+                [_KSEF, _KSEF_2],
                 access_token="token",
-                descriptions=["batch"],
+                descriptions=["batch", "other"],
             )
         payload = request_model.call_args.kwargs["json"]
         self.assertEqual(payload.invoices[0].description, "batch")
@@ -445,7 +448,7 @@ class AsyncCollectiveIdentifiersClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(found, [by_ksef_item])
 
     async def test_generate_and_query_thin_methods(self) -> None:
-        payload = m.GenerateCollectiveIdentifierRequest(invoices=[_invoice()])
+        payload = m.GenerateCollectiveIdentifierRequest(invoices=[_invoice(), _invoice(_KSEF_2)])
         query = m.CollectiveIdentifiersQueryRequest(
             date_created_from="2026-01-01T00:00:00Z",
             date_created_to="2026-01-31T23:59:59Z",

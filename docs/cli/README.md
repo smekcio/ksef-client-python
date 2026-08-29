@@ -395,6 +395,8 @@ Options:
   --base-url TEXT
 ```
 
+`generate` wymaga co najmniej dwóch numerów KSeF (OpenAPI `minItems: 2`).
+
 ## `ksef iz query`
 
 ```text

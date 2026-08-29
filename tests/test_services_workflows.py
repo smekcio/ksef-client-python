@@ -119,10 +119,12 @@ def _package_part(url: str = "https://download") -> m.InvoicePackagePart:
     )
 
 
-def _invoice_package(url: str = "https://download") -> m.InvoicePackage:
+def _invoice_package(
+    url: str = "https://download", *, compression_type: str = "Zip"
+) -> m.InvoicePackage:
     return m.InvoicePackage.from_dict(
         {
-            "compressionType": "Zip",
+            "compressionType": compression_type,
             "invoiceCount": 1,
             "size": 1,
             "isTruncated": False,
@@ -663,6 +665,33 @@ class WorkflowsTests(unittest.TestCase):
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
         self.assertEqual(result.invoice_xml_files["inv.xml"], "<xml/>")
 
+    def test_export_workflow_uses_package_compression_type_when_omitted(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        files = {
+            "_metadata.json": json.dumps({"invoices": [{"ksefNumber": "1"}]}).encode("utf-8"),
+            "inv.xml": b"<xml/>",
+        }
+        archive = build_tar_gz(files)
+        encrypted = encrypt_aes_cbc_pkcs7(archive, key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.ExportWorkflow(cast(InvoicesClient, DummyInvoices()), RecordingHttp())
+        with patch.object(
+            workflow._download_helper,
+            "download_parts_with_hash",
+            return_value=[(encrypted, _sha256_b64(encrypted))],
+        ):
+            result = workflow.download_and_process_package(
+                _invoice_package("u", compression_type="TarGz"),
+                encryption,
+            )
+        self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
+        self.assertEqual(result.invoice_xml_files["inv.xml"], "<xml/>")
+
     def test_batch_workflow_accepts_archive_bytes(self):
         sessions = StubSessionsClient()
         workflow = workflows.BatchSessionWorkflow(sessions, RecordingHttp())
@@ -715,6 +744,21 @@ class WorkflowsTests(unittest.TestCase):
             workflows._normalize_compression_type("rar")
         with self.assertRaisesRegex(ValueError, "Unsupported compression type"):
             workflows._unpack_export_archive(b"", compression_type=cast(Any, "rar"))
+        tar_package = _invoice_package("u", compression_type="TarGz")
+        self.assertEqual(
+            workflows._resolve_export_compression_type(tar_package, None),
+            m.CompressionType.TARGZ,
+        )
+        self.assertEqual(
+            workflows._resolve_export_compression_type(tar_package, m.CompressionType.ZIP),
+            m.CompressionType.ZIP,
+        )
+
+        class _MissingCompression:
+            compression_type = None
+
+        with self.assertRaisesRegex(ValueError, "compressionType"):
+            workflows._resolve_export_compression_type(cast(Any, _MissingCompression()), None)
 
     def test_export_workflow_empty_invoice_package_returns_empty_result(self):
         encryption = workflows.EncryptionData(
@@ -1077,6 +1121,36 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await workflow.download_and_process_package(_invoice_package("u"), encryption)
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
+
+    async def test_async_export_workflow_uses_package_compression_type_when_omitted(self):
+        key = generate_symmetric_key()
+        iv = generate_iv()
+        files = {
+            "_metadata.json": json.dumps({"invoices": [{"ksefNumber": "1"}]}).encode("utf-8"),
+            "inv.xml": b"<xml/>",
+        }
+        archive = build_tar_gz(files)
+        encrypted = encrypt_aes_cbc_pkcs7(archive, key, iv)
+        encryption = workflows.EncryptionData(key=key, iv=iv, encryption_info=None)
+
+        class DummyInvoices:
+            pass
+
+        workflow = workflows.AsyncExportWorkflow(
+            cast(AsyncInvoicesClient, DummyInvoices()),
+            RecordingAsyncHttp(),
+        )
+        with patch.object(
+            workflow._download_helper,
+            "download_parts_with_hash",
+            AsyncMock(return_value=[(encrypted, _sha256_b64(encrypted))]),
+        ):
+            result = await workflow.download_and_process_package(
+                _invoice_package("u", compression_type="TarGz"),
+                encryption,
+            )
+        self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
+        self.assertEqual(result.invoice_xml_files["inv.xml"], "<xml/>")
 
     async def test_async_export_workflow_empty_invoice_package_returns_empty_result(self):
         encryption = workflows.EncryptionData(

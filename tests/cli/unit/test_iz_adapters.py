@@ -9,6 +9,7 @@ from ksef_client import models as m
 from ksef_client.cli.errors import CliError
 from ksef_client.cli.exit_codes import ExitCode
 from ksef_client.cli.sdk import adapters
+from ksef_client.utils.collective_identifier import require_invoices_query_identifiers
 
 _KSEF = "5265877635-20250826-0100001AF629-AF"
 _IZ = "1111111111-IZ202607-65ED02180000-E7"
@@ -232,6 +233,26 @@ def test_list_collective_identifier_invoices(monkeypatch) -> None:
     )
     assert all_pages["count"] == 2
     assert all_pages["items"][1] == SimpleNamespace(ksef_number="raw")
+
+
+def test_list_collective_identifier_invoices_rejects_more_than_10(monkeypatch) -> None:
+    class _Collective:
+        def list_invoices(self, iz_number, *, access_token, page_size=None):
+            _ = (access_token, page_size)
+            require_invoices_query_identifiers(iz_number)
+            raise AssertionError("should not call API")
+
+    _patch_client(monkeypatch, _Collective())
+    with pytest.raises(CliError) as exc:
+        adapters.list_collective_identifier_invoices(
+            profile="demo",
+            base_url="https://example.invalid",
+            iz_numbers=[_IZ] * 11,
+            page_size=10,
+            fetch_all=False,
+        )
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+    assert "10" in exc.value.message
 
 
 def test_list_collective_identifier_invoices_wraps_value_error(monkeypatch) -> None:

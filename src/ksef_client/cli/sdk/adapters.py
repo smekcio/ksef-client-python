@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, NoReturn, cast
 
 from ksef_client import models as m
+from ksef_client.clients.invoices import INVOICE_QUERY_MAX_RANGE_DAYS
 from ksef_client.exceptions import KsefHttpError, KsefRateLimitError
 from ksef_client.services.crypto import EncryptionData, build_encryption_data, get_file_metadata
 from ksef_client.services.workflows import (
@@ -102,7 +103,7 @@ def _require_access_token(profile: str) -> str:
     return tokens[0]
 
 
-_INVOICE_QUERY_MAX_RANGE_DAYS = 100
+_INVOICE_QUERY_MAX_RANGE_DAYS = INVOICE_QUERY_MAX_RANGE_DAYS
 
 
 def _normalize_date_range(date_from: str | None, date_to: str | None) -> tuple[str, str]:
@@ -745,19 +746,20 @@ def _download_and_process_export_package(
     workflow: Any,
     package: Any,
     encryption: EncryptionData,
-    *,
-    compression_type: m.CompressionType,
 ) -> Any:
-    try:
-        return workflow.download_and_process_package(
-            package,
-            encryption,
-            compression_type=compression_type,
-        )
-    except TypeError as exc:
-        if "compression_type" not in str(exc):
-            raise
-        return workflow.download_and_process_package(package, encryption)
+    return workflow.download_and_process_package(package, encryption)
+
+
+def _export_package_compression_type(
+    package: Any,
+    requested: m.CompressionType,
+) -> str:
+    package_type = getattr(package, "compression_type", None)
+    if package_type is None:
+        return requested.value
+    if isinstance(package_type, m.CompressionType):
+        return package_type.value
+    return str(package_type)
 
 
 @contextmanager
@@ -1797,12 +1799,7 @@ def run_export(
             package = m.InvoicePackage.from_dict(package)
 
         workflow = ExportWorkflow(client.invoices, client.http_client)
-        processed = _download_and_process_export_package(
-            workflow,
-            package,
-            encryption,
-            compression_type=compression_type,
-        )
+        processed = _download_and_process_export_package(workflow, package, encryption)
 
     metadata_path = out_dir / "_metadata.json"
     metadata_payload = {"invoices": processed.metadata_summaries}
@@ -1827,7 +1824,7 @@ def run_export(
         "metadata_count": len(processed.metadata_summaries),
         "xml_files_count": files_saved,
         "only_metadata": only_metadata,
-        "compression_type": compression_type.value,
+        "compression_type": _export_package_compression_type(package, compression_type),
         "out_dir": str(out_dir),
         "from": from_iso,
         "to": to_iso,

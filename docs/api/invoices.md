@@ -24,6 +24,8 @@ Endpoint służy do wyszukiwania metadanych faktur. `request_payload` musi być 
 Typowe zastosowanie: synchronizacja historii metadanych i późniejsze pobieranie treści XML po `ksefNumber`.
 
 Uwaga dla `dateRange`:
+- maksymalny dozwolony okres to **100 dni w strefie UTC** (fail-fast `ValueError` w SDK);
+- jeśli `dateRange.to` nie jest podane, zakres jest liczony do bieżącej chwili UTC;
 - jeśli `dateRange.from` / `dateRange.to` jest podane jako ISO date-time bez offsetu (`YYYY-MM-DDTHH:MM[:SS]`),
   SDK normalizuje je do strefy `Europe/Warsaw` i wysyła z jawnie dopisanym offsetem (`+01:00`/`+02:00`).
 
@@ -45,13 +47,15 @@ Opcjonalnie:
 - `compressionType=CompressionType.TARGZ` – eksport zwraca paczkę TarGz zamiast domyślnego ZIP.
 
 Uwaga dla `filters.dateRange`:
+- maksymalny dozwolony okres to **100 dni w strefie UTC** (ten sam fail-fast co przy `query_invoice_metadata`);
 - ISO date-time bez offsetu jest normalizowany do `Europe/Warsaw` przed wysyłką requestu.
 
 ## `get_export_status(reference_number, access_token)`
 
 Endpoint: `GET /invoices/exports/{referenceNumber}`
 
-Zwraca status eksportu. Po zakończeniu w polu `package` dostępne są `parts` – lista części paczki (URL + metadane).
+Zwraca status eksportu. Po zakończeniu w polu `package` dostępne są `parts` – lista części paczki (URL + metadane)
+oraz `package.compressionType` (`Zip` albo `TarGz`). Workflow eksportu rozpakowuje paczkę według tego pola.
 
 ## `download_export_part(url)`
 

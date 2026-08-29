@@ -4,7 +4,7 @@
 
 ### Features
 
-* **api:** align with KSeF API 2.7.1 (IZ invoices POST, context maxInvoices, export compressionType)
+* **api:** align with KSeF API 2.7.1 (IZ invoices POST, generate min 2, query/export 100 days UTC, export compressionType from package)
 * **api:** align with KSeF API 2.7.0 (collective identifiers, testdata certificate update)
 * **api:** add collective identifier helpers, pagination iterators and CLI `ksef iz`
 * **api:** validate collective identifier, KSeF number and certificate serial path parameters

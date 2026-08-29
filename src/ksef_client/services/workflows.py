@@ -1022,7 +1022,7 @@ class ExportWorkflow:
         package: InvoicePackage,
         encryption_data: EncryptionData,
         *,
-        compression_type: CompressionType | str = CompressionType.ZIP,
+        compression_type: CompressionType | str | None = None,
     ) -> PackageProcessingResult:
         if package.invoice_count == 0:
             return PackageProcessingResult(metadata_summaries=[], invoice_xml_files={})
@@ -1043,7 +1043,7 @@ class ExportWorkflow:
         archive_bytes = b"".join(decrypted_parts)
         unzipped = _unpack_export_archive(
             archive_bytes,
-            compression_type=_normalize_compression_type(compression_type),
+            compression_type=_resolve_export_compression_type(package, compression_type),
         )
 
         metadata_summaries: list[dict[str, Any]] = []
@@ -1081,7 +1081,7 @@ class AsyncExportWorkflow:
         package: InvoicePackage,
         encryption_data: EncryptionData,
         *,
-        compression_type: CompressionType | str = CompressionType.ZIP,
+        compression_type: CompressionType | str | None = None,
     ) -> PackageProcessingResult:
         if package.invoice_count == 0:
             return PackageProcessingResult(metadata_summaries=[], invoice_xml_files={})
@@ -1104,7 +1104,7 @@ class AsyncExportWorkflow:
         archive_bytes = b"".join(decrypted_parts)
         unzipped = _unpack_export_archive(
             archive_bytes,
-            compression_type=_normalize_compression_type(compression_type),
+            compression_type=_resolve_export_compression_type(package, compression_type),
         )
 
         metadata_summaries: list[dict[str, Any]] = []
@@ -1153,6 +1153,18 @@ def _normalize_compression_type(value: CompressionType | str) -> CompressionType
         if normalized == candidate.value:
             return candidate
     raise ValueError("Unsupported compression type. Use Zip or TarGz.")
+
+
+def _resolve_export_compression_type(
+    package: InvoicePackage,
+    compression_type: CompressionType | str | None,
+) -> CompressionType:
+    if compression_type is not None:
+        return _normalize_compression_type(compression_type)
+    package_type = getattr(package, "compression_type", None)
+    if package_type is None:
+        raise ValueError("Export package is missing compressionType.")
+    return _normalize_compression_type(package_type)
 
 
 def _resolve_batch_archive_bytes(
