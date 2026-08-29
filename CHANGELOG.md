@@ -5,6 +5,7 @@
 ### Features
 
 * **api:** align with KSeF API 2.7.0 (collective identifiers, testdata certificate update)
+* **api:** add collective identifier helpers, pagination iterators and CLI `ksef iz`
 * **api:** validate collective identifier, KSeF number and certificate serial path parameters
 * **api:** refresh KSeF API 2.6.1 OpenAPI snapshot and documentation links
 * **api:** support KSeF API 2.6.0 OpenAPI, TarGz exports and system warning headers

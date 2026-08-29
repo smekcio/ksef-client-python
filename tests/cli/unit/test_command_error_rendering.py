@@ -13,6 +13,7 @@ from ksef_client.cli.commands import (
     health_cmd,
     init_cmd,
     invoice_cmd,
+    iz_cmd,
     profile_cmd,
     send_cmd,
     session_cmd,
@@ -35,6 +36,7 @@ def _ctx() -> typer.Context:
     [
         (auth_cmd, "auth.test"),
         (invoice_cmd, "invoice.test"),
+        (iz_cmd, "iz.test"),
         (send_cmd, "send.test"),
         (session_cmd, "session.test"),
         (upo_cmd, "upo.test"),
@@ -53,6 +55,7 @@ def test_render_error_cli_error(module, command) -> None:
     [
         (auth_cmd, "auth.test"),
         (invoice_cmd, "invoice.test"),
+        (iz_cmd, "iz.test"),
         (send_cmd, "send.test"),
         (session_cmd, "session.test"),
         (upo_cmd, "upo.test"),
@@ -84,7 +87,7 @@ def test_auth_render_error_api_and_http() -> None:
 
 @pytest.mark.parametrize(
     "module",
-    [invoice_cmd, send_cmd, session_cmd, upo_cmd, export_cmd, health_cmd],
+    [invoice_cmd, iz_cmd, send_cmd, session_cmd, upo_cmd, export_cmd, health_cmd],
 )
 def test_render_error_api_http_combined(module) -> None:
     with pytest.raises(typer.Exit) as api_exc:
@@ -101,6 +104,7 @@ def test_render_error_api_http_combined(module) -> None:
     [
         auth_cmd,
         invoice_cmd,
+        iz_cmd,
         send_cmd,
         session_cmd,
         upo_cmd,

@@ -27,8 +27,9 @@ sa renderowane z bogatszymi hintami, jesli KSeF zwroci `application/problem+json
 - latarnia:
   - `lighthouse status`
   - `lighthouse messages`
-- faktury i UPO:
+- faktury, IZ i UPO:
   - `invoice list`, `invoice download`
+  - `iz generate`, `iz query`, `iz invoices`, `iz by-ksef`
   - `send online`, `send batch`, `send status`
   - `session list/show/status/export/import/drop`
   - `session online open/send/close`
@@ -382,6 +383,59 @@ Options:
 ```
 
 ## invoice / send / upo / export
+
+## `ksef iz generate`
+
+```text
+Usage: ksef iz generate [OPTIONS]
+
+Options:
+  --ksef-number TEXT    Repeatable KSeF number.
+  --from-file PATH      One KSeF number per line.
+  --base-url TEXT
+```
+
+## `ksef iz query`
+
+```text
+Usage: ksef iz query [OPTIONS]
+
+Options:
+  --from TEXT           Created-from date (YYYY-MM-DD).  [required]
+  --to TEXT             Created-to date (YYYY-MM-DD).  [required]
+  --iz TEXT             Filter by collective identifier number.
+  --page-size INTEGER   [default: 10, min: 10, max: 200]
+  --all                 Follow continuation tokens.
+  --base-url TEXT
+```
+
+Zakres `--from/--to` nie moze przekraczac 100 dni.
+
+## `ksef iz invoices`
+
+```text
+Usage: ksef iz invoices [OPTIONS]
+
+Options:
+  --iz TEXT             Collective identifier (repeatable).
+  --page-size INTEGER   [default: 10, min: 10, max: 200]
+  --all                 Follow continuation tokens.
+  --base-url TEXT
+```
+
+W 2.7.0 kazde `--iz` to osobny GET. W 2.7.1 CLI zachowa te same flagi.
+
+## `ksef iz by-ksef`
+
+```text
+Usage: ksef iz by-ksef [OPTIONS]
+
+Options:
+  --ksef-number TEXT    [required]
+  --page-size INTEGER   [default: 10, min: 10, max: 200]
+  --all                 Follow continuation tokens.
+  --base-url TEXT
+```
 
 ## `ksef invoice list`
 
