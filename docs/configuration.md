@@ -78,6 +78,15 @@ Proxy przekazywane do httpx (string, np. `http://user:pass@host:port`).
 
 Stałe nagłówki dodawane do każdego żądania (np. identyfikator korelacji, nagłówki firmowe).
 
+Na środowisku TEST można wymusić treść `X-System-Warning` nagłówkiem żądania:
+
+```python
+custom_headers={"X-Test-System-Warning": "[test]: synthetic warning"},
+```
+
+`X-Test-System-Warning` działa wyłącznie na TEST. Odpowiedź wraca jako `X-System-Warning`
+i trafia do `system_warning_handler`.
+
 Istotne: dla operacji wysyłki i pobierania partów KSeF zwraca wymagane nagłówki. W tych wywołaniach biblioteka używa `skip_auth=True`, ale `custom_headers` nadal są scalane z nagłówkami żądania. Ustawianie `Authorization` w `custom_headers` jest niewskazane, ponieważ dla pre-signed URL może powodować błędy autoryzacji.
 
 ### `follow_redirects`
@@ -113,6 +122,7 @@ Domyślnie `False`. Gdy `False`, blokowane są hosty IP prywatne/link-local/rese
 
 Opcjonalny callback `Callable[[str], None]` wywoływany, gdy KSeF zwróci nagłówek
 `X-System-Warning`. Nagłówek przenosi ostrzeżenia techniczne i nie oznacza błędu operacji.
+Na środowisku TEST można wymusić treść ostrzeżenia nagłówkiem `X-Test-System-Warning`.
 
 ## Przekazywanie `access_token`
 

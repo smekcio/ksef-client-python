@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import calendar
 import json
 import time
 from collections.abc import Iterator
@@ -8,9 +7,10 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 from ksef_client import models as m
+from ksef_client.clients.invoices import INVOICE_QUERY_MAX_RANGE_DAYS
 from ksef_client.exceptions import KsefHttpError, KsefRateLimitError
 from ksef_client.services.crypto import EncryptionData, build_encryption_data, get_file_metadata
 from ksef_client.services.workflows import (
@@ -18,6 +18,7 @@ from ksef_client.services.workflows import (
     ExportWorkflow,
     OnlineSessionWorkflow,
 )
+from ksef_client.utils.collective_identifier import expand_query_date_bound
 from ksef_client.utils.zip_utils import build_tar_gz, build_zip
 
 from ..auth.keyring_store import get_tokens
@@ -102,6 +103,9 @@ def _require_access_token(profile: str) -> str:
     return tokens[0]
 
 
+_INVOICE_QUERY_MAX_RANGE_DAYS = INVOICE_QUERY_MAX_RANGE_DAYS
+
+
 def _normalize_date_range(date_from: str | None, date_to: str | None) -> tuple[str, str]:
     def _parse_date(value: str, option_name: str) -> datetime:
         try:
@@ -133,23 +137,14 @@ def _normalize_date_range(date_from: str | None, date_to: str | None) -> tuple[s
             ExitCode.VALIDATION_ERROR,
             "--from must be earlier than or equal to --to.",
         )
-    max_to_dt = _add_months(from_dt, 3)
-    if to_dt.date() > max_to_dt.date():
+    if (to_dt.date() - from_dt.date()).days > _INVOICE_QUERY_MAX_RANGE_DAYS:
         raise CliError(
             "Date range exceeds KSeF limit.",
             ExitCode.VALIDATION_ERROR,
-            "Use a maximum range of 3 months between --from and --to.",
+            f"Use a maximum range of {_INVOICE_QUERY_MAX_RANGE_DAYS} days between --from and --to.",
         )
 
     return from_dt.isoformat().replace("+00:00", "Z"), to_dt.isoformat().replace("+00:00", "Z")
-
-
-def _add_months(value: datetime, months: int) -> datetime:
-    month_index = value.month - 1 + months
-    target_year = value.year + month_index // 12
-    target_month = month_index % 12 + 1
-    target_day = min(value.day, calendar.monthrange(target_year, target_month)[1])
-    return value.replace(year=target_year, month=target_month, day=target_day)
 
 
 def _require_invoice_query_page_size(value: int) -> int:
@@ -751,19 +746,20 @@ def _download_and_process_export_package(
     workflow: Any,
     package: Any,
     encryption: EncryptionData,
-    *,
-    compression_type: m.CompressionType,
 ) -> Any:
-    try:
-        return workflow.download_and_process_package(
-            package,
-            encryption,
-            compression_type=compression_type,
-        )
-    except TypeError as exc:
-        if "compression_type" not in str(exc):
-            raise
-        return workflow.download_and_process_package(package, encryption)
+    return workflow.download_and_process_package(package, encryption)
+
+
+def _export_package_compression_type(
+    package: Any,
+    requested: m.CompressionType,
+) -> str:
+    package_type = getattr(package, "compression_type", None)
+    if package_type is None:
+        return requested.value
+    if isinstance(package_type, m.CompressionType):
+        return package_type.value
+    return str(package_type)
 
 
 @contextmanager
@@ -806,9 +802,7 @@ def _build_batch_payload_source(
     else:
         path = str(Path(directory or "").resolve())
         source_kind = (
-            "tar_gz_directory"
-            if compression_type is m.CompressionType.TARGZ
-            else "directory"
+            "tar_gz_directory" if compression_type is m.CompressionType.TARGZ else "directory"
         )
     metadata = get_file_metadata(payload_bytes)
     return BatchPayloadSource(
@@ -1506,9 +1500,7 @@ def send_batch_invoices(
             ExitCode.VALIDATION_ERROR,
             "Use one of: --zip, --tar-gz or --dir.",
         )
-    compression_type = _require_cli_compression_type(
-        "targz" if tar_gz_path else archive_format
-    )
+    compression_type = _require_cli_compression_type("targz" if tar_gz_path else archive_format)
     if parallelism <= 0:
         raise CliError(
             "Invalid parallelism.",
@@ -1807,12 +1799,7 @@ def run_export(
             package = m.InvoicePackage.from_dict(package)
 
         workflow = ExportWorkflow(client.invoices, client.http_client)
-        processed = _download_and_process_export_package(
-            workflow,
-            package,
-            encryption,
-            compression_type=compression_type,
-        )
+        processed = _download_and_process_export_package(workflow, package, encryption)
 
     metadata_path = out_dir / "_metadata.json"
     metadata_payload = {"invoices": processed.metadata_summaries}
@@ -1837,7 +1824,7 @@ def run_export(
         "metadata_count": len(processed.metadata_summaries),
         "xml_files_count": files_saved,
         "only_metadata": only_metadata,
-        "compression_type": compression_type.value,
+        "compression_type": _export_package_compression_type(package, compression_type),
         "out_dir": str(out_dir),
         "from": from_iso,
         "to": to_iso,
@@ -1952,4 +1939,188 @@ def run_health_check(
         "dry_run": dry_run,
         "overall": overall,
         "checks": checks,
+    }
+
+
+def _raise_iz_validation_error(exc: ValueError) -> NoReturn:
+    raise CliError(
+        str(exc),
+        ExitCode.VALIDATION_ERROR,
+        "Check collective identifier arguments and KSeF limits.",
+    ) from exc
+
+
+def _read_ksef_numbers_file(path: Path) -> list[str]:
+    if not path.is_file():
+        raise CliError(
+            f"KSeF numbers file not found: {path}",
+            ExitCode.IO_ERROR,
+            "Pass an existing file with one KSeF number per line.",
+        )
+    numbers: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            numbers.append(stripped)
+    if not numbers:
+        raise CliError(
+            "KSeF numbers file is empty.",
+            ExitCode.VALIDATION_ERROR,
+            "Provide at least one KSeF number per line.",
+        )
+    return numbers
+
+
+def generate_collective_identifier(
+    *,
+    profile: str,
+    base_url: str,
+    ksef_numbers: list[str],
+    from_file: str | None = None,
+) -> dict[str, Any]:
+    numbers = list(ksef_numbers)
+    if from_file:
+        numbers.extend(_read_ksef_numbers_file(Path(from_file)))
+    if not numbers:
+        raise CliError(
+            "No KSeF numbers provided.",
+            ExitCode.VALIDATION_ERROR,
+            "Pass --ksef-number and/or --from-file.",
+        )
+    access_token = _require_access_token(profile)
+    try:
+        with create_client(base_url, access_token=access_token) as client:
+            response = client.collective_identifiers.generate_for_ksef_numbers(
+                numbers,
+                access_token=access_token,
+            )
+    except ValueError as exc:
+        _raise_iz_validation_error(exc)
+    return _to_output_payload(response)
+
+
+def query_collective_identifiers(
+    *,
+    profile: str,
+    base_url: str,
+    date_from: str,
+    date_to: str,
+    collective_identifier_number: str | None = None,
+    page_size: int,
+    fetch_all: bool,
+) -> dict[str, Any]:
+    access_token = _require_access_token(profile)
+    request = m.CollectiveIdentifiersQueryRequest(
+        date_created_from=expand_query_date_bound(date_from, end_of_day=False),
+        date_created_to=expand_query_date_bound(date_to, end_of_day=True),
+        collective_identifier_number=collective_identifier_number,
+    )
+    try:
+        with create_client(base_url, access_token=access_token) as client:
+            if fetch_all:
+                items = list(
+                    client.collective_identifiers.iter_query(
+                        request,
+                        access_token=access_token,
+                        page_size=page_size,
+                    )
+                )
+                return {
+                    "count": len(items),
+                    "items": [_to_output_payload(item) for item in items],
+                    "continuation_token": "",
+                }
+            response = client.collective_identifiers.query(
+                request,
+                access_token=access_token,
+                page_size=page_size,
+            )
+    except ValueError as exc:
+        _raise_iz_validation_error(exc)
+    return {
+        "count": len(response.collective_identifiers),
+        "items": [_to_output_payload(item) for item in response.collective_identifiers],
+        "continuation_token": response.continuation_token or "",
+    }
+
+
+def list_collective_identifier_invoices(
+    *,
+    profile: str,
+    base_url: str,
+    iz_numbers: list[str],
+    page_size: int,
+    fetch_all: bool,
+) -> dict[str, Any]:
+    if not iz_numbers:
+        raise CliError(
+            "No collective identifier provided.",
+            ExitCode.VALIDATION_ERROR,
+            "Pass --iz at least once.",
+        )
+    access_token = _require_access_token(profile)
+    try:
+        with create_client(base_url, access_token=access_token) as client:
+            if fetch_all:
+                items = list(
+                    client.collective_identifiers.iter_invoices(
+                        iz_numbers,
+                        access_token=access_token,
+                        page_size=page_size,
+                    )
+                )
+                return {
+                    "count": len(items),
+                    "items": [_to_output_payload(item) for item in items],
+                    "continuation_token": "",
+                }
+            response = client.collective_identifiers.list_invoices(
+                iz_numbers,
+                access_token=access_token,
+                page_size=page_size,
+            )
+    except ValueError as exc:
+        _raise_iz_validation_error(exc)
+    return {
+        "count": len(response.invoices),
+        "items": [_to_output_payload(item) for item in response.invoices],
+        "continuation_token": response.continuation_token or "",
+    }
+
+
+def list_collective_identifiers_by_ksef_number(
+    *,
+    profile: str,
+    base_url: str,
+    ksef_number: str,
+    page_size: int,
+    fetch_all: bool,
+) -> dict[str, Any]:
+    access_token = _require_access_token(profile)
+    try:
+        with create_client(base_url, access_token=access_token) as client:
+            if fetch_all:
+                items = list(
+                    client.collective_identifiers.iter_by_ksef_number(
+                        ksef_number,
+                        access_token=access_token,
+                        page_size=page_size,
+                    )
+                )
+                return {
+                    "count": len(items),
+                    "items": [_to_output_payload(item) for item in items],
+                    "continuation_token": "",
+                }
+            response = client.collective_identifiers.list_by_ksef_number(
+                ksef_number,
+                access_token=access_token,
+                page_size=page_size,
+            )
+    except ValueError as exc:
+        _raise_iz_validation_error(exc)
+    return {
+        "count": len(response.collective_identifiers),
+        "items": [_to_output_payload(item) for item in response.collective_identifiers],
+        "continuation_token": response.continuation_token or "",
     }

@@ -13,6 +13,7 @@ from ksef_client.cli.commands import (
     export_cmd,
     health_cmd,
     invoice_cmd,
+    iz_cmd,
     send_cmd,
     upo_cmd,
 )
@@ -65,7 +66,7 @@ def _ctx() -> typer.Context:
 
 @pytest.mark.parametrize(
     "module",
-    [auth_cmd, invoice_cmd, send_cmd, upo_cmd, export_cmd, health_cmd],
+    [auth_cmd, invoice_cmd, iz_cmd, send_cmd, upo_cmd, export_cmd, health_cmd],
 )
 def test_render_error_problem_details_hint_includes_structured_fields(module, monkeypatch) -> None:
     renderer = _RecordingRenderer()
@@ -103,7 +104,7 @@ def test_render_error_problem_details_hint_includes_structured_fields(module, mo
 
 @pytest.mark.parametrize(
     "module",
-    [auth_cmd, invoice_cmd, send_cmd, upo_cmd, export_cmd, health_cmd],
+    [auth_cmd, invoice_cmd, iz_cmd, send_cmd, upo_cmd, export_cmd, health_cmd],
 )
 def test_render_error_rate_limit_problem_hint_includes_detail_and_retry_after(
     module, monkeypatch

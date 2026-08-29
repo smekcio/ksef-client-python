@@ -934,6 +934,14 @@ class CheckAttachmentPermissionStatusResponse(OpenApiModel):
     revoked_date: Optional[str] = field(default=None, metadata={"json_key": "revokedDate"})
 
 @dataclass(frozen=True)
+class CollectiveIdentifierContextLimitsOverride(OpenApiModel):
+    max_invoices: int = field(metadata={"json_key": "maxInvoices"})
+
+@dataclass(frozen=True)
+class CollectiveIdentifierEffectiveContextLimits(OpenApiModel):
+    max_invoices: int = field(metadata={"json_key": "maxInvoices"})
+
+@dataclass(frozen=True)
 class CollectiveIdentifierInvoice(OpenApiModel):
     ksef_number: KsefNumber = field(metadata={"json_key": "ksefNumber"})
     description: Optional[str] = None
@@ -945,12 +953,17 @@ class CollectiveIdentifierInvoicePayment(OpenApiModel):
     currency: CurrencyCode
 
 @dataclass(frozen=True)
+class CollectiveIdentifierInvoicesQueryRequest(OpenApiModel):
+    collective_identifier_numbers: list[str] = field(metadata={"json_key": "collectiveIdentifierNumbers"})
+
+@dataclass(frozen=True)
 class CollectiveIdentifierInvoicesQueryResponse(OpenApiModel):
     invoices: list[CollectiveIdentifierInvoicesQueryResponseItem]
     continuation_token: Optional[str] = field(default=None, metadata={"json_key": "continuationToken"})
 
 @dataclass(frozen=True)
 class CollectiveIdentifierInvoicesQueryResponseItem(OpenApiModel):
+    collective_identifier_number: str = field(metadata={"json_key": "collectiveIdentifierNumber"})
     details_hidden: bool = field(metadata={"json_key": "detailsHidden"})
     ksef_number: KsefNumber = field(metadata={"json_key": "ksefNumber"})
     description: Optional[str] = None
@@ -1018,6 +1031,7 @@ class EffectiveApiRateLimits(OpenApiModel):
 @dataclass(frozen=True)
 class EffectiveContextLimits(OpenApiModel):
     batch_session: BatchSessionEffectiveContextLimits = field(metadata={"json_key": "batchSession"})
+    collective_identifier: CollectiveIdentifierEffectiveContextLimits = field(metadata={"json_key": "collectiveIdentifier"})
     online_session: OnlineSessionEffectiveContextLimits = field(metadata={"json_key": "onlineSession"})
 
 @dataclass(frozen=True)
@@ -1396,6 +1410,7 @@ class InvoiceMetadataThirdSubjectIdentifier(OpenApiModel):
 
 @dataclass(frozen=True)
 class InvoicePackage(OpenApiModel):
+    compression_type: CompressionType = field(metadata={"json_key": "compressionType"})
     invoice_count: int = field(metadata={"json_key": "invoiceCount"})
     is_truncated: bool = field(metadata={"json_key": "isTruncated"})
     parts: list[InvoicePackagePart]
@@ -1868,6 +1883,7 @@ class SetRateLimitsRequest(OpenApiModel):
 @dataclass(frozen=True)
 class SetSessionLimitsRequest(OpenApiModel):
     batch_session: BatchSessionContextLimitsOverride = field(metadata={"json_key": "batchSession"})
+    collective_identifier: CollectiveIdentifierContextLimitsOverride = field(metadata={"json_key": "collectiveIdentifier"})
     online_session: OnlineSessionContextLimitsOverride = field(metadata={"json_key": "onlineSession"})
 
 @dataclass(frozen=True)

@@ -5,3 +5,6 @@
 Endpoint: `GET /rate-limits`
 
 Zwraca bieżące limity wywołań API. Obsługa 429: [Błędy i retry](../errors.md).
+
+Grupa `collectiveIdentifier` w kontrakcie OpenAPI 2.7.1 ma wartości domyślne `20` / `120` / `240`
+(na minutę / godzinę / dobę). Bieżące limity i tak odczytuj z `GET /rate-limits`.

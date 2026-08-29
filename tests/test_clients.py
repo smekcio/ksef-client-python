@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -348,6 +349,100 @@ class ClientsTests(unittest.TestCase):
             omit_none=False
         )
         self.assertEqual(payload_copy["filters"]["dateRange"]["from"], "a")
+        skipped = _normalize_invoice_date_range_payload(
+            {"dateRange": {"from": "nope", "to": "also-nope"}}
+        )
+        self.assertEqual(skipped["dateRange"]["from"], "nope")
+        skipped_to = _normalize_invoice_date_range_payload(
+            {"dateRange": {"from": "2026-01-01T00:00:00Z", "to": 1}}
+        )
+        self.assertEqual(skipped_to["dateRange"]["from"], "2026-01-01T00:00:00Z")
+        skipped_to_str = _normalize_invoice_date_range_payload(
+            {"dateRange": {"from": "2026-01-01T00:00:00Z", "to": "nope"}}
+        )
+        self.assertEqual(skipped_to_str["dateRange"]["to"], "nope")
+        date_only = _normalize_invoice_date_range_payload(
+            {"dateRange": {"from": "2026-01-01", "to": "2026-01-02"}}
+        )
+        self.assertEqual(date_only["dateRange"]["from"], "2026-01-01")
+
+    def test_invoice_date_range_limit_is_100_days_utc(self):
+        accepted = _normalize_invoice_date_range_payload(
+            {
+                "dateRange": {
+                    "from": "2026-01-01T00:00:00Z",
+                    "to": "2026-04-11T23:59:59Z",
+                }
+            }
+        )
+        self.assertEqual(accepted["dateRange"]["from"], "2026-01-01T00:00:00Z")
+
+        with self.assertRaisesRegex(ValueError, "100 days"):
+            _normalize_invoice_date_range_payload(
+                {
+                    "dateRange": {
+                        "from": "2026-01-01T00:00:00Z",
+                        "to": "2026-04-12T00:00:00Z",
+                    }
+                }
+            )
+        with self.assertRaisesRegex(ValueError, "100 days"):
+            _normalize_invoice_date_range_payload(
+                {
+                    "filters": {
+                        "dateRange": {
+                            "from": "2026-01-01T00:00:00Z",
+                            "to": "2026-04-12T00:00:00Z",
+                        }
+                    }
+                }
+            )
+
+        past = (datetime.now(timezone.utc) - timedelta(days=101)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self.assertRaisesRegex(ValueError, "100 days"):
+            _normalize_invoice_date_range_payload({"dateRange": {"from": past}})
+
+        client = InvoicesClient(self.http)
+        with self.assertRaisesRegex(ValueError, "100 days"):
+            client.query_invoice_metadata(
+                cast(
+                    Any,
+                    JsonPayload(
+                        {
+                            "subjectType": "Subject1",
+                            "dateRange": {
+                                "dateType": "Issue",
+                                "from": "2026-01-01T00:00:00Z",
+                                "to": "2026-04-12T00:00:00Z",
+                            },
+                        }
+                    ),
+                ),
+                access_token="token",
+            )
+        with self.assertRaisesRegex(ValueError, "100 days"):
+            client.export_invoices(
+                cast(
+                    Any,
+                    JsonPayload(
+                        {
+                            "encryption": {
+                                "encryptedSymmetricKey": "abc",
+                                "initializationVector": "def",
+                            },
+                            "filters": {
+                                "subjectType": "Subject1",
+                                "dateRange": {
+                                    "dateType": "Issue",
+                                    "from": "2026-01-01T00:00:00Z",
+                                    "to": "2026-04-12T00:00:00Z",
+                                },
+                            },
+                        }
+                    ),
+                ),
+                access_token="token",
+            )
 
     def test_invoices_client_query_metadata_serializes_typed_payload_once(self):
         response = HttpResponse(
@@ -483,12 +578,22 @@ class ClientsTests(unittest.TestCase):
             self.assertIsNone(request_model.call_args.kwargs["headers"])
 
         collective = CollectiveIdentifiersClient(self.http)
+        generate_payload = m.GenerateCollectiveIdentifierRequest(
+            invoices=[
+                m.CollectiveIdentifierInvoice(ksef_number="5265877635-20250826-0100001AF629-AF"),
+                m.CollectiveIdentifierInvoice(ksef_number="5265877635-20250827-0100001AF629-4A"),
+            ]
+        )
+        query_payload = m.CollectiveIdentifiersQueryRequest(
+            date_created_from="2026-01-01T00:00:00Z",
+            date_created_to="2026-01-31T23:59:59Z",
+        )
         with patch.object(
             collective, "_request_model", Mock(return_value=object())
         ) as request_model:
-            collective.generate(payload, access_token="token")
+            collective.generate(generate_payload, access_token="token")
             collective.query(
-                payload,
+                query_payload,
                 access_token="token",
                 page_size=10,
                 continuation_token="cont",
@@ -496,26 +601,24 @@ class ClientsTests(unittest.TestCase):
             collective.list_invoices(
                 "1111111111-IZ202607-65ED02180000-E7",
                 access_token="token",
-                page_size=5,
+                page_size=10,
                 continuation_token="next",
             )
             collective.list_by_ksef_number(
                 "5265877635-20250826-0100001AF629-AF",
                 access_token="token",
-                page_size=3,
+                page_size=10,
                 continuation_token="page-2",
             )
             self.assertEqual(request_model.call_args_list[0].kwargs["expected_status"], {201})
-            self.assertEqual(
-                request_model.call_args_list[1].kwargs["params"], {"pageSize": 10}
-            )
+            self.assertEqual(request_model.call_args_list[1].kwargs["params"], {"pageSize": 10})
             self.assertEqual(
                 request_model.call_args_list[1].kwargs["headers"],
                 {"x-continuation-token": "cont"},
             )
             self.assertEqual(
                 request_model.call_args_list[2].args[1],
-                "/collective-identifiers/1111111111-IZ202607-65ED02180000-E7/invoices",
+                "/collective-identifiers/invoices",
             )
             self.assertEqual(
                 request_model.call_args_list[3].args[1],
@@ -524,10 +627,8 @@ class ClientsTests(unittest.TestCase):
         with patch.object(
             collective, "_request_model", Mock(return_value=object())
         ) as request_model:
-            collective.query(payload, access_token="token", continuation_token="")
-            collective.list_invoices(
-                "1111111111-IZ202607-65ED02180000-E7", access_token="token"
-            )
+            collective.query(query_payload, access_token="token", continuation_token="")
+            collective.list_invoices("1111111111-IZ202607-65ED02180000-E7", access_token="token")
             collective.list_by_ksef_number(
                 "5265877635-20250826-0100001AF629-AF", access_token="token"
             )
@@ -576,7 +677,7 @@ class ClientsTests(unittest.TestCase):
                     "validFrom": "2026-02-01T00:00:00Z",
                     "validTo": "2999-12-31T23:59:59Z",
                 }
-            )
+            ),
         ]
         with patch.object(
             security, "_request_model_list", Mock(return_value=security_certificates)
@@ -974,12 +1075,22 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(request_model.call_args.kwargs["headers"])
 
         collective = AsyncCollectiveIdentifiersClient(self.http)
+        generate_payload = m.GenerateCollectiveIdentifierRequest(
+            invoices=[
+                m.CollectiveIdentifierInvoice(ksef_number="5265877635-20250826-0100001AF629-AF"),
+                m.CollectiveIdentifierInvoice(ksef_number="5265877635-20250827-0100001AF629-4A"),
+            ]
+        )
+        query_payload = m.CollectiveIdentifiersQueryRequest(
+            date_created_from="2026-01-01T00:00:00Z",
+            date_created_to="2026-01-31T23:59:59Z",
+        )
         with patch.object(
             collective, "_request_model", AsyncMock(return_value=object())
         ) as request_model:
-            await collective.generate(payload, access_token="token")
+            await collective.generate(generate_payload, access_token="token")
             await collective.query(
-                payload,
+                query_payload,
                 access_token="token",
                 page_size=10,
                 continuation_token="cont",
@@ -987,19 +1098,17 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             await collective.list_invoices(
                 "1111111111-IZ202607-65ED02180000-E7",
                 access_token="token",
-                page_size=5,
+                page_size=10,
                 continuation_token="next",
             )
             await collective.list_by_ksef_number(
                 "5265877635-20250826-0100001AF629-AF",
                 access_token="token",
-                page_size=3,
+                page_size=10,
                 continuation_token="page-2",
             )
             self.assertEqual(request_model.call_args_list[0].kwargs["expected_status"], {201})
-            self.assertEqual(
-                request_model.call_args_list[1].kwargs["params"], {"pageSize": 10}
-            )
+            self.assertEqual(request_model.call_args_list[1].kwargs["params"], {"pageSize": 10})
             self.assertEqual(
                 request_model.call_args_list[1].kwargs["headers"],
                 {"x-continuation-token": "cont"},
@@ -1007,7 +1116,7 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             collective, "_request_model", AsyncMock(return_value=object())
         ) as request_model:
-            await collective.query(payload, access_token="token", continuation_token="")
+            await collective.query(query_payload, access_token="token", continuation_token="")
             await collective.list_invoices(
                 "1111111111-IZ202607-65ED02180000-E7", access_token="token"
             )
@@ -1059,7 +1168,7 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
                     "validFrom": "2026-02-01T00:00:00Z",
                     "validTo": "2999-12-31T23:59:59Z",
                 }
-            )
+            ),
         ]
         with patch.object(
             security, "_request_model_list", AsyncMock(return_value=security_certificates)
@@ -1069,13 +1178,9 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(selected.certificate, "pem-new")
             self.assertEqual(selected.public_key_id, "key-new")
-            selected_pem = await security.get_public_key_certificate_pem(
-                "SymmetricKeyEncryption"
-            )
+            selected_pem = await security.get_public_key_certificate_pem("SymmetricKeyEncryption")
             self.assertEqual(selected_pem, "pem-new")
-            selected_from_str = await security.get_public_key_certificate(
-                "SymmetricKeyEncryption"
-            )
+            selected_from_str = await security.get_public_key_certificate("SymmetricKeyEncryption")
             self.assertEqual(selected_from_str.certificate, "pem-new")
             self.assertEqual(
                 _normalize_certificate_usage("symmetric-key-encryption"),
@@ -1108,16 +1213,12 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             await testdata.set_rate_limits(payload, access_token="token")
             await testdata.reset_rate_limits(access_token="token")
             await testdata.restore_production_rate_limits(access_token="token")
-            await testdata.update_certificate(
-                "ABCDEF0123456789", payload, access_token="token"
-            )
+            await testdata.update_certificate("ABCDEF0123456789", payload, access_token="token")
             self.assertEqual(request_json.await_count, 11)
             self.assertEqual(request_model.await_count, 7)
         with patch.object(testdata, "_request_json", AsyncMock()) as request_json:
             with self.assertRaises(ValueError):
-                await testdata.update_certificate(
-                    "not-a-serial", payload, access_token="token"
-                )
+                await testdata.update_certificate("not-a-serial", payload, access_token="token")
             request_json.assert_not_awaited()
 
         peppol = AsyncPeppolClient(self.http)

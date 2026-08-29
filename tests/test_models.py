@@ -211,6 +211,7 @@ class ModelsTests(unittest.TestCase):
             "completedDate": "2024-01-02",
             "packageExpirationDate": "2024-02-02",
             "package": {
+                "compressionType": "Zip",
                 "invoiceCount": 1,
                 "size": 10,
                 "parts": [

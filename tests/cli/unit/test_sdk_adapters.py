@@ -151,7 +151,7 @@ def test_list_invoices_rejects_reverse_date_range(monkeypatch) -> None:
     assert exc.value.code == ExitCode.VALIDATION_ERROR
 
 
-def test_list_invoices_rejects_date_range_longer_than_3_months(monkeypatch) -> None:
+def test_list_invoices_rejects_date_range_longer_than_100_days(monkeypatch) -> None:
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
     monkeypatch.setattr(
         adapters,
@@ -164,7 +164,7 @@ def test_list_invoices_rejects_date_range_longer_than_3_months(monkeypatch) -> N
             profile="demo",
             base_url="https://example.invalid",
             date_from="2026-01-01",
-            date_to="2026-04-02",
+            date_to="2026-04-12",
             subject_type="Subject1",
             date_type="Issue",
             page_size=10,
@@ -173,10 +173,10 @@ def test_list_invoices_rejects_date_range_longer_than_3_months(monkeypatch) -> N
         )
 
     assert exc.value.code == ExitCode.VALIDATION_ERROR
-    assert "3 months" in (exc.value.hint or "")
+    assert "100 days" in (exc.value.hint or "")
 
 
-def test_list_invoices_accepts_date_range_exactly_3_months(monkeypatch) -> None:
+def test_list_invoices_accepts_date_range_exactly_100_days(monkeypatch) -> None:
     seen: dict[str, object] = {}
 
     class _Invoices:
@@ -196,7 +196,7 @@ def test_list_invoices_accepts_date_range_exactly_3_months(monkeypatch) -> None:
         profile="demo",
         base_url="https://example.invalid",
         date_from="2026-01-01",
-        date_to="2026-04-01",
+        date_to="2026-04-11",
         subject_type="Subject1",
         date_type="Issue",
         page_size=10,
@@ -1208,19 +1208,36 @@ def test_cli_compression_type_validation() -> None:
         adapters._require_cli_compression_type("rar")
 
 
-def test_export_package_download_helper_preserves_unrelated_type_errors() -> None:
+def test_export_package_download_helper_delegates_to_workflow() -> None:
     class _Workflow:
-        def download_and_process_package(self, *args, **kwargs):
-            _ = (args, kwargs)
-            raise TypeError("boom")
+        def download_and_process_package(self, package, encryption):
+            return (package, encryption)
 
-    with pytest.raises(TypeError, match="boom"):
-        adapters._download_and_process_export_package(
-            _Workflow(),
-            object(),
-            cast(Any, object()),
-            compression_type=m.CompressionType.ZIP,
+    package = object()
+    encryption = object()
+    assert adapters._download_and_process_export_package(
+        _Workflow(),
+        package,
+        cast(Any, encryption),
+    ) == (package, encryption)
+
+
+def test_export_package_compression_type_reads_package_or_request() -> None:
+    assert adapters._export_package_compression_type(object(), m.CompressionType.ZIP) == "Zip"
+    assert (
+        adapters._export_package_compression_type(
+            SimpleNamespace(compression_type=m.CompressionType.TARGZ),
+            m.CompressionType.ZIP,
         )
+        == "TarGz"
+    )
+    assert (
+        adapters._export_package_compression_type(
+            SimpleNamespace(compression_type="TarGz"),
+            m.CompressionType.ZIP,
+        )
+        == "TarGz"
+    )
 
 
 def test_client_warning_context_preserves_unrelated_type_errors(monkeypatch) -> None:
@@ -2815,6 +2832,7 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
             return {
                 "status": {"code": 200, "description": "Done"},
                 "package": {
+                    "compressionType": "Zip",
                     "invoiceCount": 0,
                     "size": 0,
                     "isTruncated": False,
@@ -2910,6 +2928,7 @@ def test_run_export_only_metadata_success(monkeypatch, tmp_path) -> None:
             return {
                 "status": {"code": 200, "description": "Done"},
                 "package": {
+                    "compressionType": "Zip",
                     "invoiceCount": 0,
                     "size": 0,
                     "isTruncated": False,
@@ -3003,6 +3022,7 @@ def test_run_export_incremental_hwm_filters(monkeypatch, tmp_path) -> None:
             return {
                 "status": {"code": 200, "description": "Done"},
                 "package": {
+                    "compressionType": "Zip",
                     "invoiceCount": 0,
                     "size": 0,
                     "isTruncated": False,

@@ -57,6 +57,7 @@ class OpenApiModelsTests(unittest.TestCase):
 
     def test_invoice_package_roundtrip(self):
         payload = {
+            "compressionType": "Zip",
             "invoiceCount": 1,
             "size": 10,
             "isTruncated": False,
@@ -167,6 +168,41 @@ class OpenApiModelsTests(unittest.TestCase):
         parsed = m.AuthenticationChallengeResponse.from_dict(payload)
         self.assertEqual(parsed.client_ip, "203.0.113.10")
         self.assertEqual(parsed.to_dict()["clientIp"], "203.0.113.10")
+
+    def test_session_limits_roundtrip_includes_collective_identifier(self):
+        request_payload = {
+            "onlineSession": {
+                "maxInvoiceSizeInMB": 10,
+                "maxInvoiceWithAttachmentSizeInMB": 30,
+                "maxInvoices": 100,
+            },
+            "batchSession": {
+                "maxInvoiceSizeInMB": 10,
+                "maxInvoiceWithAttachmentSizeInMB": 30,
+                "maxInvoices": 100,
+            },
+            "collectiveIdentifier": {"maxInvoices": 50},
+        }
+        request = m.SetSessionLimitsRequest.from_dict(request_payload)
+        self.assertEqual(request.collective_identifier.max_invoices, 50)
+        self.assertEqual(request.to_dict()["collectiveIdentifier"]["maxInvoices"], 50)
+
+        limits_payload = {
+            "onlineSession": {
+                "maxInvoiceSizeInMB": 10,
+                "maxInvoiceWithAttachmentSizeInMB": 30,
+                "maxInvoices": 100,
+            },
+            "batchSession": {
+                "maxInvoiceSizeInMB": 10,
+                "maxInvoiceWithAttachmentSizeInMB": 30,
+                "maxInvoices": 100,
+            },
+            "collectiveIdentifier": {"maxInvoices": 50},
+        }
+        limits = m.EffectiveContextLimits.from_dict(limits_payload)
+        self.assertEqual(limits.collective_identifier.max_invoices, 50)
+        self.assertEqual(limits.to_dict()["collectiveIdentifier"]["maxInvoices"], 50)
 
     def test_problem_details_models_roundtrip(self):
         bad_request_payload = {

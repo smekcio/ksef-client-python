@@ -89,7 +89,28 @@ Nowa data nie może być późniejsza niż obecna.
 
 Endpoint: `POST /testdata/limits/context/session`
 
-Ustawia limity sesji w kontekście testowym.
+Ustawia limity sesji w kontekście testowym, w tym `collectiveIdentifier.maxInvoices`.
+
+```python
+from ksef_client import models as m
+
+limits = client.testdata.change_session_limits(
+    m.SetSessionLimitsRequest(
+        online_session=m.OnlineSessionContextLimitsOverride(
+            max_invoice_size_in_mb=10,
+            max_invoice_with_attachment_size_in_mb=30,
+            max_invoices=100,
+        ),
+        batch_session=m.BatchSessionContextLimitsOverride(
+            max_invoice_size_in_mb=10,
+            max_invoice_with_attachment_size_in_mb=30,
+            max_invoices=100,
+        ),
+        collective_identifier=m.CollectiveIdentifierContextLimitsOverride(max_invoices=50),
+    ),
+    access_token=access_token,
+)
+```
 
 ### `reset_session_limits(access_token)`
 

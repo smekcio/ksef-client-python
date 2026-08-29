@@ -27,8 +27,9 @@ sa renderowane z bogatszymi hintami, jesli KSeF zwroci `application/problem+json
 - latarnia:
   - `lighthouse status`
   - `lighthouse messages`
-- faktury i UPO:
+- faktury, IZ i UPO:
   - `invoice list`, `invoice download`
+  - `iz generate`, `iz query`, `iz invoices`, `iz by-ksef`
   - `send online`, `send batch`, `send status`
   - `session list/show/status/export/import/drop`
   - `session online open/send/close`
@@ -383,6 +384,61 @@ Options:
 
 ## invoice / send / upo / export
 
+## `ksef iz generate`
+
+```text
+Usage: ksef iz generate [OPTIONS]
+
+Options:
+  --ksef-number TEXT    Repeatable KSeF number.
+  --from-file PATH      One KSeF number per line.
+  --base-url TEXT
+```
+
+`generate` wymaga co najmniej dwóch numerów KSeF (OpenAPI `minItems: 2`).
+
+## `ksef iz query`
+
+```text
+Usage: ksef iz query [OPTIONS]
+
+Options:
+  --from TEXT           Created-from date (YYYY-MM-DD).  [required]
+  --to TEXT             Created-to date (YYYY-MM-DD).  [required]
+  --iz TEXT             Filter by collective identifier number.
+  --page-size INTEGER   [default: 10, min: 10, max: 200]
+  --all                 Follow continuation tokens.
+  --base-url TEXT
+```
+
+Zakres `--from/--to` nie moze przekraczac 100 dni.
+
+## `ksef iz invoices`
+
+```text
+Usage: ksef iz invoices [OPTIONS]
+
+Options:
+  --iz TEXT             Collective identifier (repeatable, max 10).
+  --page-size INTEGER   [default: 10, min: 10, max: 500]
+  --all                 Follow continuation tokens.
+  --base-url TEXT
+```
+
+Jedno żądanie `POST /collective-identifiers/invoices` dla wszystkich `--iz`.
+
+## `ksef iz by-ksef`
+
+```text
+Usage: ksef iz by-ksef [OPTIONS]
+
+Options:
+  --ksef-number TEXT    [required]
+  --page-size INTEGER   [default: 10, min: 10, max: 200]
+  --all                 Follow continuation tokens.
+  --base-url TEXT
+```
+
 ## `ksef invoice list`
 
 ```text
@@ -402,7 +458,7 @@ Options:
 Uwagi:
 - bez `--subject-type` CLI agreguje wyniki dla wszystkich typów (`Subject1`, `Subject2`, `Subject3`, `SubjectAuthorized`),
 - podanie `--subject-type` zachowuje poprzednie, jawne filtrowanie do jednego kontekstu podmiotu.
-- zakres `--from/--to` nie moze przekraczac 3 miesiecy.
+- zakres `--from/--to` nie moze przekraczac 100 dni.
 
 Kontrakt `data` dla `ksef invoice list --json`:
 - `count`: liczba rekordow w biezacej stronie po filtracji,

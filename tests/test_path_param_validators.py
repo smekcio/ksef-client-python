@@ -34,7 +34,16 @@ class CollectiveIdentifierValidatorTests(unittest.TestCase):
     def test_invalid_format(self):
         result = validate_collective_identifier_number("not-an-iz")
         self.assertFalse(result.is_valid)
+        self.assertEqual(result.message, "invalid length")
+
+        result = validate_collective_identifier_number("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+        self.assertFalse(result.is_valid)
         self.assertEqual(result.message, "invalid format")
+
+    def test_invalid_length(self):
+        result = validate_collective_identifier_number("1111111111-IZ202607-65ED02180000")
+        self.assertFalse(result.is_valid)
+        self.assertEqual(result.message, "invalid length")
 
     def test_lowercase_hex_rejected(self):
         value = "1111111111-IZ202607-65ed02180000-E7"
