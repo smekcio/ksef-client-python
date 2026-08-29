@@ -195,7 +195,7 @@ def test_list_collective_identifier_invoices(monkeypatch) -> None:
             _ = (iz_number, access_token, page_size)
             return m.CollectiveIdentifierInvoicesQueryResponse(
                 invoices=[invoice],
-                continuation_token="ignored",
+                continuation_token="more",
             )
 
         def iter_invoices(self, iz_number, *, access_token, page_size=None):
@@ -223,6 +223,7 @@ def test_list_collective_identifier_invoices(monkeypatch) -> None:
     )
     assert paged["count"] == 1
     assert paged["items"][0]["collectiveIdentifierNumber"] == _IZ
+    assert paged["continuation_token"] == "more"
 
     all_pages = adapters.list_collective_identifier_invoices(
         profile="demo",
@@ -233,6 +234,7 @@ def test_list_collective_identifier_invoices(monkeypatch) -> None:
     )
     assert all_pages["count"] == 2
     assert all_pages["items"][1] == SimpleNamespace(ksef_number="raw")
+    assert all_pages["continuation_token"] == ""
 
 
 def test_list_collective_identifier_invoices_rejects_more_than_10(monkeypatch) -> None:

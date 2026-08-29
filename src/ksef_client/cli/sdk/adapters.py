@@ -2062,24 +2062,30 @@ def list_collective_identifier_invoices(
     try:
         with create_client(base_url, access_token=access_token) as client:
             if fetch_all:
-                page_items = list(
+                items = list(
                     client.collective_identifiers.iter_invoices(
                         iz_numbers,
                         access_token=access_token,
                         page_size=page_size,
                     )
                 )
-            else:
-                response = client.collective_identifiers.list_invoices(
-                    iz_numbers,
-                    access_token=access_token,
-                    page_size=page_size,
-                )
-                page_items = list(response.invoices)
+                return {
+                    "count": len(items),
+                    "items": [_to_output_payload(item) for item in items],
+                    "continuation_token": "",
+                }
+            response = client.collective_identifiers.list_invoices(
+                iz_numbers,
+                access_token=access_token,
+                page_size=page_size,
+            )
     except ValueError as exc:
         _raise_iz_validation_error(exc)
-    items = [_to_output_payload(item) for item in page_items]
-    return {"count": len(items), "items": items}
+    return {
+        "count": len(response.invoices),
+        "items": [_to_output_payload(item) for item in response.invoices],
+        "continuation_token": response.continuation_token or "",
+    }
 
 
 def list_collective_identifiers_by_ksef_number(
