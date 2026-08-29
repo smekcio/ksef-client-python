@@ -6,7 +6,11 @@ from pathlib import Path
 import typer
 
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
-from ksef_client.utils.collective_identifier import PAGE_SIZE_MAX, PAGE_SIZE_MIN
+from ksef_client.utils.collective_identifier import (
+    PAGE_SIZE_INVOICES_MAX,
+    PAGE_SIZE_MAX,
+    PAGE_SIZE_MIN,
+)
 
 from ..auth.manager import resolve_base_url
 from ..context import profile_label, require_context, require_profile
@@ -159,14 +163,14 @@ def iz_query(
 def iz_invoices(
     ctx: typer.Context,
     iz_number: list[str] | None = typer.Option(  # noqa: B008
-        None, "--iz", help="Collective identifier number (repeatable)."
+        None, "--iz", help="Collective identifier number (repeatable, max 10)."
     ),
     page_size: int = typer.Option(
         PAGE_SIZE_MIN,
         "--page-size",
         min=PAGE_SIZE_MIN,
-        max=PAGE_SIZE_MAX,
-        help=f"Number of items per page ({PAGE_SIZE_MIN}-{PAGE_SIZE_MAX}).",
+        max=PAGE_SIZE_INVOICES_MAX,
+        help=f"Number of items per page ({PAGE_SIZE_MIN}-{PAGE_SIZE_INVOICES_MAX}).",
     ),
     fetch_all: bool = typer.Option(
         False, "--all", help="Follow continuation tokens and return every page."

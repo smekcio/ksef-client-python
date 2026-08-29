@@ -1,6 +1,7 @@
 # Identyfikatory zbiorcze (`client.collective_identifiers`)
 
-Obsługa identyfikatorów zbiorczych (IZ) wprowadzonych w KSeF API 2.7.0.
+Obsługa identyfikatorów zbiorczych (IZ) wprowadzonych w KSeF API 2.7.0
+i zaktualizowanych w 2.7.1.
 
 IZ grupuje już wystawione faktury tego samego sprzedawcy (do 500 numerów KSeF) pod jednym
 numerem płatniczym. Jedna faktura może należeć do maksymalnie 132 identyfikatorów zbiorczych
@@ -18,7 +19,10 @@ Wymagane jest **jedno z**: `InvoiceRead`, `InvoiceWrite`, `CollectiveIdentifierM
 | Faktury w jednym IZ | 500 |
 | IZ na jedną fakturę (w kontekście) | 132 |
 | Zakres `dateCreatedFrom`–`dateCreatedTo` | 100 dni |
-| `pageSize` | 10–200 (domyślnie 10) |
+| `pageSize` query / by-ksef | 10–200 (domyślnie 10) |
+| `pageSize` invoices | 10–500 (domyślnie 10) |
+| IZ w jednym `list_invoices` | 10 |
+| Rate limit grupy `collectiveIdentifier` | 20 / 120 / 240 |
 
 Kody błędów `generate`:
 
@@ -67,7 +71,8 @@ jest też zwracany w body odpowiedzi (`continuationToken`). Helpery `iter_query`
 
 SDK waliduje format `collective_identifier_number` oraz `ksef_number` przed wysłaniem
 żądania (`ValueError` przy niepoprawnym formacie/sumie kontrolnej). Dodatkowo fail-fast:
-liczba faktur 1–500, unikalne numery KSeF, zakres dat ≤ 100 dni, `pageSize` 10–200.
+liczba faktur 1–500, unikalne numery KSeF, zakres dat ≤ 100 dni, `pageSize` 10–200
+(query / by-ksef) albo 10–500 (`list_invoices`), maksymalnie 10 numerów IZ w `list_invoices`.
 
 CLI: `ksef iz generate|query|invoices|by-ksef`.
 
@@ -97,17 +102,17 @@ Convenience nad `query`. Daty `YYYY-MM-DD` są rozszerzane do początku/końca d
 
 Iterator po wszystkich stronach `query`.
 
-## `list_invoices(collective_identifier_number, access_token, page_size=None, continuation_token=None)`
+## `list_invoices(collective_identifier_numbers, access_token, page_size=None, continuation_token=None)`
 
-Endpoint: `GET /collective-identifiers/{collectiveIdentifierNumber}/invoices`.
+Endpoint: `POST /collective-identifiers/invoices`.
 
-Zwraca listę faktur wchodzących w skład wskazanego IZ.
+Zwraca listę faktur wchodzących w skład podanych IZ (1–10 numerów). Pojedynczy
+string jest akceptowany tak samo jak lista. Odpowiedź zawiera `collectiveIdentifierNumber`
+przy każdej fakturze. `pageSize` ma zakres 10–500.
 
-W KSeF API 2.7.0 jest to GET jednego numeru IZ. W 2.7.1 transport zmieni się na
-`POST /collective-identifiers/invoices` z listą IZ — sygnatura cienkiej metody SDK
-się zmieni, helper `iter_invoices` i CLI `ksef iz invoices --iz` zostaną.
+Od 2.7.1 transport to POST z listą IZ (w 2.7.0 był GET jednego numeru).
 
-## `iter_invoices(collective_identifier_number, access_token, page_size=None)`
+## `iter_invoices(collective_identifier_numbers, access_token, page_size=None)`
 
 Iterator po stronach `list_invoices`.
 

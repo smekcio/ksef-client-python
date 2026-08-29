@@ -113,6 +113,7 @@ Domyślnie `False`. Gdy `False`, blokowane są hosty IP prywatne/link-local/rese
 
 Opcjonalny callback `Callable[[str], None]` wywoływany, gdy KSeF zwróci nagłówek
 `X-System-Warning`. Nagłówek przenosi ostrzeżenia techniczne i nie oznacza błędu operacji.
+Na środowisku TEST można wymusić treść ostrzeżenia nagłówkiem `X-Test-System-Warning`.
 
 ## Przekazywanie `access_token`
 

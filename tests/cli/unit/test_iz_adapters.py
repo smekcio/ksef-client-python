@@ -184,6 +184,7 @@ def test_query_collective_identifiers_wraps_value_error(monkeypatch) -> None:
 
 def test_list_collective_identifier_invoices(monkeypatch) -> None:
     invoice = m.CollectiveIdentifierInvoicesQueryResponseItem(
+        collective_identifier_number=_IZ,
         details_hidden=False,
         ksef_number=_KSEF,
     )

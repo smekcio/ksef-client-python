@@ -5,6 +5,7 @@ from typing import Any
 
 from ..models import (
     CollectiveIdentifierInvoice,
+    CollectiveIdentifierInvoicesQueryRequest,
     CollectiveIdentifierInvoicesQueryResponse,
     CollectiveIdentifierInvoicesQueryResponseItem,
     CollectiveIdentifiersByKsefNumberQueryResponse,
@@ -16,10 +17,13 @@ from ..models import (
     GenerateCollectiveIdentifierResponse,
 )
 from ..utils.collective_identifier import (
+    PAGE_SIZE_INVOICES_MAX,
+    PAGE_SIZE_MAX,
     expand_query_date_bound,
     make_collective_identifier_invoice,
     require_collective_identifier_number,
     require_generate_invoices,
+    require_invoices_query_identifiers,
     require_page_size,
     require_query_date_range,
 )
@@ -30,9 +34,11 @@ from .base import AsyncBaseApiClient, BaseApiClient
 def _page_request(
     page_size: int | None,
     continuation_token: str | None,
+    *,
+    page_size_max: int = PAGE_SIZE_MAX,
 ) -> tuple[dict[str, Any] | None, dict[str, str] | None]:
     if page_size is not None:
-        page_size = require_page_size(page_size)
+        page_size = require_page_size(page_size, maximum=page_size_max)
     params: dict[str, Any] = {}
     if page_size is not None:
         params["pageSize"] = page_size
@@ -194,20 +200,25 @@ class CollectiveIdentifiersClient(BaseApiClient):
 
     def list_invoices(
         self,
-        collective_identifier_number: str,
+        collective_identifier_numbers: str | Sequence[str],
         *,
         access_token: str,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> CollectiveIdentifierInvoicesQueryResponse:
-        collective_identifier_number = require_collective_identifier_number(
-            collective_identifier_number
+        numbers = require_invoices_query_identifiers(collective_identifier_numbers)
+        params, headers = _page_request(
+            page_size,
+            continuation_token,
+            page_size_max=PAGE_SIZE_INVOICES_MAX,
         )
-        params, headers = _page_request(page_size, continuation_token)
         return self._request_model(
-            "GET",
-            f"/collective-identifiers/{collective_identifier_number}/invoices",
+            "POST",
+            "/collective-identifiers/invoices",
             response_model=CollectiveIdentifierInvoicesQueryResponse,
+            json=CollectiveIdentifierInvoicesQueryRequest(
+                collective_identifier_numbers=numbers,
+            ),
             params=params,
             headers=headers,
             access_token=access_token,
@@ -215,7 +226,7 @@ class CollectiveIdentifiersClient(BaseApiClient):
 
     def iter_invoices(
         self,
-        collective_identifier_number: str,
+        collective_identifier_numbers: str | Sequence[str],
         *,
         access_token: str,
         page_size: int | None = None,
@@ -224,7 +235,7 @@ class CollectiveIdentifiersClient(BaseApiClient):
         seen_tokens: set[str] = set()
         while True:
             response = self.list_invoices(
-                collective_identifier_number,
+                collective_identifier_numbers,
                 access_token=access_token,
                 page_size=page_size,
                 continuation_token=continuation_token,
@@ -378,20 +389,25 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
 
     async def list_invoices(
         self,
-        collective_identifier_number: str,
+        collective_identifier_numbers: str | Sequence[str],
         *,
         access_token: str,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> CollectiveIdentifierInvoicesQueryResponse:
-        collective_identifier_number = require_collective_identifier_number(
-            collective_identifier_number
+        numbers = require_invoices_query_identifiers(collective_identifier_numbers)
+        params, headers = _page_request(
+            page_size,
+            continuation_token,
+            page_size_max=PAGE_SIZE_INVOICES_MAX,
         )
-        params, headers = _page_request(page_size, continuation_token)
         return await self._request_model(
-            "GET",
-            f"/collective-identifiers/{collective_identifier_number}/invoices",
+            "POST",
+            "/collective-identifiers/invoices",
             response_model=CollectiveIdentifierInvoicesQueryResponse,
+            json=CollectiveIdentifierInvoicesQueryRequest(
+                collective_identifier_numbers=numbers,
+            ),
             params=params,
             headers=headers,
             access_token=access_token,
@@ -399,7 +415,7 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
 
     async def iter_invoices(
         self,
-        collective_identifier_number: str,
+        collective_identifier_numbers: str | Sequence[str],
         *,
         access_token: str,
         page_size: int | None = None,
@@ -408,7 +424,7 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         seen_tokens: set[str] = set()
         while True:
             response = await self.list_invoices(
-                collective_identifier_number,
+                collective_identifier_numbers,
                 access_token=access_token,
                 page_size=page_size,
                 continuation_token=continuation_token,

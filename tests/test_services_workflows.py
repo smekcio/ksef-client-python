@@ -122,6 +122,7 @@ def _package_part(url: str = "https://download") -> m.InvoicePackagePart:
 def _invoice_package(url: str = "https://download") -> m.InvoicePackage:
     return m.InvoicePackage.from_dict(
         {
+            "compressionType": "Zip",
             "invoiceCount": 1,
             "size": 1,
             "isTruncated": False,
@@ -133,6 +134,7 @@ def _invoice_package(url: str = "https://download") -> m.InvoicePackage:
 def _empty_invoice_package() -> m.InvoicePackage:
     return m.InvoicePackage.from_dict(
         {
+            "compressionType": "Zip",
             "invoiceCount": 0,
             "size": 0,
             "isTruncated": False,

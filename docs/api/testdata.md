@@ -89,7 +89,7 @@ Nowa data nie może być późniejsza niż obecna.
 
 Endpoint: `POST /testdata/limits/context/session`
 
-Ustawia limity sesji w kontekście testowym.
+Ustawia limity sesji w kontekście testowym, w tym `collectiveIdentifier.maxInvoices`.
 
 ### `reset_session_limits(access_token)`
 

@@ -4,7 +4,7 @@
 
 Endpoint: `GET /limits/context`
 
-Zwraca limity zależne od kontekstu (np. wysyłka/sesje).
+Zwraca limity zależne od kontekstu (sesje oraz `collectiveIdentifier.maxInvoices`).
 
 ## `get_subject_limits(access_token)`
 

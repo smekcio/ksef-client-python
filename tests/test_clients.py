@@ -522,7 +522,7 @@ class ClientsTests(unittest.TestCase):
             )
             self.assertEqual(
                 request_model.call_args_list[2].args[1],
-                "/collective-identifiers/1111111111-IZ202607-65ED02180000-E7/invoices",
+                "/collective-identifiers/invoices",
             )
             self.assertEqual(
                 request_model.call_args_list[3].args[1],

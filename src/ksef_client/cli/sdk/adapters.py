@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import calendar
 import json
 import time
 from collections.abc import Iterator
@@ -103,6 +102,9 @@ def _require_access_token(profile: str) -> str:
     return tokens[0]
 
 
+_INVOICE_QUERY_MAX_RANGE_DAYS = 100
+
+
 def _normalize_date_range(date_from: str | None, date_to: str | None) -> tuple[str, str]:
     def _parse_date(value: str, option_name: str) -> datetime:
         try:
@@ -134,23 +136,14 @@ def _normalize_date_range(date_from: str | None, date_to: str | None) -> tuple[s
             ExitCode.VALIDATION_ERROR,
             "--from must be earlier than or equal to --to.",
         )
-    max_to_dt = _add_months(from_dt, 3)
-    if to_dt.date() > max_to_dt.date():
+    if (to_dt.date() - from_dt.date()).days > _INVOICE_QUERY_MAX_RANGE_DAYS:
         raise CliError(
             "Date range exceeds KSeF limit.",
             ExitCode.VALIDATION_ERROR,
-            "Use a maximum range of 3 months between --from and --to.",
+            f"Use a maximum range of {_INVOICE_QUERY_MAX_RANGE_DAYS} days between --from and --to.",
         )
 
     return from_dt.isoformat().replace("+00:00", "Z"), to_dt.isoformat().replace("+00:00", "Z")
-
-
-def _add_months(value: datetime, months: int) -> datetime:
-    month_index = value.month - 1 + months
-    target_year = value.year + month_index // 12
-    target_month = month_index % 12 + 1
-    target_day = min(value.day, calendar.monthrange(target_year, target_month)[1])
-    return value.replace(year=target_year, month=target_month, day=target_day)
 
 
 def _require_invoice_query_page_size(value: int) -> int:
@@ -2069,32 +2062,26 @@ def list_collective_identifier_invoices(
             "Pass --iz at least once.",
         )
     access_token = _require_access_token(profile)
-    items: list[Any] = []
     try:
         with create_client(base_url, access_token=access_token) as client:
-            for iz_number in iz_numbers:
-                if fetch_all:
-                    page_items = list(
-                        client.collective_identifiers.iter_invoices(
-                            iz_number,
-                            access_token=access_token,
-                            page_size=page_size,
-                        )
-                    )
-                else:
-                    response = client.collective_identifiers.list_invoices(
-                        iz_number,
+            if fetch_all:
+                page_items = list(
+                    client.collective_identifiers.iter_invoices(
+                        iz_numbers,
                         access_token=access_token,
                         page_size=page_size,
                     )
-                    page_items = list(response.invoices)
-                for item in page_items:
-                    payload = _to_output_payload(item)
-                    if isinstance(payload, dict):
-                        payload["collectiveIdentifierNumber"] = iz_number
-                    items.append(payload)
+                )
+            else:
+                response = client.collective_identifiers.list_invoices(
+                    iz_numbers,
+                    access_token=access_token,
+                    page_size=page_size,
+                )
+                page_items = list(response.invoices)
     except ValueError as exc:
         _raise_iz_validation_error(exc)
+    items = [_to_output_payload(item) for item in page_items]
     return {"count": len(items), "items": items}
 
 

@@ -38,6 +38,7 @@ def _query_item(number: str = _IZ) -> m.CollectiveIdentifiersQueryResponseItem:
 
 def _invoice_item() -> m.CollectiveIdentifierInvoicesQueryResponseItem:
     return m.CollectiveIdentifierInvoicesQueryResponseItem(
+        collective_identifier_number=_IZ,
         details_hidden=False,
         ksef_number=_KSEF,
     )
@@ -94,10 +95,13 @@ class CollectiveIdentifierDomainTests(unittest.TestCase):
     def test_page_size_bounds(self) -> None:
         self.assertEqual(require_page_size(10), 10)
         self.assertEqual(require_page_size(200), 200)
+        self.assertEqual(require_page_size(500, maximum=500), 500)
         with self.assertRaises(ValueError):
             require_page_size(9)
         with self.assertRaises(ValueError):
             require_page_size(201)
+        with self.assertRaises(ValueError):
+            require_page_size(501, maximum=500)
 
     def test_factory_accepts_enum_currency_and_int_amount(self) -> None:
         item = make_collective_identifier_invoice(
@@ -173,20 +177,40 @@ class CollectiveIdentifiersClientTests(unittest.TestCase):
         self.assertEqual(payload.date_created_from, "2026-01-01T00:00:00Z")
         self.assertEqual(payload.date_created_to, "2026-01-31T23:59:59Z")
 
-    def test_list_invoices_uses_get_single_iz_path(self) -> None:
+    def test_list_invoices_posts_identifier_list(self) -> None:
         with patch.object(
             self.client, "_request_model", Mock(return_value=object())
         ) as request_model:
             self.client.list_invoices(_IZ, access_token="token", page_size=10)
-        self.assertEqual(request_model.call_args.args[0], "GET")
+        self.assertEqual(request_model.call_args.args[0], "POST")
+        self.assertEqual(request_model.call_args.args[1], "/collective-identifiers/invoices")
         self.assertEqual(
-            request_model.call_args.args[1],
-            f"/collective-identifiers/{_IZ}/invoices",
+            request_model.call_args.kwargs["json"].collective_identifier_numbers,
+            [_IZ],
         )
+
+    def test_list_invoices_rejects_empty_and_duplicate_identifiers(self) -> None:
+        with self.assertRaises(ValueError):
+            self.client.list_invoices([], access_token="token")
+        with self.assertRaises(ValueError):
+            self.client.list_invoices([_IZ, _IZ], access_token="token")
+
+    def test_list_invoices_rejects_more_than_ten_identifiers(self) -> None:
+        with self.assertRaises(ValueError):
+            self.client.list_invoices([_IZ] * 11, access_token="token")
+
+    def test_list_invoices_accepts_invoices_page_size(self) -> None:
+        with patch.object(
+            self.client, "_request_model", Mock(return_value=object())
+        ) as request_model:
+            self.client.list_invoices(_IZ, access_token="token", page_size=500)
+        self.assertEqual(request_model.call_args.kwargs["params"], {"pageSize": 500})
 
     def test_list_invoices_rejects_invalid_page_size(self) -> None:
         with self.assertRaises(ValueError):
             self.client.list_invoices(_IZ, access_token="token", page_size=5)
+        with self.assertRaises(ValueError):
+            self.client.list_invoices(_IZ, access_token="token", page_size=501)
 
     def test_iter_query_follows_token_and_stops_on_repeat(self) -> None:
         first = _query_item("1111111111-IZ202607-65ED02180000-E7")

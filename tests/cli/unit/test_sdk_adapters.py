@@ -151,7 +151,7 @@ def test_list_invoices_rejects_reverse_date_range(monkeypatch) -> None:
     assert exc.value.code == ExitCode.VALIDATION_ERROR
 
 
-def test_list_invoices_rejects_date_range_longer_than_3_months(monkeypatch) -> None:
+def test_list_invoices_rejects_date_range_longer_than_100_days(monkeypatch) -> None:
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
     monkeypatch.setattr(
         adapters,
@@ -164,7 +164,7 @@ def test_list_invoices_rejects_date_range_longer_than_3_months(monkeypatch) -> N
             profile="demo",
             base_url="https://example.invalid",
             date_from="2026-01-01",
-            date_to="2026-04-02",
+            date_to="2026-04-12",
             subject_type="Subject1",
             date_type="Issue",
             page_size=10,
@@ -173,7 +173,7 @@ def test_list_invoices_rejects_date_range_longer_than_3_months(monkeypatch) -> N
         )
 
     assert exc.value.code == ExitCode.VALIDATION_ERROR
-    assert "3 months" in (exc.value.hint or "")
+    assert "100 days" in (exc.value.hint or "")
 
 
 def test_list_invoices_accepts_date_range_exactly_3_months(monkeypatch) -> None:
@@ -2815,6 +2815,7 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
             return {
                 "status": {"code": 200, "description": "Done"},
                 "package": {
+                    "compressionType": "Zip",
                     "invoiceCount": 0,
                     "size": 0,
                     "isTruncated": False,
@@ -2910,6 +2911,7 @@ def test_run_export_only_metadata_success(monkeypatch, tmp_path) -> None:
             return {
                 "status": {"code": 200, "description": "Done"},
                 "package": {
+                    "compressionType": "Zip",
                     "invoiceCount": 0,
                     "size": 0,
                     "isTruncated": False,
@@ -3003,6 +3005,7 @@ def test_run_export_incremental_hwm_filters(monkeypatch, tmp_path) -> None:
             return {
                 "status": {"code": 200, "description": "Done"},
                 "package": {
+                    "compressionType": "Zip",
                     "invoiceCount": 0,
                     "size": 0,
                     "isTruncated": False,

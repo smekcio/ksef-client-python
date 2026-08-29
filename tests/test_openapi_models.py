@@ -57,6 +57,7 @@ class OpenApiModelsTests(unittest.TestCase):
 
     def test_invoice_package_roundtrip(self):
         payload = {
+            "compressionType": "Zip",
             "invoiceCount": 1,
             "size": 10,
             "isTruncated": False,

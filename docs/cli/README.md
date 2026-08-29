@@ -417,13 +417,13 @@ Zakres `--from/--to` nie moze przekraczac 100 dni.
 Usage: ksef iz invoices [OPTIONS]
 
 Options:
-  --iz TEXT             Collective identifier (repeatable).
-  --page-size INTEGER   [default: 10, min: 10, max: 200]
+  --iz TEXT             Collective identifier (repeatable, max 10).
+  --page-size INTEGER   [default: 10, min: 10, max: 500]
   --all                 Follow continuation tokens.
   --base-url TEXT
 ```
 
-W 2.7.0 kazde `--iz` to osobny GET. W 2.7.1 CLI zachowa te same flagi.
+Jedno żądanie `POST /collective-identifiers/invoices` dla wszystkich `--iz`.
 
 ## `ksef iz by-ksef`
 
@@ -456,7 +456,7 @@ Options:
 Uwagi:
 - bez `--subject-type` CLI agreguje wyniki dla wszystkich typów (`Subject1`, `Subject2`, `Subject3`, `SubjectAuthorized`),
 - podanie `--subject-type` zachowuje poprzednie, jawne filtrowanie do jednego kontekstu podmiotu.
-- zakres `--from/--to` nie moze przekraczac 3 miesiecy.
+- zakres `--from/--to` nie moze przekraczac 100 dni.
 
 Kontrakt `data` dla `ksef invoice list --json`:
 - `count`: liczba rekordow w biezacej stronie po filtracji,

@@ -19,10 +19,12 @@ COLLECTIVE_IDENTIFIER_PATTERN = re.compile(
 
 MAX_INVOICES_PER_IDENTIFIER = 500
 MAX_IDENTIFIERS_PER_INVOICE = 132
+MAX_IDENTIFIERS_PER_INVOICES_QUERY = 10
 MAX_QUERY_RANGE_DAYS = 100
 MAX_INVOICE_DESCRIPTION_LENGTH = 512
 PAGE_SIZE_MIN = 10
 PAGE_SIZE_MAX = 200
+PAGE_SIZE_INVOICES_MAX = 500
 
 COLLECTIVE_IDENTIFIER_EXCEPTION_CODES = {
     71001: "Invoice cannot be assigned to a collective identifier",
@@ -64,10 +66,35 @@ def require_collective_identifier_number(collective_identifier_number: str) -> s
     return collective_identifier_number
 
 
-def require_page_size(value: int) -> int:
-    if PAGE_SIZE_MIN <= value <= PAGE_SIZE_MAX:
+def require_page_size(value: int, *, maximum: int = PAGE_SIZE_MAX) -> int:
+    if PAGE_SIZE_MIN <= value <= maximum:
         return value
-    raise ValueError(f"page_size must be between {PAGE_SIZE_MIN} and {PAGE_SIZE_MAX}")
+    raise ValueError(f"page_size must be between {PAGE_SIZE_MIN} and {maximum}")
+
+
+def require_invoices_query_identifiers(
+    collective_identifier_numbers: str | Sequence[str],
+) -> list[str]:
+    if isinstance(collective_identifier_numbers, str):
+        numbers = [collective_identifier_numbers]
+    else:
+        numbers = list(collective_identifier_numbers)
+    if not numbers:
+        raise ValueError("At least one collective identifier number is required")
+    if len(numbers) > MAX_IDENTIFIERS_PER_INVOICES_QUERY:
+        raise ValueError(
+            "Cannot query more than "
+            f"{MAX_IDENTIFIERS_PER_INVOICES_QUERY} collective identifiers at once"
+        )
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for number in numbers:
+        number = require_collective_identifier_number(number)
+        if number in seen:
+            raise ValueError(f"Duplicate collective identifier number in invoices query: {number}")
+        seen.add(number)
+        normalized.append(number)
+    return normalized
 
 
 def require_query_date_range(date_from: str, date_to: str) -> tuple[str, str]:
