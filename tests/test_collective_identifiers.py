@@ -21,6 +21,7 @@ from ksef_client.utils.collective_identifier import (
 
 _KSEF = "5265877635-20250826-0100001AF629-AF"
 _KSEF_2 = "5265877635-20250827-0100001AF629-4A"
+_KSEF_OTHER_SELLER = "1111111111-20260612-6310EC800000-33"
 _IZ = "1111111111-IZ202607-65ED02180000-E7"
 
 
@@ -83,17 +84,41 @@ class CollectiveIdentifierDomainTests(unittest.TestCase):
             require_generate_invoices([_invoice()])
         with self.assertRaises(ValueError):
             require_generate_invoices([_invoice() for _ in range(MAX_INVOICES_PER_IDENTIFIER + 1)])
+        with self.assertRaisesRegex(ValueError, "more than 2 invoices"):
+            require_generate_invoices(
+                [_invoice(), _invoice(_KSEF_2), _invoice(_KSEF_OTHER_SELLER)],
+                max_invoices=2,
+            )
+
+    def test_require_generate_invoices_rejects_invalid_maximum(self) -> None:
+        with self.assertRaisesRegex(ValueError, "max_invoices must be between"):
+            require_generate_invoices([_invoice(), _invoice(_KSEF_2)], max_invoices=1)
+
+    def test_require_generate_invoices_requires_one_seller(self) -> None:
+        with self.assertRaisesRegex(ValueError, "same seller"):
+            require_generate_invoices([_invoice(), _invoice(_KSEF_OTHER_SELLER)])
 
     def test_require_generate_invoices_duplicates(self) -> None:
         with self.assertRaises(ValueError):
             require_generate_invoices([_invoice(), _invoice()])
 
     def test_query_date_range_limits(self) -> None:
-        require_query_date_range("2026-01-01", "2026-04-11")
+        require_query_date_range("2026-01-01T00:00:00Z", "2026-04-11T00:00:00Z")
+        require_query_date_range("2026-01-01", "2026-04-10")
         with self.assertRaises(ValueError):
             require_query_date_range("2026-04-11", "2026-01-01")
         with self.assertRaises(ValueError):
-            require_query_date_range("2026-01-01", "2026-04-12")
+            require_query_date_range("2026-01-01", "2026-04-11")
+        with self.assertRaises(ValueError):
+            require_query_date_range(
+                "2026-01-01T00:00:00Z",
+                "2026-04-11T00:00:00.000001Z",
+            )
+        with self.assertRaises(ValueError):
+            require_query_date_range(
+                "2026-01-01T00:00:00+14:00",
+                "2026-04-11T00:00:00-12:00",
+            )
 
     def test_page_size_bounds(self) -> None:
         self.assertEqual(require_page_size(10), 10)
@@ -119,6 +144,11 @@ class CollectiveIdentifierDomainTests(unittest.TestCase):
     def test_factory_rejects_invalid_amount(self) -> None:
         with self.assertRaises(ValueError):
             make_collective_identifier_invoice(_KSEF, amount="not-a-number", currency="PLN")
+
+    def test_factory_rejects_non_finite_amount(self) -> None:
+        for amount in ("NaN", "Infinity", "-Infinity", Decimal("1e10000")):
+            with self.subTest(amount=amount), self.assertRaises(ValueError):
+                make_collective_identifier_invoice(_KSEF, amount=amount, currency="PLN")
 
     def test_require_generate_invoices_rejects_long_description_on_model(self) -> None:
         invoice = m.CollectiveIdentifierInvoice(
@@ -153,6 +183,7 @@ class CollectiveIdentifiersClientTests(unittest.TestCase):
                 [_KSEF, _KSEF_2],
                 access_token="token",
                 descriptions=["batch", "other"],
+                max_invoices=2,
             )
         payload = request_model.call_args.kwargs["json"]
         self.assertIsInstance(payload, m.GenerateCollectiveIdentifierRequest)
@@ -178,7 +209,7 @@ class CollectiveIdentifiersClientTests(unittest.TestCase):
             )
         payload = request_model.call_args.kwargs["json"]
         self.assertEqual(payload.date_created_from, "2026-01-01T00:00:00Z")
-        self.assertEqual(payload.date_created_to, "2026-01-31T23:59:59Z")
+        self.assertEqual(payload.date_created_to, "2026-01-31T23:59:59.999999Z")
 
     def test_list_invoices_posts_identifier_list(self) -> None:
         with patch.object(
@@ -237,15 +268,44 @@ class CollectiveIdentifiersClientTests(unittest.TestCase):
         self.assertEqual(items, [first, second])
         self.assertEqual(query.call_count, 2)
 
+    def test_iter_query_can_start_from_continuation_token(self) -> None:
+        page = m.CollectiveIdentifiersQueryResponse(
+            collective_identifiers=[],
+            continuation_token=None,
+        )
+        request = m.CollectiveIdentifiersQueryRequest(
+            date_created_from="2026-01-01T00:00:00Z",
+            date_created_to="2026-01-31T23:59:59Z",
+        )
+        with patch.object(self.client, "query", Mock(return_value=page)) as query:
+            items = list(
+                self.client.iter_query(
+                    request,
+                    access_token="token",
+                    continuation_token="resume-token",
+                )
+            )
+        self.assertEqual(items, [])
+        self.assertEqual(query.call_args.kwargs["continuation_token"], "resume-token")
+
     def test_iter_invoices_stops_without_token(self) -> None:
         page = m.CollectiveIdentifierInvoicesQueryResponse(
             invoices=[_invoice_item()],
             continuation_token=None,
         )
-        with patch.object(self.client, "list_invoices", Mock(return_value=page)):
-            items = list(self.client.iter_invoices(_IZ, access_token="token"))
+        with patch.object(
+            self.client, "list_invoices", Mock(return_value=page)
+        ) as list_invoices:
+            items = list(
+                self.client.iter_invoices(
+                    _IZ,
+                    access_token="token",
+                    continuation_token="resume-invoices",
+                )
+            )
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].ksef_number, _KSEF)
+        self.assertEqual(list_invoices.call_args.kwargs["continuation_token"], "resume-invoices")
 
     def test_iter_invoices_stops_on_repeated_token(self) -> None:
         item = _invoice_item()
@@ -279,9 +339,18 @@ class CollectiveIdentifiersClientTests(unittest.TestCase):
                 continuation_token=None,
             ),
         ]
-        with patch.object(self.client, "list_by_ksef_number", Mock(side_effect=pages)):
-            items = list(self.client.iter_by_ksef_number(_KSEF, access_token="token"))
+        with patch.object(
+            self.client, "list_by_ksef_number", Mock(side_effect=pages)
+        ) as by_ksef:
+            items = list(
+                self.client.iter_by_ksef_number(
+                    _KSEF,
+                    access_token="token",
+                    continuation_token="resume-by-ksef",
+                )
+            )
         self.assertEqual(items, [item])
+        self.assertEqual(by_ksef.call_args_list[0].kwargs["continuation_token"], "resume-by-ksef")
 
     def test_query_validates_optional_collective_identifier(self) -> None:
         with self.assertRaises(ValueError):

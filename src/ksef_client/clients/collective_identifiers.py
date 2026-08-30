@@ -89,6 +89,7 @@ def _build_query_request(
 def _build_generate_request(
     ksef_numbers: Sequence[str],
     descriptions: Sequence[str | None] | None,
+    max_invoices: int | None,
 ) -> GenerateCollectiveIdentifierRequest:
     numbers = list(ksef_numbers)
     if descriptions is not None and len(descriptions) != len(numbers):
@@ -97,7 +98,9 @@ def _build_generate_request(
     for index, ksef_number in enumerate(numbers):
         description = None if descriptions is None else descriptions[index]
         invoices.append(make_collective_identifier_invoice(ksef_number, description=description))
-    return GenerateCollectiveIdentifierRequest(invoices=require_generate_invoices(invoices))
+    return GenerateCollectiveIdentifierRequest(
+        invoices=require_generate_invoices(invoices, max_invoices=max_invoices)
+    )
 
 
 class CollectiveIdentifiersClient(BaseApiClient):
@@ -106,8 +109,9 @@ class CollectiveIdentifiersClient(BaseApiClient):
         request_payload: GenerateCollectiveIdentifierRequest,
         *,
         access_token: str,
+        max_invoices: int | None = None,
     ) -> GenerateCollectiveIdentifierResponse:
-        require_generate_invoices(request_payload.invoices)
+        require_generate_invoices(request_payload.invoices, max_invoices=max_invoices)
         return self._request_model(
             "POST",
             "/collective-identifiers",
@@ -123,10 +127,12 @@ class CollectiveIdentifiersClient(BaseApiClient):
         *,
         access_token: str,
         descriptions: Sequence[str | None] | None = None,
+        max_invoices: int | None = None,
     ) -> GenerateCollectiveIdentifierResponse:
         return self.generate(
-            _build_generate_request(ksef_numbers, descriptions),
+            _build_generate_request(ksef_numbers, descriptions, max_invoices),
             access_token=access_token,
+            max_invoices=max_invoices,
         )
 
     def query(
@@ -182,9 +188,9 @@ class CollectiveIdentifiersClient(BaseApiClient):
         *,
         access_token: str,
         page_size: int | None = None,
+        continuation_token: str | None = None,
     ) -> Iterator[CollectiveIdentifiersQueryResponseItem]:
-        continuation_token: str | None = None
-        seen_tokens: set[str] = set()
+        seen_tokens: set[str] = {continuation_token} if continuation_token else set()
         while True:
             response = self.query(
                 request_payload,
@@ -230,9 +236,9 @@ class CollectiveIdentifiersClient(BaseApiClient):
         *,
         access_token: str,
         page_size: int | None = None,
+        continuation_token: str | None = None,
     ) -> Iterator[CollectiveIdentifierInvoicesQueryResponseItem]:
-        continuation_token: str | None = None
-        seen_tokens: set[str] = set()
+        seen_tokens: set[str] = {continuation_token} if continuation_token else set()
         while True:
             response = self.list_invoices(
                 collective_identifier_numbers,
@@ -271,9 +277,9 @@ class CollectiveIdentifiersClient(BaseApiClient):
         *,
         access_token: str,
         page_size: int | None = None,
+        continuation_token: str | None = None,
     ) -> Iterator[CollectiveIdentifiersByKsefNumberQueryResponseItem]:
-        continuation_token: str | None = None
-        seen_tokens: set[str] = set()
+        seen_tokens: set[str] = {continuation_token} if continuation_token else set()
         while True:
             response = self.list_by_ksef_number(
                 ksef_number,
@@ -294,8 +300,9 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         request_payload: GenerateCollectiveIdentifierRequest,
         *,
         access_token: str,
+        max_invoices: int | None = None,
     ) -> GenerateCollectiveIdentifierResponse:
-        require_generate_invoices(request_payload.invoices)
+        require_generate_invoices(request_payload.invoices, max_invoices=max_invoices)
         return await self._request_model(
             "POST",
             "/collective-identifiers",
@@ -311,10 +318,12 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         *,
         access_token: str,
         descriptions: Sequence[str | None] | None = None,
+        max_invoices: int | None = None,
     ) -> GenerateCollectiveIdentifierResponse:
         return await self.generate(
-            _build_generate_request(ksef_numbers, descriptions),
+            _build_generate_request(ksef_numbers, descriptions, max_invoices),
             access_token=access_token,
+            max_invoices=max_invoices,
         )
 
     async def query(
@@ -370,9 +379,9 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         *,
         access_token: str,
         page_size: int | None = None,
+        continuation_token: str | None = None,
     ) -> AsyncIterator[CollectiveIdentifiersQueryResponseItem]:
-        continuation_token: str | None = None
-        seen_tokens: set[str] = set()
+        seen_tokens: set[str] = {continuation_token} if continuation_token else set()
         while True:
             response = await self.query(
                 request_payload,
@@ -419,9 +428,9 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         *,
         access_token: str,
         page_size: int | None = None,
+        continuation_token: str | None = None,
     ) -> AsyncIterator[CollectiveIdentifierInvoicesQueryResponseItem]:
-        continuation_token: str | None = None
-        seen_tokens: set[str] = set()
+        seen_tokens: set[str] = {continuation_token} if continuation_token else set()
         while True:
             response = await self.list_invoices(
                 collective_identifier_numbers,
@@ -461,9 +470,9 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         *,
         access_token: str,
         page_size: int | None = None,
+        continuation_token: str | None = None,
     ) -> AsyncIterator[CollectiveIdentifiersByKsefNumberQueryResponseItem]:
-        continuation_token: str | None = None
-        seen_tokens: set[str] = set()
+        seen_tokens: set[str] = {continuation_token} if continuation_token else set()
         while True:
             response = await self.list_by_ksef_number(
                 ksef_number,

@@ -1977,6 +1977,7 @@ def generate_collective_identifier(
     base_url: str,
     ksef_numbers: list[str],
     from_file: str | None = None,
+    max_invoices: int | None = None,
 ) -> dict[str, Any]:
     numbers = list(ksef_numbers)
     if from_file:
@@ -1993,6 +1994,7 @@ def generate_collective_identifier(
             response = client.collective_identifiers.generate_for_ksef_numbers(
                 numbers,
                 access_token=access_token,
+                max_invoices=max_invoices,
             )
     except ValueError as exc:
         _raise_iz_validation_error(exc)
@@ -2008,6 +2010,7 @@ def query_collective_identifiers(
     collective_identifier_number: str | None = None,
     page_size: int,
     fetch_all: bool,
+    continuation_token: str | None = None,
 ) -> dict[str, Any]:
     access_token = _require_access_token(profile)
     request = m.CollectiveIdentifiersQueryRequest(
@@ -2023,6 +2026,7 @@ def query_collective_identifiers(
                         request,
                         access_token=access_token,
                         page_size=page_size,
+                        continuation_token=continuation_token,
                     )
                 )
                 return {
@@ -2034,6 +2038,7 @@ def query_collective_identifiers(
                 request,
                 access_token=access_token,
                 page_size=page_size,
+                continuation_token=continuation_token,
             )
     except ValueError as exc:
         _raise_iz_validation_error(exc)
@@ -2051,6 +2056,7 @@ def list_collective_identifier_invoices(
     iz_numbers: list[str],
     page_size: int,
     fetch_all: bool,
+    continuation_token: str | None = None,
 ) -> dict[str, Any]:
     if not iz_numbers:
         raise CliError(
@@ -2067,6 +2073,7 @@ def list_collective_identifier_invoices(
                         iz_numbers,
                         access_token=access_token,
                         page_size=page_size,
+                        continuation_token=continuation_token,
                     )
                 )
                 return {
@@ -2078,6 +2085,7 @@ def list_collective_identifier_invoices(
                 iz_numbers,
                 access_token=access_token,
                 page_size=page_size,
+                continuation_token=continuation_token,
             )
     except ValueError as exc:
         _raise_iz_validation_error(exc)
@@ -2095,6 +2103,7 @@ def list_collective_identifiers_by_ksef_number(
     ksef_number: str,
     page_size: int,
     fetch_all: bool,
+    continuation_token: str | None = None,
 ) -> dict[str, Any]:
     access_token = _require_access_token(profile)
     try:
@@ -2105,6 +2114,7 @@ def list_collective_identifiers_by_ksef_number(
                         ksef_number,
                         access_token=access_token,
                         page_size=page_size,
+                        continuation_token=continuation_token,
                     )
                 )
                 return {
@@ -2116,6 +2126,7 @@ def list_collective_identifiers_by_ksef_number(
                 ksef_number,
                 access_token=access_token,
                 page_size=page_size,
+                continuation_token=continuation_token,
             )
     except ValueError as exc:
         _raise_iz_validation_error(exc)
