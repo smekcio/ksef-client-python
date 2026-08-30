@@ -14,6 +14,8 @@
 
 ### Bug Fixes
 
+* **collective-identifiers:** validate context invoice limits, common seller, finite payment amounts,
+  precise UTC ranges, and resumable CLI pagination
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
 
 ## 0.17.0 (2026-08-29)

@@ -7,6 +7,7 @@ import typer
 
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 from ksef_client.utils.collective_identifier import (
+    MAX_INVOICES_PER_IDENTIFIER,
     PAGE_SIZE_INVOICES_MAX,
     PAGE_SIZE_MAX,
     PAGE_SIZE_MIN,
@@ -90,6 +91,13 @@ def iz_generate(
     from_file: Path | None = typer.Option(  # noqa: B008
         None, "--from-file", help="File with one KSeF number per line."
     ),
+    max_invoices: int | None = typer.Option(
+        None,
+        "--max-invoices",
+        min=2,
+        max=MAX_INVOICES_PER_IDENTIFIER,
+        help=f"Effective context limit for one identifier (2-{MAX_INVOICES_PER_IDENTIFIER}).",
+    ),
     base_url: str | None = typer.Option(
         None, "--base-url", help="Override KSeF base URL for this command."
     ),
@@ -104,6 +112,7 @@ def iz_generate(
             base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
             ksef_numbers=list(ksef_number or []),
             from_file=str(from_file) if from_file is not None else None,
+            max_invoices=max_invoices,
         )
     except Exception as exc:
         _render_error(ctx, "iz.generate", exc)
@@ -132,6 +141,9 @@ def iz_query(
     fetch_all: bool = typer.Option(
         False, "--all", help="Follow continuation tokens and return every page."
     ),
+    continuation_token: str | None = typer.Option(
+        None, "--continuation-token", help="Resume from a previous response token."
+    ),
     base_url: str | None = typer.Option(
         None, "--base-url", help="Override KSeF base URL for this command."
     ),
@@ -149,6 +161,7 @@ def iz_query(
             collective_identifier_number=iz_number,
             page_size=page_size,
             fetch_all=fetch_all,
+            continuation_token=continuation_token,
         )
     except Exception as exc:
         _render_error(ctx, "iz.query", exc)
@@ -175,6 +188,9 @@ def iz_invoices(
     fetch_all: bool = typer.Option(
         False, "--all", help="Follow continuation tokens and return every page."
     ),
+    continuation_token: str | None = typer.Option(
+        None, "--continuation-token", help="Resume from a previous response token."
+    ),
     base_url: str | None = typer.Option(
         None, "--base-url", help="Override KSeF base URL for this command."
     ),
@@ -190,6 +206,7 @@ def iz_invoices(
             iz_numbers=list(iz_number or []),
             page_size=page_size,
             fetch_all=fetch_all,
+            continuation_token=continuation_token,
         )
     except Exception as exc:
         _render_error(ctx, "iz.invoices", exc)
@@ -214,6 +231,9 @@ def iz_by_ksef(
     fetch_all: bool = typer.Option(
         False, "--all", help="Follow continuation tokens and return every page."
     ),
+    continuation_token: str | None = typer.Option(
+        None, "--continuation-token", help="Resume from a previous response token."
+    ),
     base_url: str | None = typer.Option(
         None, "--base-url", help="Override KSeF base URL for this command."
     ),
@@ -229,6 +249,7 @@ def iz_by_ksef(
             ksef_number=ksef_number,
             page_size=page_size,
             fetch_all=fetch_all,
+            continuation_token=continuation_token,
         )
     except Exception as exc:
         _render_error(ctx, "iz.by-ksef", exc)

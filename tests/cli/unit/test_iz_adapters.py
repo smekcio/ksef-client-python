@@ -37,8 +37,10 @@ def _patch_client(monkeypatch, collective) -> None:
 
 def test_generate_collective_identifier_success(monkeypatch) -> None:
     class _Collective:
-        def generate_for_ksef_numbers(self, numbers, *, access_token, descriptions=None):
-            _ = (access_token, descriptions)
+        def generate_for_ksef_numbers(
+            self, numbers, *, access_token, descriptions=None, max_invoices=None
+        ):
+            _ = (access_token, descriptions, max_invoices)
             assert numbers == [_KSEF]
             return m.GenerateCollectiveIdentifierResponse(collective_identifier_number=_IZ)
 
@@ -87,8 +89,10 @@ def test_generate_collective_identifier_from_file_and_empty_errors(
     numbers_file.write_text(f"{_KSEF}\n# skip\n", encoding="utf-8")
 
     class _Collective:
-        def generate_for_ksef_numbers(self, numbers, *, access_token, descriptions=None):
-            _ = (access_token, descriptions)
+        def generate_for_ksef_numbers(
+            self, numbers, *, access_token, descriptions=None, max_invoices=None
+        ):
+            _ = (access_token, descriptions, max_invoices)
             assert numbers == [_KSEF]
             return {"collectiveIdentifierNumber": _IZ}
 
@@ -104,8 +108,10 @@ def test_generate_collective_identifier_from_file_and_empty_errors(
 
 def test_generate_collective_identifier_wraps_value_error(monkeypatch) -> None:
     class _Collective:
-        def generate_for_ksef_numbers(self, numbers, *, access_token, descriptions=None):
-            _ = (numbers, access_token, descriptions)
+        def generate_for_ksef_numbers(
+            self, numbers, *, access_token, descriptions=None, max_invoices=None
+        ):
+            _ = (numbers, access_token, descriptions, max_invoices)
             raise ValueError("too many invoices")
 
     _patch_client(monkeypatch, _Collective())
@@ -120,6 +126,7 @@ def test_generate_collective_identifier_wraps_value_error(monkeypatch) -> None:
 
 
 def test_query_collective_identifiers_pages(monkeypatch) -> None:
+    seen: dict[str, object] = {}
     item = m.CollectiveIdentifiersQueryResponseItem(
         collective_identifier_number=_IZ,
         created_in_current_context=True,
@@ -128,12 +135,14 @@ def test_query_collective_identifiers_pages(monkeypatch) -> None:
     )
 
     class _Collective:
-        def iter_query(self, request, *, access_token, page_size=None):
+        def iter_query(self, request, *, access_token, page_size=None, continuation_token=None):
             _ = (request, access_token, page_size)
+            seen["iter_token"] = continuation_token
             yield item
 
-        def query(self, request, *, access_token, page_size=None):
+        def query(self, request, *, access_token, page_size=None, continuation_token=None):
             _ = (request, access_token, page_size)
+            seen["query_token"] = continuation_token
             return m.CollectiveIdentifiersQueryResponse(
                 collective_identifiers=[item],
                 continuation_token=None,
@@ -147,9 +156,11 @@ def test_query_collective_identifiers_pages(monkeypatch) -> None:
         date_to="2026-01-31",
         page_size=10,
         fetch_all=False,
+        continuation_token="resume-query",
     )
     assert paged["count"] == 1
     assert paged["continuation_token"] == ""
+    assert seen["query_token"] == "resume-query"
 
     all_pages = adapters.query_collective_identifiers(
         profile="demo",
@@ -159,15 +170,17 @@ def test_query_collective_identifiers_pages(monkeypatch) -> None:
         collective_identifier_number=_IZ,
         page_size=10,
         fetch_all=True,
+        continuation_token="resume-iterator",
     )
     assert all_pages["count"] == 1
     assert all_pages["continuation_token"] == ""
+    assert seen["iter_token"] == "resume-iterator"
 
 
 def test_query_collective_identifiers_wraps_value_error(monkeypatch) -> None:
     class _Collective:
-        def query(self, request, *, access_token, page_size=None):
-            _ = (request, access_token, page_size)
+        def query(self, request, *, access_token, page_size=None, continuation_token=None):
+            _ = (request, access_token, page_size, continuation_token)
             raise ValueError("range too wide")
 
     _patch_client(monkeypatch, _Collective())
@@ -184,6 +197,7 @@ def test_query_collective_identifiers_wraps_value_error(monkeypatch) -> None:
 
 
 def test_list_collective_identifier_invoices(monkeypatch) -> None:
+    seen: dict[str, object] = {}
     invoice = m.CollectiveIdentifierInvoicesQueryResponseItem(
         collective_identifier_number=_IZ,
         details_hidden=False,
@@ -191,15 +205,21 @@ def test_list_collective_identifier_invoices(monkeypatch) -> None:
     )
 
     class _Collective:
-        def list_invoices(self, iz_number, *, access_token, page_size=None):
+        def list_invoices(
+            self, iz_number, *, access_token, page_size=None, continuation_token=None
+        ):
             _ = (iz_number, access_token, page_size)
+            seen["list_token"] = continuation_token
             return m.CollectiveIdentifierInvoicesQueryResponse(
                 invoices=[invoice],
                 continuation_token="more",
             )
 
-        def iter_invoices(self, iz_number, *, access_token, page_size=None):
+        def iter_invoices(
+            self, iz_number, *, access_token, page_size=None, continuation_token=None
+        ):
             _ = (iz_number, access_token, page_size)
+            seen["iter_token"] = continuation_token
             yield invoice
             yield SimpleNamespace(ksef_number="raw")
 
@@ -220,10 +240,12 @@ def test_list_collective_identifier_invoices(monkeypatch) -> None:
         iz_numbers=[_IZ],
         page_size=10,
         fetch_all=False,
+        continuation_token="resume-invoices",
     )
     assert paged["count"] == 1
     assert paged["items"][0]["collectiveIdentifierNumber"] == _IZ
     assert paged["continuation_token"] == "more"
+    assert seen["list_token"] == "resume-invoices"
 
     all_pages = adapters.list_collective_identifier_invoices(
         profile="demo",
@@ -231,16 +253,20 @@ def test_list_collective_identifier_invoices(monkeypatch) -> None:
         iz_numbers=[_IZ],
         page_size=10,
         fetch_all=True,
+        continuation_token="resume-invoice-iterator",
     )
     assert all_pages["count"] == 2
     assert all_pages["items"][1] == SimpleNamespace(ksef_number="raw")
     assert all_pages["continuation_token"] == ""
+    assert seen["iter_token"] == "resume-invoice-iterator"
 
 
 def test_list_collective_identifier_invoices_rejects_more_than_10(monkeypatch) -> None:
     class _Collective:
-        def list_invoices(self, iz_number, *, access_token, page_size=None):
-            _ = (access_token, page_size)
+        def list_invoices(
+            self, iz_number, *, access_token, page_size=None, continuation_token=None
+        ):
+            _ = (access_token, page_size, continuation_token)
             require_invoices_query_identifiers(iz_number)
             raise AssertionError("should not call API")
 
@@ -259,8 +285,10 @@ def test_list_collective_identifier_invoices_rejects_more_than_10(monkeypatch) -
 
 def test_list_collective_identifier_invoices_wraps_value_error(monkeypatch) -> None:
     class _Collective:
-        def list_invoices(self, iz_number, *, access_token, page_size=None):
-            _ = (iz_number, access_token, page_size)
+        def list_invoices(
+            self, iz_number, *, access_token, page_size=None, continuation_token=None
+        ):
+            _ = (iz_number, access_token, page_size, continuation_token)
             raise ValueError("bad iz")
 
     _patch_client(monkeypatch, _Collective())
@@ -276,6 +304,7 @@ def test_list_collective_identifier_invoices_wraps_value_error(monkeypatch) -> N
 
 
 def test_list_collective_identifiers_by_ksef_number(monkeypatch) -> None:
+    seen: dict[str, object] = {}
     item = m.CollectiveIdentifiersByKsefNumberQueryResponseItem(
         collective_identifier_number=_IZ,
         created_in_current_context=True,
@@ -283,15 +312,21 @@ def test_list_collective_identifiers_by_ksef_number(monkeypatch) -> None:
     )
 
     class _Collective:
-        def list_by_ksef_number(self, ksef_number, *, access_token, page_size=None):
+        def list_by_ksef_number(
+            self, ksef_number, *, access_token, page_size=None, continuation_token=None
+        ):
             _ = (ksef_number, access_token, page_size)
+            seen["list_token"] = continuation_token
             return m.CollectiveIdentifiersByKsefNumberQueryResponse(
                 collective_identifiers=[item],
                 continuation_token="more",
             )
 
-        def iter_by_ksef_number(self, ksef_number, *, access_token, page_size=None):
+        def iter_by_ksef_number(
+            self, ksef_number, *, access_token, page_size=None, continuation_token=None
+        ):
             _ = (ksef_number, access_token, page_size)
+            seen["iter_token"] = continuation_token
             yield item
 
     _patch_client(monkeypatch, _Collective())
@@ -301,9 +336,11 @@ def test_list_collective_identifiers_by_ksef_number(monkeypatch) -> None:
         ksef_number=_KSEF,
         page_size=10,
         fetch_all=False,
+        continuation_token="resume-by-ksef",
     )
     assert paged["continuation_token"] == "more"
     assert paged["count"] == 1
+    assert seen["list_token"] == "resume-by-ksef"
 
     all_pages = adapters.list_collective_identifiers_by_ksef_number(
         profile="demo",
@@ -311,15 +348,19 @@ def test_list_collective_identifiers_by_ksef_number(monkeypatch) -> None:
         ksef_number=_KSEF,
         page_size=10,
         fetch_all=True,
+        continuation_token="resume-by-ksef-iterator",
     )
     assert all_pages["continuation_token"] == ""
     assert all_pages["count"] == 1
+    assert seen["iter_token"] == "resume-by-ksef-iterator"
 
 
 def test_list_collective_identifiers_by_ksef_number_wraps_value_error(monkeypatch) -> None:
     class _Collective:
-        def list_by_ksef_number(self, ksef_number, *, access_token, page_size=None):
-            _ = (ksef_number, access_token, page_size)
+        def list_by_ksef_number(
+            self, ksef_number, *, access_token, page_size=None, continuation_token=None
+        ):
+            _ = (ksef_number, access_token, page_size, continuation_token)
             raise ValueError("bad ksef")
 
     _patch_client(monkeypatch, _Collective())

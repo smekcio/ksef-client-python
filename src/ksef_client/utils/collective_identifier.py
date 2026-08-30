@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from ..models import (
@@ -14,10 +15,12 @@ from .ksef_number import ValidationResult, _crc8, require_ksef_number
 
 COLLECTIVE_IDENTIFIER_LENGTH = 35
 COLLECTIVE_IDENTIFIER_PATTERN = re.compile(
-    r"^(\d{10})-IZ(\d{4})(0[1-9]|1[0-2])-([0-9A-F]{12})-([0-9A-F]{2})$"
+    r"^([0-9]{10})-IZ([0-9]{4})(0[1-9]|1[0-2])-([0-9A-F]{12})-([0-9A-F]{2})$"
 )
 
-MAX_INVOICES_PER_IDENTIFIER = 500
+# The effective limit is context-dependent. This is the absolute upper bound
+# accepted by the API's context-limit override schema.
+MAX_INVOICES_PER_IDENTIFIER = 5000
 MIN_INVOICES_PER_IDENTIFIER = 2
 MAX_IDENTIFIERS_PER_INVOICE = 132
 MAX_IDENTIFIERS_PER_INVOICES_QUERY = 10
@@ -32,7 +35,7 @@ COLLECTIVE_IDENTIFIER_EXCEPTION_CODES = {
     71002: "Invoice is already assigned to the maximum number of collective identifiers",
 }
 
-_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATE_ONLY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
 
 def validate_collective_identifier_number(
@@ -103,8 +106,7 @@ def require_query_date_range(date_from: str, date_to: str) -> tuple[str, str]:
     parsed_to = _parse_query_datetime(date_to, field_name="dateCreatedTo")
     if parsed_from > parsed_to:
         raise ValueError("dateCreatedFrom must be earlier than or equal to dateCreatedTo")
-    span_days = (parsed_to.date() - parsed_from.date()).days
-    if span_days > MAX_QUERY_RANGE_DAYS:
+    if parsed_to - parsed_from > timedelta(days=MAX_QUERY_RANGE_DAYS):
         raise ValueError(
             f"Collective identifier query range cannot exceed {MAX_QUERY_RANGE_DAYS} days"
         )
@@ -113,7 +115,7 @@ def require_query_date_range(date_from: str, date_to: str) -> tuple[str, str]:
 
 def expand_query_date_bound(value: str, *, end_of_day: bool) -> str:
     if _DATE_ONLY_RE.match(value):
-        suffix = "T23:59:59Z" if end_of_day else "T00:00:00Z"
+        suffix = "T23:59:59.999999Z" if end_of_day else "T00:00:00Z"
         return f"{value}{suffix}"
     return value
 
@@ -140,6 +142,8 @@ def make_collective_identifier_invoice(
 
 def require_generate_invoices(
     invoices: Sequence[CollectiveIdentifierInvoice],
+    *,
+    max_invoices: int | None = None,
 ) -> list[CollectiveIdentifierInvoice]:
     items = list(invoices)
     count = len(items)
@@ -147,14 +151,34 @@ def require_generate_invoices(
         raise ValueError(
             f"Collective identifier requires at least {MIN_INVOICES_PER_IDENTIFIER} invoices"
         )
-    if count > MAX_INVOICES_PER_IDENTIFIER:
+    if max_invoices is not None and (
+        isinstance(max_invoices, bool)
+        or not isinstance(max_invoices, int)
+        or not MIN_INVOICES_PER_IDENTIFIER <= max_invoices <= MAX_INVOICES_PER_IDENTIFIER
+    ):
         raise ValueError(
-            f"Collective identifier cannot contain more than {MAX_INVOICES_PER_IDENTIFIER} invoices"
+            "max_invoices must be between "
+            f"{MIN_INVOICES_PER_IDENTIFIER} and {MAX_INVOICES_PER_IDENTIFIER}"
+        )
+    max_allowed = (
+        MAX_INVOICES_PER_IDENTIFIER if max_invoices is None else max_invoices
+    )
+    if count > max_allowed:
+        raise ValueError(
+            f"Collective identifier cannot contain more than {max_allowed} invoices"
         )
 
     seen: set[str] = set()
+    seller_nip: str | None = None
     for invoice in items:
         ksef_number = require_ksef_number(str(invoice.ksef_number))
+        invoice_seller_nip = ksef_number.split("-", 1)[0]
+        if seller_nip is None:
+            seller_nip = invoice_seller_nip
+        elif invoice_seller_nip != seller_nip:
+            raise ValueError(
+                "All invoices in a collective identifier must belong to the same seller"
+            )
         if ksef_number in seen:
             raise ValueError(
                 f"Duplicate KSeF number in collective identifier request: {ksef_number}"
@@ -179,11 +203,19 @@ def _build_payment(
         raise ValueError("payment amount and currency must be provided together")
     try:
         amount_decimal = amount if isinstance(amount, Decimal) else Decimal(str(amount))
-    except (InvalidOperation, ValueError) as exc:
+    except (InvalidOperation, TypeError, ValueError) as exc:
         raise ValueError("Invalid payment amount") from exc
+    if not amount_decimal.is_finite():
+        raise ValueError("Payment amount must be finite")
+    try:
+        amount_float = float(amount_decimal)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("Payment amount is outside the supported range") from exc
+    if not math.isfinite(amount_float):
+        raise ValueError("Payment amount is outside the supported range")
     currency_code = currency if isinstance(currency, CurrencyCode) else CurrencyCode(str(currency))
     return CollectiveIdentifierInvoicePayment(
-        amount=float(amount_decimal),
+        amount=amount_float,
         currency=currency_code,
     )
 
@@ -192,7 +224,8 @@ def _parse_query_datetime(value: str, *, field_name: str) -> datetime:
     if not value:
         raise ValueError(f"{field_name} is required")
     normalized = expand_query_date_bound(value, end_of_day=field_name == "dateCreatedTo")
-    normalized = normalized.replace("Z", "+00:00")
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError as exc:

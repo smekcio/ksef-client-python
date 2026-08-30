@@ -392,10 +392,12 @@ Usage: ksef iz generate [OPTIONS]
 Options:
   --ksef-number TEXT    Repeatable KSeF number.
   --from-file PATH      One KSeF number per line.
+  --max-invoices INTEGER  Effective context limit for one identifier (2-5000).
   --base-url TEXT
 ```
 
 `generate` wymaga co najmniej dwóch numerów KSeF (OpenAPI `minItems: 2`).
+`--max-invoices` pozwala przekazać efektywny limit z `/limits/context` i uzyskać fail-fast.
 
 ## `ksef iz query`
 
@@ -408,6 +410,7 @@ Options:
   --iz TEXT             Filter by collective identifier number.
   --page-size INTEGER   [default: 10, min: 10, max: 200]
   --all                 Follow continuation tokens.
+  --continuation-token TEXT  Resume from a previous response token.
   --base-url TEXT
 ```
 
@@ -422,6 +425,7 @@ Options:
   --iz TEXT             Collective identifier (repeatable, max 10).
   --page-size INTEGER   [default: 10, min: 10, max: 500]
   --all                 Follow continuation tokens.
+  --continuation-token TEXT  Resume from a previous response token.
   --base-url TEXT
 ```
 
@@ -436,6 +440,7 @@ Options:
   --ksef-number TEXT    [required]
   --page-size INTEGER   [default: 10, min: 10, max: 200]
   --all                 Follow continuation tokens.
+  --continuation-token TEXT  Resume from a previous response token.
   --base-url TEXT
 ```
 

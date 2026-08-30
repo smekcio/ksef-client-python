@@ -45,12 +45,15 @@ def test_iz_generate_two_numbers(runner, monkeypatch) -> None:
             _KSEF,
             "--ksef-number",
             _KSEF,
+            "--max-invoices",
+            "2",
         ],
     )
     assert result.exit_code == 0
     payload = _json_output(result.stdout)
     assert payload["data"]["collectiveIdentifierNumber"] == _IZ
     assert seen["ksef_numbers"] == [_KSEF, _KSEF]
+    assert seen["max_invoices"] == 2
 
 
 def test_iz_generate_from_file(runner, monkeypatch, tmp_path: Path) -> None:
@@ -92,11 +95,14 @@ def test_iz_query_all(runner, monkeypatch) -> None:
             "--to",
             "2026-01-31",
             "--all",
+            "--continuation-token",
+            "resume-query",
         ],
     )
     assert result.exit_code == 0
     assert seen["fetch_all"] is True
     assert seen["date_from"] == "2026-01-01"
+    assert seen["continuation_token"] == "resume-query"
     payload = _json_output(result.stdout)
     assert payload["data"]["count"] == 1
 
@@ -112,10 +118,21 @@ def test_iz_invoices_two_identifiers(runner, monkeypatch) -> None:
 
     result = runner.invoke(
         app,
-        ["--json", "iz", "invoices", "--iz", _IZ, "--iz", _IZ],
+        [
+            "--json",
+            "iz",
+            "invoices",
+            "--iz",
+            _IZ,
+            "--iz",
+            _IZ,
+            "--continuation-token",
+            "resume-invoices",
+        ],
     )
     assert result.exit_code == 0
     assert seen["iz_numbers"] == [_IZ, _IZ]
+    assert seen["continuation_token"] == "resume-invoices"
 
 
 def test_iz_by_ksef(runner, monkeypatch) -> None:
@@ -129,10 +146,19 @@ def test_iz_by_ksef(runner, monkeypatch) -> None:
 
     result = runner.invoke(
         app,
-        ["--json", "iz", "by-ksef", "--ksef-number", _KSEF],
+        [
+            "--json",
+            "iz",
+            "by-ksef",
+            "--ksef-number",
+            _KSEF,
+            "--continuation-token",
+            "resume-by-ksef",
+        ],
     )
     assert result.exit_code == 0
     assert seen["ksef_number"] == _KSEF
+    assert seen["continuation_token"] == "resume-by-ksef"
 
 
 def test_iz_generate_maps_validation_error(runner, monkeypatch) -> None:

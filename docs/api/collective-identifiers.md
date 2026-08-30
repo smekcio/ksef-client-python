@@ -3,7 +3,8 @@
 Obsługa identyfikatorów zbiorczych (IZ) wprowadzonych w KSeF API 2.7.0
 i zaktualizowanych w 2.7.1.
 
-IZ grupuje już wystawione faktury tego samego sprzedawcy (co najmniej 2 i do 500 numerów KSeF)
+IZ grupuje już wystawione faktury tego samego sprzedawcy (co najmniej 2 i do efektywnego limitu
+kontekstu; schema limitów dopuszcza zakres 2–5000 numerów KSeF)
 pod jednym numerem płatniczym. Jedna faktura może należeć do maksymalnie 132 identyfikatorów
 zbiorczych w ramach kontekstu.
 
@@ -16,9 +17,9 @@ Wymagane jest **jedno z**: `InvoiceRead`, `InvoiceWrite`, `CollectiveIdentifierM
 
 | Limit | Wartość |
 | --- | --- |
-| Faktury w jednym IZ | 2–500 (OpenAPI `minItems` / `maxItems`) |
+| Faktury w jednym IZ | co najmniej 2; efektywny limit `GET /limits/context` (`2–5000`) |
 | IZ na jedną fakturę (w kontekście) | 132 |
-| Zakres `dateCreatedFrom`–`dateCreatedTo` | 100 dni |
+| Zakres `dateCreatedFrom`–`dateCreatedTo` | maks. 100 dni czasu UTC |
 | `pageSize` query / by-ksef | 10–200 (domyślnie 10) |
 | `pageSize` invoices | 10–500 (domyślnie 10) |
 | IZ w jednym `list_invoices` | 10 |
@@ -34,8 +35,10 @@ Kody błędów `generate`:
 Stałe i mapowanie kodów: `ksef_client.utils.collective_identifier`
 (`MIN_INVOICES_PER_IDENTIFIER`, `MAX_INVOICES_PER_IDENTIFIER`, `COLLECTIVE_IDENTIFIER_EXCEPTION_CODES`).
 Błędy API nadal przychodzą jako `KsefApiError`.
-Górny limit 500 w `generate()` to limit schematu OpenAPI; efektywny limit kontekstu na TEST to
-`GET /limits/context` → `collective_identifier.max_invoices` (nadpisywany testdata).
+Efektywny limit kontekstu to `GET /limits/context` →
+`collective_identifier.max_invoices` (nadpisywany testdata). Można przekazać go do `generate()`
+lub `generate_for_ksef_numbers()` przez `max_invoices`, aby uzyskać fail-fast dla konkretnego
+kontekstu; bez tego SDK stosuje wyłącznie absolutny pułap 5000.
 
 ## Scenariusz
 
@@ -77,23 +80,25 @@ client.collective_identifiers.generate(
 
 Paginacja list: query `pageSize` oraz nagłówek `x-continuation-token`. Token kontynuacji
 jest też zwracany w body odpowiedzi (`continuationToken`). Helpery `iter_query`,
-`iter_invoices` i `iter_by_ksef_number` schodzą po stronach same.
+`iter_invoices` i `iter_by_ksef_number` schodzą po stronach same i przyjmują opcjonalny
+`continuation_token` do wznowienia od konkretnej strony.
 
 SDK waliduje format `collective_identifier_number` oraz `ksef_number` przed wysłaniem
 żądania (`ValueError` przy niepoprawnym formacie/sumie kontrolnej). Dodatkowo fail-fast:
-liczba faktur 2–500, unikalne numery KSeF, zakres dat ≤ 100 dni, `pageSize` 10–200
+liczba faktur co najmniej 2 i zgodność NIP-u sprzedawcy, unikalne numery KSeF, zakres dat ≤ 100 dni, `pageSize` 10–200
 (query / by-ksef) albo 10–500 (`list_invoices`), maksymalnie 10 numerów IZ w `list_invoices`.
 
 CLI: `ksef iz generate|query|invoices|by-ksef`.
 
-## `generate(request_payload, access_token)`
+## `generate(request_payload, access_token, max_invoices=None)`
 
 Endpoint: `POST /collective-identifiers` (`201`).
 
 Generuje identyfikator zbiorczy dla listy faktur (numery KSeF) tego samego sprzedawcy.
-OpenAPI wymaga co najmniej dwóch faktur (`minItems: 2`); górny limit schematu to 500.
+OpenAPI wymaga co najmniej dwóch faktur (`minItems: 2`). Efektywny limit liczby faktur zależy
+od kontekstu; opcjonalny `max_invoices` pozwala przekazać wartość z `/limits/context`.
 
-## `generate_for_ksef_numbers(ksef_numbers, access_token, descriptions=None)`
+## `generate_for_ksef_numbers(ksef_numbers, access_token, descriptions=None, max_invoices=None)`
 
 Składa `GenerateCollectiveIdentifierRequest` z numerów KSeF. Płatności zostaw przy
 `generate()` i `make_collective_identifier_invoice`.
@@ -107,9 +112,10 @@ wymagany w payloadzie, max 100 dni).
 
 ## `query_by_created_range(date_from, date_to, access_token, ...)`
 
-Convenience nad `query`. Daty `YYYY-MM-DD` są rozszerzane do początku/końca dnia UTC.
+Convenience nad `query`. Daty `YYYY-MM-DD` są rozszerzane do początku i końca dnia UTC
+(`23:59:59.999999Z`), a limit jest liczony po rzeczywistej normalizacji obu granic do UTC.
 
-## `iter_query(request_payload, access_token, page_size=None)`
+## `iter_query(request_payload, access_token, page_size=None, continuation_token=None)`
 
 Iterator po wszystkich stronach `query`.
 
@@ -123,7 +129,7 @@ przy każdej fakturze. `pageSize` ma zakres 10–500.
 
 Od 2.7.1 transport to POST z listą IZ (w 2.7.0 był GET jednego numeru).
 
-## `iter_invoices(collective_identifier_numbers, access_token, page_size=None)`
+## `iter_invoices(collective_identifier_numbers, access_token, page_size=None, continuation_token=None)`
 
 Iterator po stronach `list_invoices`.
 
@@ -133,6 +139,6 @@ Endpoint: `GET /collective-identifiers/ksef/{ksefNumber}`.
 
 Zwraca listę identyfikatorów zbiorczych powiązanych z podanym numerem KSeF.
 
-## `iter_by_ksef_number(ksef_number, access_token, page_size=None)`
+## `iter_by_ksef_number(ksef_number, access_token, page_size=None, continuation_token=None)`
 
 Iterator po stronach `list_by_ksef_number`.

@@ -5,7 +5,7 @@ oraz helpery domenowe używane przez `client.collective_identifiers`.
 
 ## Stałe
 
-- `MAX_INVOICES_PER_IDENTIFIER` (500)
+- `MAX_INVOICES_PER_IDENTIFIER` (5000, absolutny pułap limitu kontekstu)
 - `MIN_INVOICES_PER_IDENTIFIER` (2)
 - `MAX_IDENTIFIERS_PER_INVOICE` (132)
 - `MAX_IDENTIFIERS_PER_INVOICES_QUERY` (10)
@@ -32,9 +32,14 @@ Normalizuje jeden numer albo listę (1–10, unikalne).
 
 ## `require_query_date_range(date_from, date_to) -> tuple[str, str]`
 
-## `require_generate_invoices(invoices) -> list`
+Wymaga poprawnych granic ISO 8601, normalizuje je do UTC na potrzeby walidacji i odrzuca
+zakres dłuższy niż 100 dni rzeczywistego czasu. Data bez godziny oznacza początek albo koniec
+dnia (`00:00:00Z` / `23:59:59.999999Z`).
 
-Fail-fast: co najmniej 2 i najwyżej 500 unikalnych numerów KSeF.
+## `require_generate_invoices(invoices, *, max_invoices=None) -> list`
+
+Fail-fast: co najmniej 2, najwyżej 5000 oraz unikalne numery KSeF należące do tego samego
+sprzedawcy. `max_invoices` pozwala przekazać niższy efektywny limit z `/limits/context`.
 
 ## `make_collective_identifier_invoice(ksef_number, *, description=None, amount=None, currency=None)`
 
