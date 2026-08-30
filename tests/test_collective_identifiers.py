@@ -150,6 +150,12 @@ class CollectiveIdentifierDomainTests(unittest.TestCase):
             with self.subTest(amount=amount), self.assertRaises(ValueError):
                 make_collective_identifier_invoice(_KSEF, amount=amount, currency="PLN")
 
+    def test_factory_rejects_amount_conversion_error(self) -> None:
+        with patch("builtins.float", side_effect=OverflowError), self.assertRaisesRegex(
+            ValueError, "outside the supported range"
+        ):
+            make_collective_identifier_invoice(_KSEF, amount="1.00", currency="PLN")
+
     def test_require_generate_invoices_rejects_long_description_on_model(self) -> None:
         invoice = m.CollectiveIdentifierInvoice(
             ksef_number=_KSEF,
