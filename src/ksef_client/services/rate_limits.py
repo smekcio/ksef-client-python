@@ -94,8 +94,18 @@ def iter_rate_limits(limits: EffectiveApiRateLimits) -> list[RateLimitInfo]:
 def get_rate_limit(
     limits: EffectiveApiRateLimits, group: RateLimitGroup | str
 ) -> RateLimitInfo | None:
-    """Zwraca limit dla wskazanej grupy albo ``None``, gdy grupa nie występuje."""
-    resolved = group if isinstance(group, RateLimitGroup) else RateLimitGroup(str(group))
+    """Zwraca limit dla wskazanej grupy albo ``None``, gdy grupa nie występuje.
+
+    Nieznana nazwa grupy również zwraca ``None`` — sygnatura ``| None`` oznacza
+    „brak danych", a nie „błąd programisty", więc nie podnosimy wyjątku.
+    """
+    if isinstance(group, RateLimitGroup):
+        resolved = group
+    else:
+        try:
+            resolved = RateLimitGroup(str(group))
+        except ValueError:
+            return None
     values = getattr(limits, _attribute_name(resolved), None)
     if not isinstance(values, EffectiveApiRateLimitValues):
         return None

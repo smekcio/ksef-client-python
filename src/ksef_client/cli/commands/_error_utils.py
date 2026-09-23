@@ -10,40 +10,46 @@ _EXCEPTION_CODE_HINTS: dict[int, str] = {
         "Sesja jest tymczasowo niedostępna. Otwórz nową sesję i kontynuuj wysyłkę "
         "pozostałych faktur (KSeF API 2.8.0)."
     ),
-    21180: "Status sesji nie pozwala na wykonanie operacji - sprawdź stan sesji.",
 }
 
 
 def _extract_exception_codes(problem: Any) -> list[int]:
-    """Wyciąga kody wyjątków KSeF z odpowiedzi (pojedynczy lub lista)."""
+    """Wyciąga kody błędów KSeF z odpowiedzi.
+
+    Obsługuje oba kształty zwracane przez API:
+
+    - styl wyjątkowy: ``exception.exceptionDetailList[].exceptionCode``,
+    - styl Problem Details (400/429/410): ``errors[].code``.
+    """
     if problem is None:
         return []
 
     candidates: list[Any] = []
+
+    def _collect_detail_list(items: Any, key: str) -> None:
+        if not isinstance(items, list):
+            return
+        for item in items:
+            if isinstance(item, dict):
+                candidates.append(item.get(key))
+            else:
+                candidates.append(getattr(item, _snake(key), None))
+
     exception = getattr(problem, "exception", None)
     if exception is not None:
-        details = getattr(exception, "exception_detail_list", None)
-        if details is None and isinstance(exception, dict):
-            details = exception.get("exceptionDetailList")
-        if isinstance(details, list):
-            candidates.extend(
-                getattr(item, "exception_code", None)
-                if not isinstance(item, dict)
-                else item.get("exceptionCode")
-                for item in details
-            )
+        _collect_detail_list(
+            getattr(exception, "exception_detail_list", None), "exceptionCode"
+        )
+    if not candidates:
+        _collect_detail_list(getattr(problem, "errors", None), "code")
 
     raw = getattr(problem, "raw", None)
     if isinstance(raw, dict):
         exception_raw = raw.get("exception")
         if isinstance(exception_raw, dict):
-            details = exception_raw.get("exceptionDetailList")
-            if isinstance(details, list):
-                candidates.extend(
-                    item.get("exceptionCode")
-                    for item in details
-                    if isinstance(item, dict)
-                )
+            _collect_detail_list(exception_raw.get("exceptionDetailList"), "exceptionCode")
+        if not candidates:
+            _collect_detail_list(raw.get("errors"), "code")
 
     codes: list[int] = []
     for value in candidates:
@@ -52,6 +58,12 @@ def _extract_exception_codes(problem: Any) -> list[int]:
         except (TypeError, ValueError):
             continue
     return codes
+
+
+def _snake(name: str) -> str:
+    import re
+
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower()
 
 
 def _problem_value(problem: Any, attr_name: str, *, raw_key: str | None = None) -> Any:

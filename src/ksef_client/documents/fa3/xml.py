@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import re
+import warnings
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from importlib import resources
@@ -47,7 +47,28 @@ FA3_NAMESPACE = "http://crd.gov.pl/wzor/2025/06/25/13775/"
 ETD_NAMESPACE = "http://crd.gov.pl/xml/schematy/dziedzinowe/mf/2022/01/05/eD/DefinicjeTypy/"
 XSI_NAMESPACE = "http://www.w3.org/2001/XMLSchema-instance"
 
-_KOD_WALUTY_TAG = f"{{{FA3_NAMESPACE}}}KodWaluty"
+KOD_WALUTY_LOCAL_NAME = "KodWaluty"
+
+
+def _iter_currency_codes(xml: bytes | str) -> list[str]:
+    """Zwraca kody walut z elementów `KodWaluty` niezależnie od prefiksu namespace.
+
+    Parsowanie przez `ElementTree` zamiast wyrażenia regularnego jest konieczne:
+    regex gubi `<x:KodWaluty>`, `<KodWaluty >` i inne poprawne warianty XML,
+    a `validate_fa3_xml_xsd` jest publicznym API przyjmującym dowolny dokument.
+    """
+    try:
+        root = ET.fromstring(xml if isinstance(xml, bytes) else xml.encode("utf-8"))
+    except ET.ParseError:
+        # Dokument nieparsowalny - walidacja XSD zgłosi właściwy błąd.
+        return []
+
+    codes: list[str] = []
+    for element in root.iter():
+        local_name = element.tag.rsplit("}", 1)[-1] if isinstance(element.tag, str) else ""
+        if local_name == KOD_WALUTY_LOCAL_NAME and element.text:
+            codes.append(element.text.strip())
+    return codes
 
 
 def _preflight_currency_check(xml: bytes | str) -> None:
@@ -56,14 +77,30 @@ def _preflight_currency_check(xml: bytes | str) -> None:
     Bez tego użytkownik dostaje ``SCHEMAV_CVC_ENUMERATION_VALID``, który nie mówi,
     że przyczyną jest rozjazd słowników po stronie KSeF.
     """
-    text = xml.decode("utf-8", "replace") if isinstance(xml, bytes) else xml
-    for code in set(re.findall(r"<KodWaluty>([A-Za-z]{3})</KodWaluty>", text)):
+    for code in dict.fromkeys(_iter_currency_codes(xml)):
         try:
             validate_fa3_currency(code)
         except Fa3CurrencyMismatchError as exc:
-            raise FA3XmlValidationError(
-                f"{exc} Schemat: {FA3_SCHEMA_FILE}."
-            ) from exc
+            raise FA3XmlValidationError(f"{exc} Schemat: {FA3_SCHEMA_FILE}.") from exc
+
+
+def _warn_unsupported_currencies(xml: bytes | str) -> None:
+    """Ostrzega o rozjeździe walut, gdy walidacja XSD nie została uruchomiona.
+
+    Wariant domyślny (`xsd_validate=False`) nie sprawdza schematu, więc faktura
+    w walucie odrzucanej przez FA(3) przeszłaby bez sygnału i zostałaby odrzucona
+    dopiero przez KSeF. Ostrzeżenie nie zmienia zachowania, ale ujawnia problem.
+    """
+    for code in dict.fromkeys(_iter_currency_codes(xml)):
+        try:
+            validate_fa3_currency(code)
+        except Fa3CurrencyMismatchError as exc:
+            warnings.warn(
+                f"{exc} Dokument nie został zwalidowany względem schematu FA(3) "
+                f"(xsd_validate=False), ale KSeF odrzuci taką fakturę.",
+                UserWarning,
+                stacklevel=3,
+            )
 
 
 class FA3XmlValidationError(ValueError):
@@ -97,6 +134,8 @@ def draft_to_xml(
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     if xsd_validate:
         validate_fa3_xml_xsd(xml)
+    else:
+        _warn_unsupported_currencies(xml)
     return xml
 
 
@@ -135,6 +174,8 @@ def invoice_to_xml(
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     if xsd_validate:
         validate_fa3_xml_xsd(xml)
+    else:
+        _warn_unsupported_currencies(xml)
     return xml
 
 
@@ -155,7 +196,11 @@ def validate_fa3_xml_xsd(xml: bytes | str) -> None:
     schema_package = resources.files("ksef_client.documents.fa3.schemas")
     with resources.as_file(schema_package / "schemat_FA(3)_v1-0E.xsd") as schema_path:
         schema = etree.XMLSchema(etree.parse(str(schema_path), parser))
-    document = etree.fromstring(xml.encode("utf-8") if isinstance(xml, str) else xml)
+    try:
+        document = etree.fromstring(xml.encode("utf-8") if isinstance(xml, str) else xml)
+    except etree.XMLSyntaxError as exc:
+        # Dokument nieparsowalny to też błąd walidacji - nie przeciekamy wyjątku lxml.
+        raise FA3XmlValidationError(f"Nieprawidłowy XML: {exc}") from exc
     if not schema.validate(document):
         error = schema.error_log.last_error
         detail = str(error) if error is not None else "nieznany błąd walidacji XSD"

@@ -90,3 +90,29 @@ def test_session_close_groups_constant_matches_enum() -> None:
         RateLimitGroup.ONLINE_SESSION_CLOSE,
         RateLimitGroup.BATCH_SESSION_CLOSE,
     } == SESSION_CLOSE_GROUPS
+
+
+def test_get_rate_limit_returns_none_for_unknown_group(
+    effective_limits: m.EffectiveApiRateLimits,
+) -> None:
+    """Sygnatura `| None` oznacza brak danych, więc nieznana grupa nie podnosi wyjątku."""
+    assert get_rate_limit(effective_limits, "nieistniejacaGrupa") is None
+    assert get_rate_limit(effective_limits, "InVoIcE sEnD") is None
+
+
+def test_get_rate_limit_returns_none_when_group_absent() -> None:
+    """Model bez danej grupy nie może wywalić odczytu.
+
+    Kontrakt 2.8.x oznacza wszystkie 17 grup jako wymagane, więc obiekt bez
+    grupy budujemy przez obejście walidacji konstruktora — sprawdzamy odporność
+    `get_rate_limit` na kształt, który może pojawić się przy zmianie kontraktu.
+    """
+    spec = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    properties = spec["components"]["schemas"]["EffectiveApiRateLimits"]["properties"]
+    full = {key: dict(_LIMIT) for key in properties}
+    limits = m.EffectiveApiRateLimits.from_dict(full)
+    object.__setattr__(limits, "invoice_send", None)
+
+    assert get_rate_limit(limits, RateLimitGroup.INVOICE_SEND) is None
+    assert get_rate_limit(limits, RateLimitGroup.OTHER) is not None
+    assert RateLimitGroup.INVOICE_SEND not in {info.group for info in iter_rate_limits(limits)}

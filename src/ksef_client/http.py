@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import math
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -159,6 +159,74 @@ def _has_required_types(body: dict[str, Any], expected: dict[str, type]) -> bool
     return True
 
 
+def _fill_missing_required_fields(model_cls: type, payload: dict[str, Any]) -> dict[str, Any]:
+    """Uzupełnia brakujące pola wymagane, żeby `from_dict` nie wywalił się na `TypeError`.
+
+    Kontrakt KSeF oznacza `timestamp` i `traceId` jako wymagane w modelach
+    Problem Details, ale API nie przysyła ich w każdej odpowiedzi 400/429/410.
+    Modele generowane z OpenAPI mają te pola bez wartości domyślnych, więc
+    `from_dict` kończy się `TypeError`, `_parse_api_problem` go połyka i poprawna
+    odpowiedź degraduje się do `UnknownApiProblem` — użytkownik traci typowane
+    `errors[]` i `instance`.
+
+    Brakujące pola uzupełniamy wartościami neutralnymi **tylko w warstwie odczytu
+    odpowiedzi**; pliki generowane pozostają wierne kontraktowi.
+    """
+    type_map = getattr(model_cls, "__dataclass_fields__", {})
+    filled = dict(payload)
+    for field_name, model_field in type_map.items():
+        json_key = model_field.metadata.get("json_key", field_name)
+        if json_key in filled:
+            continue
+        if model_field.default is not MISSING or model_field.default_factory is not MISSING:
+            continue
+        annotation = str(model_field.type)
+        filled[json_key] = "" if ("str" in annotation) else 0
+    return filled
+
+
+def _from_dict_lenient(model_cls: type, payload: dict[str, Any]) -> Any:
+    """Deserializuje payload, tolerując brak pól wymaganych przez kontrakt OpenAPI."""
+    try:
+        return model_cls.from_dict(payload)  # type: ignore[attr-defined]
+    except TypeError:
+        return model_cls.from_dict(  # type: ignore[attr-defined]
+            _fill_missing_required_fields(model_cls, payload)
+        )
+
+
+# Kontrakt KSeF oznacza `traceId`/`timestamp` jako wymagane w modelach Problem Details,
+# ale API ich nie zawsze przysyła. Deserializacja do modelu szczegółowego wywala się
+# wtedy na brakującym argumencie i poprawna odpowiedź 400/429/410 degraduje się do
+# `UnknownApiProblem`, tracąc typowane `errors[]` i `instance`. Dlatego sprawdzamy
+# tylko pola faktycznie potrzebne, a nie całą listę `required` z OpenAPI.
+_BAD_REQUEST_REQUIRED_TYPES: dict[str, type] = {
+    "detail": str,
+    "errors": list,
+    "instance": str,
+    "status": int,
+    "title": str,
+}
+_GONE_REQUIRED_TYPES: dict[str, type] = {
+    "detail": str,
+    "instance": str,
+    "status": int,
+    "title": str,
+}
+_TOO_MANY_REQUESTS_REQUIRED_TYPES: dict[str, type] = _GONE_REQUIRED_TYPES
+_FORBIDDEN_REQUIRED_TYPES: dict[str, type] = {
+    "detail": str,
+    "reasonCode": str,
+    "status": int,
+    "title": str,
+}
+_UNAUTHORIZED_REQUIRED_TYPES: dict[str, type] = {
+    "detail": str,
+    "status": int,
+    "title": str,
+}
+
+
 def _parse_api_problem(status_code: int, body: Any) -> Any | None:
     if not isinstance(body, dict):
         return None
@@ -166,21 +234,19 @@ def _parse_api_problem(status_code: int, body: Any) -> Any | None:
     try:
         if "exception" in body:
             return ExceptionResponse.from_dict(body)
-        if status_code == 400 and "errors" in body:
-            return BadRequestProblemDetails.from_dict(body)
+        if status_code == 400 and _has_required_types(body, _BAD_REQUEST_REQUIRED_TYPES):
+            return _from_dict_lenient(BadRequestProblemDetails, body)
         if status_code == 429:
             if isinstance(body.get("status"), dict):
                 return TooManyRequestsResponse.from_dict(body)
-            if _looks_like_problem_details(body):
-                return TooManyRequestsProblemDetails.from_dict(body)
-        if status_code == 410 and _looks_like_problem_details(body):
-            return GoneProblemDetails.from_dict(body)
-        if status_code == 401:
-            return UnauthorizedProblemDetails.from_dict(body)
-        if status_code == 403 and _has_required_types(
-            body, {"reasonCode": str, "detail": str, "status": int, "title": str}
-        ):
-            return ForbiddenProblemDetails.from_dict(body)
+            if _has_required_types(body, _TOO_MANY_REQUESTS_REQUIRED_TYPES):
+                return _from_dict_lenient(TooManyRequestsProblemDetails, body)
+        if status_code == 410 and _has_required_types(body, _GONE_REQUIRED_TYPES):
+            return _from_dict_lenient(GoneProblemDetails, body)
+        if status_code == 401 and _has_required_types(body, _UNAUTHORIZED_REQUIRED_TYPES):
+            return _from_dict_lenient(UnauthorizedProblemDetails, body)
+        if status_code == 403 and _has_required_types(body, _FORBIDDEN_REQUIRED_TYPES):
+            return _from_dict_lenient(ForbiddenProblemDetails, body)
     except (TypeError, ValueError, KeyError):
         pass
 

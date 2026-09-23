@@ -17,7 +17,10 @@ from ksef_client.cli.commands import (
     send_cmd,
     upo_cmd,
 )
-from ksef_client.cli.commands._error_utils import build_problem_hint
+from ksef_client.cli.commands._error_utils import (
+    _extract_exception_codes,
+    build_problem_hint,
+)
 from ksef_client.cli.context import CliContext
 from ksef_client.cli.exit_codes import ExitCode
 from ksef_client.exceptions import KsefApiError, KsefRateLimitError
@@ -211,3 +214,44 @@ def test_build_problem_hint_without_known_code_keeps_default() -> None:
     hint = build_problem_hint(problem, default_hint="Wait and retry.")
 
     assert hint is None or "[99999]" not in hint
+
+
+def test_extract_exception_codes_reads_problem_details_errors() -> None:
+    """Kody w stylu Problem Details siedzą w `errors[].code`, nie w `exceptionDetailList`."""
+    problem = m.BadRequestProblemDetails.from_dict(
+        {
+            "title": "Bad Request",
+            "status": 400,
+            "detail": "Blad walidacji",
+            "instance": "/x",
+            "timestamp": "2026-09-23T00:00:00Z",
+            "traceId": "trace-400",
+            "errors": [{"code": 21405, "description": "Blad walidacji danych wejsciowych"}],
+        }
+    )
+
+    assert _extract_exception_codes(problem) == [21405]
+
+
+def test_extract_exception_codes_prefers_exception_style() -> None:
+    problem = m.ExceptionResponse.from_dict(
+        {
+            "exception": {
+                "serviceCode": "00-1E",
+                "serviceName": "Sesja",
+                "exceptionDetailList": [{"exceptionCode": 21184, "exceptionDescription": "x"}],
+            }
+        }
+    )
+
+    assert _extract_exception_codes(problem) == [21184]
+
+
+def test_extract_exception_codes_handles_missing_problem() -> None:
+    assert _extract_exception_codes(None) == []
+
+
+def test_extract_exception_codes_reads_from_raw_payload() -> None:
+    problem = SimpleNamespace(raw={"errors": [{"code": "21418"}]})
+
+    assert _extract_exception_codes(problem) == [21418]

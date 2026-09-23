@@ -37,12 +37,6 @@ COLLECTIVE_IDENTIFIER_EXCEPTION_CODES = {
     71005: "Duplicated KSeF number in the request",
 }
 
-# Kody błędów sesji wysyłki istotne dla logiki ponawiania (KSeF API 2.8.0+).
-SESSION_EXCEPTION_CODES = {
-    21180: "Session status does not allow the operation",
-    21184: "Session temporarily unavailable - open a new session and continue sending",
-}
-
 _DATE_ONLY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
 
