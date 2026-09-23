@@ -211,3 +211,31 @@ def test_neutral_value_matches_annotation_type() -> None:
     assert _neutral_value("str | None") == ""
     # Nieznany typ zagniezdzonego modelu nie jest zgadywany.
     assert _neutral_value("ApiError") is None
+
+
+@pytest.mark.parametrize(
+    ("annotation", "expected"),
+    [
+        ("Optional[Optional[str]]", ""),
+        ("Optional[Optional[int]]", 0),
+        ("Optional[Optional[list[ApiError]]]", []),
+        ("Optional[str | None]", ""),
+        ("Optional[dict[str, str | None]]", {}),
+        ("list[str | None]", []),
+        ("dict[str, str | None]", {}),
+        ("Optional[Optional[Optional[bool]]]", False),
+    ],
+)
+def test_neutral_value_unwraps_nested_optional(annotation: str, expected: object) -> None:
+    """Zagnieżdżone `Optional`/`| None` muszą być rozwijane, nie kończyć jako `None`."""
+    from ksef_client.http import _neutral_value
+
+    assert _neutral_value(annotation) == expected
+
+
+def test_neutral_value_terminates_for_unknown_types() -> None:
+    """Rozwijanie nie może się zapętlić na nietypowych adnotacjach."""
+    from ksef_client.http import _neutral_value
+
+    for annotation in ["None", "Any", "object", "ApiError", "tuple[int, str]", ""]:
+        assert _neutral_value(annotation) is None

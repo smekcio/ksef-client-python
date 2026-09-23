@@ -53,11 +53,18 @@ def _extract_exception_codes(problem: Any) -> list[int]:
             _collect_detail_list(raw.get("errors"), "code")
 
     codes: list[int] = []
+    seen: set[int] = set()
     for value in candidates:
         try:
-            codes.append(int(value))
+            code = int(value)
         except (TypeError, ValueError):
             continue
+        # Błąd wsadowy może zawierać wiele pozycji z tym samym kodem; bez deduplikacji
+        # ta sama podpowiedź powtarzałaby się w komunikacie wielokrotnie.
+        if code in seen:
+            continue
+        seen.add(code)
+        codes.append(code)
     return codes
 
 

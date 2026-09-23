@@ -32,8 +32,8 @@ jobs:
           set +e
           python tools/sync_generated.py --check --input .tmp/openapi.json > .tmp/diff.txt 2>&1
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
-          LIVE_VERSION=$(python -c "import json;print(json.load(open('.tmp/openapi.json'))['info']['description'].split('**Wersja API:**')[1].split('(')[0].strip())")
-          SNAP_VERSION=$(python -c "import json;print(json.load(open('specs/ksef-openapi.snapshot.json'))['info']['description'].split('**Wersja API:**')[1].split('(')[0].strip())")
+          LIVE_VERSION=$(python -c "from tools.openapi_spec import extract_api_version; print(extract_api_version(open('.tmp/openapi.json', encoding='utf-8').read()) or 'nieznana')")
+          SNAP_VERSION=$(python -c "from tools.openapi_spec import extract_api_version; print(extract_api_version(open('specs/ksef-openapi.snapshot.json', encoding='utf-8').read()) or 'nieznana')")
           echo "live_version=$LIVE_VERSION" >> "$GITHUB_OUTPUT"
           echo "snapshot_version=$SNAP_VERSION" >> "$GITHUB_OUTPUT"
           echo "### Wersja live: $LIVE_VERSION / snapshot: $SNAP_VERSION" >> "$GITHUB_STEP_SUMMARY"

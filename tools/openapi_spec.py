@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +55,38 @@ def write_openapi_snapshot(
         raise OpenApiSpecError(
             f"Failed to write OpenAPI snapshot to {snapshot_path}: {exc}"
         ) from exc
+
+
+# KSeF podaje wersję kontraktu w opisie, w formacie: `**Wersja API:** 2.8.1 (build ...)`.
+_API_VERSION_RE = re.compile(
+    r"\*\*Wersja API:\*\*\s*(?P<version>[0-9][0-9A-Za-z.\-]*)"
+)
+
+
+def extract_api_version(text: str) -> str | None:
+    """Wyciąga wersję kontraktu KSeF z treści specyfikacji OpenAPI.
+
+    Zwraca ``None``, gdy opisu nie da się odczytać lub format znacznika się zmieni.
+    Workflow driftu nie może polegać na twardym ``split`` — zmiana formatu opisu
+    MF kończyła się ``IndexError``, a ponieważ krok działa z ``set +e``, wersja
+    stawała się pusta i deduplikacja zgłoszeń przestawała działać.
+    """
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    description = payload.get("info", {})
+    if not isinstance(description, dict):
+        return None
+    raw = description.get("description")
+    if not isinstance(raw, str):
+        return None
+
+    match = _API_VERSION_RE.search(raw)
+    return match.group("version") if match else None
 
 
 def load_openapi_document(

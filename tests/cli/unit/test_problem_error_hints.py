@@ -255,3 +255,39 @@ def test_extract_exception_codes_reads_from_raw_payload() -> None:
     problem = SimpleNamespace(raw={"errors": [{"code": "21418"}]})
 
     assert _extract_exception_codes(problem) == [21418]
+
+
+def test_extract_exception_codes_deduplicates_repeated_codes() -> None:
+    """Błąd wsadowy może mieć wiele pozycji z tym samym kodem."""
+    problem = SimpleNamespace(errors=[{"code": 21184}, {"code": 21184}, {"code": 21184}])
+
+    assert _extract_exception_codes(problem) == [21184]
+
+
+def test_extract_exception_codes_preserves_order_of_distinct_codes() -> None:
+    problem = SimpleNamespace(errors=[{"code": 21405}, {"code": 21184}, {"code": 21405}])
+
+    assert _extract_exception_codes(problem) == [21405, 21184]
+
+
+def test_duplicate_codes_do_not_repeat_hint() -> None:
+    """Ta sama podpowiedź nie może pojawić się w komunikacie wielokrotnie."""
+    problem = m.BadRequestProblemDetails.from_dict(
+        {
+            "title": "B",
+            "status": 400,
+            "detail": "d",
+            "errors": [
+                {"code": 21184, "description": "a"},
+                {"code": 21184, "description": "b"},
+            ],
+            "instance": "/x",
+            "timestamp": "t",
+            "traceId": "t",
+        }
+    )
+
+    hint = build_problem_hint(problem, default_hint=None)
+
+    assert hint is not None
+    assert hint.count("[21184]") == 1

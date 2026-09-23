@@ -185,13 +185,18 @@ def _neutral_value(annotation: Any) -> Any:
     text = annotation if isinstance(annotation, str) else str(annotation)
     base = text.strip()
 
-    # `Optional[X]` / `X | None` -> interesuje nas X.
-    if base.startswith("Optional[") and base.endswith("]"):
-        base = base[len("Optional[") : -1].strip()
-    if "|" in base:
-        parts = [part.strip() for part in base.split("|")]
-        inner = [part for part in parts if part != "None"]
-        base = inner[0] if inner else "None"
+    # `Optional[X]` / `X | None` -> interesuje nas X. Rozwijamy iteracyjnie, bo
+    # zdarzają się formy zagnieżdżone (`Optional[Optional[str]]`, `Optional[X | None]`).
+    while True:
+        stripped = base
+        if base.startswith("Optional[") and base.endswith("]"):
+            base = base[len("Optional[") : -1].strip()
+        if "|" in base:
+            parts = [part.strip() for part in base.split("|")]
+            inner = [part for part in parts if part != "None"]
+            base = inner[0] if inner else "None"
+        if base == stripped:
+            break
 
     if base.startswith("list[") or base.startswith("List["):
         return []
