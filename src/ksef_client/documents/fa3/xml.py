@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from importlib import resources
@@ -7,6 +8,11 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from .currency import (
+    FA3_SCHEMA_FILE,
+    Fa3CurrencyMismatchError,
+    validate_fa3_currency,
+)
 from .domain import (
     Address,
     AnnotationSet,
@@ -40,6 +46,24 @@ from .sections import (
 FA3_NAMESPACE = "http://crd.gov.pl/wzor/2025/06/25/13775/"
 ETD_NAMESPACE = "http://crd.gov.pl/xml/schematy/dziedzinowe/mf/2022/01/05/eD/DefinicjeTypy/"
 XSI_NAMESPACE = "http://www.w3.org/2001/XMLSchema-instance"
+
+_KOD_WALUTY_TAG = f"{{{FA3_NAMESPACE}}}KodWaluty"
+
+
+def _preflight_currency_check(xml: bytes | str) -> None:
+    """Wykrywa waluty z OpenAPI nieobsługiwane przez schemat FA(3) przed walidacją XSD.
+
+    Bez tego użytkownik dostaje ``SCHEMAV_CVC_ENUMERATION_VALID``, który nie mówi,
+    że przyczyną jest rozjazd słowników po stronie KSeF.
+    """
+    text = xml.decode("utf-8", "replace") if isinstance(xml, bytes) else xml
+    for code in set(re.findall(r"<KodWaluty>([A-Za-z]{3})</KodWaluty>", text)):
+        try:
+            validate_fa3_currency(code)
+        except Fa3CurrencyMismatchError as exc:
+            raise FA3XmlValidationError(
+                f"{exc} Schemat: {FA3_SCHEMA_FILE}."
+            ) from exc
 
 
 class FA3XmlValidationError(ValueError):
@@ -121,6 +145,10 @@ def validate_fa3_xml_xsd(xml: bytes | str) -> None:
         raise RuntimeError(
             'Walidacja XSD FA(3) wymaga lxml. Zainstaluj: pip install "ksef-client[fa3]".'
         ) from exc
+
+    # Rozjazd słowników walut OpenAPI ↔ XSD daje mylący błąd SCHEMAV_CVC_ENUMERATION_VALID.
+    # Sprawdzamy go zawczasu i tłumaczymy na komunikat wskazujący rzeczywistą przyczynę.
+    _preflight_currency_check(xml)
 
     parser = etree.XMLParser()
     parser.resolvers.add(_schema_resolver(etree))

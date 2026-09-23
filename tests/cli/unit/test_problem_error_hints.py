@@ -169,3 +169,45 @@ def test_build_problem_hint_ignores_unrenderable_error_items() -> None:
     )
 
     assert build_problem_hint(problem, default_hint=None) is None
+
+
+def test_build_problem_hint_explains_temporarily_unavailable_session() -> None:
+    """Kod 21184 (KSeF API 2.8.0) wymaga konkretnego działania użytkownika."""
+    problem = m.ExceptionResponse.from_dict(
+        {
+            "exception": {
+                "serviceCode": "00-1E",
+                "serviceName": "Sesja",
+                "exceptionDetailList": [
+                    {
+                        "exceptionCode": 21184,
+                        "exceptionDescription": "Sesja tymczasowo niedostępna",
+                    }
+                ],
+            }
+        }
+    )
+
+    hint = build_problem_hint(problem, default_hint="Wait and retry.")
+
+    assert hint is not None
+    assert "[21184]" in hint
+    assert "nową sesję" in hint
+
+
+def test_build_problem_hint_without_known_code_keeps_default() -> None:
+    problem = m.ExceptionResponse.from_dict(
+        {
+            "exception": {
+                "serviceCode": "00-1E",
+                "serviceName": "Sesja",
+                "exceptionDetailList": [
+                    {"exceptionCode": 99999, "exceptionDescription": "Nieznany"}
+                ],
+            }
+        }
+    )
+
+    hint = build_problem_hint(problem, default_hint="Wait and retry.")
+
+    assert hint is None or "[99999]" not in hint

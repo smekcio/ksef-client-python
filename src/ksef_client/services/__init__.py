@@ -17,6 +17,14 @@ from .csr import CsrResult, generate_csr_ec, generate_csr_rsa
 from .hwm import dedupe_by_ksef_number, get_effective_start_date, update_continuation_point
 from .person_token import PersonToken, PersonTokenService
 from .qr import add_label_to_qr, generate_qr_png, resize_png
+from .rate_limits import (
+    INACTIVE_RATE_LIMIT_GROUPS,
+    SESSION_CLOSE_GROUPS,
+    RateLimitGroup,
+    RateLimitInfo,
+    get_rate_limit,
+    iter_rate_limits,
+)
 from .sessions import (
     AsyncBatchSessionHandle,
     AsyncOnlineSessionHandle,
@@ -97,4 +105,10 @@ __all__ = [
     "update_continuation_point",
     "get_effective_start_date",
     "dedupe_by_ksef_number",
+    "RateLimitGroup",
+    "RateLimitInfo",
+    "iter_rate_limits",
+    "get_rate_limit",
+    "INACTIVE_RATE_LIMIT_GROUPS",
+    "SESSION_CLOSE_GROUPS",
 ]

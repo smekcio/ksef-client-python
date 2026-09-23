@@ -4,6 +4,14 @@
 
 ### Features
 
+* **api:** align with KSeF API 2.8.1 (CollectiveIdentifierManage scope, session-close and
+  anonymous/global rate-limit groups, currency codes CNH/VED/XTS/ZWG/SLE, optional
+  `ForbiddenProblemDetails.timestamp`)
+* **services:** add semantic rate-limit group helpers (`RateLimitGroup`, `iter_rate_limits`,
+  `get_rate_limit`) including reserved `global` group handling
+* **fa3:** detect OpenAPI ↔ XSD currency mismatch with an explanatory error instead of a raw
+  XSD validation failure
+* **cli:** explain KSeF error `21184` (session temporarily unavailable) with a recovery hint
 * **api:** align with KSeF API 2.7.1 (IZ invoices POST, generate min 2, query/export 100 days UTC, export compressionType from package)
 * **api:** align with KSeF API 2.7.0 (collective identifiers, testdata certificate update)
 * **api:** add collective identifier helpers, pagination iterators and CLI `ksef iz`
@@ -14,6 +22,9 @@
 
 ### Bug Fixes
 
+* **http:** stop deserializing malformed `403` payloads into `ForbiddenProblemDetails`;
+  payloads with wrong field types now surface as `UnknownApiProblem` instead of hiding the
+  raw response (regression exposed by optional `timestamp` in API 2.8.0)
 * **collective-identifiers:** validate context invoice limits, common seller, finite payment amounts,
   precise UTC ranges, and resumable CLI pagination
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters

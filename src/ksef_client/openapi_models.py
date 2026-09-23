@@ -343,6 +343,11 @@ class CurrencyCode(OpenApiEnum):
     ZAR = "ZAR"
     ZMW = "ZMW"
     ZWL = "ZWL"
+    CNH = "CNH"
+    VED = "VED"
+    XTS = "XTS"
+    ZWG = "ZWG"
+    SLE = "SLE"
 
 class EntityAuthorizationPermissionType(OpenApiEnum):
     SELFINVOICING = "SelfInvoicing"
@@ -369,10 +374,12 @@ class EntityAuthorizationsAuthorizingEntityIdentifierType(OpenApiEnum):
 class EntityPermissionItemScope(OpenApiEnum):
     INVOICEWRITE = "InvoiceWrite"
     INVOICEREAD = "InvoiceRead"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
 
 class EntityPermissionType(OpenApiEnum):
     INVOICEWRITE = "InvoiceWrite"
     INVOICEREAD = "InvoiceRead"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
 
 class EntityPermissionsContextIdentifierType(OpenApiEnum):
     NIP = "Nip"
@@ -437,6 +444,7 @@ class EuEntityPermissionsSubjectIdentifierType(OpenApiEnum):
 class IndirectPermissionType(OpenApiEnum):
     INVOICEREAD = "InvoiceRead"
     INVOICEWRITE = "InvoiceWrite"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
 
 class IndirectPermissionsSubjectIdentifierType(OpenApiEnum):
     NIP = "Nip"
@@ -1014,8 +1022,11 @@ class EffectiveApiRateLimitValues(OpenApiModel):
 
 @dataclass(frozen=True)
 class EffectiveApiRateLimits(OpenApiModel):
+    anonymous: EffectiveApiRateLimitValues
     batch_session: EffectiveApiRateLimitValues = field(metadata={"json_key": "batchSession"})
+    batch_session_close: EffectiveApiRateLimitValues = field(metadata={"json_key": "batchSessionClose"})
     collective_identifier: EffectiveApiRateLimitValues = field(metadata={"json_key": "collectiveIdentifier"})
+    global_: EffectiveApiRateLimitValues = field(metadata={"json_key": "global"})
     invoice_download: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceDownload"})
     invoice_export: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceExport"})
     invoice_export_status: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceExportStatus"})
@@ -1023,6 +1034,7 @@ class EffectiveApiRateLimits(OpenApiModel):
     invoice_send: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceSend"})
     invoice_status: EffectiveApiRateLimitValues = field(metadata={"json_key": "invoiceStatus"})
     online_session: EffectiveApiRateLimitValues = field(metadata={"json_key": "onlineSession"})
+    online_session_close: EffectiveApiRateLimitValues = field(metadata={"json_key": "onlineSessionClose"})
     other: EffectiveApiRateLimitValues
     session_invoice_list: EffectiveApiRateLimitValues = field(metadata={"json_key": "sessionInvoiceList"})
     session_list: EffectiveApiRateLimitValues = field(metadata={"json_key": "sessionList"})
@@ -1267,10 +1279,10 @@ class ForbiddenProblemDetails(OpenApiModel):
     detail: str
     reason_code: str = field(metadata={"json_key": "reasonCode"})
     status: int
-    timestamp: str
     title: str
     instance: Optional[str] = None
     security: Optional[dict[str, Optional[Any]]] = None
+    timestamp: Optional[str] = None
     trace_id: Optional[str] = field(default=None, metadata={"json_key": "traceId"})
 
 @dataclass(frozen=True)

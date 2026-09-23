@@ -10,6 +10,16 @@ from .builders import (
     SettlementInvoiceBuilder,
     SimplifiedInvoiceBuilder,
 )
+from .currency import (
+    FA3_SCHEMA_FILE,
+    Fa3CurrencyMismatchError,
+    fa3_xsd_currency_codes,
+    is_fa3_currency_supported,
+    known_openapi_only_currency_codes,
+    openapi_currency_codes,
+    openapi_only_currency_codes,
+    validate_fa3_currency,
+)
 from .domain import (
     Address,
     Annotation,
@@ -158,4 +168,12 @@ __all__ = [
     "invoice_to_xml",
     "parse_fa3_xsd_elements",
     "validate_fa3_xml_xsd",
+    "FA3_SCHEMA_FILE",
+    "Fa3CurrencyMismatchError",
+    "fa3_xsd_currency_codes",
+    "openapi_currency_codes",
+    "openapi_only_currency_codes",
+    "known_openapi_only_currency_codes",
+    "is_fa3_currency_supported",
+    "validate_fa3_currency",
 ]

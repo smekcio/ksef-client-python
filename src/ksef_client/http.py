@@ -143,6 +143,22 @@ def _looks_like_problem_details(body: dict[str, Any]) -> bool:
     return any(key in body for key in ("status", "title", "detail", "traceId", "timestamp"))
 
 
+def _has_required_types(body: dict[str, Any], expected: dict[str, type]) -> bool:
+    """Sprawdza typy pól wymaganych, zanim uznamy payload za dany model Problem Details.
+
+    `OpenApiModel.from_dict` nie waliduje typów, więc bez tej kontroli malformed
+    odpowiedź (np. `reasonCode` jako lista zamiast string) zostałaby
+    zdeserializowana do modelu szczegółowego i nigdy nie trafiłaby do
+    `UnknownApiProblem` — czyli surowy payload zostałby ukryty przed użytkownikiem.
+    """
+    for key, expected_type in expected.items():
+        if key not in body:
+            return False
+        if not isinstance(body[key], expected_type):
+            return False
+    return True
+
+
 def _parse_api_problem(status_code: int, body: Any) -> Any | None:
     if not isinstance(body, dict):
         return None
@@ -161,7 +177,9 @@ def _parse_api_problem(status_code: int, body: Any) -> Any | None:
             return GoneProblemDetails.from_dict(body)
         if status_code == 401:
             return UnauthorizedProblemDetails.from_dict(body)
-        if status_code == 403 and "reasonCode" in body:
+        if status_code == 403 and _has_required_types(
+            body, {"reasonCode": str, "detail": str, "status": int, "title": str}
+        ):
             return ForbiddenProblemDetails.from_dict(body)
     except (TypeError, ValueError, KeyError):
         pass

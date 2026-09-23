@@ -1,6 +1,6 @@
 # Identyfikator zbiorczy (`ksef_client.utils.collective_identifier`)
 
-Walidator formatu IZ (`NIP-IZYYYYMM-HEX12-CRC8`), zgodny z dokumentacją KSeF API 2.7.1,
+Walidator formatu IZ (`NIP-IZYYYYMM-HEX12-CRC8`), zgodny z dokumentacją KSeF API 2.8.1,
 oraz helpery domenowe używane przez `client.collective_identifiers`.
 
 ## Stałe
