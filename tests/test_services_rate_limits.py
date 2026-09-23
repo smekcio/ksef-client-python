@@ -11,7 +11,9 @@ from ksef_client import models as m
 from ksef_client.services import (
     INACTIVE_RATE_LIMIT_GROUPS,
     SESSION_CLOSE_GROUPS,
+    UNLIMITED,
     RateLimitGroup,
+    RateLimitInfo,
     get_rate_limit,
     iter_rate_limits,
 )
@@ -116,3 +118,97 @@ def test_get_rate_limit_returns_none_when_group_absent() -> None:
     assert get_rate_limit(limits, RateLimitGroup.INVOICE_SEND) is None
     assert get_rate_limit(limits, RateLimitGroup.OTHER) is not None
     assert RateLimitGroup.INVOICE_SEND not in {info.group for info in iter_rate_limits(limits)}
+
+
+def test_iteration_order_is_alphabetical_not_contract_order() -> None:
+    """Kolejność iteracji pochodzi z enuma, więc jest alfabetyczna.
+
+    Docstring wcześniej twierdził, że odpowiada kolejności z kontraktu OpenAPI -
+    ten test utrwala faktyczne zachowanie, żeby rozjazd był widoczny.
+    """
+    spec = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    contract_order = list(
+        spec["components"]["schemas"]["EffectiveApiRateLimits"]["properties"]
+    )
+    enum_order = [group.value for group in RateLimitGroup]
+
+    assert enum_order == sorted(enum_order)
+    assert enum_order != contract_order
+
+
+def test_unlimited_sentinel_is_modelled() -> None:
+    """`-1` znaczy „bez limitu" i musi być rozpoznawalny, a nie mylony z limitem."""
+    assert UNLIMITED == -1
+
+    limits = RateLimitInfo(
+        group=RateLimitGroup.GLOBAL, per_second=-1, per_minute=-1, per_hour=-1
+    )
+    assert limits.is_unlimited is True
+
+    bounded = RateLimitInfo(
+        group=RateLimitGroup.INVOICE_SEND, per_second=10, per_minute=30, per_hour=120
+    )
+    assert bounded.is_unlimited is False
+
+
+def test_partial_unlimited_window_is_reported_per_window() -> None:
+    """Kontrakt dopuszcza `-1` w pojedynczych oknach - `is_unlimited` tego nie pokaże.
+
+    Przykład z kontraktu: `anonymous` ma `60/-1/-1`. Bez pytania o konkretne okno
+    użytkownik nie odróżni „limit 60/s" od „brak limitu na godzinę".
+    """
+    anonymous = RateLimitInfo(
+        group=RateLimitGroup.ANONYMOUS, per_second=60, per_minute=-1, per_hour=-1
+    )
+
+    assert anonymous.is_unlimited is False
+    assert anonymous.is_unlimited_window("per_second") is False
+    assert anonymous.is_unlimited_window("per_minute") is True
+    assert anonymous.is_unlimited_window("per_hour") is True
+
+    with pytest.raises(ValueError, match="Nieznane okno"):
+        anonymous.is_unlimited_window("per_day")
+
+
+def test_inactive_groups_are_about_known_limits_not_enforcement() -> None:
+    """`is_active` mówi o znajomości limitu; kontrakt nie deklaruje stanu egzekwowania.
+
+    Snapshot OpenAPI nie zawiera słów „wyłączone"/„zarezerwowane", więc sprawdzamy
+    tylko spójność naszej interpretacji - nie twierdzenie kontraktu.
+    """
+    spec = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    global_schema = spec["components"]["schemas"]["EffectiveApiRateLimits"]["properties"][
+        "global"
+    ]
+    description = global_schema.get("description", "").lower()
+
+    assert "wyłącz" not in description
+    assert "zarezerwow" not in description
+    # Nasza interpretacja: `global` nie ma znanego aktywnego limitu.
+    assert RateLimitGroup.GLOBAL in INACTIVE_RATE_LIMIT_GROUPS
+    assert RateLimitGroup.INVOICE_SEND not in INACTIVE_RATE_LIMIT_GROUPS
+
+
+def test_is_active_is_false_only_for_inactive_groups() -> None:
+    """`is_active` rozstrzyga wyłącznie na podstawie naszej listy grup nieaktywnych."""
+    active = RateLimitInfo(
+        group=RateLimitGroup.INVOICE_SEND, per_second=10, per_minute=30, per_hour=120
+    )
+    inactive = RateLimitInfo(
+        group=RateLimitGroup.GLOBAL, per_second=-1, per_minute=-1, per_hour=-1
+    )
+
+    assert active.is_active is True
+    assert inactive.is_active is False
+
+
+def test_session_close_groups_cover_both_session_types() -> None:
+    """Zamykanie sesji ma osobne limity dla trybu interaktywnego i wsadowego."""
+    assert {
+        RateLimitGroup.ONLINE_SESSION_CLOSE,
+        RateLimitGroup.BATCH_SESSION_CLOSE,
+    } == SESSION_CLOSE_GROUPS
+    spec = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    properties = spec["components"]["schemas"]["EffectiveApiRateLimits"]["properties"]
+    for group in SESSION_CLOSE_GROUPS:
+        assert group.value in properties
