@@ -13,23 +13,26 @@ def test_extract_api_version_from_real_snapshot() -> None:
 
 def test_extract_api_version_returns_none_instead_of_raising() -> None:
     """Zmiana formatu opisu MF nie może wywalić workflow driftu (`IndexError`)."""
-    base = {"info": {"description": "**Wersja API:** 2.8.1 (build x)"}}
-    variants = [
-        "",
-        "to nie jest json",
-        "[]",
-        json.dumps({}),
-        json.dumps({"info": {}}),
-        json.dumps({"info": {"description": ""}}),
-        json.dumps({"info": {"description": "Wersja API: 2.8.1"}}),
-        json.dumps({"info": {"description": 123}}),
-        json.dumps({"info": "nie-obiekt"}),
-        json.dumps(base),
+    # Każdy wariant musi dać konkretny wynik: `None` (nie da się odczytać) albo
+    # poprawną wersję. Samo `isinstance` niczego by tu nie sprawdzało.
+    variants: list[tuple[str, str | None]] = [
+        ("", None),
+        ("to nie jest json", None),
+        ("[]", None),
+        (json.dumps({}), None),
+        (json.dumps({"info": {}}), None),
+        (json.dumps({"info": {"description": ""}}), None),
+        (json.dumps({"info": {"description": "Wersja API: 2.8.1"}}), None),
+        (json.dumps({"info": {"description": 123}}), None),
+        (json.dumps({"info": "nie-obiekt"}), None),
+        (
+            json.dumps({"info": {"description": "**Wersja API:** 2.8.1 (build x)"}}),
+            "2.8.1",
+        ),
     ]
 
-    for text in variants:
-        result = extract_api_version(text)
-        assert result is None or isinstance(result, str)
+    for text, expected in variants:
+        assert extract_api_version(text) == expected, text
 
 
 def test_extract_api_version_parses_common_shapes() -> None:
