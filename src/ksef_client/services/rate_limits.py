@@ -10,8 +10,9 @@ from ..utils.naming import to_snake_case
 class RateLimitGroup(str, Enum):
     """Grupy limitów API KSeF.
 
-    Nazwy odpowiadają właściwościom modelu ``EffectiveApiRateLimits`` zwracanego
-    przez ``GET /rate-limits`` (KSeF API 2.8.0+).
+    Zbiór nazw odpowiada właściwościom modelu ``EffectiveApiRateLimits`` zwracanego
+    przez ``GET /rate-limits`` (KSeF API 2.8.0+). Kolejność członków jest
+    alfabetyczna i **nie** odwzorowuje kolejności właściwości z kontraktu OpenAPI.
     """
 
     ANONYMOUS = "anonymous"
@@ -33,23 +34,36 @@ class RateLimitGroup(str, Enum):
     SESSION_MISC = "sessionMisc"
 
 
-# Grupy, których mechanizm nie jest jeszcze aktywny po stronie KSeF (2.8.0).
-# `global` opisuje przyszłe limity naliczane per adres IP (obecnie wyłączone),
-# `anonymous` obowiązywał wcześniej, ale jest zwracany dopiero od 2.8.0.
+# Grupy, o których kontrakt nie mówi, czy mechanizm limitu jest w ogóle włączony.
+# `global` opisuje limity per adres IP i w kontrakcie 2.8.x ma wyłącznie wartości
+# `-1` (patrz `UNLIMITED`), więc budowanie na nim logiki ponawiania nie ma sensu.
+#
+# UWAGA: to nasza interpretacja, a nie twierdzenie kontraktu. Snapshot OpenAPI nie
+# zawiera słów „wyłączone"/„zarezerwowane" — `is_active` znaczy więc „nie znamy
+# aktywnego limitu", a nie „KSeF na pewno tego nie egzekwuje".
 INACTIVE_RATE_LIMIT_GROUPS: frozenset[RateLimitGroup] = frozenset(
     {RateLimitGroup.GLOBAL}
 )
 
-# Operacje zamykania sesji mają od 2.8.0 osobne, wyższe limity niż otwieranie:
-# sesja interaktywna 20/60/240, sesja wsadowa 20/40/120.
+# Operacje zamykania sesji mają od 2.8.0 osobne limity, odrębne od otwierania
+# (`onlineSessionClose` / `batchSessionClose`). Kontrakt nie podaje tu konkretnych
+# wartości — obowiązujące odczytuj z `GET /rate-limits`.
 SESSION_CLOSE_GROUPS: frozenset[RateLimitGroup] = frozenset(
     {RateLimitGroup.ONLINE_SESSION_CLOSE, RateLimitGroup.BATCH_SESSION_CLOSE}
 )
 
+# Sentinel KSeF dla „bez limitu". Kontrakt typuje pola jako `int32` i nie opisuje
+# tej wartości słownie, ale `GET /rate-limits` zwraca `-1` m.in. dla `global`.
+UNLIMITED = -1
+
 
 @dataclass(frozen=True)
 class RateLimitInfo:
-    """Pojedyncza grupa limitów w czytelnej postaci."""
+    """Pojedyncza grupa limitów w czytelnej postaci.
+
+    Pola mogą przyjąć :data:`UNLIMITED` (``-1``), co oznacza brak limitu — nie
+    należy traktować tego jako liczby dozwolonych żądań.
+    """
 
     group: RateLimitGroup
     per_second: int
@@ -58,8 +72,36 @@ class RateLimitInfo:
 
     @property
     def is_active(self) -> bool:
-        """Czy mechanizm limitu jest obecnie egzekwowany przez KSeF."""
+        """Czy dla tej grupy znamy aktywny limit.
+
+        ``False`` znaczy „brak znanego limitu" (grupa zarezerwowana albo
+        nieaktywna) — nie jest to twierdzenie o stanie egzekwowania po stronie KSeF.
+        """
         return self.group not in INACTIVE_RATE_LIMIT_GROUPS
+
+    @property
+    def is_unlimited(self) -> bool:
+        """Czy **wszystkie trzy** okna są nieograniczone (``-1``).
+
+        Uwaga: ``False`` nie oznacza, że grupa ma limit w każdym oknie. Kontrakt
+        dopuszcza ``-1`` w pojedynczych oknach (np. ``anonymous`` ma ``60/-1/-1``).
+        Do sprawdzania konkretnego okna użyj :meth:`is_unlimited_window`.
+        """
+        return self.per_second == self.per_minute == self.per_hour == UNLIMITED
+
+    def is_unlimited_window(self, window: str) -> bool:
+        """Czy dane okno (``"per_second"``/``"per_minute"``/``"per_hour"``) jest bez limitu.
+
+        Kontrakt KSeF dopuszcza ``-1`` w pojedynczych oknach niezależnie od
+        pozostałych, więc logika ponawiania musi pytać o konkretne okno, a nie
+        o całą grupę.
+        """
+        if window not in {"per_second", "per_minute", "per_hour"}:
+            raise ValueError(
+                f"Nieznane okno limitu: {window!r}. "
+                f"Oczekiwano 'per_second', 'per_minute' albo 'per_hour'."
+            )
+        return getattr(self, window) == UNLIMITED
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -81,8 +123,9 @@ def _to_info(group: RateLimitGroup, values: EffectiveApiRateLimitValues) -> Rate
 def iter_rate_limits(limits: EffectiveApiRateLimits) -> list[RateLimitInfo]:
     """Zamienia odpowiedź ``GET /rate-limits`` na listę :class:`RateLimitInfo`.
 
-    Kolejność odpowiada kolejności grup w kontrakcie OpenAPI. Grupy nieobecne
-    w odpowiedzi są pomijane.
+    Kolejność jest **alfabetyczna według nazwy grupy**, bo iterujemy po
+    ``RateLimitGroup`` — nie odwzorowuje kolejności właściwości z kontraktu
+    OpenAPI. Grupy nieobecne w odpowiedzi są pomijane.
     """
     result: list[RateLimitInfo] = []
     for group in RateLimitGroup:
