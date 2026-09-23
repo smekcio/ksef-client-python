@@ -24,6 +24,7 @@ from ksef_client.cli.commands._error_utils import (
 from ksef_client.cli.context import CliContext
 from ksef_client.cli.exit_codes import ExitCode
 from ksef_client.exceptions import KsefApiError, KsefRateLimitError
+from ksef_client.http import _parse_api_problem
 
 
 class _RecordingRenderer:
@@ -291,3 +292,79 @@ def test_duplicate_codes_do_not_repeat_hint() -> None:
 
     assert hint is not None
     assert hint.count("[21184]") == 1
+
+
+def test_codes_from_errors_survive_a_code_less_exception_path() -> None:
+    """`exceptionCode` jest opcjonalny, więc jego brak nie może ukryć kodów z `errors[]`.
+
+    Wcześniej decyzja o źródle kodów zapadała na surowej liście kandydatów: obecna,
+    ale bezkodowa `exceptionDetailList` dawała `[None]`, co było „niepuste", więc
+    poprawny kod z `errors[]` był odrzucany i podpowiedź nigdy się nie pojawiała.
+    """
+    payload = {
+        "status": 400,
+        "title": "Bad Request",
+        "detail": "d",
+        "exception": {"exceptionDetailList": [{"exceptionDescription": "bez kodu"}]},
+        "errors": [{"code": 21184, "description": "y"}],
+    }
+    problem = _parse_api_problem(400, payload)
+
+    assert problem is not None
+    assert _extract_exception_codes(problem) == [21184]
+
+    hint = build_problem_hint(problem, default_hint=None)
+    assert hint is not None
+    assert "[21184]" in hint
+
+
+def test_codes_are_merged_when_both_sources_carry_them() -> None:
+    """Gdy oba źródła niosą kody, żaden nie może zginąć."""
+    payload = {
+        "status": 400,
+        "title": "Bad Request",
+        "detail": "d",
+        "exception": {
+            "exceptionDetailList": [{"exceptionCode": 21418, "exceptionDescription": "x"}]
+        },
+        "errors": [{"code": 21184, "description": "y"}],
+    }
+    problem = _parse_api_problem(400, payload)
+
+    assert problem is not None
+    assert _extract_exception_codes(problem) == [21184, 21418]
+
+
+def test_non_numeric_and_boolean_codes_are_not_coerced() -> None:
+    """`True` nie może stać się kodem `1`, a tekst niebędący liczbą - kodem."""
+    problem = SimpleNamespace(
+        errors=[
+            {"code": True},
+            {"code": 21184.9},
+            {"code": "nie-kod"},
+            {"code": "21180"},
+        ]
+    )
+
+    assert _extract_exception_codes(problem) == [21180]
+
+
+@pytest.mark.parametrize("code", [21180, 21173, 21155, 21418, 71004, 71005])
+def test_documented_actionable_codes_have_hints(code: int) -> None:
+    """Kody z jasnym działaniem dla użytkownika muszą mieć podpowiedź."""
+    problem = m.BadRequestProblemDetails.from_dict(
+        {
+            "title": "B",
+            "status": 400,
+            "detail": "d",
+            "errors": [{"code": code, "description": "opis"}],
+            "instance": "/x",
+            "timestamp": "t",
+            "traceId": "t",
+        }
+    )
+
+    hint = build_problem_hint(problem, default_hint=None)
+
+    assert hint is not None
+    assert f"[{code}]" in hint
