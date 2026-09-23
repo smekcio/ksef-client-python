@@ -146,3 +146,68 @@ def test_exception_style_response_is_preferred(client: BaseHttpClient) -> None:
         },
     )
     assert type(problem).__name__ == "ExceptionResponse"
+
+
+# --- Brak pol opcjonalnych nie moze degradowac odpowiedzi (KSeF ich nie zawsze wysyla) ---
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"title": "B", "status": 400, "detail": "d", "instance": "/x"},
+        {"title": "B", "status": 400, "detail": "d"},
+    ],
+)
+def test_bad_request_without_errors_is_still_typed(
+    client: BaseHttpClient, payload: dict
+) -> None:
+    """KSeF potrafi zwrocic 400 bez `errors`; brak listy nie moze degradowac modelu."""
+    problem = _problem(client, 400, payload)
+    assert isinstance(problem, BadRequestProblemDetails)
+    assert problem.errors == []
+
+
+def test_bad_request_missing_fields_are_filled_with_correct_types(
+    client: BaseHttpClient,
+) -> None:
+    """Uzupelnione pola musza miec typy zgodne z adnotacjami, nie tylko "jakiekolwiek"."""
+    problem = _problem(client, 400, {"title": "B", "status": 400, "detail": "d"})
+
+    assert isinstance(problem, BadRequestProblemDetails)
+    assert isinstance(problem.errors, list)
+    assert isinstance(problem.instance, str)
+    assert isinstance(problem.timestamp, str)
+    assert isinstance(problem.trace_id, str)
+    # `errors` musi byc iterowalne - zla wartosc zastępcza lamie to na int.
+    assert list(problem.errors) == []
+
+
+def test_bad_request_with_errors_as_string_stays_unknown(client: BaseHttpClient) -> None:
+    """Malformed `errors` nie moze byc rozbity na liste znakow i udawac poprawny model."""
+    payload = {
+        "title": "B",
+        "status": 400,
+        "detail": "d",
+        "errors": "nie-lista",
+        "instance": "/x",
+    }
+    problem = _problem(client, 400, payload)
+
+    assert isinstance(problem, UnknownApiProblem)
+    assert problem.raw == payload
+
+
+def test_neutral_value_matches_annotation_type() -> None:
+    """`dict[str, Any]` nie moze byc rozpoznane jako `str` (podlancuch w adnotacji)."""
+    from ksef_client.http import _neutral_value
+
+    assert _neutral_value("str") == ""
+    assert _neutral_value("int") == 0
+    assert _neutral_value("bool") is False
+    assert _neutral_value("list[ApiError]") == []
+    assert _neutral_value("dict[str, Any]") == {}
+    assert _neutral_value("Optional[str]") == ""
+    assert _neutral_value("Optional[list[ApiError]]") == []
+    assert _neutral_value("str | None") == ""
+    # Nieznany typ zagniezdzonego modelu nie jest zgadywany.
+    assert _neutral_value("ApiError") is None

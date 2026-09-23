@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ..models import EffectiveApiRateLimits, EffectiveApiRateLimitValues
+from ..utils.naming import to_snake_case
 
 
 class RateLimitGroup(str, Enum):
@@ -113,17 +114,12 @@ def get_rate_limit(
 
 
 def _attribute_name(group: RateLimitGroup) -> str:
-    """Mapuje nazwę grupy na atrybut modelu (obsługa kolizji ze słowem kluczowym)."""
-    name = group.value
-    snake = _to_snake_case(name)
-    if snake in {"global"}:
+    """Mapuje nazwę grupy na atrybut modelu (obsługa kolizji ze słowem kluczowym).
+
+    Model generowany z OpenAPI używa `global_`, bo `global` jest słowem kluczowym
+    Pythona; pozostałe grupy mapują się wprost przez `camelCase` -> `snake_case`.
+    """
+    snake = to_snake_case(group.value)
+    if snake == "global":
         return "global_"
     return snake
-
-
-def _to_snake_case(name: str) -> str:
-    import re
-
-    normalized = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
-    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized)
-    return normalized.lower()

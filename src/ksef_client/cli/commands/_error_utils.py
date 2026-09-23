@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ksef_client.exceptions import KsefApiError, KsefRateLimitError
+from ksef_client.utils.naming import to_snake_case
 
 # Podpowiedzi dla kodów błędów wymagających konkretnego działania użytkownika.
 _EXCEPTION_CODE_HINTS: dict[int, str] = {
@@ -33,7 +34,7 @@ def _extract_exception_codes(problem: Any) -> list[int]:
             if isinstance(item, dict):
                 candidates.append(item.get(key))
             else:
-                candidates.append(getattr(item, _snake(key), None))
+                candidates.append(getattr(item, to_snake_case(key), None))
 
     exception = getattr(problem, "exception", None)
     if exception is not None:
@@ -58,12 +59,6 @@ def _extract_exception_codes(problem: Any) -> list[int]:
         except (TypeError, ValueError):
             continue
     return codes
-
-
-def _snake(name: str) -> str:
-    import re
-
-    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower()
 
 
 def _problem_value(problem: Any, attr_name: str, *, raw_key: str | None = None) -> Any:

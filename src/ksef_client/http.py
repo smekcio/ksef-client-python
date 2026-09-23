@@ -139,10 +139,6 @@ def _coerce_problem_status(value: Any, fallback_status: int) -> int:
         return fallback_status
 
 
-def _looks_like_problem_details(body: dict[str, Any]) -> bool:
-    return any(key in body for key in ("status", "title", "detail", "traceId", "timestamp"))
-
-
 def _has_required_types(body: dict[str, Any], expected: dict[str, type]) -> bool:
     """Sprawdza typy pól wymaganych, zanim uznamy payload za dany model Problem Details.
 
@@ -159,6 +155,61 @@ def _has_required_types(body: dict[str, Any], expected: dict[str, type]) -> bool
     return True
 
 
+def _has_valid_optional_types(body: dict[str, Any], expected: dict[str, type]) -> bool:
+    """Sprawdza typy pól **opcjonalnych**: brak pola jest OK, zły typ nie.
+
+    Potrzebne dla pól, których KSeF nie zawsze przysyła, ale które po
+    deserializacji trafiają do typowanego atrybutu. Bez tego `errors` podane jako
+    string zostałoby zamienione na listę pojedynczych znaków i model wyglądałby
+    na poprawny, ukrywając malformed payload.
+    """
+    for key, expected_type in expected.items():
+        if key in body and not isinstance(body[key], expected_type):
+            return False
+    return True
+
+
+def _neutral_value(annotation: Any) -> Any:
+    """Zwraca wartość neutralną dla typu adnotacji pola.
+
+    Adnotacje w modelach generowanych są **tekstowe** (moduł używa
+    `from __future__ import annotations`), więc `field.type` to np. `'list[ApiError]'`,
+    a nie obiekt typu. Wcześniejsza wersja sprawdzała `"str" in str(annotation)`,
+    co dla `'dict[str, Any]'` dawało fałszywe trafienie i wstawiało `""` w pole
+    `status`, kończąc się `AttributeError` przy `from_dict`.
+
+    Rozpoznajemy typ po nazwie bazowej, a dla typów parametryzowanych po nazwie
+    kontenera — bez parsowania pełnej składni, bo używamy tego wyłącznie do
+    wartości zastępczych.
+    """
+    text = annotation if isinstance(annotation, str) else str(annotation)
+    base = text.strip()
+
+    # `Optional[X]` / `X | None` -> interesuje nas X.
+    if base.startswith("Optional[") and base.endswith("]"):
+        base = base[len("Optional[") : -1].strip()
+    if "|" in base:
+        parts = [part.strip() for part in base.split("|")]
+        inner = [part for part in parts if part != "None"]
+        base = inner[0] if inner else "None"
+
+    if base.startswith("list[") or base.startswith("List["):
+        return []
+    if base.startswith("dict[") or base.startswith("Dict["):
+        return {}
+    if base.startswith("set[") or base.startswith("Set["):
+        return set()
+    if base == "str":
+        return ""
+    if base == "bool":
+        return False
+    if base in ("int", "float", "Decimal"):
+        return 0
+    # Nieznany typ (np. zagnieżdżony model) - pomijamy pole, żeby nie wstawić
+    # wartości o typie sprzecznym z adnotacją.
+    return None
+
+
 def _fill_missing_required_fields(model_cls: type, payload: dict[str, Any]) -> dict[str, Any]:
     """Uzupełnia brakujące pola wymagane, żeby `from_dict` nie wywalił się na `TypeError`.
 
@@ -170,7 +221,9 @@ def _fill_missing_required_fields(model_cls: type, payload: dict[str, Any]) -> d
     `errors[]` i `instance`.
 
     Brakujące pola uzupełniamy wartościami neutralnymi **tylko w warstwie odczytu
-    odpowiedzi**; pliki generowane pozostają wierne kontraktowi.
+    odpowiedzi**; pliki generowane pozostają wierne kontraktowi. Pola, których nie
+    umiemy wypełnić sensownie (`_neutral_value` zwraca `None`), są pomijane, żeby
+    nie wstawiać wartości o złym typie.
     """
     type_map = getattr(model_cls, "__dataclass_fields__", {})
     filled = dict(payload)
@@ -180,8 +233,9 @@ def _fill_missing_required_fields(model_cls: type, payload: dict[str, Any]) -> d
             continue
         if model_field.default is not MISSING or model_field.default_factory is not MISSING:
             continue
-        annotation = str(model_field.type)
-        filled[json_key] = "" if ("str" in annotation) else 0
+        neutral = _neutral_value(model_field.type)
+        if neutral is not None:
+            filled[json_key] = neutral
     return filled
 
 
@@ -200,12 +254,20 @@ def _from_dict_lenient(model_cls: type, payload: dict[str, Any]) -> Any:
 # wtedy na brakującym argumencie i poprawna odpowiedź 400/429/410 degraduje się do
 # `UnknownApiProblem`, tracąc typowane `errors[]` i `instance`. Dlatego sprawdzamy
 # tylko pola faktycznie potrzebne, a nie całą listę `required` z OpenAPI.
+#
+# `errors` celowo nie jest wymagane: KSeF potrafi zwrócić 400 bez listy błędów
+# szczegółowych, a wymaganie tego pola degradowało poprawny response do
+# `UnknownApiProblem`. Brakującą listę uzupełnia `_fill_missing_required_fields`.
 _BAD_REQUEST_REQUIRED_TYPES: dict[str, type] = {
     "detail": str,
-    "errors": list,
-    "instance": str,
     "status": int,
     "title": str,
+}
+# `errors` i `instance` nie są wymagane (KSeF potrafi ich nie przysłać), ale gdy
+# występują, muszą mieć właściwy typ — inaczej string trafiłby do `list[ApiError]`.
+_BAD_REQUEST_OPTIONAL_TYPES: dict[str, type] = {
+    "errors": list,
+    "instance": str,
 }
 _GONE_REQUIRED_TYPES: dict[str, type] = {
     "detail": str,
@@ -234,7 +296,9 @@ def _parse_api_problem(status_code: int, body: Any) -> Any | None:
     try:
         if "exception" in body:
             return ExceptionResponse.from_dict(body)
-        if status_code == 400 and _has_required_types(body, _BAD_REQUEST_REQUIRED_TYPES):
+        if status_code == 400 and _has_required_types(
+            body, _BAD_REQUEST_REQUIRED_TYPES
+        ) and _has_valid_optional_types(body, _BAD_REQUEST_OPTIONAL_TYPES):
             return _from_dict_lenient(BadRequestProblemDetails, body)
         if status_code == 429:
             if isinstance(body.get("status"), dict):
@@ -247,7 +311,9 @@ def _parse_api_problem(status_code: int, body: Any) -> Any | None:
             return _from_dict_lenient(UnauthorizedProblemDetails, body)
         if status_code == 403 and _has_required_types(body, _FORBIDDEN_REQUIRED_TYPES):
             return _from_dict_lenient(ForbiddenProblemDetails, body)
-    except (TypeError, ValueError, KeyError):
+    except (AttributeError, IndexError, TypeError, ValueError, KeyError):
+        # `AttributeError`/`IndexError` mogą pojawić się przy nietypowym payloadzie;
+        # bez nich wyjątek przeciekłby do użytkownika zamiast degradacji do UnknownApiProblem.
         pass
 
     if "status" in body or "title" in body or "detail" in body:
