@@ -72,25 +72,51 @@ def known_openapi_only_currency_codes() -> frozenset[str]:
     return _KNOWN_OPENAPI_ONLY_CURRENCIES
 
 
+def _normalize(currency: str | CurrencyCode) -> str:
+    """Sprowadza walutę do postaci, w jakiej trafi do XML-a.
+
+    **Bez** ``strip()``. Serializacja (``domain.py``) robi wyłącznie ``.upper()``,
+    więc gdyby walidator obcinał białe znaki, uznawałby za poprawną wartość, która
+    po zapisaniu do XML-a nadal zawiera spacje i zostaje odrzucona przez schemat
+    (``SCHEMAV_CVC_ENUMERATION_VALID``). Walidator musi widzieć dokładnie tę samą
+    wartość, którą zobaczy walidacja XSD. Wielkość liter normalizujemy, bo
+    serializacja robi to samo.
+    """
+    value = currency.value if isinstance(currency, CurrencyCode) else str(currency)
+    return value.upper()
+
+
 def is_fa3_currency_supported(currency: str | CurrencyCode | None) -> bool:
     """Czy waluta przejdzie walidację schematu FA(3)."""
     if currency is None:
         return False
-    value = currency.value if isinstance(currency, CurrencyCode) else str(currency)
-    return value.strip().upper() in fa3_xsd_currency_codes()
+    return _normalize(currency) in fa3_xsd_currency_codes()
 
 
 def validate_fa3_currency(currency: str | CurrencyCode | None) -> None:
     """Sprawdza walutę pod kątem schematu FA(3) i podnosi czytelny błąd.
 
-    Różnicuje dwa przypadki: walutę nieznaną OpenAPI oraz walutę znaną OpenAPI,
-    ale nieobsługiwaną przez schemat faktury — bo w drugim przypadku użytkownik
-    nie ma błędu w kodzie, tylko trafił na rozjazd kontraktów MF.
+    Różnicuje trzy przypadki: walutę nieznaną OpenAPI, walutę znaną OpenAPI,
+    ale nieobsługiwaną przez schemat faktury (rozjazd kontraktów MF), oraz wartość
+    o niepoprawnym formacie — bo tylko w drugim przypadku użytkownik nie ma błędu
+    w kodzie, a w trzecim musi poprawić dane wejściowe.
+
+    Format sprawdzamy po ``upper()``, ale przed jakimkolwiek obcinaniem: walidator
+    musi być co najmniej tak samo surowy jak serializacja, inaczej przepuści
+    wartość, którą XSD odrzuci.
     """
     value = currency.value if isinstance(currency, CurrencyCode) else str(currency or "")
-    normalized = value.strip().upper()
+    normalized = _normalize(value or "")
     if not normalized:
         raise Fa3CurrencyMismatchError("Waluta jest wymagana.")
+    if normalized.strip() != normalized:
+        # Walidator nie może być łagodniejszy niż serializacja: spacje zostaną
+        # zapisane do XML-a i schemat odrzuci dokument, mimo znanej waluty.
+        # (Wielkość liter nie jest problemem — serializacja robi ``upper()``.)
+        raise Fa3CurrencyMismatchError(
+            f"Waluta {value!r} ma nieprawidłowy format. Oczekiwany trzyliterowy kod "
+            f"ISO-4217 bez spacji, np. 'PLN'."
+        )
     if normalized in fa3_xsd_currency_codes():
         return
     if normalized in openapi_currency_codes():

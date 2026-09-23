@@ -48,14 +48,22 @@ ETD_NAMESPACE = "http://crd.gov.pl/xml/schematy/dziedzinowe/mf/2022/01/05/eD/Def
 XSI_NAMESPACE = "http://www.w3.org/2001/XMLSchema-instance"
 
 KOD_WALUTY_LOCAL_NAME = "KodWaluty"
+# Schemat FA(3) typuje `TKodWaluty` w DWÓCH elementach: `KodWaluty` (waluta faktury)
+# oraz `WalutaUmowna` (waluta umowna w `WarunkiTransakcji`). Oba podlegają tej samej
+# enumeracji, więc pominięcie któregokolwiek przepuszczałoby walutę, którą KSeF odrzuci.
+CURRENCY_LOCAL_NAMES = frozenset({KOD_WALUTY_LOCAL_NAME, "WalutaUmowna"})
 
 
 def _iter_currency_codes(xml: bytes | str) -> list[str]:
-    """Zwraca kody walut z elementów `KodWaluty` niezależnie od prefiksu namespace.
+    """Zwraca kody walut z elementów `KodWaluty`/`WalutaUmowna` niezależnie od prefiksu.
 
     Parsowanie przez `ElementTree` zamiast wyrażenia regularnego jest konieczne:
     regex gubi `<x:KodWaluty>`, `<KodWaluty >` i inne poprawne warianty XML,
     a `validate_fa3_xml_xsd` jest publicznym API przyjmującym dowolny dokument.
+
+    Bierzemy oba elementy o typie `TKodWaluty`, bo oba trafiają do tej samej
+    enumeracji schematu - waluta umowna z kodem spoza FA(3) również kończy się
+    błędem `SCHEMAV_CVC_ENUMERATION_VALID`.
     """
     try:
         root = ET.fromstring(xml if isinstance(xml, bytes) else xml.encode("utf-8"))
@@ -66,7 +74,7 @@ def _iter_currency_codes(xml: bytes | str) -> list[str]:
     codes: list[str] = []
     for element in root.iter():
         local_name = element.tag.rsplit("}", 1)[-1] if isinstance(element.tag, str) else ""
-        if local_name == KOD_WALUTY_LOCAL_NAME and element.text:
+        if local_name in CURRENCY_LOCAL_NAMES and element.text:
             codes.append(element.text.strip())
     return codes
 
@@ -90,6 +98,10 @@ def _warn_unsupported_currencies(xml: bytes | str) -> None:
     Wariant domyślny (`xsd_validate=False`) nie sprawdza schematu, więc faktura
     w walucie odrzucanej przez FA(3) przeszłaby bez sygnału i zostałaby odrzucona
     dopiero przez KSeF. Ostrzeżenie nie zmienia zachowania, ale ujawnia problem.
+
+    ``stacklevel=4`` wskazuje wywołanie użytkownika: ścieżka to
+    ``<użytkownik>`` → ``models.FA3Draft.to_xml`` → ``draft_to_xml`` →
+    ``_warn_unsupported_currencies`` → ``warn``.
     """
     for code in dict.fromkeys(_iter_currency_codes(xml)):
         try:
@@ -99,7 +111,7 @@ def _warn_unsupported_currencies(xml: bytes | str) -> None:
                 f"{exc} Dokument nie został zwalidowany względem schematu FA(3) "
                 f"(xsd_validate=False), ale KSeF odrzuci taką fakturę.",
                 UserWarning,
-                stacklevel=3,
+                stacklevel=4,
             )
 
 
