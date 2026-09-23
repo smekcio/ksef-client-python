@@ -23,23 +23,35 @@ jobs:
           python-version: "3.12"
 
       - name: Fetch live OpenAPI spec
+        id: fetch
         run: |
           python -c "from pathlib import Path; from tools.openapi_spec import load_openapi_document; output = Path('.tmp/openapi.json'); output.parent.mkdir(parents=True, exist_ok=True); output.write_text(load_openapi_document(allow_fallback=False).text, encoding='utf-8', newline='\n')"
 
       - name: Detect contract drift
         id: drift
+        # Bez pobranej specyfikacji nie da się wykryć dryfu - inaczej brak pliku
+        # zostałby zaraportowany jako rozjazd kontraktu.
+        if: steps.fetch.outcome == 'success'
         run: |
           set +e
           python tools/sync_generated.py --check --input .tmp/openapi.json > .tmp/diff.txt 2>&1
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          code=$?
+          # 1 = artefakty nieaktualne (dryf), 2 = nie udało się wczytać specyfikacji.
+          # Tylko 1 jest podstawą do zgłoszenia; 2 przerywa job bez otwierania issue.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           LIVE_VERSION=$(python -c "from tools.openapi_spec import extract_api_version; print(extract_api_version(open('.tmp/openapi.json', encoding='utf-8').read()) or 'nieznana')")
           SNAP_VERSION=$(python -c "from tools.openapi_spec import extract_api_version; print(extract_api_version(open('specs/ksef-openapi.snapshot.json', encoding='utf-8').read()) or 'nieznana')")
           echo "live_version=$LIVE_VERSION" >> "$GITHUB_OUTPUT"
           echo "snapshot_version=$SNAP_VERSION" >> "$GITHUB_OUTPUT"
           echo "### Wersja live: $LIVE_VERSION / snapshot: $SNAP_VERSION" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" = "2" ]; then
+            echo "::error::Nie udało się wczytać specyfikacji OpenAPI (kod 2) - to nie jest dryf kontraktu."
+            cat .tmp/diff.txt
+            exit 1
+          fi
 
       - name: Open or update tracking issue
-        if: steps.drift.outputs.exit_code != '0'
+        if: steps.fetch.outcome == 'success' && steps.drift.outputs.exit_code == '1'
         uses: actions/github-script@v8
         env:
           LIVE_VERSION: ${{ steps.drift.outputs.live_version }}

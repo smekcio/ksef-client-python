@@ -18,8 +18,11 @@ def to_snake_case(name: str) -> str:
     """Zamienia nazwę `camelCase`/`PascalCase` na `snake_case`.
 
     Obsługuje akronimy, żeby `invoiceExportStatus` dało `invoice_export_status`,
-    a nie `invoice_export_status` z rozjechanym akronimem. Przypadki typu
+    a nie `invoice_exportstatus` z rozjechanym akronimem. Przypadki typu
     ``KodWaluty`` również są obsłużone.
+
+    Zakładamy wejście alfanumeryczne (nazwy właściwości kontraktu OpenAPI); znaki
+    inne niż litery i cyfry nie są normalizowane.
 
     >>> to_snake_case("invoiceSend")
     'invoice_send'

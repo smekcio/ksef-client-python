@@ -20,6 +20,7 @@ from .qr import add_label_to_qr, generate_qr_png, resize_png
 from .rate_limits import (
     INACTIVE_RATE_LIMIT_GROUPS,
     SESSION_CLOSE_GROUPS,
+    UNLIMITED,
     RateLimitGroup,
     RateLimitInfo,
     get_rate_limit,
@@ -111,4 +112,5 @@ __all__ = [
     "get_rate_limit",
     "INACTIVE_RATE_LIMIT_GROUPS",
     "SESSION_CLOSE_GROUPS",
+    "UNLIMITED",
 ]

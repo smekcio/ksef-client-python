@@ -10,6 +10,12 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools import generate_models_stub, generate_openapi_models
+from tools.openapi_spec import OpenApiSpecError
+
+# Kody wyjścia rozróżnialne dla wołającego (workflow driftu):
+# 0 - brak dryfu, 1 - artefakty nieaktualne, 2 - nie udało się wczytać specyfikacji.
+EXIT_DRIFT = 1
+EXIT_SPEC_ERROR = 2
 
 DEFAULT_OPENAPI_OUTPUT_PATH = Path("src/ksef_client/openapi_models.py")
 DEFAULT_MODELS_STUB_OUTPUT_PATH = Path("src/ksef_client/models.pyi")
@@ -90,12 +96,13 @@ def sync_generated(
             if diffs:
                 for diff in diffs:
                     print(diff, end="")
-                raise SystemExit(
+                print(
                     "Generated artifacts are out of date. "
-                    "Run tools/sync_generated.py and commit the result."
+                    "Run tools/sync_generated.py and commit the result.",
+                    file=sys.stderr,
                 )
+                raise SystemExit(EXIT_DRIFT)
             return
-
         _write_text(openapi_output_path, generated_openapi_text)
         _write_text(models_stub_output_path, generated_models_stub_text)
 
@@ -137,14 +144,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    sync_generated(
-        check=args.check,
-        input_path=args.input,
-        allow_fallback=not args.no_fallback,
-        openapi_output_path=args.openapi_output,
-        models_stub_output_path=args.models_stub_output,
-        models_path=args.models,
-    )
+    try:
+        sync_generated(
+            check=args.check,
+            input_path=args.input,
+            allow_fallback=not args.no_fallback,
+            openapi_output_path=args.openapi_output,
+            models_stub_output_path=args.models_stub_output,
+            models_path=args.models,
+        )
+    except OpenApiSpecError as exc:
+        # Błąd wczytania specyfikacji to nie dryf kontraktu - wołający (workflow)
+        # musi to rozróżnić, żeby nie zgłaszać fałszywego rozjazdu.
+        print(f"Nie udało się wczytać specyfikacji OpenAPI: {exc}", file=sys.stderr)
+        raise SystemExit(EXIT_SPEC_ERROR) from exc
 
 
 if __name__ == "__main__":
