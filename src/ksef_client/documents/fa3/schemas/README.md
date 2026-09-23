@@ -21,11 +21,27 @@ zasoby po nazwie pliku i rozwiązuje je do kopii z tego katalogu, również gdy
 
 ## Odstępstwa od oryginału
 
-Kopie różnią się od plików publikowanych przez MF **wyłącznie kosmetycznie**
-(trailing whitespace w `<xsd:documentation>` oraz `schemaLocation` wskazujący
-ścieżkę relatywną zamiast URL). Treść definicji typów i elementów jest identyczna.
-Nie należy wprowadzać tu zmian merytorycznych — schemat musi odwzorowywać
-kontrakt produkcyjny KSeF.
+Treść schematów jest zgodna ze źródłem; różnice są **wyłącznie formatujące** i zostały
+zweryfikowane wobec oryginałów:
+
+| Plik | Różnica wobec źródła |
+| --- | --- |
+| `schemat_FA(3)_v1-0E.xsd` | Jedna linia (2258) bez końcowego whitespace. W źródle `CIRFMF/ksef-api` linia ta ma 18 spacji na końcu. |
+| `KodyKrajow_v10-0E.xsd` | Tylko końcówki linii (`CRLF` → `LF`). Treść bajtowo identyczna po normalizacji. |
+| `ElementarneTypyDanych_v10-0E.xsd` | Tylko końcówki linii (samotny `CR` → `LF`). Treść identyczna po normalizacji. |
+| `StrukturyDanych_v10-0E.xsd` | Tylko końcówki linii (samotny `CR` → `LF`). Treść identyczna po normalizacji. |
+
+Źródła MF używają niespójnych końcówek linii (jeden plik `CRLF`, dwa samotny `CR`), więc
+w repo ujednolicono je do `LF`. **Nie należy wprowadzać tu zmian merytorycznych** —
+schemat musi odwzorowywać kontrakt produkcyjny KSeF.
+
+### Adresy `schemaLocation`
+
+Wszystkie kopie zachowują oryginalne `schemaLocation` wskazujące **adresy URL** do
+`crd.gov.pl`. Walidacja działa offline nie dzięki zmodyfikowanym ścieżkom, lecz dlatego,
+że `_schema_resolver` w `xml.py` przechwytuje żądania zasobów i podstawia pliki z tego
+katalogu (dopasowanie po nazwie pliku). Zmiana tych adresów na relatywne nie jest
+konieczna.
 
 ## Rozjazd słowników walut (OpenAPI ↔ XSD)
 
