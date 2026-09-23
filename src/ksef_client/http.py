@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import math
 from dataclasses import MISSING, dataclass
@@ -229,6 +230,7 @@ def _fill_missing_required_fields(model_cls: type, payload: dict[str, Any]) -> d
     odpowiedzi**; pliki generowane pozostają wierne kontraktowi. Pola, których nie
     umiemy wypełnić sensownie (`_neutral_value` zwraca `None`), są pomijane, żeby
     nie wstawiać wartości o złym typie.
+
     """
     type_map = getattr(model_cls, "__dataclass_fields__", {})
     filled = dict(payload)
@@ -244,6 +246,7 @@ def _fill_missing_required_fields(model_cls: type, payload: dict[str, Any]) -> d
     return filled
 
 
+
 def _from_dict_lenient(model_cls: type, payload: dict[str, Any]) -> Any:
     """Deserializuje payload, tolerując brak pól wymaganych przez kontrakt OpenAPI."""
     try:
@@ -252,6 +255,7 @@ def _from_dict_lenient(model_cls: type, payload: dict[str, Any]) -> Any:
         return model_cls.from_dict(  # type: ignore[attr-defined]
             _fill_missing_required_fields(model_cls, payload)
         )
+
 
 
 # Kontrakt KSeF oznacza `traceId`/`timestamp` jako wymagane w modelach Problem Details,
@@ -294,13 +298,26 @@ _UNAUTHORIZED_REQUIRED_TYPES: dict[str, type] = {
 }
 
 
+def _attach_raw(problem: Any, body: dict[str, Any]) -> Any:
+    """Dołącza surowy payload do obiektu problemu, żeby dało się odczytać kody błędów.
+
+    ``ExceptionResponse`` modeluje wyłącznie ``exception``, więc ``errors[]`` oraz
+    ``status``/``title`` z tego samego payloadu przepadają. ``_error_utils`` czyta
+    kody właśnie z ``errors[].code`` (jest to bogatsze źródło niż
+    ``exceptionDetailList``), a bez zachowanego ``raw`` te kody są nieosiągalne.
+    """
+    with contextlib.suppress(AttributeError, TypeError):
+        object.__setattr__(problem, "raw", body)
+    return problem
+
+
 def _parse_api_problem(status_code: int, body: Any) -> Any | None:
     if not isinstance(body, dict):
         return None
 
     try:
         if "exception" in body:
-            return ExceptionResponse.from_dict(body)
+            return _attach_raw(ExceptionResponse.from_dict(body), body)
         if status_code == 400 and _has_required_types(
             body, _BAD_REQUEST_REQUIRED_TYPES
         ) and _has_valid_optional_types(body, _BAD_REQUEST_OPTIONAL_TYPES):
