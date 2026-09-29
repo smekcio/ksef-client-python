@@ -1,0 +1,124 @@
+name: KSeF API drift check
+
+on:
+  schedule:
+    # Codziennie rano UTC - wykrywa nowe wydanie API KSeF zanim trafi na PROD.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Fetch live OpenAPI spec
+        id: fetch
+        run: |
+          python -c "from pathlib import Path; from tools.openapi_spec import load_openapi_document; output = Path('.tmp/openapi.json'); output.parent.mkdir(parents=True, exist_ok=True); output.write_text(load_openapi_document(allow_fallback=False).text, encoding='utf-8', newline='\n')"
+
+      - name: Detect contract drift
+        id: drift
+        # Bez pobranej specyfikacji nie da się wykryć dryfu - inaczej brak pliku
+        # zostałby zaraportowany jako rozjazd kontraktu.
+        if: steps.fetch.outcome == 'success'
+        run: |
+          set +e
+          python tools/sync_generated.py --check --input .tmp/openapi.json > .tmp/diff.txt 2>&1
+          code=$?
+          # 1 = artefakty nieaktualne (dryf), 2 = nie udało się wczytać specyfikacji.
+          # Tylko 1 jest podstawą do zgłoszenia; 2 przerywa job bez otwierania issue.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          LIVE_VERSION=$(python -c "from tools.openapi_spec import extract_api_version; print(extract_api_version(open('.tmp/openapi.json', encoding='utf-8').read()) or 'nieznana')")
+          SNAP_VERSION=$(python -c "from tools.openapi_spec import extract_api_version; print(extract_api_version(open('specs/ksef-openapi.snapshot.json', encoding='utf-8').read()) or 'nieznana')")
+          echo "live_version=$LIVE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "snapshot_version=$SNAP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "### Wersja live: $LIVE_VERSION / snapshot: $SNAP_VERSION" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" = "2" ]; then
+            echo "::error::Nie udało się wczytać specyfikacji OpenAPI (kod 2) - to nie jest dryf kontraktu."
+            cat .tmp/diff.txt
+            exit 1
+          fi
+
+      - name: Open or update tracking issue
+        if: steps.fetch.outcome == 'success' && steps.drift.outputs.exit_code == '1'
+        uses: actions/github-script@v8
+        env:
+          LIVE_VERSION: ${{ steps.drift.outputs.live_version }}
+          SNAPSHOT_VERSION: ${{ steps.drift.outputs.snapshot_version }}
+        with:
+          script: |
+            const fs = require("fs");
+            const live = process.env.LIVE_VERSION;
+            const snapshot = process.env.SNAPSHOT_VERSION;
+            const marker = `<!-- ksef-api-drift:${live} -->`;
+            const labelName = "ksef-api-drift";
+            const diff = fs.readFileSync(".tmp/diff.txt", "utf8").slice(0, 20000);
+
+            const { owner, repo } = context.repo;
+
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: labelName });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: labelName,
+                color: "B60205",
+                description: "Kontrakt KSeF API rozjechał się ze snapshotem w repo",
+              });
+            }
+
+            const existing = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: "all", per_page: 100, labels: labelName,
+            });
+            const duplicate = existing.find(
+              (issue) => !issue.pull_request && (issue.body || "").includes(marker)
+            );
+
+            const body = [
+              `Kontrakt KSeF API rozjechał się ze snapshotem w repozytorium.`,
+              "",
+              `- Wersja live: **${live}**`,
+              `- Wersja snapshotu: **${snapshot}**`,
+              "",
+              "Uruchom `python tools/sync_generated.py`, a następnie przejrzyj diff",
+              "pod kątem zmian wymagających pracy ręcznej (semantyka limitów, kody błędów,",
+              "rozjazd słowników walut OpenAPI ↔ XSD).",
+              "",
+              "<details><summary>Diff artefaktów generowanych</summary>",
+              "",
+              "```diff",
+              diff,
+              "```",
+              "",
+              "</details>",
+              "",
+              marker,
+            ].join("\n");
+
+            if (duplicate) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: duplicate.number, body,
+              });
+              core.info(`Zaktualizowano issue #${duplicate.number}`);
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner, repo,
+              title: `KSeF API: rozjazd kontraktu (live ${live}, snapshot ${snapshot})`,
+              body,
+              labels: [labelName],
+            });

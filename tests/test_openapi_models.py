@@ -5,6 +5,10 @@ from unittest.mock import patch
 
 from ksef_client import openapi_models as m
 
+# Zatwierdzony snapshot OpenAPI jest źródłem prawdy o kontrakcie KSeF.
+ROOT = Path(__file__).resolve().parents[1]
+SNAPSHOT_PATH = ROOT / "specs" / "ksef-openapi.snapshot.json"
+
 
 class OpenApiModelsTests(unittest.TestCase):
     def test_from_dict_none(self):
@@ -279,18 +283,11 @@ class OpenApiModelsTests(unittest.TestCase):
         gone = m.GoneProblemDetails.from_dict(gone_payload)
         self.assertEqual(gone.to_dict()["traceId"], "trace-410")
 
-    def test_token_permission_type_matches_openapi_when_available(self):
-        repo_root = Path(__file__).resolve().parents[2]
-        openapi_path = repo_root / "ksef-docs" / "open-api.json"
-        if not openapi_path.exists():
-            self.skipTest(
-                "open-api.json not found; enum compatibility test requires monorepo layout"
-            )
-
-        spec = json.loads(openapi_path.read_text(encoding="utf-8"))
-        expected = set(
-            spec["components"]["schemas"]["TokenPermissionType"]["enum"]
-        ).union({"CollectiveIdentifierManage"})
+    def test_token_permission_type_matches_openapi(self):
+        # Kontrakt czytamy z zatwierdzonego snapshotu OpenAPI — to jedyne źródło
+        # prawdy dostępne również poza monorepo. Bez tego test po cichu się pomijał.
+        spec = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+        expected = set(spec["components"]["schemas"]["TokenPermissionType"]["enum"])
         actual = {item.value for item in m.TokenPermissionType}
         self.assertSetEqual(actual, expected)
 

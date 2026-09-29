@@ -17,10 +17,14 @@ from ksef_client.cli.commands import (
     send_cmd,
     upo_cmd,
 )
-from ksef_client.cli.commands._error_utils import build_problem_hint
+from ksef_client.cli.commands._error_utils import (
+    _extract_exception_codes,
+    build_problem_hint,
+)
 from ksef_client.cli.context import CliContext
 from ksef_client.cli.exit_codes import ExitCode
 from ksef_client.exceptions import KsefApiError, KsefRateLimitError
+from ksef_client.http import _parse_api_problem
 
 
 class _RecordingRenderer:
@@ -169,3 +173,198 @@ def test_build_problem_hint_ignores_unrenderable_error_items() -> None:
     )
 
     assert build_problem_hint(problem, default_hint=None) is None
+
+
+def test_build_problem_hint_explains_temporarily_unavailable_session() -> None:
+    """Kod 21184 (KSeF API 2.8.0) wymaga konkretnego działania użytkownika."""
+    problem = m.ExceptionResponse.from_dict(
+        {
+            "exception": {
+                "serviceCode": "00-1E",
+                "serviceName": "Sesja",
+                "exceptionDetailList": [
+                    {
+                        "exceptionCode": 21184,
+                        "exceptionDescription": "Sesja tymczasowo niedostępna",
+                    }
+                ],
+            }
+        }
+    )
+
+    hint = build_problem_hint(problem, default_hint="Wait and retry.")
+
+    assert hint is not None
+    assert "[21184]" in hint
+    assert "nową sesję" in hint
+
+
+def test_build_problem_hint_without_known_code_keeps_default() -> None:
+    problem = m.ExceptionResponse.from_dict(
+        {
+            "exception": {
+                "serviceCode": "00-1E",
+                "serviceName": "Sesja",
+                "exceptionDetailList": [
+                    {"exceptionCode": 99999, "exceptionDescription": "Nieznany"}
+                ],
+            }
+        }
+    )
+
+    hint = build_problem_hint(problem, default_hint="Wait and retry.")
+
+    assert hint is None or "[99999]" not in hint
+
+
+def test_extract_exception_codes_reads_problem_details_errors() -> None:
+    """Kody w stylu Problem Details siedzą w `errors[].code`, nie w `exceptionDetailList`."""
+    problem = m.BadRequestProblemDetails.from_dict(
+        {
+            "title": "Bad Request",
+            "status": 400,
+            "detail": "Blad walidacji",
+            "instance": "/x",
+            "timestamp": "2026-09-23T00:00:00Z",
+            "traceId": "trace-400",
+            "errors": [{"code": 21405, "description": "Blad walidacji danych wejsciowych"}],
+        }
+    )
+
+    assert _extract_exception_codes(problem) == [21405]
+
+
+def test_extract_exception_codes_prefers_exception_style() -> None:
+    problem = m.ExceptionResponse.from_dict(
+        {
+            "exception": {
+                "serviceCode": "00-1E",
+                "serviceName": "Sesja",
+                "exceptionDetailList": [{"exceptionCode": 21184, "exceptionDescription": "x"}],
+            }
+        }
+    )
+
+    assert _extract_exception_codes(problem) == [21184]
+
+
+def test_extract_exception_codes_handles_missing_problem() -> None:
+    assert _extract_exception_codes(None) == []
+
+
+def test_extract_exception_codes_reads_from_raw_payload() -> None:
+    problem = SimpleNamespace(raw={"errors": [{"code": "21418"}]})
+
+    assert _extract_exception_codes(problem) == [21418]
+
+
+def test_extract_exception_codes_deduplicates_repeated_codes() -> None:
+    """Błąd wsadowy może mieć wiele pozycji z tym samym kodem."""
+    problem = SimpleNamespace(errors=[{"code": 21184}, {"code": 21184}, {"code": 21184}])
+
+    assert _extract_exception_codes(problem) == [21184]
+
+
+def test_extract_exception_codes_preserves_order_of_distinct_codes() -> None:
+    problem = SimpleNamespace(errors=[{"code": 21405}, {"code": 21184}, {"code": 21405}])
+
+    assert _extract_exception_codes(problem) == [21405, 21184]
+
+
+def test_duplicate_codes_do_not_repeat_hint() -> None:
+    """Ta sama podpowiedź nie może pojawić się w komunikacie wielokrotnie."""
+    problem = m.BadRequestProblemDetails.from_dict(
+        {
+            "title": "B",
+            "status": 400,
+            "detail": "d",
+            "errors": [
+                {"code": 21184, "description": "a"},
+                {"code": 21184, "description": "b"},
+            ],
+            "instance": "/x",
+            "timestamp": "t",
+            "traceId": "t",
+        }
+    )
+
+    hint = build_problem_hint(problem, default_hint=None)
+
+    assert hint is not None
+    assert hint.count("[21184]") == 1
+
+
+def test_codes_from_errors_survive_a_code_less_exception_path() -> None:
+    """`exceptionCode` jest opcjonalny, więc jego brak nie może ukryć kodów z `errors[]`.
+
+    Wcześniej decyzja o źródle kodów zapadała na surowej liście kandydatów: obecna,
+    ale bezkodowa `exceptionDetailList` dawała `[None]`, co było „niepuste", więc
+    poprawny kod z `errors[]` był odrzucany i podpowiedź nigdy się nie pojawiała.
+    """
+    payload = {
+        "status": 400,
+        "title": "Bad Request",
+        "detail": "d",
+        "exception": {"exceptionDetailList": [{"exceptionDescription": "bez kodu"}]},
+        "errors": [{"code": 21184, "description": "y"}],
+    }
+    problem = _parse_api_problem(400, payload)
+
+    assert problem is not None
+    assert _extract_exception_codes(problem) == [21184]
+
+    hint = build_problem_hint(problem, default_hint=None)
+    assert hint is not None
+    assert "[21184]" in hint
+
+
+def test_codes_are_merged_when_both_sources_carry_them() -> None:
+    """Gdy oba źródła niosą kody, żaden nie może zginąć."""
+    payload = {
+        "status": 400,
+        "title": "Bad Request",
+        "detail": "d",
+        "exception": {
+            "exceptionDetailList": [{"exceptionCode": 21418, "exceptionDescription": "x"}]
+        },
+        "errors": [{"code": 21184, "description": "y"}],
+    }
+    problem = _parse_api_problem(400, payload)
+
+    assert problem is not None
+    assert _extract_exception_codes(problem) == [21184, 21418]
+
+
+def test_non_numeric_and_boolean_codes_are_not_coerced() -> None:
+    """`True` nie może stać się kodem `1`, a tekst niebędący liczbą - kodem."""
+    problem = SimpleNamespace(
+        errors=[
+            {"code": True},
+            {"code": 21184.9},
+            {"code": "nie-kod"},
+            {"code": "21180"},
+        ]
+    )
+
+    assert _extract_exception_codes(problem) == [21180]
+
+
+@pytest.mark.parametrize("code", [21180, 21173, 21155, 21418, 71004, 71005])
+def test_documented_actionable_codes_have_hints(code: int) -> None:
+    """Kody z jasnym działaniem dla użytkownika muszą mieć podpowiedź."""
+    problem = m.BadRequestProblemDetails.from_dict(
+        {
+            "title": "B",
+            "status": 400,
+            "detail": "d",
+            "errors": [{"code": code, "description": "opis"}],
+            "instance": "/x",
+            "timestamp": "t",
+            "traceId": "t",
+        }
+    )
+
+    hint = build_problem_hint(problem, default_hint=None)
+
+    assert hint is not None
+    assert f"[{code}]" in hint

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from importlib import resources
@@ -7,6 +8,11 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from .currency import (
+    FA3_SCHEMA_FILE,
+    Fa3CurrencyMismatchError,
+    validate_fa3_currency,
+)
 from .domain import (
     Address,
     AnnotationSet,
@@ -41,6 +47,75 @@ FA3_NAMESPACE = "http://crd.gov.pl/wzor/2025/06/25/13775/"
 ETD_NAMESPACE = "http://crd.gov.pl/xml/schematy/dziedzinowe/mf/2022/01/05/eD/DefinicjeTypy/"
 XSI_NAMESPACE = "http://www.w3.org/2001/XMLSchema-instance"
 
+KOD_WALUTY_LOCAL_NAME = "KodWaluty"
+# Schemat FA(3) typuje `TKodWaluty` w DWÓCH elementach: `KodWaluty` (waluta faktury)
+# oraz `WalutaUmowna` (waluta umowna w `WarunkiTransakcji`). Oba podlegają tej samej
+# enumeracji, więc pominięcie któregokolwiek przepuszczałoby walutę, którą KSeF odrzuci.
+CURRENCY_LOCAL_NAMES = frozenset({KOD_WALUTY_LOCAL_NAME, "WalutaUmowna"})
+
+
+def _iter_currency_codes(xml: bytes | str) -> list[str]:
+    """Zwraca kody walut z elementów `KodWaluty`/`WalutaUmowna` niezależnie od prefiksu.
+
+    Parsowanie przez `ElementTree` zamiast wyrażenia regularnego jest konieczne:
+    regex gubi `<x:KodWaluty>`, `<KodWaluty >` i inne poprawne warianty XML,
+    a `validate_fa3_xml_xsd` jest publicznym API przyjmującym dowolny dokument.
+
+    Bierzemy oba elementy o typie `TKodWaluty`, bo oba trafiają do tej samej
+    enumeracji schematu - waluta umowna z kodem spoza FA(3) również kończy się
+    błędem `SCHEMAV_CVC_ENUMERATION_VALID`.
+    """
+    try:
+        root = ET.fromstring(xml if isinstance(xml, bytes) else xml.encode("utf-8"))
+    except ET.ParseError:
+        # Dokument nieparsowalny - walidacja XSD zgłosi właściwy błąd.
+        return []
+
+    codes: list[str] = []
+    for element in root.iter():
+        local_name = element.tag.rsplit("}", 1)[-1] if isinstance(element.tag, str) else ""
+        if local_name in CURRENCY_LOCAL_NAMES and element.text:
+            # Nie obcinamy białych znaków: XSD widzi dokładną treść elementu,
+            # a walidator nie może zaakceptować wartości, którą schemat odrzuci.
+            codes.append(element.text)
+    return codes
+
+
+def _preflight_currency_check(xml: bytes | str) -> None:
+    """Wykrywa waluty z OpenAPI nieobsługiwane przez schemat FA(3) przed walidacją XSD.
+
+    Bez tego użytkownik dostaje ``SCHEMAV_CVC_ENUMERATION_VALID``, który nie mówi,
+    że przyczyną jest rozjazd słowników po stronie KSeF.
+    """
+    for code in dict.fromkeys(_iter_currency_codes(xml)):
+        try:
+            validate_fa3_currency(code)
+        except Fa3CurrencyMismatchError as exc:
+            raise FA3XmlValidationError(f"{exc} Schemat: {FA3_SCHEMA_FILE}.") from exc
+
+
+def _warn_unsupported_currencies(xml: bytes | str) -> None:
+    """Ostrzega o rozjeździe walut, gdy walidacja XSD nie została uruchomiona.
+
+    Wariant domyślny (`xsd_validate=False`) nie sprawdza schematu, więc faktura
+    w walucie odrzucanej przez FA(3) przeszłaby bez sygnału i zostałaby odrzucona
+    dopiero przez KSeF. Ostrzeżenie nie zmienia zachowania, ale ujawnia problem.
+
+    ``stacklevel=4`` wskazuje wywołanie użytkownika: ścieżka to
+    ``<użytkownik>`` → ``models.FA3Draft.to_xml`` → ``draft_to_xml`` →
+    ``_warn_unsupported_currencies`` → ``warn``.
+    """
+    for code in dict.fromkeys(_iter_currency_codes(xml)):
+        try:
+            validate_fa3_currency(code)
+        except Fa3CurrencyMismatchError as exc:
+            warnings.warn(
+                f"{exc} Dokument nie został zwalidowany względem schematu FA(3) "
+                f"(xsd_validate=False), ale KSeF odrzuci taką fakturę.",
+                UserWarning,
+                stacklevel=4,
+            )
+
 
 class FA3XmlValidationError(ValueError):
     pass
@@ -73,6 +148,8 @@ def draft_to_xml(
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     if xsd_validate:
         validate_fa3_xml_xsd(xml)
+    else:
+        _warn_unsupported_currencies(xml)
     return xml
 
 
@@ -111,6 +188,8 @@ def invoice_to_xml(
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     if xsd_validate:
         validate_fa3_xml_xsd(xml)
+    else:
+        _warn_unsupported_currencies(xml)
     return xml
 
 
@@ -122,12 +201,20 @@ def validate_fa3_xml_xsd(xml: bytes | str) -> None:
             'Walidacja XSD FA(3) wymaga lxml. Zainstaluj: pip install "ksef-client[fa3]".'
         ) from exc
 
+    # Rozjazd słowników walut OpenAPI ↔ XSD daje mylący błąd SCHEMAV_CVC_ENUMERATION_VALID.
+    # Sprawdzamy go zawczasu i tłumaczymy na komunikat wskazujący rzeczywistą przyczynę.
+    _preflight_currency_check(xml)
+
     parser = etree.XMLParser()
     parser.resolvers.add(_schema_resolver(etree))
     schema_package = resources.files("ksef_client.documents.fa3.schemas")
     with resources.as_file(schema_package / "schemat_FA(3)_v1-0E.xsd") as schema_path:
         schema = etree.XMLSchema(etree.parse(str(schema_path), parser))
-    document = etree.fromstring(xml.encode("utf-8") if isinstance(xml, str) else xml)
+    try:
+        document = etree.fromstring(xml.encode("utf-8") if isinstance(xml, str) else xml)
+    except etree.XMLSyntaxError as exc:
+        # Dokument nieparsowalny to też błąd walidacji - nie przeciekamy wyjątku lxml.
+        raise FA3XmlValidationError(f"Nieprawidłowy XML: {exc}") from exc
     if not schema.validate(document):
         error = schema.error_log.last_error
         detail = str(error) if error is not None else "nieznany błąd walidacji XSD"

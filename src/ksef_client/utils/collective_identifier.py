@@ -33,6 +33,8 @@ PAGE_SIZE_INVOICES_MAX = 500
 COLLECTIVE_IDENTIFIER_EXCEPTION_CODES = {
     71001: "Invoice cannot be assigned to a collective identifier",
     71002: "Invoice is already assigned to the maximum number of collective identifiers",
+    71004: "Invoices belong to different sellers",
+    71005: "Duplicated KSeF number in the request",
 }
 
 _DATE_ONLY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")

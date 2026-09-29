@@ -85,7 +85,7 @@ def test_sync_generated_check_detects_stale_outputs(monkeypatch, tmp_path: Path)
             models_path=models_path,
         )
 
-    assert "Generated artifacts are out of date" in str(exc.value)
+    assert exc.value.code == sync_tool.EXIT_DRIFT
 
 
 def test_main_supports_check_mode(monkeypatch, tmp_path: Path) -> None:

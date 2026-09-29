@@ -2,9 +2,9 @@
 
 Dokumentacja opisuje **publiczne API** biblioteki `ksef-client-python` (import: `ksef_client`) oraz scenariusze (workflow) wspierające typowe procesy: uwierzytelnianie, generowanie XML FA(3), sesje wysyłkowe (online/batch) i eksport faktur.
 
-Opis kontraktu API (OpenAPI) oraz dokumenty procesowe i ograniczenia systemu znajdują się w `ksef-docs/`.
+Opis kontraktu API (OpenAPI) oraz dokumenty procesowe i ograniczenia systemu znajdują się w repozytorium [`CIRFMF/ksef-api`](https://github.com/CIRFMF/ksef-api).
 
-Kompatybilność SDK: **KSeF API `v2.7.1`**.
+Kompatybilność SDK: **KSeF API `v2.8.1`**.
 
 Publiczny kontrakt SDK używa typowanych modeli `ksef_client.models`. Payloady requestów są
 `typed-only`, a wiele metod klientów zwraca modele odpowiedzi zamiast surowych `dict`. Jeśli

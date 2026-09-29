@@ -1,7 +1,7 @@
 # Identyfikatory zbiorcze (`client.collective_identifiers`)
 
 Obsługa identyfikatorów zbiorczych (IZ) wprowadzonych w KSeF API 2.7.0
-i zaktualizowanych w 2.7.1.
+i zaktualizowanych w 2.7.1 oraz 2.8.x.
 
 IZ grupuje już wystawione faktury tego samego sprzedawcy (co najmniej 2 i do efektywnego limitu
 kontekstu; schema limitów dopuszcza zakres 2–5000 numerów KSeF)

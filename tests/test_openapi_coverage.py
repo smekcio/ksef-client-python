@@ -79,10 +79,12 @@ def _extract_openapi_spec_operations(openapi_path: Path) -> set[tuple[str, str]]
 
 class OpenApiCoverageTests(unittest.TestCase):
     def test_python_clients_cover_openapi_spec(self) -> None:
-        repo_root = Path(__file__).resolve().parents[2]
-        openapi_path = repo_root / "ksef-docs" / "open-api.json"
+        repo_root = Path(__file__).resolve().parents[1]
+        openapi_path = repo_root / "specs" / "ksef-openapi.snapshot.json"
         if not openapi_path.exists():
-            self.skipTest("open-api.json not found; coverage test requires monorepo layout")
+            self.fail(
+                "Brak specs/ksef-openapi.snapshot.json - nie można zweryfikować pokrycia API."
+            )
 
         spec_ops = _extract_openapi_spec_operations(openapi_path)
         py_ops = _extract_python_openapi_operations()
