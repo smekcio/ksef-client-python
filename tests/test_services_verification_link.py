@@ -140,6 +140,25 @@ class VerificationLinkTests(unittest.TestCase):
                 private_key_password="wrong-password",
             )
 
+    def test_sign_path_maps_platform_specific_wrong_password_error(self):
+        rsa_cert = generate_rsa_cert(private_key_password=self.ENCRYPTED_KEY_PASSWORD)
+        linux_error = ValueError(
+            "Could not deserialize key data. Details: ASN.1 parsing error: "
+            "unexpected tag (got Tag { value: 16, constructed: true, class: Application })"
+        )
+
+        with patch(
+            "ksef_client.services.verification_link.load_private_key",
+            side_effect=linux_error,
+        ), self.assertRaisesRegex(ValueError, "`private_key_password` is incorrect"):
+            _sign_path(
+                "path",
+                None,
+                rsa_cert.private_key_pem,
+                "p1363",
+                private_key_password="wrong-password",
+            )
+
     def test_sign_path_error_when_password_is_given_for_unencrypted_key(self):
         rsa_cert = generate_rsa_cert()
         with self.assertRaisesRegex(ValueError, "Omit `private_key_password`"):

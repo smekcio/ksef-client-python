@@ -103,7 +103,10 @@ def _sign_path(
         ) from exc
     except ValueError as exc:
         message = str(exc).lower()
-        if any(
+        encrypted_pem = "ENCRYPTED PRIVATE KEY" in private_key_pem or (
+            "Proc-Type: 4,ENCRYPTED" in private_key_pem
+        )
+        if (private_key_password is not None and encrypted_pem) or any(
             text in message
             for text in (
                 "incorrect password",
