@@ -18,6 +18,17 @@
   precise UTC ranges, and resumable CLI pagination
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
 
+## 0.18.0 (2026-09-29)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* feat: align with KSeF API 2.8.1 by @smekcio in https://github.com/smekcio/ksef-client-python/pull/90
+
+
+**Full Changelog**: https://github.com/smekcio/ksef-client-python/compare/v0.17.1...v0.18.0
+
 ## 0.17.1 (2026-08-30)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
