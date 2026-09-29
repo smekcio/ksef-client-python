@@ -241,3 +241,13 @@ def test_xsd_validation_is_offline(monkeypatch: pytest.MonkeyPatch) -> None:
 
     xml = _invoice_xml("PLN", xsd_validate=True)
     assert b"KodWaluty" in xml
+
+
+def test_currency_preflight_preserves_whitespace_from_xml() -> None:
+    """Preflight nie może naprawiać wartości, którą XSD faktycznie odrzuci."""
+    from ksef_client.documents.fa3.xml import _warn_unsupported_currencies
+
+    with pytest.warns(UserWarning, match="nieprawidłowy format"):
+        _warn_unsupported_currencies(
+            "<Faktura><KodWaluty> PLN </KodWaluty></Faktura>"
+        )

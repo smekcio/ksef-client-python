@@ -135,6 +135,10 @@ def _parse_retry_after(value: str | None) -> int | None:
 
 
 def _coerce_problem_status(value: Any, fallback_status: int) -> int:
+    # ``bool`` jest podklasą ``int``, ale nie jest poprawnym statusem HTTP.
+    # Bez jawnego odrzucenia ``True`` zostałoby zinterpretowane jako status 1.
+    if isinstance(value, bool):
+        return fallback_status
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -151,6 +155,8 @@ def _has_required_types(body: dict[str, Any], expected: dict[str, type]) -> bool
     """
     for key, expected_type in expected.items():
         if key not in body:
+            return False
+        if expected_type is int and isinstance(body[key], bool):
             return False
         if not isinstance(body[key], expected_type):
             return False
@@ -482,7 +488,12 @@ def _parse_api_problem(status_code: int, body: Any) -> Any | None:
 
     try:
         if "exception" in body:
-            return _attach_raw(ExceptionResponse.from_dict(body), body)
+            if body["exception"] is None or isinstance(body["exception"], dict):
+                return _attach_raw(ExceptionResponse.from_dict(body), body)
+            # Obecność wadliwego pola ``exception`` oznacza, że cały payload
+            # jest niezgodny z kontraktem. Nie interpretujemy go ponownie jako
+            # innego, pozornie poprawnego wariantu Problem Details.
+            raise TypeError("exception must be an object or null")
         if (
             status_code == 400
             and _has_required_types(body, _BAD_REQUEST_REQUIRED_TYPES)

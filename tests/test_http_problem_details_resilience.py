@@ -36,6 +36,31 @@ def _problem(client: BaseHttpClient, status: int, payload: dict) -> object:
     return getattr(ctx.value, "problem", None)
 
 
+@pytest.mark.parametrize("status_value", [True, False])
+def test_boolean_problem_status_is_not_treated_as_integer(
+    client: BaseHttpClient, status_value: bool
+) -> None:
+    payload = {"title": "B", "status": status_value, "detail": "d"}
+
+    problem = _problem(client, 400, payload)
+
+    assert isinstance(problem, UnknownApiProblem)
+    assert problem.status == 400
+    assert problem.raw == payload
+
+
+@pytest.mark.parametrize("exception", ["invalid", [], 123, True])
+def test_non_object_exception_falls_back_to_unknown(
+    client: BaseHttpClient, exception: object
+) -> None:
+    payload = {"exception": exception}
+
+    problem = _problem(client, 400, payload)
+
+    assert isinstance(problem, UnknownApiProblem)
+    assert problem.raw == payload
+
+
 # --- Poprawne odpowiedzi bez pól oznaczonych w OpenAPI jako wymagane ---
 
 

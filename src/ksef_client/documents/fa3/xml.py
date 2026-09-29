@@ -75,7 +75,9 @@ def _iter_currency_codes(xml: bytes | str) -> list[str]:
     for element in root.iter():
         local_name = element.tag.rsplit("}", 1)[-1] if isinstance(element.tag, str) else ""
         if local_name in CURRENCY_LOCAL_NAMES and element.text:
-            codes.append(element.text.strip())
+            # Nie obcinamy białych znaków: XSD widzi dokładną treść elementu,
+            # a walidator nie może zaakceptować wartości, którą schemat odrzuci.
+            codes.append(element.text)
     return codes
 
 
