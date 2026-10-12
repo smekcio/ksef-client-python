@@ -80,6 +80,7 @@ Biblioteka udostępnia trzy poziomy użycia:
 **Dokumenty FA(3):**
 
 - [FA(3) SDK: klasy, metody i XSD](fa3-sdk.md)
+- [Schematy XSD i dokumentacja MF (broszura FA(3), przykładowe pliki)](../src/ksef_client/documents/fa3/schemas/README.md)
 
 **CLI:**
 

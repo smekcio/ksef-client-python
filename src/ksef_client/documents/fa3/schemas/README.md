@@ -15,9 +15,37 @@ zasoby po nazwie pliku i rozwiązuje je do kopii z tego katalogu, również gdy
 
 ## Źródła
 
-- <https://github.com/CIRFMF/ksef-api> (repozytorium MF; zastąpiło `CIRFMF/ksef-docs`)
+- <https://github.com/CIRFMF/ksef-api> (repozytorium MF; link `CIRFMF/ksef-docs` przekierowuje tutaj)
 - <https://github.com/CIRFMF/ksef-api/tree/main/faktury/schemy/FA>
 - <https://ksef.podatki.gov.pl/informacje-ogolne-ksef-20/struktura-logiczna-fa-3/>
+- wzór w CRWDE: `crd.gov.pl/wzor/2025/06/25/13775/` (ID `13775`, opublikowany `2025-06-25`);
+  przeglądarka wzoru: <https://crd.e-instytucja.pl/index.php?r=wzor%2Fview&id=13775>
+
+## Dokumentacja opisowa MF (broszura informacyjna)
+
+Najbardziej użyteczne **opisowe** źródło wiedzy o FA(3) to broszura informacyjna MF:
+pole po polu, z przykładowymi wartościami, dla każdego elementu schematu
+(`Naglowek`, `Podmiot1/2/3`, `PodmiotUpowazniony`, `Fa`, `FaWiersz`, `Rozliczenie`,
+`Platnosc`, `WarunkiTransakcji`, `Transport`, `Zamowienie`, `Stopka`).
+
+| Dokument | Język | Objętość | Wersja |
+| --- | --- | --- | --- |
+| [Broszura informacyjna dotycząca struktury logicznej FA(3)](https://ksef.podatki.gov.pl/media/nuclnu0w/broszura-informacyjna-dotyczaca-struktury-logicznej-fa-3.pdf) | **PL** (wersja podstawowa) | 173 str. | sierpień 2026 |
+| [Information sheet on the FA(3) logical structure](https://ksef.podatki.gov.pl/media/f2hnwjk2/information-sheet-on-the-fa-3-logical-structure.pdf) | EN | 174 str. | August 2026 |
+
+Obie wersje są równoważne merytorycznie — to ten sam dokument MF w dwóch językach.
+
+Wszystkie materiały MF (podręczniki KSeF 2.0, broszura, przykłady, tabele trybów wystawiania)
+są zebrane na stronie [Pliki do pobrania KSeF 2.0](https://ksef.podatki.gov.pl/pliki-do-pobrania-ksef-20).
+
+### Przykładowe pliki MF
+
+[Przykładowe pliki dla struktury logicznej e-Faktury FA(3)](https://ksef.podatki.gov.pl/media/e5cia0ey/przykladowe-pliki-dla-struktury-logicznej-e-faktury-fa-3.zip)
+(ZIP, ~196 KB) zawiera **26 przykładowych faktur XML** oraz PDF z ich opisem.
+
+Wszystkie 26 plików XML przechodzi walidację wobec schematu z tego katalogu
+(`validate_fa3_xml_xsd`) — to niezależne potwierdzenie, że lokalna kopia schematu
+odpowiada wzorowi MF. Są też dobrym materiałem na fixtures dla testów.
 
 ## Odstępstwa od oryginału
 

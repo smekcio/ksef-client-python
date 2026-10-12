@@ -243,3 +243,10 @@ W praktyce audyt składa się z trzech warstw:
 
 Aby domknąć brak pokrycia, należy dodać scenariusz, który generuje brakującą ścieżkę oraz przechodzi
 `xsd_validate=True`.
+
+## Dokumentacja FA(3) i schematy XSD
+
+- [Broszura informacyjna MF: struktura logiczna FA(3)](https://ksef.podatki.gov.pl/media/nuclnu0w/broszura-informacyjna-dotyczaca-struktury-logicznej-fa-3.pdf) (PDF, PL, 173 str.) – **pole po polu**, z przykładami wartości; wersja angielska: [Information sheet on the FA(3) logical structure](https://ksef.podatki.gov.pl/media/f2hnwjk2/information-sheet-on-the-fa-3-logical-structure.pdf)
+- [`schemas/README.md`](../src/ksef_client/documents/fa3/schemas/README.md) – pochodzenie lokalnych XSD, odstępstwa wobec oryginału, rozjazd słowników walut OpenAPI ↔ XSD oraz pełna lista materiałów MF
+- [Przykładowe pliki MF (26 faktur XML)](https://ksef.podatki.gov.pl/media/e5cia0ey/przykladowe-pliki-dla-struktury-logicznej-e-faktury-fa-3.zip) – wszystkie przechodzą walidację wobec lokalnego schematu
+- [Pliki do pobrania KSeF 2.0](https://ksef.podatki.gov.pl/pliki-do-pobrania-ksef-20) – podręczniki i pozostałe materiały MF
