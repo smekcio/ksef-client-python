@@ -160,7 +160,6 @@ Metody specyficzne dla korekt i zaliczek:
 - `settles_advance(...)`, `settles_advances(...)`, `remaining_to_pay(...)` – rozliczenie zaliczki.
 
 ## Walidacja i serializacja
-
 `build()` i `to_xml(validate=True)` uruchamiają walidację biznesową SDK. Wynik walidacji możesz też
 sprawdzić jawnie:
 
@@ -186,6 +185,35 @@ validate_fa3_xml_xsd(xml)
 ```
 
 Błąd XSD jest zgłaszany jako `FA3XmlValidationError`.
+
+### Ograniczenia pól schematu (`ksef_client.documents.fa3.validation`)
+
+`to_xml(validate=True)` sprawdza wygenerowany dokument także wobec **ograniczeń pól**
+wynikających ze schematu: długości tekstów, precyzji liczb, słowników wartości
+(np. `P_12`, `GTU`, `Procedura`, `Rola`, `FormaPlatnosci`), wzorców (NIP, numer KSeF,
+`SWIFT`, `IPKSeF`) oraz liczności elementów. Sprawdzenie działa bez `lxml` i zwraca
+komunikat ze **ścieżką elementu**, np.:
+
+```
+Faktura/Fa/FaWiersz/P_9A: wartość '1.123456789' ma 9 miejsc po przecinku,
+a schemat dopuszcza 8 (TKwotowy2)
+```
+
+Tabela ograniczeń jest jednym źródłem prawdy i jest weryfikowana ze schematem
+przez test `tests/test_fa3_validation_facets.py` — rozjazd z XSD daje czerwony test.
+Walidację można też uruchomić samodzielnie na gotowym drzewie XML:
+
+```python
+from xml.etree import ElementTree as ET
+from ksef_client.documents.fa3.validation import validate_xml_facets
+
+issues = validate_xml_facets(ET.fromstring(xml))
+for issue in issues:
+    print(issue)   # "ścieżka: opis naruszenia"
+```
+
+`xsd_validate=True` pozostaje ostatecznym arbitrem — sprawdza dodatkowo kolejność
+elementów i pełną strukturę schematu.
 
 ## Drafty JSON i batch helper
 

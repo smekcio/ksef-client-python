@@ -524,7 +524,7 @@ def test_draft_and_xml_validation_edges() -> None:
         kind=FA3InvoiceKind.CORRECTION,
         correction_reason="Korekta",
         corrected_invoice_date=date(2026, 1, 1),
-        corrected_ksef_number="1234567890-20260101-AAAA-BB",
+        corrected_ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01",
     )
     correction_without_number.add_line("Usługa", quantity="1", unit_net_price="1")
     with pytest.raises(ValueError, match="numer faktury korygowanej"):
@@ -537,7 +537,7 @@ def test_draft_and_xml_validation_edges() -> None:
         buyer=FA3Party(name="B", tax_id="2"),
         kind=FA3InvoiceKind.SETTLEMENT,
         advance_invoice_number="FV/ZAL/1",
-        advance_ksef_number="1234567890-20260101-AAAA-BB",
+        advance_ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01",
     )
     settlement_with_both_refs.add_line("Usługa", quantity="1", unit_net_price="1")
     with pytest.raises(ValueError, match="albo numer KSeF, nie oba"):
@@ -568,7 +568,7 @@ def test_draft_and_xml_validation_edges() -> None:
         advance_invoices=(
             AdvanceInvoiceReference(
                 invoice_number="FV/ZAL/1",
-                ksef_number="1234567890-20260101-AAAA-BB",
+                ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01",
             ),
         ),
     )
@@ -594,7 +594,7 @@ def test_draft_and_xml_validation_edges() -> None:
         ],
         kind=FA3InvoiceKind.SETTLEMENT,
         advance_invoice_number="FV/ZAL/1",
-        advance_ksef_number="1234567890-20260101-AAAA-BB",
+        advance_ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01",
     )
     with pytest.raises(
         FA3XmlValidationError,
@@ -776,8 +776,8 @@ def test_xml_exports_advanced_fields_and_payment_variants() -> None:
         correction_reason="Korekta",
         corrected_invoice_number="FV/OLD/1",
         corrected_invoice_date=date(2026, 1, 1),
-        corrected_ksef_number="1234567890-20260101-AAAA-BB",
-        advance_ksef_number="1234567890-20260102-AAAA-BB",
+        corrected_ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01",
+        advance_ksef_number="1111111111-20260102-AAAAAA-BBBBBB-02",
         settlement_amount=decimal_from_value("12.34", field_name="kwota"),
         payment_due_date=date(2026, 1, 31),
         payment_method="gotówka",
@@ -788,7 +788,7 @@ def test_xml_exports_advanced_fields_and_payment_variants() -> None:
 
     assert b"<DataWystFaKorygowanej>2026-01-01</DataWystFaKorygowanej>" in xml
     assert b"<NrKSeF>1</NrKSeF>" in xml
-    assert b"<NrKSeFFaZaliczkowej>1234567890-20260102-AAAA-BB</NrKSeFFaZaliczkowej>" in xml
+    assert b"<NrKSeFFaZaliczkowej>1111111111-20260102-AAAAAA-BBBBBB-02</NrKSeFFaZaliczkowej>" in xml
     assert b"<DoZaplaty>12.34</DoZaplaty>" in xml
     assert b"<FormaPlatnosci>1</FormaPlatnosci>" in xml
     assert b"<Zaliczka>" not in xml
@@ -2181,7 +2181,7 @@ def test_correction_and_settlement_variant_edge_paths() -> None:
         issue_date=date(2026, 1, 1),
         reason="Correction",
         correction_type=CorrectionType.OTHER,
-        ksef_number="123456789012345678901234567890123456",
+        ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01",
     )
     correction_builder.correction_type(CorrectionType.NO_TAX_IMPACT)
     correction_builder.corrected_advance_state("100", currency_rate="4.123456")
@@ -2203,7 +2203,7 @@ def test_correction_and_settlement_variant_edge_paths() -> None:
         reason="Correction",
     )
     settlement_builder.settles_advances(
-        (("ZAL/1", None), (None, "123456789012345678901234567890123456"))
+        (("ZAL/1", None), (None, "1111111111-20260101-AAAAAA-BBBBBB-01"))
     )
     settlement_builder.document_discount("10", reason="Discount")
     settlement_builder.remaining_to_pay("113")
@@ -2223,7 +2223,7 @@ def test_order_lines_internal_ids_default_transport_and_settle_amount_xml() -> N
     buyer = Party.without_tax_id(name="Internal buyer", address="Addr")
     internal_party = replace(
         Party.without_tax_id(name="Internal party", address="Addr"),
-        identifier=PartyIdentifier.internal("INT-1"),
+        identifier=PartyIdentifier.internal("1111111111-00001"),
         role="8",
     )
 
@@ -2265,7 +2265,7 @@ def test_order_lines_internal_ids_default_transport_and_settle_amount_xml() -> N
     )
     xml = advance.to_xml().decode("utf-8")
 
-    assert "<IDWew>INT-1</IDWew>" in xml
+    assert "<IDWew>1111111111-00001</IDWew>" in xml
     assert "<DoRozliczenia>50.00</DoRozliczenia>" in xml
     assert "<RodzajTransportu>3</RodzajTransportu>" in xml
     assert "<UU_IDZ>order-line-1</UU_IDZ>" in xml

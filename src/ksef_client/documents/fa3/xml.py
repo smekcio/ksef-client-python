@@ -42,6 +42,7 @@ from .sections import (
     Transport,
     enum_value,
 )
+from .validation import validate_xml_facets
 
 FA3_NAMESPACE = "http://crd.gov.pl/wzor/2025/06/25/13775/"
 ETD_NAMESPACE = "http://crd.gov.pl/xml/schematy/dziedzinowe/mf/2022/01/05/eD/DefinicjeTypy/"
@@ -145,12 +146,26 @@ def draft_to_xml(
     _party(root, "Podmiot2", draft.buyer)
     _invoice(root, draft)
     _basic_xml_validation(root)
+    if validate:
+        _raise_on_facet_issues(root)
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     if xsd_validate:
         validate_fa3_xml_xsd(xml)
     else:
         _warn_unsupported_currencies(xml)
     return xml
+
+
+def _raise_on_facet_issues(root: ET.Element) -> None:
+    """Podnosi `FA3XmlValidationError`, gdy drzewo łamie ograniczenia schematu.
+
+    Sprawdzenie jest tańsze i czytelniejsze niż walidacja XSD: działa bez `lxml`
+    i wskazuje ścieżkę elementu. Pełna walidacja XSD pozostaje dostępna przez
+    `xsd_validate=True` i nadal jest uruchamiana, gdy o nią poproszono.
+    """
+    issues = validate_xml_facets(root)
+    if issues:
+        raise FA3XmlValidationError("; ".join(str(issue) for issue in issues))
 
 
 def invoice_to_xml(
@@ -185,6 +200,8 @@ def invoice_to_xml(
     if invoice.attachment is not None:
         _attachment(root, invoice.attachment)
     _basic_xml_validation(root)
+    if validate:
+        _raise_on_facet_issues(root)
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     if xsd_validate:
         validate_fa3_xml_xsd(xml)
