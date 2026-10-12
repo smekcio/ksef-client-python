@@ -473,6 +473,36 @@ _TAX_SUMMARY_ORDER = (
     ("P_13_11", None, None),
 )
 
+# Kolejność pól w `Fa` wymuszona przez `xsd:sequence` schematu FA(3):
+# (znacznik netto, waga, znacznik VAT, waga) - emitowane rosnąco po wadze.
+_DRAFT_SUMMARY_ORDER = (
+    ("P_13_1", 1, "P_14_1", 1),
+    ("P_13_2", 2, "P_14_2", 2),
+    ("P_13_3", 3, "P_14_3", 3),
+    ("P_13_4", 4, "P_14_4", 4),
+    ("P_13_5", 5, "P_14_5", 5),
+    ("P_13_6_1", 6, None, 6),
+    ("P_13_6_2", 7, None, 7),
+    ("P_13_6_3", 8, None, 8),
+    ("P_13_7", 9, None, 9),
+    ("P_13_8", 10, None, 10),
+    ("P_13_9", 11, None, 11),
+    ("P_13_10", 12, None, 12),
+    ("P_13_11", 13, None, 13),
+)
+
+# Stawka -> (znacznik netto, znacznik VAT). Mapowanie wynika z dokumentacji pól
+# P_13_x/P_14_x w schemacie FA(3) oraz z TStawkaPodatku.
+_DRAFT_VAT_BUCKETS: dict[str, tuple[str, str | None]] = {
+    "23": ("P_13_1", "P_14_1"),
+    "22": ("P_13_1", "P_14_1"),
+    "8": ("P_13_2", "P_14_2"),
+    "7": ("P_13_3", "P_14_3"),
+    "5": ("P_13_5", "P_14_5"),
+    "4": ("P_13_4", "P_14_4"),
+    "3": ("P_13_4", "P_14_4"),
+}
+
 
 def _domain_annotations(fa: ET.Element, annotations: AnnotationSet) -> None:
     node = ET.SubElement(fa, _q("Adnotacje"))
@@ -966,10 +996,8 @@ def _invoice(root: ET.Element, draft: FA3Draft) -> None:
     if draft.issue_place:
         ET.SubElement(fa, _q("P_1M")).text = draft.issue_place
     ET.SubElement(fa, _q("P_2")).text = draft.invoice_number
-    ET.SubElement(fa, _q("P_13_1")).text = _amount(draft.total_net)
-    ET.SubElement(fa, _q("P_14_1")).text = _amount(draft.total_vat)
-    ET.SubElement(fa, _q("P_15")).text = _amount(draft.total_gross)
-    _annotations(fa)
+    _draft_tax_summary(fa, draft)
+    _annotations(fa, exemption_basis=_draft_exemption_basis(draft))
     ET.SubElement(fa, _q("RodzajFaktury")).text = draft.kind.xml_code
     _correction(fa, draft)
     _advance_invoice_reference(fa, draft)
@@ -978,20 +1006,88 @@ def _invoice(root: ET.Element, draft: FA3Draft) -> None:
         ET.SubElement(row, _q("NrWierszaFa")).text = str(index)
         ET.SubElement(row, _q("P_7")).text = line.description
         ET.SubElement(row, _q("P_8A")).text = line.unit
-        ET.SubElement(row, _q("P_8B")).text = _amount(line.quantity)
-        ET.SubElement(row, _q("P_9A")).text = _amount(line.unit_net_price)
+        ET.SubElement(row, _q("P_8B")).text = _decimal(line.quantity)
+        ET.SubElement(row, _q("P_9A")).text = _amount2(line.unit_net_price)
         ET.SubElement(row, _q("P_11")).text = _amount(line.effective_net_amount)
         ET.SubElement(row, _q("P_12")).text = _vat_rate(line.vat_rate)
     _settlement(fa, draft)
     _payment(fa, draft)
 
 
-def _annotations(fa: ET.Element) -> None:
+def _draft_tax_summary(fa: ET.Element, draft: FA3Draft) -> None:
+    """Podsumowanie stawek dla draftu: netto/VAT w polach właściwych dla stawki pozycji.
+
+    Kwoty są sumowane per stawka tak samo jak w ścieżce typowanej
+    (``_tax_summary``), a nie wrzucane w całości do ``P_13_1``/``P_14_1``.
+    """
+    summary: dict[str, Decimal] = {}
+    vat_summary: dict[str, Decimal] = {}
+    for line in draft.lines:
+        net_tag, vat_tag = _draft_vat_bucket(line.vat_rate)
+        summary[net_tag] = money(summary.get(net_tag, Decimal("0.00")) + line.effective_net_amount)
+        if vat_tag:
+            vat_summary[vat_tag] = money(
+                vat_summary.get(vat_tag, Decimal("0.00")) + line.effective_vat_amount
+            )
+    for net_tag, _net_order, vat_tag, _vat_order in _DRAFT_SUMMARY_ORDER:
+        if net_tag in summary:
+            ET.SubElement(fa, _q(net_tag)).text = _amount(summary[net_tag])
+        if vat_tag and vat_tag in vat_summary:
+            ET.SubElement(fa, _q(vat_tag)).text = _amount(vat_summary[vat_tag])
+    ET.SubElement(fa, _q("P_15")).text = _amount(draft.total_gross)
+
+
+def _draft_exemption_basis(draft: FA3Draft) -> str | None:
+    """Podstawa prawna zwolnienia do adnotacji, gdy draft zawiera pozycje zwolnione.
+
+    ``P_19N`` („brak dostawy zwolnionej") jest sprzeczne z pozycją o stawce ``zw``,
+    dlatego dla takich faktur wymagana jest podstawa prawna (``FA3Line.exemption_basis``).
+    """
+    for line in draft.lines:
+        if line.vat_rate is None:
+            return line.exemption_basis
+    return None
+
+
+def _draft_vat_bucket(vat_rate: Decimal | None) -> tuple[str, str | None]:
+    """Mapuje stawkę z pozycji draftu na pola podsumowania stawek (P_13_x/P_14_x).
+
+    Kontrakt FA(3) ma osobne pola dla każdej stawki, a ``P_13_1``/``P_14_1`` dotyczą
+    wyłącznie stawki podstawowej (23% albo 22%). Wcześniejsza wersja wpisywała całe
+    netto i VAT faktury do ``P_13_1``/``P_14_1`` niezależnie od stawek pozycji, przez
+    co dokument był zgodny z XSD, ale podawał złą kwotę podatku (np. pozycja 8% była
+    deklarowana jako sprzedaż opodatkowana stawką podstawową).
+
+    ``None`` oznacza zwolnienie z podatku -> ``P_13_7`` (bez pola VAT).
+    """
+    if vat_rate is None:
+        return ("P_13_7", None)
+
+    normalized = format(vat_rate.normalize(), "f")
+    if normalized == "0":
+        # Zero stawki rozróżnia się znacznikiem P_12 ("0 KR"/"0 WDT"/"0 EX");
+        # draft przyjmuje samą stawkę, więc domyślnie krajowa sprzedaż 0%.
+        return ("P_13_6_1", None)
+
+    bucket = _DRAFT_VAT_BUCKETS.get(normalized)
+    if bucket is None:
+        raise ValueError(
+            f"Nieobsługiwana stawka VAT w pozycji faktury: {normalized}. "
+            "Dozwolone są stawki 23, 22, 8, 7, 5, 4, 3, 0 oraz brak stawki (zwolnienie)."
+        )
+    return bucket
+
+
+def _annotations(fa: ET.Element, *, exemption_basis: str | None = None) -> None:
     annotations = ET.SubElement(fa, _q("Adnotacje"))
     for tag in ("P_16", "P_17", "P_18", "P_18A"):
         ET.SubElement(annotations, _q(tag)).text = "2"
     exemption = ET.SubElement(annotations, _q("Zwolnienie"))
-    ET.SubElement(exemption, _q("P_19N")).text = "1"
+    if exemption_basis:
+        ET.SubElement(exemption, _q("P_19")).text = "1"
+        ET.SubElement(exemption, _q("P_19A")).text = exemption_basis
+    else:
+        ET.SubElement(exemption, _q("P_19N")).text = "1"
     transport = ET.SubElement(annotations, _q("NoweSrodkiTransportu"))
     ET.SubElement(transport, _q("P_22N")).text = "1"
     ET.SubElement(annotations, _q("P_23")).text = "2"
@@ -1102,5 +1198,12 @@ def _vat_rate(value: Decimal | None) -> str:
     if value is None:
         return "zw"
     if value == value.to_integral_value():
-        return str(int(value))
+        rate = str(int(value))
+        if rate == "0":
+            # TStawkaPodatku nie zawiera gołego "0" - stawki zerowe rozróżnia się
+            # znacznikiem. Draft przyjmuje samą stawkę, więc wybieramy krajową
+            # sprzedaż 0% ("0 KR"); "0 WDT"/"0 EX" wymagają ścieżki typowanej
+            # (TaxCategory/VatClass), która niesie pełny kod stawki.
+            return "0 KR"
+        return rate
     return format(value.normalize(), "f")

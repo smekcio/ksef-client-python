@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import unittest
 from datetime import date
 from unittest.mock import patch
@@ -32,6 +33,30 @@ class VerificationLinkTests(unittest.TestCase):
         self.assertEqual(_decode_base64_or_url(b64url), payload)
         with patch("ksef_client.services.verification_link.b64decode", side_effect=ValueError):
             self.assertEqual(_decode_base64_or_url(b64url), payload)
+
+    def test_decode_base64_or_url_falls_back_for_urlsafe_alphabet(self):
+        """Fallback musi działać bez mockowania, gdy wartość naprawdę używa ``-``/``_``.
+
+        Regresja: ``b64decode`` używał niestrictego ``base64.b64decode``, który
+        *odrzuca* znaki spoza alfabetu standardowego zamiast zgłosić błąd, więc dla
+        prawdziwego base64url zwracał krótszy wynik i fallback nigdy się nie włączał.
+        """
+        digest = hashlib.sha256(b"invoice").digest()
+        url_form = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+        self.assertTrue("-" in url_form or "_" in url_form, url_form)
+        self.assertEqual(_decode_base64_or_url(url_form), digest)
+        self.assertEqual(len(_decode_base64_or_url(url_form)), 32)
+
+    def test_invoice_verification_url_keeps_the_whole_hash(self):
+        """Hash z ``-``/``_`` nie może zostać obcięty w linku weryfikacyjnym."""
+        options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
+        service = VerificationLinkService(options)
+        digest = hashlib.sha256(b"invoice").digest()
+        url_form = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+        url = service.build_invoice_verification_url("123", "01-01-2024", url_form)
+        expected_tail = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+        self.assertTrue(url.endswith(expected_tail), url)
+        self.assertEqual(b64url_decode(url.rsplit("/", 1)[-1]), digest)
 
     def test_invoice_verification_url(self):
         options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)

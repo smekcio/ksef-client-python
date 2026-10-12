@@ -674,6 +674,8 @@ class InvoiceLine:
             issues.append(FA3ValidationIssue(f"{path}: ilość musi być większa od zera."))
         if self.unit_net_price < 0:
             issues.append(FA3ValidationIssue(f"{path}: cena netto nie może być ujemna."))
+        if self.tax.vat_rate is not None and self.tax.vat_rate < 0:
+            issues.append(FA3ValidationIssue(f"{path}: stawka VAT nie może być ujemna."))
         if self.discount is not None:
             issues.extend(self.discount.validate(f"{path}.discount"))
         return issues

@@ -179,6 +179,9 @@ class FA3Line:
     net_amount: Decimal | None = None
     vat_amount: Decimal | None = None
     gross_amount: Decimal | None = None
+    # Podstawa prawna zwolnienia (P_19A) - wymagana, gdy stawka to `zw`,
+    # bo znacznik P_19N ("brak dostawy zwolnionej") jest z taką pozycją sprzeczny.
+    exemption_basis: str | None = None
 
     @property
     def computed_net_amount(self) -> Decimal:
@@ -188,11 +191,14 @@ class FA3Line:
     def computed_vat_amount(self) -> Decimal:
         if self.vat_rate is None:
             return Decimal("0.00")
-        return money(self.computed_net_amount * self.vat_rate / Decimal("100"))
+        # VAT liczymy od *efektywnego* netto, żeby override `net_amount` zmieniał
+        # też podatek i brutto. Liczenie od `quantity * unit_net_price` dawało
+        # dokumenty, w których P_13_x + P_14_x != P_15.
+        return money(self.effective_net_amount * self.vat_rate / Decimal("100"))
 
     @property
     def computed_gross_amount(self) -> Decimal:
-        return money(self.computed_net_amount + self.computed_vat_amount)
+        return money(self.effective_net_amount + self.effective_vat_amount)
 
     @property
     def effective_net_amount(self) -> Decimal:
@@ -265,6 +271,7 @@ class FA3Line:
             "wartosc_netto": _decimal_to_json(self.net_amount),
             "kwota_vat": _decimal_to_json(self.vat_amount),
             "wartosc_brutto": _decimal_to_json(self.gross_amount),
+            "podstawa_zwolnienia": self.exemption_basis,
         }
 
     @classmethod
@@ -284,13 +291,40 @@ class FA3Line:
             net_amount=_optional_decimal(data, "wartosc_netto", "net_amount", "netAmount"),
             vat_amount=_optional_decimal(data, "kwota_vat", "vat_amount", "vatAmount"),
             gross_amount=_optional_decimal(data, "wartosc_brutto", "gross_amount", "grossAmount"),
+            exemption_basis=_first_non_empty_text(
+                data,
+                "podstawa_zwolnienia",
+                "exemption_basis",
+                "exemptionBasis",
+            ),
         )
 
 
 def parse_vat_rate(value: Any) -> Decimal | None:
-    text = _normalize_label(value).replace("%", "").replace("vat", "").strip()
-    if text in {"zw", "zwolniony", "np", "nie podlega"}:
+    """Zamienia wartość pola VAT na stawkę (albo ``None`` dla zwolnienia).
+
+    Wartość jest normalizowana **bez gubienia znaku**: wcześniejsza wersja
+    przepuszczała wejście przez ``_normalize_label``, które zamienia ``-`` na
+    spację, więc ``-23`` stawało się cichym ``23`` i reguła "stawka VAT nie może
+    być ujemna" w ``FA3Line.validate`` była nieosiągalna.
+    """
+    if value is None:
         return None
+    if isinstance(value, Decimal):
+        text = format(value, "f").strip()
+    elif isinstance(value, int | float):
+        text = str(value).strip()
+    else:
+        text = str(value).strip()
+    text = text.replace("%", "").replace("_", " ").strip().lower()
+    text = " ".join(text.split())
+    text = text.replace("vat", "").strip()
+    if text in {"", "zw", "zwolniony", "zwolniona", "zwolnione", "np", "nie podlega"}:
+        return None
+    if text.startswith("0 "):
+        # Stawki zerowe rozróżniane znacznikiem ("0 KR"/"0 WDT"/"0 EX") mają
+        # dla rozliczenia tę samą stawkę 0%.
+        return Decimal("0")
     return decimal_from_value(text, field_name="VAT")
 
 
@@ -371,6 +405,7 @@ class FA3Draft:
             line_errors, line_warnings = line.validate()
             errors.extend(line_errors)
             warnings.extend(line_warnings)
+        errors.extend(self._validate_vat_rates())
         errors.extend(self._validate_kind_specific())
         errors.extend(self._validate_xml_shape())
         numbered_errors = [self._tag_issue(issue) for issue in errors]
@@ -386,6 +421,40 @@ class FA3Draft:
             cell=issue.cell,
             severity=issue.severity,
         )
+
+    def _validate_vat_rates(self) -> list[FA3ValidationIssue]:
+        """Sprawdza, że stawki pozycji da się odzwierciedlić w polach P_13_x/P_14_x.
+
+        Bez tego nieobsługiwana stawka (albo pozycja zwolniona bez podstawy prawnej)
+        kończyła się dopiero wyjątkiem `ValueError` w trakcie serializacji.
+        """
+        from .xml import _draft_vat_bucket
+
+        issues: list[FA3ValidationIssue] = []
+        for index, line in enumerate(self.lines, start=1):
+            if line.vat_rate is not None:
+                try:
+                    _draft_vat_bucket(line.vat_rate)
+                except ValueError as exc:
+                    issues.append(
+                        FA3ValidationIssue(
+                            f"Pozycja {index}: {exc}",
+                            row_number=index,
+                            column="VAT",
+                        )
+                    )
+                continue
+            if not (line.exemption_basis or "").strip():
+                issues.append(
+                    FA3ValidationIssue(
+                        f"Pozycja {index}: stawka zwolniona wymaga podstawy prawnej "
+                        "(`exemption_basis`), bo adnotacja P_19N twierdzi, że faktura "
+                        "nie zawiera sprzedaży zwolnionej.",
+                        row_number=index,
+                        column="VAT",
+                    )
+                )
+        return issues
 
     def _validate_kind_specific(self) -> list[FA3ValidationIssue]:
         correction_kinds = {
@@ -579,6 +648,7 @@ class FA3InvoiceBuilder:
         net_amount: Decimal | str | int | float | None = None,
         vat_amount: Decimal | str | int | float | None = None,
         gross_amount: Decimal | str | int | float | None = None,
+        exemption_basis: str | None = None,
     ) -> FA3InvoiceBuilder:
         line = FA3Line(
             description=description,
@@ -589,6 +659,7 @@ class FA3InvoiceBuilder:
             net_amount=_coerce_optional_decimal(net_amount, "net_amount"),
             vat_amount=_coerce_optional_decimal(vat_amount, "vat_amount"),
             gross_amount=_coerce_optional_decimal(gross_amount, "gross_amount"),
+            exemption_basis=exemption_basis,
         )
         _errors, warnings = line.validate()
         self._warnings.extend(warnings)

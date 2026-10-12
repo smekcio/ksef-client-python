@@ -75,6 +75,7 @@ from ksef_client.documents.fa3 import xsd_audit as xsd_audit_module
 from ksef_client.documents.fa3.domain import (
     AdvanceInvoiceReference,
     FA3InvoiceBuilderV2,
+    InvoiceParty,
     TaxCategoryKind,
 )
 from ksef_client.documents.fa3.models import (
@@ -86,6 +87,7 @@ from ksef_client.documents.fa3.models import (
     _optional_iso_date,
     _parse_iso_date,
     decimal_from_value,
+    money,
     parse_vat_rate,
 )
 from ksef_client.documents.fa3.xml import (
@@ -299,6 +301,12 @@ def test_models_cover_human_aliases_and_validation_edges() -> None:
         }
     )
     assert zero_draft.lines[0].unit_net_price == Decimal("0")
+    # Stawka "zw" wymaga podstawy prawnej do adnotacji P_19A (samo P_19N byłoby
+    # sprzeczne z pozycją zwolnioną) - patrz test_draft_exempt_line_requires_basis.
+    zero_draft = replace(
+        zero_draft,
+        lines=[replace(zero_draft.lines[0], exemption_basis="art. 43 ust. 1 ustawy")],
+    )
     assert "<P_9A>0.00</P_9A>" in zero_draft.to_xml().decode("utf-8")
     empty_lines_keep_priority = FA3Draft.from_dict(
         {
@@ -354,7 +362,8 @@ def test_models_cover_human_aliases_and_validation_edges() -> None:
     assert len(warnings) == 2
     assert str(exempt_line.effective_net_amount) == "11.00"
     assert str(exempt_line.effective_vat_amount) == "1.00"
-    assert str(exempt_line.effective_gross_amount) == "10.00"
+    # Brutto liczone z *efektywnego* netto i VAT, żeby P_13_x + P_14_x == P_15.
+    assert str(exempt_line.effective_gross_amount) == "12.00"
 
     bad_line = FA3Line(
         description="",
@@ -3573,3 +3582,378 @@ def _audit_order_invoice() -> FA3Invoice:
         .order_reference(number="ZAM/1", date=date(2026, 1, 20))
         .build()
     )
+
+
+# ---------------------------------------------------------------------------
+# Regresje z bug review v0.18.1: rozliczenie stawek VAT w ścieżce draftu.
+#
+# Draft (`FA3InvoiceBuilder`/`FA3Draft`) wpisywał całe netto i VAT faktury do
+# `P_13_1`/`P_14_1` (pola stawki podstawowej 23/22%) niezależnie od stawek
+# pozycji, więc np. faktura ze stawką 8% deklarowała sprzedaż opodatkowaną
+# stawką podstawową z VAT 8.00 od bazy 100.00.
+# ---------------------------------------------------------------------------
+
+DRAFT_RATE_BUCKETS = (
+    ("23", "P_13_1", "P_14_1"),
+    ("22", "P_13_1", "P_14_1"),
+    ("8", "P_13_2", "P_14_2"),
+    ("7", "P_13_3", "P_14_3"),
+    ("5", "P_13_5", "P_14_5"),
+    ("4", "P_13_4", "P_14_4"),
+    ("3", "P_13_4", "P_14_4"),
+)
+
+# Wszystkie pola podsumowania stawek w kolejności wymuszonej przez xs:sequence.
+_ALL_TAX_SUMMARY_TAGS = (
+    "P_13_1",
+    "P_14_1",
+    "P_13_2",
+    "P_14_2",
+    "P_13_3",
+    "P_14_3",
+    "P_13_4",
+    "P_14_4",
+    "P_13_5",
+    "P_14_5",
+    "P_13_6_1",
+    "P_13_6_2",
+    "P_13_6_3",
+    "P_13_7",
+    "P_13_8",
+    "P_13_9",
+    "P_13_10",
+    "P_13_11",
+)
+
+
+def _draft_for_rate(rate: str, *, net: str = "100", quantity: str = "1") -> FA3Draft:
+    builder = FA3InvoiceBuilder(
+        invoice_number=f"FV/RATE/{rate}",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line("Usługa", quantity=quantity, unit_net_price=net, vat_rate=rate)
+    return builder.build()
+
+
+def _tag_texts(xml: bytes) -> dict[str, str]:
+    root = ET.fromstring(xml)
+    ns = {"fa": root.tag.split("}")[0].strip("{")}
+    found: dict[str, str] = {}
+    for tag in ("P_11", "P_12", "P_15", "P_19", "P_19A", "P_19N", *_ALL_TAX_SUMMARY_TAGS):
+        node = root.find(f".//fa:{tag}", ns)
+        if node is not None and node.text is not None:
+            found[tag] = node.text
+    return found
+
+
+@pytest.mark.parametrize(("rate", "net_tag", "vat_tag"), DRAFT_RATE_BUCKETS)
+def test_draft_puts_each_rate_into_its_own_summary_bucket(
+    rate: str, net_tag: str, vat_tag: str
+) -> None:
+    draft = _draft_for_rate(rate)
+    assert str(draft.total_net) == "100.00"
+    xml = draft.to_xml(xsd_validate=True)
+    found = _tag_texts(xml)
+    assert found[net_tag] == "100.00", found
+    expected_vat = money(Decimal("100.00") * Decimal(rate) / Decimal("100"))
+    assert found[vat_tag] == f"{expected_vat:.2f}", found
+    # Netto i VAT muszą trafić dokładnie w jeden koszyk — nie do P_13_1 "po drodze".
+    present_net_tags = {tag for tag in _ALL_TAX_SUMMARY_TAGS if tag in found and "P_13" in tag}
+    assert present_net_tags == {net_tag}, found
+    present_vat_tags = {tag for tag in _ALL_TAX_SUMMARY_TAGS if tag in found and "P_14" in tag}
+    assert present_vat_tags == {vat_tag}, found
+
+
+def test_draft_totals_match_the_summary_buckets() -> None:
+    """`total_net`/`total_vat`/`total_gross` muszą zgadzać się z tym, co idzie do XML."""
+    draft = _draft_for_rate("8")
+    found = _tag_texts(draft.to_xml(xsd_validate=True))
+    assert f"{draft.total_net:.2f}" == found["P_13_2"]
+    assert f"{draft.total_vat:.2f}" == found["P_14_2"]
+    assert f"{draft.total_gross:.2f}" == found["P_15"]
+
+
+def test_draft_summary_is_not_hardcoded_to_the_basic_rate() -> None:
+    """Stawka 8% nie może być deklarowana w polach stawki podstawowej."""
+    found = _tag_texts(_draft_for_rate("8").to_xml(xsd_validate=True))
+    assert "P_13_1" not in found
+    assert "P_14_1" not in found
+    assert found["P_13_2"] == "100.00"
+    assert found["P_14_2"] == "8.00"
+    assert found["P_15"] == "108.00"
+
+
+def test_draft_zero_rate_uses_a_valid_p12_code_and_zero_bucket() -> None:
+    found = _tag_texts(_draft_for_rate("0").to_xml(xsd_validate=True))
+    # TStawkaPodatku nie zawiera gołego "0" - XSD wymaga "0 KR"/"0 WDT"/"0 EX".
+    assert found["P_12"] == "0 KR"
+    assert found["P_13_6_1"] == "100.00"
+    assert "P_14_1" not in found
+    assert found["P_15"] == "100.00"
+
+
+def test_draft_multi_rate_invoice_buckets_each_line() -> None:
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/MULTI",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line("23%", quantity="1", unit_net_price="100", vat_rate="23")
+    builder.add_line("8%", quantity="2", unit_net_price="100", vat_rate="8")
+    draft = builder.build()
+    found = _tag_texts(draft.to_xml(xsd_validate=True))
+    assert found["P_13_1"] == "100.00"
+    assert found["P_14_1"] == "23.00"
+    assert found["P_13_2"] == "200.00"
+    assert found["P_14_2"] == "16.00"
+    assert found["P_15"] == "339.00"
+    # Suma koszyków netto i VAT musi dać P_15.
+    net_total = Decimal(found["P_13_1"]) + Decimal(found["P_13_2"])
+    vat_total = Decimal(found["P_14_1"]) + Decimal(found["P_14_2"])
+    assert net_total + vat_total == Decimal(found["P_15"])
+
+
+def test_draft_sums_identical_rates_across_lines() -> None:
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/SAME-RATE",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line("A", quantity="1", unit_net_price="100", vat_rate="8")
+    builder.add_line("B", quantity="1", unit_net_price="50", vat_rate="8")
+    found = _tag_texts(builder.build().to_xml(xsd_validate=True))
+    assert found["P_13_2"] == "150.00"
+    assert found["P_14_2"] == "12.00"
+
+
+def test_draft_exempt_line_requires_exemption_basis() -> None:
+    """Pozycja ``zw`` nie może iść do P_13_1, a adnotacja P_19N byłaby sprzeczna."""
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/ZW/BAD",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line("Zwolniona", quantity="1", unit_net_price="100", vat_rate="zw")
+    with pytest.raises(ValueError, match="podstawy prawnej"):
+        builder.build()
+
+    # `FA3Draft` da się też zbudować bez walidacji (np. przez `from_dict`), więc
+    # kontrakt walidacyjny draftu również musi zgłaszać brak podstawy prawnej.
+    draft = FA3Draft(
+        invoice_number="FV/ZW/BAD",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+        lines=[
+            FA3Line(
+                description="Zwolniona",
+                quantity=Decimal("1"),
+                unit="szt",
+                unit_net_price=Decimal("100"),
+                vat_rate=None,
+            )
+        ],
+    )
+    errors, _warnings = draft.validate()
+    assert any("podstawy prawnej" in issue.message for issue in errors), [
+        issue.message for issue in errors
+    ]
+    with pytest.raises((ValueError, FA3XmlValidationError)):
+        draft.to_xml()
+
+
+def test_draft_exempt_line_with_basis_uses_p13_7_and_p19a() -> None:
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/ZW/OK",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line(
+        "Zwolniona",
+        quantity="1",
+        unit_net_price="100",
+        vat_rate="zw",
+        exemption_basis="art. 43 ust. 1 ustawy",
+    )
+    draft = builder.build()
+    errors, _warnings = draft.validate()
+    assert errors == [], [issue.message for issue in errors]
+    xml = draft.to_xml(xsd_validate=True)
+    found = _tag_texts(xml)
+    assert found["P_12"] == "zw"
+    assert found["P_13_7"] == "100.00"
+    assert found["P_15"] == "100.00"
+    assert "P_14_1" not in found
+    assert found["P_19"] == "1"
+    assert found["P_19A"] == "art. 43 ust. 1 ustawy"
+    assert "P_19N" not in found
+
+
+def test_draft_rejects_unsupported_vat_rate_before_serialization() -> None:
+    """Stawka spoza TStawkaPodatku nie może cicho trafić do XML jako P_12."""
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/RATE/17",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line("Usługa", quantity="1", unit_net_price="100", vat_rate="17")
+    with pytest.raises(ValueError, match="(?i)nieobs"):
+        builder.build()
+
+
+# ---------------------------------------------------------------------------
+# Regresja: `parse_vat_rate` gubił znak, więc reguła "stawka VAT nie może być
+# ujemna" była nieosiągalna (``-23`` stawało się cichym ``23``).
+# ---------------------------------------------------------------------------
+
+
+def test_parse_vat_rate_keeps_the_sign() -> None:
+    assert parse_vat_rate("-23") == Decimal("-23")
+    assert parse_vat_rate(Decimal("-23")) == Decimal("-23")
+    assert parse_vat_rate(-23) == Decimal("-23")
+    assert parse_vat_rate("-100") == Decimal("-100")
+    assert parse_vat_rate("23") == Decimal("23")
+    assert parse_vat_rate(" 8 % ") == Decimal("8")
+    assert parse_vat_rate("8") == Decimal("8")
+
+
+def test_parse_vat_rate_exempt_markers_still_map_to_none() -> None:
+    for marker in ("zw", "ZW", "zwolniony", "np", "nie podlega", None, ""):
+        assert parse_vat_rate(marker) is None, marker
+
+
+def test_parse_vat_rate_zero_rate_codes_map_to_zero() -> None:
+    assert parse_vat_rate("0") == Decimal("0")
+    assert parse_vat_rate("0 KR") == Decimal("0")
+    assert parse_vat_rate("0 WDT") == Decimal("0")
+    assert parse_vat_rate("0 EX") == Decimal("0")
+
+
+def test_negative_vat_rate_is_reported_as_an_error() -> None:
+    line = FA3Line(
+        description="Korekta",
+        quantity=Decimal("1"),
+        unit="szt",
+        unit_net_price=Decimal("100"),
+        vat_rate=parse_vat_rate("-23"),
+    )
+    errors, _warnings = line.validate()
+    assert any("ujemna" in issue.message for issue in errors), [e.message for e in errors]
+
+
+def test_negative_vat_rate_is_rejected_by_draft_and_typed_paths() -> None:
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/NEG",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line("Usługa", quantity="1", unit_net_price="100", vat_rate="-23")
+    with pytest.raises(ValueError, match="ujemna"):
+        builder.build()
+
+    typed_line = InvoiceLine.create(
+        "Usługa",
+        quantity="1",
+        unit_net_price="100",
+        tax=TaxCategory.from_vat_rate("-23"),
+    )
+    typed_errors = typed_line.validate("invoice.lines[0]")
+    assert any("ujemna" in issue.message for issue in typed_errors), [
+        e.message for e in typed_errors
+    ]
+
+
+def test_typed_invoice_with_negative_rate_is_rejected() -> None:
+    builder = BasicInvoiceBuilder(invoice_number="FV/NEG/TYPED")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1234567890", name="Sprzedawca", address="ul. Prosta 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="1111111111", name="Nabywca", address="ul. Testowa 2")
+    )
+    builder.add_service_line(
+        "Usługa",
+        quantity="1",
+        unit_net_price="100",
+        tax=TaxCategory.from_vat_rate("-23"),
+    )
+    with pytest.raises(ValueError, match="ujemna"):
+        builder.build()
+
+
+# ---------------------------------------------------------------------------
+# Regresja: override `net_amount` nie wchodził do podstawy VAT, więc dokument
+# miał P_13_x + P_14_x != P_15 (netto 200 @23% dawało VAT 23.00 i brutto 123.00).
+# ---------------------------------------------------------------------------
+
+
+def test_net_amount_override_recomputes_vat_and_gross() -> None:
+    line = FA3Line(
+        description="Override netto",
+        quantity=Decimal("1"),
+        unit="szt",
+        unit_net_price=Decimal("100"),
+        vat_rate=Decimal("23"),
+        net_amount=Decimal("200"),
+    )
+    assert line.effective_net_amount == Decimal("200.00")
+    assert line.effective_vat_amount == Decimal("46.00")
+    assert line.effective_gross_amount == Decimal("246.00")
+
+
+def test_draft_with_net_amount_override_keeps_summary_consistent() -> None:
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/OVERRIDE",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line(
+        "Usługa",
+        quantity="1",
+        unit_net_price="100",
+        vat_rate="23",
+        net_amount="200",
+    )
+    draft = builder.build()
+    found = _tag_texts(draft.to_xml(xsd_validate=True))
+    assert found["P_11"] == "200.00"
+    assert found["P_13_1"] == "200.00"
+    assert found["P_14_1"] == "46.00"
+    assert found["P_15"] == "246.00"
+    assert Decimal(found["P_13_1"]) + Decimal(found["P_14_1"]) == Decimal(found["P_15"])
+
+
+def test_vat_amount_override_still_flows_into_gross() -> None:
+    line = FA3Line(
+        description="Override VAT",
+        quantity=Decimal("1"),
+        unit="szt",
+        unit_net_price=Decimal("100"),
+        vat_rate=Decimal("23"),
+        vat_amount=Decimal("10"),
+    )
+    assert line.effective_net_amount == Decimal("100.00")
+    assert line.effective_vat_amount == Decimal("10.00")
+    assert line.effective_gross_amount == Decimal("110.00")
+
+
+def test_gross_amount_override_wins_over_the_computed_gross() -> None:
+    line = FA3Line(
+        description="Override brutto",
+        quantity=Decimal("1"),
+        unit="szt",
+        unit_net_price=Decimal("100"),
+        vat_rate=Decimal("23"),
+        net_amount=Decimal("200"),
+        gross_amount=Decimal("999"),
+    )
+    assert line.effective_gross_amount == Decimal("999.00")

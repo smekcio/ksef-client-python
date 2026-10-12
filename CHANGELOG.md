@@ -17,6 +17,19 @@
 * **collective-identifiers:** validate context invoice limits, common seller, finite payment amounts,
   precise UTC ranges, and resumable CLI pagination
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
+* **cli:** read the UPO reference from `upo.pages[].referenceNumber`, so `send batch --wait-upo`,
+  `session batch close --wait-upo` and `upo wait --batch-auto` no longer fail on a real session status
+* **utils:** make `b64decode` reject the base64url alphabet instead of silently discarding it, so
+  `_decode_base64_or_url` actually falls back and verification links keep the whole invoice hash
+* **packaging:** declare `typing_extensions` as a runtime dependency of the FA(3) SDK
+  (`import ksef_client.documents.fa3` failed on Python 3.13+ without an unrelated package providing it)
+* **fa3:** put each VAT rate into its own `P_13_x`/`P_14_x` bucket in the draft XML instead of
+  declaring every rate as basic-rate sales, and emit `0 KR` for a 0% line
+* **fa3:** keep the sign in `parse_vat_rate`, so a negative VAT rate is reported as an error
+  instead of being silently flipped to a positive one
+* **fa3:** derive VAT and gross from the effective net amount so `net_amount` overrides keep
+  `P_13_x + P_14_x == P_15`; exempt draft lines now require an `exemption_basis` (P_19A)
+  instead of emitting a contradictory `P_19N`
 
 ## 0.18.1 (2026-09-29)
 

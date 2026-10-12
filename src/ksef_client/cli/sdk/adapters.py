@@ -246,13 +246,30 @@ def _extract_ksef_number(payload: Any) -> str:
     return str(value or "")
 
 
+def _upo_pages(payload: Any) -> list[Any]:
+    """Zwraca listę stron UPO z ``upo`` (model typowany albo surowy słownik)."""
+    pages = payload.get("pages") if isinstance(payload, dict) else getattr(payload, "pages", None)
+    return pages if isinstance(pages, list) else []
+
+
 def _extract_upo_reference(payload: Any) -> str:
+    """Wyciąga numer referencyjny UPO z payloadu statusu sesji.
+
+    Kontrakt KSeF nie ma płaskiego pola ``upoReferenceNumber``: ``SessionStatusResponse``
+    niesie ``upo`` typu ``UpoResponse``, a numer referencyjny każdej strony to
+    ``upo.pages[].referenceNumber``. Wcześniejsza wersja czytała nieistniejące
+    ``upoReferenceNumber`` oraz ``upo.referenceNumber``, więc dla prawdziwej
+    odpowiedzi zawsze zwracała pusty string i wszystkie przepływy UPO dla paczek
+    kończyły się błędem "UPO reference number is not available".
+    """
     direct = _get_value(payload, "upo_reference_number", "upoReferenceNumber")
     if direct:
         return str(direct)
-    upo = _get_value(payload, "upo")
-    nested = _get_value(upo, "reference_number", "referenceNumber")
-    return str(nested or "")
+    for page in _upo_pages(_get_value(payload, "upo")):
+        nested = _get_value(page, "reference_number", "referenceNumber")
+        if nested:
+            return str(nested)
+    return ""
 
 
 def _parse_certificate_datetime(value: Any) -> datetime | None:

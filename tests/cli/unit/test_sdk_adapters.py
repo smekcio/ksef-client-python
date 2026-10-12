@@ -3764,3 +3764,63 @@ def test_run_health_check_ignores_non_list_usage_values(monkeypatch) -> None:
     )
     cert_check = [item for item in result["checks"] if item["name"] == "certificates"][0]
     assert cert_check["status"] == "FAIL"
+
+
+# ---------------------------------------------------------------------------
+# Regresja: numer referencyjny UPO.
+#
+# Kontrakt KSeF nie ma pola ``upoReferenceNumber``: status sesji niesie
+# ``upo.pages[].referenceNumber``. Wcześniejsza implementacja czytała
+# nieistniejące pole, więc ``send batch --wait-upo``, ``session batch close
+# --wait-upo`` i ``upo wait --batch-auto`` zawsze kończyły się błędem
+# "UPO reference number is not available".
+# ---------------------------------------------------------------------------
+
+
+def _session_status_payload(reference: str) -> dict[str, Any]:
+    return {
+        "dateCreated": "2026-01-01T00:00:00Z",
+        "dateUpdated": "2026-01-01T00:00:00Z",
+        "status": {"code": 200, "description": "Sesja wsadowa przetworzona pomyslnie"},
+        "upo": {
+            "pages": [
+                {
+                    "referenceNumber": reference,
+                    "downloadUrl": "https://ksef.example/upo/1",
+                    "downloadUrlExpirationDate": "2026-01-01T00:00:00Z",
+                }
+            ]
+        },
+    }
+
+
+def test_extract_upo_reference_from_typed_session_status() -> None:
+    status = m.SessionStatusResponse.from_dict(_session_status_payload("UPO-REF-REAL-1"))
+    assert adapters._extract_upo_reference(status) == "UPO-REF-REAL-1"
+
+
+def test_extract_upo_reference_from_raw_payload() -> None:
+    payload = _session_status_payload("UPO-REF-REAL-2")
+    assert adapters._extract_upo_reference(payload) == "UPO-REF-REAL-2"
+
+
+def test_extract_upo_reference_prefers_explicit_flat_field() -> None:
+    assert adapters._extract_upo_reference({"upoReferenceNumber": "FLAT-1"}) == "FLAT-1"
+
+
+def test_extract_upo_reference_without_upo_is_empty() -> None:
+    assert adapters._extract_upo_reference({"status": {"code": 100}}) == ""
+    assert adapters._extract_upo_reference({"upo": {"pages": []}}) == ""
+    assert adapters._extract_upo_reference({"upo": None}) == ""
+
+
+def test_extract_upo_reference_uses_first_page() -> None:
+    payload = {
+        "upo": {
+            "pages": [
+                {"referenceNumber": "PAGE-1"},
+                {"referenceNumber": "PAGE-2"},
+            ]
+        }
+    }
+    assert adapters._extract_upo_reference(payload) == "PAGE-1"
