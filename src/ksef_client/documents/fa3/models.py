@@ -182,6 +182,10 @@ class FA3Line:
     # Podstawa prawna zwolnienia (P_19A) - wymagana, gdy stawka to `zw`,
     # bo znacznik P_19N ("brak dostawy zwolnionej") jest z taką pozycją sprzeczny.
     exemption_basis: str | None = None
+    # Pełny kod stawki z `TStawkaPodatku` (np. "0 KR"/"0 WDT"/"0 EX"/"zw").
+    # Sam `vat_rate` nie rozróżnia stawek zerowych, a kontrakt FA(3) wymaga
+    # innego znacznika P_12 i innego koszyka P_13_6_x dla każdej z nich.
+    vat_code: str | None = None
 
     @property
     def computed_net_amount(self) -> Decimal:
@@ -262,12 +266,16 @@ class FA3Line:
         return errors, warnings
 
     def to_dict(self) -> dict[str, Any]:
+        if self.vat_rate is None:
+            vat_value: str | None = "zw"
+        else:
+            vat_value = self.vat_code or _decimal_to_json(self.vat_rate)
         return {
             "opis": self.description,
             "ilosc": _decimal_to_json(self.quantity),
             "jm": self.unit,
             "cena_netto": _decimal_to_json(self.unit_net_price),
-            "vat": "zw" if self.vat_rate is None else _decimal_to_json(self.vat_rate),
+            "vat": vat_value,
             "wartosc_netto": _decimal_to_json(self.net_amount),
             "kwota_vat": _decimal_to_json(self.vat_amount),
             "wartosc_brutto": _decimal_to_json(self.gross_amount),
@@ -288,6 +296,7 @@ class FA3Line:
                 field_name="cena_netto",
             ),
             vat_rate=parse_vat_rate(vat_value),
+            vat_code=parse_vat_code(vat_value),
             net_amount=_optional_decimal(data, "wartosc_netto", "net_amount", "netAmount"),
             vat_amount=_optional_decimal(data, "kwota_vat", "vat_amount", "vatAmount"),
             gross_amount=_optional_decimal(data, "wartosc_brutto", "gross_amount", "grossAmount"),
@@ -300,13 +309,13 @@ class FA3Line:
         )
 
 
-def parse_vat_rate(value: Any) -> Decimal | None:
-    """Zamienia wartość pola VAT na stawkę (albo ``None`` dla zwolnienia).
+def parse_vat_code(value: Any) -> str | None:
+    """Zwraca **kod** stawki z `TStawkaPodatku` (albo ``None`` dla zwolnienia).
 
-    Wartość jest normalizowana **bez gubienia znaku**: wcześniejsza wersja
-    przepuszczała wejście przez ``_normalize_label``, które zamienia ``-`` na
-    spację, więc ``-23`` stawało się cichym ``23`` i reguła "stawka VAT nie może
-    być ujemna" w ``FA3Line.validate`` była nieosiągalna.
+    Potrzebne, bo sam procent nie rozróżnia stawek zerowych: kontrakt FA(3) wymaga
+    osobnego znacznika `P_12` (``"0 KR"``/``"0 WDT"``/``"0 EX"``) i osobnego koszyka
+    (`P_13_6_1`/`P_13_6_2`/`P_13_6_3`). Wcześniej draft spłaszczał wszystkie trzy
+    do ``Decimal("0")``, więc faktura WDT/eksportowa deklarowała sprzedaż krajową.
     """
     if value is None:
         return None
@@ -321,9 +330,48 @@ def parse_vat_rate(value: Any) -> Decimal | None:
     text = text.replace("vat", "").strip()
     if text in {"", "zw", "zwolniony", "zwolniona", "zwolnione", "np", "nie podlega"}:
         return None
+    if text == "0":
+        # Skrót: sama stawka 0% bez znacznika -> krajowa sprzedaż 0%.
+        return "0 KR"
     if text.startswith("0 "):
-        # Stawki zerowe rozróżniane znacznikiem ("0 KR"/"0 WDT"/"0 EX") mają
-        # dla rozliczenia tę samą stawkę 0%.
+        suffix = text[2:].strip().upper()
+        code = f"0 {suffix}"
+        if code not in {"0 KR", "0 WDT", "0 EX"}:
+            raise ValueError(
+                f"Nieobsługiwany kod stawki zerowej: {value!r}. "
+                "Dozwolone są '0 KR', '0 WDT' i '0 EX'."
+            )
+        return code
+    return format(decimal_from_value(text, field_name="VAT").normalize(), "f")
+
+
+def parse_vat_rate(value: Any) -> Decimal | None:
+    """Zamienia wartość pola VAT na stawkę (albo ``None`` dla zwolnienia).
+
+    Wartość jest normalizowana **bez gubienia znaku**: wcześniejsza wersja
+    przepuszczała wejście przez ``_normalize_label``, które zamienia ``-`` na
+    spację, więc ``-23`` stawało się cichym ``23`` i reguła "stawka VAT nie może
+    być ujemna" w ``FA3Line.validate`` była nieosiągalna.
+
+    Kod stawki (potrzebny do rozróżnienia ``0 KR``/``0 WDT``/``0 EX``) zwraca
+    :func:`parse_vat_code`.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        text = format(value, "f").strip()
+    elif isinstance(value, int | float):
+        text = str(value).strip()
+    else:
+        text = str(value).strip()
+    text = text.replace("%", "").replace("_", " ").strip().lower()
+    text = " ".join(text.split())
+    text = text.replace("vat", "").strip()
+    if text in {"", "zw", "zwolniony", "zwolniona", "zwolnione", "np", "nie podlega"}:
+        return None
+    if text == "0" or text.startswith("0 "):
+        # Walidacja kodu (i jego dopuszczalności) należy do `parse_vat_code`.
+        parse_vat_code(text)
         return Decimal("0")
     return decimal_from_value(text, field_name="VAT")
 
@@ -434,7 +482,7 @@ class FA3Draft:
         for index, line in enumerate(self.lines, start=1):
             if line.vat_rate is not None:
                 try:
-                    _draft_vat_bucket(line.vat_rate)
+                    _draft_vat_bucket(line.vat_code, line.vat_rate)
                 except ValueError as exc:
                     issues.append(
                         FA3ValidationIssue(
@@ -656,6 +704,7 @@ class FA3InvoiceBuilder:
             unit=unit,
             unit_net_price=decimal_from_value(unit_net_price, field_name="unit_net_price"),
             vat_rate=parse_vat_rate(vat_rate),
+            vat_code=parse_vat_code(vat_rate),
             net_amount=_coerce_optional_decimal(net_amount, "net_amount"),
             vat_amount=_coerce_optional_decimal(vat_amount, "vat_amount"),
             gross_amount=_coerce_optional_decimal(gross_amount, "gross_amount"),

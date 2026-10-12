@@ -29,7 +29,7 @@ from .domain import (
     PaymentTerms,
     Settlement,
 )
-from .models import FA3Draft, FA3InvoiceKind, FA3Party, money
+from .models import FA3Draft, FA3InvoiceKind, FA3Line, FA3Party, money
 from .sections import (
     AdditionalDescription,
     AdvancePayment,
@@ -286,7 +286,7 @@ def _domain_party(
         ET.SubElement(node, _q("PrefiksPodatnika")).text = party.taxpayer_prefix
     if party.eori:
         ET.SubElement(node, _q("NrEORI")).text = party.eori
-    _party_identity(node, party, seller=seller or authorized)
+    _party_identity(node, party, seller=seller or authorized, third_party=third_party)
     if party.address is not None:
         _address(node, "Adres", party.address)
     if party.correspondence_address is not None:
@@ -320,7 +320,9 @@ def _domain_party(
         ET.SubElement(node, _q("RolaPU")).text = role_value
 
 
-def _party_identity(node: ET.Element, party: InvoiceParty, *, seller: bool) -> None:
+def _party_identity(
+    node: ET.Element, party: InvoiceParty, *, seller: bool, third_party: bool = False
+) -> None:
     identity = ET.SubElement(node, _q("DaneIdentyfikacyjne"))
     identifier = party.identifier
     if seller:
@@ -341,6 +343,14 @@ def _party_identity(node: ET.Element, party: InvoiceParty, *, seller: bool) -> N
     elif identifier.kind is PartyIdentifierKind.NONE:
         ET.SubElement(identity, _q("BrakID")).text = "1"
     elif identifier.kind is PartyIdentifierKind.INTERNAL:
+        # `IDWew` występuje wyłącznie w `TPodmiot3`. W `TPodmiot2` (nabywca,
+        # Podmiot2K, przewoźnik) schemat dopuszcza tylko NIP/KodUE+NrVatUE/
+        # KodKraju+NrID/BrakID - emisja IDWew dawała XML odrzucany przez XSD.
+        if not third_party:
+            raise FA3XmlValidationError(
+                "Identyfikator wewnętrzny (IDWew) jest dozwolony tylko dla Podmiot3. "
+                "Dla nabywcy/przewoźnika użyj NIP, KodUE+NrVatUE, KodKraju+NrID albo BrakID."
+            )
         ET.SubElement(identity, _q("IDWew")).text = identifier.value
     ET.SubElement(identity, _q("Nazwa")).text = party.name
 
@@ -491,14 +501,18 @@ _DRAFT_SUMMARY_ORDER = (
     ("P_13_11", 13, None, 13),
 )
 
-# Stawka -> (znacznik netto, znacznik VAT). Mapowanie wynika z dokumentacji pól
-# P_13_x/P_14_x w schemacie FA(3) oraz z TStawkaPodatku.
+# Stawka -> (znacznik netto, znacznik VAT). Mapowanie wynika z `xsd:sequence`
+# elementu `Fa` oraz z opisów pól P_13_x/P_14_x w broszurze MF (str. 47-54):
+#   P_13_1/P_14_1 = stawka podstawowa (23% albo 22%)
+#   P_13_2/P_14_2 = pierwsza stawka obniżona (8% albo 7%)
+#   P_13_3/P_14_3 = druga stawka obniżona (5%)
+#   P_13_4/P_14_4 = ryczałt dla taksówek (4% albo 3%)
 _DRAFT_VAT_BUCKETS: dict[str, tuple[str, str | None]] = {
     "23": ("P_13_1", "P_14_1"),
     "22": ("P_13_1", "P_14_1"),
     "8": ("P_13_2", "P_14_2"),
-    "7": ("P_13_3", "P_14_3"),
-    "5": ("P_13_5", "P_14_5"),
+    "7": ("P_13_2", "P_14_2"),
+    "5": ("P_13_3", "P_14_3"),
     "4": ("P_13_4", "P_14_4"),
     "3": ("P_13_4", "P_14_4"),
 }
@@ -784,10 +798,15 @@ def _domain_transport(parent: ET.Element, transport: Transport) -> None:
     else:
         ET.SubElement(node, _q("RodzajTransportu")).text = "3"
     if transport.carrier is not None:
+        if transport.carrier.address is None:
+            # `AdresPrzewoznika` jest wymagany wewnątrz `Przewoznik` (minOccurs=1).
+            raise FA3XmlValidationError(
+                "invoice.transport.carrier: przewoźnik wymaga adresu "
+                "(AdresPrzewoznika jest elementem wymaganym w schemacie FA(3))."
+            )
         carrier = ET.SubElement(node, _q("Przewoznik"))
         _party_identity(carrier, transport.carrier, seller=False)
-        if transport.carrier.address is not None:
-            _address(carrier, "AdresPrzewoznika", transport.carrier.address)
+        _address(carrier, "AdresPrzewoznika", transport.carrier.address)
     if transport.order_number:
         ET.SubElement(node, _q("NrZleceniaTransportu")).text = transport.order_number
     if transport.other_cargo_description:
@@ -812,6 +831,13 @@ def _domain_transport(parent: ET.Element, transport: Transport) -> None:
 def _domain_order(fa: ET.Element, order: Order | None) -> None:
     if order is None:
         return
+    if not order.lines:
+        # `ZamowienieWiersz` jest wymagane w `Zamowienie` (minOccurs=1), więc samo
+        # `WartoscZamowienia` dawało XML odrzucany przez schemat.
+        raise FA3XmlValidationError(
+            "invoice.order: 'Zamowienie' wymaga co najmniej jednej pozycji "
+            "(ZamowienieWiersz). Dodaj pozycje przez order_line()."
+        )
     node = ET.SubElement(fa, _q("Zamowienie"))
     ET.SubElement(node, _q("WartoscZamowienia")).text = _amount(order.total_gross)
     for index, line in enumerate(order.lines, start=1):
@@ -932,11 +958,19 @@ def _attachment(root: ET.Element, attachment: Attachment) -> None:
         _attachment_block(node, block)
 
 
+# `BlokDanych/MetaDane` jest w schemacie FA(3) elementem wymaganym (minOccurs=1),
+# a `ZKlucz`/`ZWartosc` to wolny tekst. Gdy wołający nie podał metadanych, emitujemy
+# neutralny wpis zamiast łamać schemat - dzięki temu `Attachment.text()` i ręcznie
+# zbudowany `AttachmentBlock` dają dokument, który KSeF przyjmie.
+_DEFAULT_BLOCK_METADATA: tuple[tuple[str, str], ...] = (("Zalacznik", "Zalacznik"),)
+
+
 def _attachment_block(parent: ET.Element, block: AttachmentBlock) -> None:
     node = ET.SubElement(parent, _q("BlokDanych"))
     if block.header:
         ET.SubElement(node, _q("ZNaglowek")).text = block.header
-    for key, value in block.metadata:
+    metadata = block.metadata or _DEFAULT_BLOCK_METADATA
+    for key, value in metadata:
         meta = ET.SubElement(node, _q("MetaDane"))
         ET.SubElement(meta, _q("ZKlucz")).text = key
         ET.SubElement(meta, _q("ZWartosc")).text = value
@@ -1009,7 +1043,7 @@ def _invoice(root: ET.Element, draft: FA3Draft) -> None:
         ET.SubElement(row, _q("P_8B")).text = _decimal(line.quantity)
         ET.SubElement(row, _q("P_9A")).text = _amount2(line.unit_net_price)
         ET.SubElement(row, _q("P_11")).text = _amount(line.effective_net_amount)
-        ET.SubElement(row, _q("P_12")).text = _vat_rate(line.vat_rate)
+        ET.SubElement(row, _q("P_12")).text = _draft_vat_rate(line)
     _settlement(fa, draft)
     _payment(fa, draft)
 
@@ -1023,7 +1057,7 @@ def _draft_tax_summary(fa: ET.Element, draft: FA3Draft) -> None:
     summary: dict[str, Decimal] = {}
     vat_summary: dict[str, Decimal] = {}
     for line in draft.lines:
-        net_tag, vat_tag = _draft_vat_bucket(line.vat_rate)
+        net_tag, vat_tag = _draft_vat_bucket(line.vat_code, line.vat_rate)
         summary[net_tag] = money(summary.get(net_tag, Decimal("0.00")) + line.effective_net_amount)
         if vat_tag:
             vat_summary[vat_tag] = money(
@@ -1049,7 +1083,28 @@ def _draft_exemption_basis(draft: FA3Draft) -> str | None:
     return None
 
 
-def _draft_vat_bucket(vat_rate: Decimal | None) -> tuple[str, str | None]:
+_ZERO_RATE_BUCKETS: dict[str, str] = {
+    "0 KR": "P_13_6_1",
+    "0 WDT": "P_13_6_2",
+    "0 EX": "P_13_6_3",
+}
+
+
+def _draft_vat_rate(line: FA3Line) -> str:
+    """Znacznik `P_12` dla pozycji draftu.
+
+    Preferuje pełny kod stawki (`FA3Line.vat_code`), bo tylko on rozróżnia
+    ``0 KR``/``0 WDT``/``0 EX``. Dla starszych obiektów bez kodu spada do wartości
+    liczonej ze stawki procentowej.
+    """
+    if line.vat_code:
+        return line.vat_code
+    return _vat_rate(line.vat_rate)
+
+
+def _draft_vat_bucket(
+    vat_code: str | None, vat_rate: Decimal | None
+) -> tuple[str, str | None]:
     """Mapuje stawkę z pozycji draftu na pola podsumowania stawek (P_13_x/P_14_x).
 
     Kontrakt FA(3) ma osobne pola dla każdej stawki, a ``P_13_1``/``P_14_1`` dotyczą
@@ -1059,14 +1114,19 @@ def _draft_vat_bucket(vat_rate: Decimal | None) -> tuple[str, str | None]:
     deklarowana jako sprzedaż opodatkowana stawką podstawową).
 
     ``None`` oznacza zwolnienie z podatku -> ``P_13_7`` (bez pola VAT).
+
+    Stawki zerowe mają osobne koszyki (``P_13_6_1``/``P_13_6_2``/``P_13_6_3``), więc
+    wybór opiera się na pełnym kodzie `TStawkaPodatku`, a nie na samym procencie.
     """
     if vat_rate is None:
         return ("P_13_7", None)
 
+    if vat_code in _ZERO_RATE_BUCKETS:
+        return (_ZERO_RATE_BUCKETS[vat_code], None)
+
     normalized = format(vat_rate.normalize(), "f")
     if normalized == "0":
-        # Zero stawki rozróżnia się znacznikiem P_12 ("0 KR"/"0 WDT"/"0 EX");
-        # draft przyjmuje samą stawkę, więc domyślnie krajowa sprzedaż 0%.
+        # Brak kodu przy zerowej stawce: historycznie krajowa sprzedaż 0%.
         return ("P_13_6_1", None)
 
     bucket = _DRAFT_VAT_BUCKETS.get(normalized)
@@ -1177,11 +1237,22 @@ def _q(tag: str) -> str:
 
 
 def _amount(value: Decimal) -> str:
+    """Kwota w polach typu `TKwotowy` (do 2 miejsc po przecinku)."""
     return f"{value:.2f}"
 
 
 def _amount2(value: Decimal) -> str:
-    return f"{value:.2f}"
+    """Kwota w polach typu `TKwotowy2` (do 8 miejsc po przecinku).
+
+    Dotyczy `P_9A`, `P_9B`, `P_10` i `P_9AZ`: broszura MF mówi wprost
+    "Unit prices in P_9A, P_9B, P_9AZ, as well as discounts or reductions in
+    field P_10, may be expressed with up to 8 decimal places", a schemat
+    (`TKwotowy2`) dopuszcza `fractionDigits=8`. Wcześniejsza wersja używała
+    formatu 2-decymalnego, więc cena jednostkowa 1.005 była wysyłana jako
+    `1.00` przy `P_11 = 1.01` — czyli wiersz nie spełniał `P_8B * P_9A = P_11`,
+    a wartość faktury była cicho zniekształcana.
+    """
+    return _decimal(value)
 
 
 def _decimal(value: Decimal) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import runpy
 import zipfile
 from dataclasses import replace
@@ -48,6 +49,7 @@ from ksef_client.documents.fa3 import (
     LineProcedure,
     MarginProcedure,
     NewTransportMeans,
+    Order,
     OrderLine,
     OrderLineProcedure,
     PartialPayment,
@@ -88,6 +90,7 @@ from ksef_client.documents.fa3.models import (
     _parse_iso_date,
     decimal_from_value,
     money,
+    parse_vat_code,
     parse_vat_rate,
 )
 from ksef_client.documents.fa3.xml import (
@@ -302,12 +305,20 @@ def test_models_cover_human_aliases_and_validation_edges() -> None:
     )
     assert zero_draft.lines[0].unit_net_price == Decimal("0")
     # Stawka "zw" wymaga podstawy prawnej do adnotacji P_19A (samo P_19N byłoby
+    # sprzeczne z pozycją zwolnioną).
+    zero_draft = replace(
+        zero_draft,
+        lines=[replace(zero_draft.lines[0], exemption_basis="art. 43 ust. 1 ustawy")],
+    )
+    # Stawka "zw" wymaga podstawy prawnej do adnotacji P_19A (samo P_19N byłoby
     # sprzeczne z pozycją zwolnioną) - patrz test_draft_exempt_line_requires_basis.
     zero_draft = replace(
         zero_draft,
         lines=[replace(zero_draft.lines[0], exemption_basis="art. 43 ust. 1 ustawy")],
     )
-    assert "<P_9A>0.00</P_9A>" in zero_draft.to_xml().decode("utf-8")
+    # P_9A jest typu TKwotowy2 (do 8 miejsc po przecinku), więc wartość jest
+    # normalizowana: 0.00 -> "0". XSD wymaga co najmniej jednej cyfry po kropce.
+    assert "<P_9A>0</P_9A>" in zero_draft.to_xml().decode("utf-8")
     empty_lines_keep_priority = FA3Draft.from_dict(
         {
             "numer_faktury": "FV/EMPTY-LINES/1",
@@ -1164,7 +1175,8 @@ def test_domain_invoice_builds_discount_annotations_parties_payment_and_attachme
 
     assert "<KodUE>DE</KodUE>" in xml
     assert "<Podmiot3>" in xml
-    assert "<P_10>20.00</P_10>" in xml
+    # P_10 jest typu TKwotowy2 (do 8 miejsc po przecinku) - wartość jest normalizowana.
+    assert "<P_10>20</P_10>" in xml
     assert "<P_13_" in xml
     assert "<P_14_" in xml
     assert "<P_13_7>50.00</P_13_7>" in xml
@@ -2001,7 +2013,11 @@ def test_domain_validation_and_value_object_branches() -> None:
     assert VatClass.from_vat_rate("7").xml_rate == "7"
     assert VatClass.from_vat_rate("5").xml_rate == "5"
     assert VatClass.from_vat_rate("0").xml_rate == "0 KR"
-    assert VatClass.from_vat_rate("17").xml_rate == "17"
+    # Stawki spoza TStawkaPodatku nie mogą być cicho przepuszczane do P_12.
+    with pytest.raises(ValueError, match="(?i)nieobs"):
+        VatClass.from_vat_rate("17")
+    assert VatClass.from_vat_rate("4").summary_fields[0] == "P_13_4"
+    assert VatClass.from_vat_rate("3").summary_fields[0] == "P_13_4"
     assert VatClass.from_rate_code("0 WDT").summary_fields[0] == "P_13_6_2"
     assert VatClass.from_rate_code("0 EX").summary_fields[0] == "P_13_6_3"
     assert VatClass.from_rate_code("oo").xml_rate == "oo"
@@ -2201,9 +2217,14 @@ def test_correction_and_settlement_variant_edge_paths() -> None:
 
 def test_order_lines_internal_ids_default_transport_and_settle_amount_xml() -> None:
     seller = Party.polish_company(nip="1234567890", name="Seller", address="Addr")
-    buyer = replace(
-        Party.without_tax_id(name="Internal buyer", address="Addr"),
+    # `IDWew` występuje wyłącznie w `TPodmiot3` - w `TPodmiot2` (nabywca) schemat
+    # dopuszcza tylko NIP/KodUE+NrVatUE/KodKraju+NrID/BrakID, więc identyfikator
+    # wewnętrzny niesie dodatkowy podmiot (Podmiot3) z rolą 8 (JST).
+    buyer = Party.without_tax_id(name="Internal buyer", address="Addr")
+    internal_party = replace(
+        Party.without_tax_id(name="Internal party", address="Addr"),
         identifier=PartyIdentifier.internal("INT-1"),
+        role="8",
     )
 
     advance = (
@@ -2211,6 +2232,7 @@ def test_order_lines_internal_ids_default_transport_and_settle_amount_xml() -> N
         .issued_on(date(2026, 1, 1))
         .seller(seller)
         .buyer(buyer)
+        .add_party(internal_party, role="8")
         .advance_payment(amount="10")
         .order(total_gross="123")
         .order_line(
@@ -3597,8 +3619,8 @@ DRAFT_RATE_BUCKETS = (
     ("23", "P_13_1", "P_14_1"),
     ("22", "P_13_1", "P_14_1"),
     ("8", "P_13_2", "P_14_2"),
-    ("7", "P_13_3", "P_14_3"),
-    ("5", "P_13_5", "P_14_5"),
+    ("7", "P_13_2", "P_14_2"),
+    ("5", "P_13_3", "P_14_3"),
     ("4", "P_13_4", "P_14_4"),
     ("3", "P_13_4", "P_14_4"),
 )
@@ -3856,14 +3878,20 @@ def test_negative_vat_rate_is_rejected_by_draft_and_typed_paths() -> None:
         buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
     )
     builder.add_line("Usługa", quantity="1", unit_net_price="100", vat_rate="-23")
-    with pytest.raises(ValueError, match="ujemna"):
+    with pytest.raises(ValueError, match="(?i)ujemna"):
         builder.build()
 
+    # W ścieżce typowanej ujemna stawka jest odrzucana już przy budowie kategorii.
+    with pytest.raises(ValueError, match="(?i)nieobs"):
+        TaxCategory.from_vat_rate("-23")
+
+    # Reguła "stawka VAT nie może być ujemna" musi być jednak osiągalna dla
+    # kategorii zbudowanej wprost (np. z odczytu stanu sesji).
     typed_line = InvoiceLine.create(
         "Usługa",
         quantity="1",
         unit_net_price="100",
-        tax=TaxCategory.from_vat_rate("-23"),
+        tax=TaxCategory(TaxCategoryKind.STANDARD_23, Decimal("-23"), "-23"),
     )
     typed_errors = typed_line.validate("invoice.lines[0]")
     assert any("ujemna" in issue.message for issue in typed_errors), [
@@ -3879,14 +3907,13 @@ def test_typed_invoice_with_negative_rate_is_rejected() -> None:
     builder.buyer(
         InvoiceParty.polish_company(nip="1111111111", name="Nabywca", address="ul. Testowa 2")
     )
-    builder.add_service_line(
-        "Usługa",
-        quantity="1",
-        unit_net_price="100",
-        tax=TaxCategory.from_vat_rate("-23"),
-    )
-    with pytest.raises(ValueError, match="ujemna"):
-        builder.build()
+    with pytest.raises(ValueError, match="(?i)nieobs"):
+        builder.add_service_line(
+            "Usługa",
+            quantity="1",
+            unit_net_price="100",
+            tax=TaxCategory.from_vat_rate("-23"),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -3957,3 +3984,393 @@ def test_gross_amount_override_wins_over_the_computed_gross() -> None:
         gross_amount=Decimal("999"),
     )
     assert line.effective_gross_amount == Decimal("999.00")
+
+
+# ---------------------------------------------------------------------------
+# Regresje z broszury MF "Information sheet on the FA(3) logical structure"
+# (EN, sierpień 2026) - precyzja pól kwotowych i pola wymagane przez schemat.
+#
+# Precyzja (str. 6):
+#   "Amounts are generally provided with a precision of up to 2 decimal places"
+#   "For the fields P_8B, P_12_XII, P_8BZ, P_12Z_XII, KursWaluty, KursWalutyZK,
+#    KursWalutyZW, KursWalutyZ, KursUmowny, and Udzial, values are provided with
+#    up to 6 decimal places."
+#   "Unit prices in P_9A, P_9B, P_9AZ, as well as discounts or reductions in
+#    field P_10, may be expressed with up to 8 decimal places."
+# Schemat: P_9A/P_9B/P_10/P_9AZ to `TKwotowy2` (fractionDigits=8), P_8B `TIlosci` (6).
+# Regresja: `_amount2` formatował te pola do 2 miejsc, więc 1.005 szło jako 1.00.
+# ---------------------------------------------------------------------------
+
+_VALID_PAYMENT_LINK = "https://pay.example.com/invoice?IPKSeF=123abc456DEFG"
+_VALID_IPKSEF = "123abc456DEFG"
+
+
+def _tag_text(xml_text: str, tag: str) -> str | None:
+    match = re.search(rf"<{tag}>([^<]*)</{tag}>", xml_text)
+    return match.group(1) if match else None
+
+
+def _typed_line_xml(**line_kwargs: Any) -> str:
+    """Buduje fakturę z jedną pozycją i zwraca XML jako tekst."""
+    builder = BasicInvoiceBuilder(invoice_number="FV/PRECISION")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line("Usługa", **line_kwargs)
+    return builder.build().to_xml(xsd_validate=True).decode("utf-8")
+
+
+def _payment_invoice(invoice_number: str = "FV/PAYMENT") -> FA3Invoice:
+    builder = BasicInvoiceBuilder(invoice_number=invoice_number)
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+    return builder.build()
+
+
+@pytest.mark.parametrize(
+    ("unit_price", "expected_p9a"),
+    [
+        ("1.005", "1.005"),
+        ("1.12345678", "1.12345678"),
+        ("1.1234567", "1.1234567"),
+        ("20.00", "20"),
+        ("1.5", "1.5"),
+    ],
+)
+def test_unit_price_keeps_up_to_eight_decimals(unit_price: str, expected_p9a: str) -> None:
+    xml = _typed_line_xml(quantity="1", unit_net_price=unit_price)
+    assert _tag_text(xml, "P_9A") == expected_p9a, xml[:600]
+
+
+def test_unit_price_precision_is_not_silently_rounded() -> None:
+    """Cena 1.005 nie może stać się 1.00 — to zmienia wartość faktury."""
+    xml = _typed_line_xml(quantity="1", unit_net_price="1.005")
+    assert _tag_text(xml, "P_9A") == "1.005"
+    assert _tag_text(xml, "P_11") == "1.01"
+
+
+def test_unit_price_with_nine_decimals_is_rejected() -> None:
+    with pytest.raises(FA3XmlValidationError):
+        _typed_line_xml(quantity="1", unit_net_price="1.123456789")
+
+
+def test_quantity_keeps_up_to_six_decimals() -> None:
+    xml = _typed_line_xml(quantity="1.123456", unit_net_price="10")
+    assert _tag_text(xml, "P_8B") == "1.123456"
+
+
+def test_quantity_with_seven_decimals_is_rejected() -> None:
+    with pytest.raises(FA3XmlValidationError):
+        _typed_line_xml(quantity="1.1234567", unit_net_price="10")
+
+
+def test_aggregate_amounts_use_two_decimals() -> None:
+    xml = _typed_line_xml(quantity="3", unit_net_price="10")
+    assert _tag_text(xml, "P_11") == "30.00"
+    assert _tag_text(xml, "P_13_1") == "30.00"
+    assert _tag_text(xml, "P_14_1") == "6.90"
+    assert _tag_text(xml, "P_15") == "36.90"
+
+
+def test_draft_unit_price_keeps_eight_decimals() -> None:
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/PRECISION/DRAFT",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line("Usługa", quantity="1", unit_net_price="1.005", vat_rate="23")
+    xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+    assert _tag_text(xml, "P_9A") == "1.005"
+    assert _tag_text(xml, "P_11") == "1.01"
+
+
+def test_draft_quantity_keeps_six_decimals_and_is_not_money_formatted() -> None:
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/PRECISION/DRAFT-QTY",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line("Usługa", quantity="0.125", unit_net_price="1000", vat_rate="23")
+    xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+    assert _tag_text(xml, "P_8B") == "0.125"
+    assert _tag_text(xml, "P_11") == "125.00"
+
+
+def test_valid_payment_link_and_ipksef_pass_validation() -> None:
+    invoice = replace(
+        _payment_invoice(),
+        payment_terms=PaymentTerms(payment_link=_VALID_PAYMENT_LINK, ipksef=_VALID_IPKSEF),
+    )
+    errors = invoice.validate().errors
+    assert not errors, [issue.message for issue in errors]
+    xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+    assert f"<LinkDoPlatnosci>{_VALID_PAYMENT_LINK}</LinkDoPlatnosci>" in xml
+    assert f"<IPKSeF>{_VALID_IPKSEF}</IPKSeF>" in xml
+
+
+def test_payment_link_without_ipksef_is_reported() -> None:
+    """Dowolny URL przechodził walidację i wywalał się dopiero na schemacie."""
+    invoice = replace(
+        _payment_invoice(),
+        payment_terms=PaymentTerms(payment_link="https://pay.example.com/invoice"),
+    )
+    errors = invoice.validate().errors
+    assert any("payment_link" in issue.message for issue in errors), [
+        issue.message for issue in errors
+    ]
+    with pytest.raises(FA3XmlValidationError):
+        invoice.to_xml(xsd_validate=True)
+
+
+def test_ipksef_with_wrong_shape_is_reported() -> None:
+    invoice = replace(_payment_invoice(), payment_terms=PaymentTerms(ipksef="123"))
+    errors = invoice.validate().errors
+    assert any("ipksef" in issue.message for issue in errors), [
+        issue.message for issue in errors
+    ]
+
+
+def test_contractual_currency_pln_is_reported() -> None:
+    """`WalutaUmowna` nie może być PLN - schemat tego nie wymusza."""
+    invoice = replace(
+        _payment_invoice("FV/WAL-UMOWNA"),
+        transaction_terms=TransactionTerms(
+            contractual_rate=Decimal("4.5"), contractual_currency="PLN"
+        ),
+    )
+    errors = invoice.validate().errors
+    assert any("WalutaUmowna" in issue.message for issue in errors), [
+        issue.message for issue in errors
+    ]
+
+
+def test_contractual_currency_foreign_is_accepted() -> None:
+    invoice = replace(
+        _payment_invoice("FV/WAL-UMOWNA-OK"),
+        transaction_terms=TransactionTerms(
+            contractual_rate=Decimal("4.5"), contractual_currency="EUR"
+        ),
+    )
+    errors = invoice.validate().errors
+    assert not errors, [issue.message for issue in errors]
+    xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+    assert "<WalutaUmowna>EUR</WalutaUmowna>" in xml
+
+
+# ---------------------------------------------------------------------------
+# Regresje z audytu kodu wobec broszury MF FA(3): pola i konstrukcje, które
+# schemat wymaga, a SDK pomijał - XML był odrzucany dopiero przez KSeF.
+# ---------------------------------------------------------------------------
+
+
+def test_attachment_text_emits_required_metadata() -> None:
+    """`BlokDanych/MetaDane` jest w schemacie wymagane (minOccurs=1)."""
+    builder = BasicInvoiceBuilder(invoice_number="FV/ZAL")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+    builder.attachment_text("Nagłówek", "Akapit 1")
+    invoice = builder.build()
+    xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+    assert "<MetaDane>" in xml
+    assert "<ZWartosc>Zalacznik</ZWartosc>" in xml
+    assert "<Akapit>Akapit 1</Akapit>" in xml
+
+
+def test_attachment_block_without_metadata_still_validates() -> None:
+    """Ręcznie zbudowany blok bez metadanych też nie może łamać schematu."""
+    invoice = replace(
+        _payment_invoice("FV/ZAL-BLOCK"),
+        attachment=Attachment((AttachmentBlock(header="H", paragraphs=("p",)),)),
+    )
+    xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+    assert "<BlokDanych>" in xml
+    assert "<MetaDane>" in xml
+
+
+def test_order_without_lines_is_rejected() -> None:
+    """`Zamowienie` wymaga co najmniej jednego `ZamowienieWiersz`."""
+    builder = BasicInvoiceBuilder(invoice_number="FV/ZAM")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+    invoice = replace(builder.build(), order=Order.create("123.00"))
+    with pytest.raises(FA3XmlValidationError, match="ZamowienieWiersz"):
+        invoice.to_xml(xsd_validate=True)
+
+
+def test_transport_carrier_without_address_is_rejected() -> None:
+    """`AdresPrzewoznika` jest wymagany wewnątrz `Przewoznik`."""
+    invoice = replace(
+        _payment_invoice("FV/PRZEWOZNIK"),
+        transaction_terms=TransactionTerms(
+            transports=(
+                Transport(
+                    kind=TransportKind.ROAD,
+                    carrier=InvoiceParty.polish_company(nip="9999999999", name="Przewoźnik"),
+                ),
+            )
+        ),
+    )
+    with pytest.raises(FA3XmlValidationError, match="AdresPrzewoznika"):
+        invoice.to_xml(xsd_validate=True)
+
+
+def test_internal_identifier_is_rejected_for_the_buyer() -> None:
+    """`IDWew` występuje tylko w `TPodmiot3`; nabywca go nie może nieść."""
+    builder = BasicInvoiceBuilder(invoice_number="FV/IDWEW")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        replace(
+            InvoiceParty.without_tax_id(name="Nabywca", address="ul. B 2"),
+            identifier=PartyIdentifier.internal("1111111111-00001"),
+        )
+    )
+    builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+    with pytest.raises(FA3XmlValidationError, match="IDWew"):
+        builder.build().to_xml(xsd_validate=True)
+
+
+def test_internal_identifier_is_allowed_for_a_third_party() -> None:
+    builder = BasicInvoiceBuilder(invoice_number="FV/IDWEW-OK")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+    builder.add_party(
+        replace(
+            InvoiceParty.without_tax_id(name="Oddział", address="ul. C 3"),
+            identifier=PartyIdentifier.internal("1111111111-00001"),
+        ),
+        role="8",
+    )
+    xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+    assert "<IDWew>1111111111-00001</IDWew>" in xml
+
+
+# --- 0% w draftcie: kod stawki musi przetrwać round-trip -------------------
+
+
+@pytest.mark.parametrize(
+    ("code", "bucket"),
+    [("0 KR", "P_13_6_1"), ("0 WDT", "P_13_6_2"), ("0 EX", "P_13_6_3")],
+)
+def test_draft_zero_rate_subtypes_keep_their_code_and_bucket(code: str, bucket: str) -> None:
+    """`0 WDT`/`0 EX` nie mogą być spłaszczane do krajowej stawki 0%."""
+    builder = FA3InvoiceBuilder(
+        invoice_number=f"FV/{code}",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line("Usługa", quantity="1", unit_net_price="100", vat_rate=code)
+    draft = builder.build()
+    assert draft.lines[0].vat_code == code
+    found = _tag_texts(draft.to_xml(xsd_validate=True))
+    assert found["P_12"] == code
+    assert found[bucket] == "100.00"
+
+
+def test_draft_zero_rate_code_survives_json_round_trip() -> None:
+    draft = FA3Draft.from_dict(
+        {
+            "numer_faktury": "FV/WDT",
+            "data_wystawienia": "2026-01-15",
+            "sprzedawca": {"nazwa": "S", "nip": "1234567890"},
+            "nabywca": {"nazwa": "B", "nip": "1111111111"},
+            "pozycje": [{"opis": "WDT", "ilosc": 1, "cena_netto": 100, "vat": "0 WDT"}],
+        }
+    )
+    assert draft.lines[0].vat_code == "0 WDT"
+    assert draft.lines[0].to_dict()["vat"] == "0 WDT"
+
+
+def test_draft_unknown_zero_rate_code_is_rejected() -> None:
+    with pytest.raises(ValueError, match="(?i)zerowej"):
+        FA3Line.from_dict({"opis": "L", "ilosc": 1, "cena_netto": 1, "vat": "0 XX"})
+
+
+def test_draft_exempt_line_to_dict_uses_zw() -> None:
+    line = FA3Line(
+        description="Zwolniona",
+        quantity=Decimal("1"),
+        unit="szt",
+        unit_net_price=Decimal("100"),
+        vat_rate=None,
+        exemption_basis="art. 43",
+    )
+    assert line.to_dict()["vat"] == "zw"
+
+
+def test_draft_legacy_line_without_vat_code_falls_back_to_rate() -> None:
+    """Starsze obiekty bez `vat_code` muszą nadal serializować się poprawnie."""
+    line = FA3Line(
+        description="Usługa",
+        quantity=Decimal("1"),
+        unit="szt",
+        unit_net_price=Decimal("100"),
+        vat_rate=Decimal("23"),
+    )
+    assert line.vat_code is None
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/LEGACY",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line("Usługa", quantity="1", unit_net_price="100", vat_rate="23")
+    legacy = replace(builder.build(), lines=[line])
+    found = _tag_texts(legacy.to_xml(xsd_validate=True))
+    assert found["P_12"] == "23"
+    assert found["P_13_1"] == "100.00"
+
+
+def test_draft_legacy_zero_rate_without_code_uses_domestic_bucket() -> None:
+    line = FA3Line(
+        description="Gratis",
+        quantity=Decimal("1"),
+        unit="szt",
+        unit_net_price=Decimal("100"),
+        vat_rate=Decimal("0"),
+    )
+    assert line.vat_code is None
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/LEGACY-ZERO",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    builder.add_line("Gratis", quantity="1", unit_net_price="100", vat_rate="0")
+    legacy = replace(builder.build(), lines=[line])
+    found = _tag_texts(legacy.to_xml(xsd_validate=True))
+    assert found["P_12"] == "0 KR"
+    assert found["P_13_6_1"] == "100.00"
+
+
+def test_parse_vat_code_accepts_decimal_and_none() -> None:
+    assert parse_vat_code(None) is None
+    assert parse_vat_code(Decimal("23")) == "23"
+    assert parse_vat_code(23) == "23"

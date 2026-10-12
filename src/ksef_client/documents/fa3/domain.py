@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -45,6 +46,17 @@ _CORRECTION_KINDS = {
     FA3InvoiceKind.ADVANCE_CORRECTION,
     FA3InvoiceKind.SETTLEMENT_CORRECTION,
 }
+
+# Identyfikator płatności KSeF: schemat FA(3) wymaga dokładnie
+# `[0-9]{3}[a-zA-Z0-9]{10}` (max 13 znaków) - patrz `IPKSeF` w schemacie.
+IPKSEF_PATTERN = re.compile(r"[0-9]{3}[a-zA-Z0-9]{10}")
+
+# Link do płatności bezgotówkowej: schemat wymaga adresu http(s), który niesie
+# parametr `IPKSeF=<3 cyfry><10 znaków alfanumerycznych>`, i ogranicza długość do 512.
+PAYMENT_LINK_PATTERN = re.compile(
+    r"(https?)://([a-zA-Z0-9][a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}(:[0-9]{1,5})?(/[^\s?#]*)?"
+    r"\?([^#\s]*&)?IPKSeF=[0-9]{3}[a-zA-Z0-9]{10}(&[^#\s]*)?(#.*)?"
+)
 
 
 class PartyIdentifierKind(str, Enum):
@@ -435,6 +447,17 @@ class TaxCategory:
 
     @classmethod
     def from_vat_rate(cls, value: Decimal | str | int | float | None) -> TaxCategory:
+        """Buduje kategorię stawki z samej wartości procentowej.
+
+        Zakres dopuszczalnych wartości wynika z `TStawkaPodatku` w schemacie FA(3)
+        oraz z broszury MF ("Information sheet on the FA(3) logical structure",
+        str. 94): 23, 22, 8, 7, 5, 4, 3 oraz stawki zerowe i zwolnienie.
+
+        Wcześniejsza wersja wrzucała każdą nieznaną stawkę do koszyka stawki
+        podstawowej (`STANDARD_23`) z zachowaniem surowej wartości w `P_12`, więc
+        np. 4% było deklarowane jako sprzedaż opodatkowana stawką podstawową.
+        Stawki 3% i 4% (ryczałt dla taksówek) mają własny koszyk `P_13_4`/`P_14_4`.
+        """
         parsed = parse_vat_rate(value)
         if parsed is None:
             return cls.exempt("zwolnienie")
@@ -448,9 +471,17 @@ class TaxCategory:
             return cls.reduced_7()
         if parsed == Decimal("5"):
             return cls.reduced_5()
+        if parsed in {Decimal("4"), Decimal("3")}:
+            return cls(TaxCategoryKind.TAXI_FLAT_RATE, parsed, format(parsed.normalize(), "f"))
         if parsed == Decimal("0"):
             return cls.zero_domestic()
-        return cls(TaxCategoryKind.STANDARD_23, parsed, format(parsed.normalize(), "f"))
+        raise ValueError(
+            f"Nieobsługiwana stawka VAT FA(3): {value!r}. "
+            "Dozwolone stawki to 23, 22, 8, 7, 5, 4, 3 oraz stawki zerowe "
+            "('0 KR'/'0 WDT'/'0 EX'), zwolnienie ('zw'), odwrotne obciążenie ('oo') "
+            "i niepodlegające opodatkowaniu ('np I'/'np II') - te ostatnie podaj "
+            "przez TaxCategory.from_rate_code()."
+        )
 
     @classmethod
     def from_rate_code(cls, value: Any) -> TaxCategory:
@@ -791,7 +822,20 @@ class Attachment:
 
     @classmethod
     def text(cls, header: str, *paragraphs: str) -> Attachment:
-        return cls((AttachmentBlock(header=header, paragraphs=tuple(paragraphs)),))
+        """Załącznik tekstowy.
+
+        `BlokDanych/MetaDane` jest w schemacie FA(3) wymagane, więc dokładamy
+        neutralny wpis metadanych - inaczej wygenerowany XML byłby niezgodny z XSD.
+        """
+        return cls(
+            (
+                AttachmentBlock(
+                    header=header,
+                    metadata=(("Zalacznik", "Zalacznik"),),
+                    paragraphs=tuple(paragraphs),
+                ),
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -1127,7 +1171,57 @@ class FA3Invoice:
                         "albo numer KSeF, nie oba."
                     )
                 )
+        issues.extend(self._validate_payment_link())
+        issues.extend(self._validate_contractual_currency())
         return issues
+
+    def _validate_payment_link(self) -> list[FA3ValidationIssue]:
+        """`LinkDoPlatnosci` musi być adresem z parametrem `IPKSeF`.
+
+        Schemat FA(3) wymusza wzorzec:
+        ``(https?)://...?IPKSeF=[0-9]{3}[a-zA-Z0-9]{10}`` (max 512 znaków), a osobne
+        pole `IPKSeF` ma dokładnie ``[0-9]{3}[a-zA-Z0-9]{10}``. Bez tej walidacji
+        dowolny URL przechodził `validate()` i wywalał się dopiero na XSD/KSeF.
+        """
+        terms = self.payment_terms
+        if terms is None:
+            return []
+        issues: list[FA3ValidationIssue] = []
+        if terms.ipksef and not IPKSEF_PATTERN.fullmatch(terms.ipksef):
+            issues.append(
+                FA3ValidationIssue(
+                    "invoice.payment_terms.ipksef: identyfikator IPKSeF musi mieć "
+                    "postaċ 3 cyfr i 10 znaków alfanumerycznych (np. '123abc456DEF')."
+                )
+            )
+        if terms.payment_link and not PAYMENT_LINK_PATTERN.fullmatch(terms.payment_link):
+            issues.append(
+                FA3ValidationIssue(
+                    "invoice.payment_terms.payment_link: link do płatności musi być "
+                    "adresem http(s) zawierającym parametr 'IPKSeF=' z 3 cyframi i "
+                    "10 znakami alfanumerycznymi (max 512 znaków)."
+                )
+            )
+        return issues
+
+    def _validate_contractual_currency(self) -> list[FA3ValidationIssue]:
+        """`WalutaUmowna` nie może być PLN.
+
+        Broszura MF (str. 124): "The Polish currency (PLN) should never appear in
+        the WalutaUmowna field." Schemat dopuszcza PLN (słownik `TKodWaluty`), więc
+        to reguła biznesowa, której XSD nie wyegzekwuje.
+        """
+        terms = self.transaction_terms
+        if terms is None or not terms.contractual_currency:
+            return []
+        if terms.contractual_currency.strip().upper() == "PLN":
+            return [
+                FA3ValidationIssue(
+                    "invoice.transaction_terms.contractual_currency: 'WalutaUmowna' nie "
+                    "może być PLN (waluta umowna dotyczy wyłącznie waluty obcej)."
+                )
+            ]
+        return []
 
 
 @dataclass
