@@ -4067,9 +4067,20 @@ def test_quantity_keeps_up_to_six_decimals() -> None:
     assert _tag_text(xml, "P_8B") == "1.123456"
 
 
-def test_quantity_with_seven_decimals_is_rejected() -> None:
-    with pytest.raises(FA3XmlValidationError):
-        _typed_line_xml(quantity="1.1234567", unit_net_price="10")
+def test_quantity_with_seven_decimals_is_normalised_to_six() -> None:
+    """`TIlosci` dopuszcza 6 miejsc, więc nadmiar jest zaokrąglany, nie odrzucany.
+
+    Broszura MF (str. 6) wylicza `P_8B` wśród pól z limitem 6 miejsc; schemat
+    egzekwuje to wzorcem, więc wcześniej taka ilość dawała XML odrzucany przez KSeF.
+    """
+    xml = _typed_line_xml(quantity="1.1234567", unit_net_price="10")
+    assert _tag_text(xml, "P_8B") == "1.123457"
+
+
+def test_exchange_rate_with_seven_decimals_is_normalised_to_six() -> None:
+    """`KursWaluty` ma ten sam limit 6 miejsc co `P_8B`."""
+    xml = _typed_line_xml(quantity="1", unit_net_price="10", currency_rate="4.1234567")
+    assert _tag_text(xml, "KursWaluty") == "4.123457"
 
 
 def test_aggregate_amounts_use_two_decimals() -> None:

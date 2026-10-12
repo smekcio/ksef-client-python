@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -29,7 +29,7 @@ from .domain import (
     PaymentTerms,
     Settlement,
 )
-from .models import FA3Draft, FA3InvoiceKind, FA3Line, FA3Party, money
+from .models import FA3Draft, FA3InvoiceKind, FA3Line, FA3Party, decimal_from_value, money
 from .sections import (
     AdditionalDescription,
     AdvancePayment,
@@ -311,7 +311,7 @@ def _domain_party(
     if third_party:
         _third_party_role(node, party)
         if party.share is not None:
-            ET.SubElement(node, _q("Udzial")).text = _decimal(party.share)
+            ET.SubElement(node, _q("Udzial")).text = _rate6(party.share)
         if party.customer_number:
             ET.SubElement(node, _q("NrKlienta")).text = party.customer_number
     if authorized:
@@ -394,7 +394,7 @@ def _domain_invoice(root: ET.Element, invoice: FA3Invoice) -> None:
         ET.SubElement(period, _q("P_6_Do")).text = invoice.period_to.isoformat()
     _tax_summary(fa, invoice)
     if invoice.foreign_currency_rate is not None:
-        ET.SubElement(fa, _q("KursWalutyZ")).text = _decimal(invoice.foreign_currency_rate)
+        ET.SubElement(fa, _q("KursWalutyZ")).text = _rate6(invoice.foreign_currency_rate)
     _domain_annotations(fa, invoice.annotations)
     ET.SubElement(fa, _q("RodzajFaktury")).text = invoice.kind.xml_code
     _domain_correction(fa, invoice)
@@ -601,7 +601,7 @@ def _domain_correction(fa: ET.Element, invoice: FA3Invoice) -> None:
     if invoice.corrected_advance_state is not None:
         ET.SubElement(fa, _q("P_15ZK")).text = _amount(invoice.corrected_advance_state.amount)
         if invoice.corrected_advance_state.currency_rate is not None:
-            ET.SubElement(fa, _q("KursWalutyZK")).text = _decimal(
+            ET.SubElement(fa, _q("KursWalutyZK")).text = _rate6(
                 invoice.corrected_advance_state.currency_rate
             )
 
@@ -616,7 +616,7 @@ def _domain_advance_payments(
         ET.SubElement(node, _q("P_6Z")).text = (payment.paid_on or issue_date).isoformat()
         ET.SubElement(node, _q("P_15Z")).text = _amount(payment.amount)
         if payment.currency_rate is not None:
-            ET.SubElement(node, _q("KursWalutyZW")).text = _decimal(payment.currency_rate)
+            ET.SubElement(node, _q("KursWalutyZW")).text = _rate6(payment.currency_rate)
 
 
 def _domain_additional_descriptions(
@@ -660,7 +660,7 @@ def _domain_line(fa: ET.Element, index: int, line: InvoiceLine) -> None:
         if line.identifiers.pkob:
             ET.SubElement(row, _q("PKOB")).text = line.identifiers.pkob
     ET.SubElement(row, _q("P_8A")).text = line.unit
-    ET.SubElement(row, _q("P_8B")).text = _decimal(line.quantity)
+    ET.SubElement(row, _q("P_8B")).text = _rate6(line.quantity)
     ET.SubElement(row, _q("P_9A")).text = _amount2(line.unit_net_price)
     if line.unit_gross_price is not None:
         ET.SubElement(row, _q("P_9B")).text = _amount2(line.unit_gross_price)
@@ -674,7 +674,7 @@ def _domain_line(fa: ET.Element, index: int, line: InvoiceLine) -> None:
     if line.tax.xml_rate:
         ET.SubElement(row, _q("P_12")).text = line.tax.xml_rate
     if line.tax.xii_rate is not None:
-        ET.SubElement(row, _q("P_12_XII")).text = _decimal(line.tax.xii_rate)
+        ET.SubElement(row, _q("P_12_XII")).text = _rate6(line.tax.xii_rate)
     if line.annex_15:
         ET.SubElement(row, _q("P_12_Zal_15")).text = "1"
     if line.excise_amount is not None:
@@ -684,7 +684,7 @@ def _domain_line(fa: ET.Element, index: int, line: InvoiceLine) -> None:
     if line.procedure:
         ET.SubElement(row, _q("Procedura")).text = enum_value(line.procedure)
     if line.currency_rate is not None:
-        ET.SubElement(row, _q("KursWaluty")).text = _decimal(line.currency_rate)
+        ET.SubElement(row, _q("KursWaluty")).text = _rate6(line.currency_rate)
     if line.before_correction:
         ET.SubElement(row, _q("StanPrzed")).text = "1"
 
@@ -780,7 +780,7 @@ def _domain_transaction_terms(fa: ET.Element, terms: TransactionTerms | None) ->
     if terms.delivery_terms:
         ET.SubElement(node, _q("WarunkiDostawy")).text = terms.delivery_terms
     if terms.contractual_rate is not None and terms.contractual_currency:
-        ET.SubElement(node, _q("KursUmowny")).text = _decimal(terms.contractual_rate)
+        ET.SubElement(node, _q("KursUmowny")).text = _rate6(terms.contractual_rate)
         ET.SubElement(node, _q("WalutaUmowna")).text = terms.contractual_currency
     for transport in terms.transports:
         _domain_transport(node, transport)
@@ -862,14 +862,14 @@ def _domain_order_line(parent: ET.Element, index: int, line: OrderLine) -> None:
         if line.identifiers.pkob:
             ET.SubElement(row, _q("PKOBZ")).text = line.identifiers.pkob
     ET.SubElement(row, _q("P_8AZ")).text = line.unit
-    ET.SubElement(row, _q("P_8BZ")).text = _decimal(line.quantity)
+    ET.SubElement(row, _q("P_8BZ")).text = _rate6(line.quantity)
     ET.SubElement(row, _q("P_9AZ")).text = _amount2(line.unit_net_price)
     ET.SubElement(row, _q("P_11NettoZ")).text = _amount(line.effective_net_amount)
     ET.SubElement(row, _q("P_11VatZ")).text = _amount(line.effective_vat_amount)
     if line.tax.xml_rate:
         ET.SubElement(row, _q("P_12Z")).text = line.tax.xml_rate
     if line.tax.xii_rate is not None:
-        ET.SubElement(row, _q("P_12Z_XII")).text = _decimal(line.tax.xii_rate)
+        ET.SubElement(row, _q("P_12Z_XII")).text = _rate6(line.tax.xii_rate)
     if line.annex_15:
         ET.SubElement(row, _q("P_12Z_Zal_15")).text = "1"
     if line.gtu:
@@ -1259,6 +1259,24 @@ def _decimal(value: Decimal) -> str:
     if value == value.to_integral_value():
         return str(int(value))
     return format(value.normalize(), "f")
+
+
+_RATE6_QUANT = Decimal("0.000001")
+
+
+def _rate6(value: Decimal | str | int | float) -> str:
+    """Pola typu `TIlosci`/`TProcentowy`: do 6 miejsc po przecinku.
+
+    Broszura MF (str. 6) wylicza je wprost: "For the fields P_8B, P_12_XII,
+    P_8BZ, P_12Z_XII, KursWaluty, KursWalutyZK, KursWalutyZW, KursWalutyZ,
+    KursUmowny, and Udzial, values are provided with up to 6 decimal places."
+    Schemat egzekwuje to wzorcem, więc wartość z większą liczbą miejsc (np. ilość
+    z dzielenia albo kurs skopiowany z tabeli NBP) dawała XML odrzucany przez KSeF,
+    a `validate()` milczał. Zaokrąglamy do 6 miejsc (ROUND_HALF_UP, jak `money`).
+    """
+    if not isinstance(value, Decimal):
+        value = decimal_from_value(value, field_name="rate")
+    return _decimal(value.quantize(_RATE6_QUANT, rounding=ROUND_HALF_UP))
 
 
 def _yes_no(value: bool) -> str:
