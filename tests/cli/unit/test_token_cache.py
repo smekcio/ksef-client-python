@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time
 import warnings
 from pathlib import Path
 
@@ -123,6 +125,75 @@ def test_token_cache_lock_waits_for_release(monkeypatch, tmp_path: Path) -> None
 
     assert waits == [token_cache._CACHE_LOCK_POLL_INTERVAL_SECONDS]
     assert token_cache.get_cached_metadata("demo") is not None
+
+
+def test_token_cache_steals_an_orphaned_lock(monkeypatch, tmp_path: Path) -> None:
+    """Blokada po zabitym procesie nie może blokować cache na zawsze.
+
+    Proces zabity w trakcie nie sprząta pliku blokady — wcześniej każde kolejne
+    wywołanie kończyło się `CliError` po 5 s, dopóki człowiek nie usunął pliku
+    ręcznie.
+    """
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(token_cache, "cache_file", lambda: cache_path)
+    lock_path = cache_path.with_name("cache.json.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("999999 1.0", encoding="utf-8")
+    stale_time = time.time() - token_cache._CACHE_LOCK_STALE_SECONDS - 5
+    os.utime(lock_path, (stale_time, stale_time))
+
+    token_cache.set_cached_metadata("demo", {"method": "token"})
+
+    metadata = token_cache.get_cached_metadata("demo")
+    assert metadata is not None
+    assert metadata["method"] == "token"
+    assert not lock_path.exists()
+
+
+def test_token_cache_lock_is_not_stale_when_stat_fails(monkeypatch, tmp_path: Path) -> None:
+    """Gdy nie da się odczytać wieku blokady, nie przejmujemy jej na ślepo."""
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(token_cache, "cache_file", lambda: cache_path)
+    lock_path = cache_path.with_name("cache.json.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("1 1.0", encoding="utf-8")
+    original_stat = Path.stat
+
+    def _stat(self: Path, *, follow_symlinks: bool = True):
+        if self == lock_path:
+            raise OSError("locked")
+        return original_stat(self, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", _stat)
+
+    assert token_cache._lock_is_stale(lock_path) is False
+
+
+def test_token_cache_lock_creation_error_is_wrapped(monkeypatch, tmp_path: Path) -> None:
+    """Błąd utworzenia blokady (np. brak praw) to `CliError`, nie surowy OSError."""
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(token_cache, "cache_file", lambda: cache_path)
+
+    def _denied(*args: object, **kwargs: object) -> int:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(token_cache.os, "open", _denied)
+
+    with pytest.raises(CliError, match="Cannot create the token metadata cache lock"):
+        token_cache.get_cached_metadata("demo")
+
+
+def test_token_cache_lock_directory_error_is_wrapped(monkeypatch, tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(token_cache, "cache_file", lambda: cache_path)
+
+    def _denied(*args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "mkdir", _denied)
+
+    with pytest.raises(CliError, match="Cannot create the token metadata cache directory"):
+        token_cache.set_cached_metadata("demo", {"method": "token"})
 
 
 def test_token_cache_chmod_is_applied_on_posix(monkeypatch, tmp_path: Path) -> None:

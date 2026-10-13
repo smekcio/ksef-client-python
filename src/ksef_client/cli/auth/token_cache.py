@@ -16,11 +16,24 @@ from ..exit_codes import ExitCode
 #: Czas oczekiwania na blokadę pliku cache (sekundy) i interwał odpytywania.
 _CACHE_LOCK_TIMEOUT_SECONDS = 5.0
 _CACHE_LOCK_POLL_INTERVAL_SECONDS = 0.05
+#: Blokada starsza niż tyle sekund jest uznawana za osieroconą (proces, który ją
+#: trzymał, został zabity) i jest przejmowana. Sekcja krytyczna to odczyt i zapis
+#: małego JSON-a, więc próg jest z zapasem większy od realnego czasu trzymania.
+_CACHE_LOCK_STALE_SECONDS = 30.0
 
 
 def _cache_lock_file() -> Path:
     path = cache_file()
     return path.with_name(f"{path.name}.lock")
+
+
+def _lock_is_stale(lock_path: Path) -> bool:
+    """Czy plik blokady pochodzi po procesie, który padł bez sprzątania."""
+    try:
+        age = time.time() - lock_path.stat().st_mtime
+    except OSError:
+        return False
+    return age >= _CACHE_LOCK_STALE_SECONDS
 
 
 @contextmanager
@@ -30,15 +43,33 @@ def _cache_lock() -> Iterator[None]:
     Bez niej dwa równoległe uruchomienia CLI (każde pisze metadane swojego
     profilu) nadpisywały się nawzajem i gubiły wpisy — potwierdzone uruchomieniem
     czterech procesów, z których na dysku została jedna zmiana.
+
+    Blokada to plik z PID-em właściciela. Proces zabity w trakcie nie posprząta
+    jej, dlatego blokada starsza niż `_CACHE_LOCK_STALE_SECONDS` jest
+    przejmowana — inaczej jedno `Stop-Process -Force` trwale odbierało
+    możliwość odczytu metadanych tokenów.
     """
     lock_path = _cache_lock_file()
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise CliError(
+            "Cannot create the token metadata cache directory.",
+            ExitCode.CONFIG_ERROR,
+            "Grant write access to cache directory or update cache location settings.",
+        ) from exc
+
     started = time.monotonic()
     handle: int | None = None
     while handle is None:
         try:
             handle = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
         except FileExistsError as exc:
+            if _lock_is_stale(lock_path):
+                # Poprzedni właściciel padł bez sprzątania — przejmujemy blokadę.
+                with suppress(OSError):
+                    lock_path.unlink()
+                continue
             if time.monotonic() - started >= _CACHE_LOCK_TIMEOUT_SECONDS:
                 raise CliError(
                     "Timed out waiting for the token metadata cache lock.",
@@ -46,7 +77,15 @@ def _cache_lock() -> Iterator[None]:
                     "Another ksef process may be running; retry in a moment.",
                 ) from exc
             time.sleep(_CACHE_LOCK_POLL_INTERVAL_SECONDS)
+        except OSError as exc:
+            raise CliError(
+                "Cannot create the token metadata cache lock.",
+                ExitCode.CONFIG_ERROR,
+                "Grant write access to cache directory or update cache location settings.",
+            ) from exc
     try:
+        with suppress(OSError):
+            os.write(handle, f"{os.getpid()} {time.time():.3f}".encode("ascii"))
         yield
     finally:
         with suppress(OSError):
