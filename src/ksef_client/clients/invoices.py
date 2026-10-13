@@ -17,6 +17,7 @@ from ..models import (
     InvoiceQuerySubjectType,
     QueryInvoicesMetadataResponse,
 )
+from ..utils.datetime_parsing import normalize_api_timestamp, try_parse_api_datetime
 from .base import AsyncBaseApiClient, BaseApiClient, _serialize_json_payload
 
 _OFFSET_SUFFIX_RE = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
@@ -49,16 +50,24 @@ def _warsaw_offset_for_local_datetime(local_dt: datetime) -> timedelta:
 
 
 def _normalize_datetime_without_offset(value: str) -> str:
+    """Uzupełnia strefę dla znacznika bez offsetu (czas lokalny Europe/Warsaw).
+
+    Wartość z sufiksem ``Z`` albo z offsetem jest zwracana bez zmian — jej
+    strefa jest już jednoznaczna. Dla wartości bez strefy parsujemy ją jako czas
+    lokalny i dopiero potem doklejamy offset warszawski; wcześniej robiła to
+    ta sama funkcja, która na Pythonie 3.10 nie umiała sparsować 7-cyfrowego
+    ułamka, więc zwracała wartość bez offsetu (albo z błędnym offsetem).
+    """
     if "T" not in value or _OFFSET_SUFFIX_RE.search(value):
         return value
     try:
-        parsed = datetime.fromisoformat(value)
+        naive = datetime.fromisoformat(normalize_api_timestamp(value))
     except ValueError:
         return value
-    if parsed.tzinfo is not None:
+    if naive.tzinfo is not None:
         return value
-    offset = _warsaw_offset_for_local_datetime(parsed)
-    return parsed.replace(tzinfo=timezone(offset)).isoformat()
+    offset = _warsaw_offset_for_local_datetime(naive)
+    return naive.replace(tzinfo=timezone(offset)).isoformat()
 
 
 def _normalize_invoice_date_range_payload(request_payload: dict[str, Any]) -> dict[str, Any]:
@@ -85,13 +94,8 @@ def _normalize_invoice_date_range_payload(request_payload: dict[str, Any]) -> di
 
 
 def _parse_invoice_range_datetime(value: str) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    """Parsuje granicę zakresu (toleruje 7 cyfr ułamka na Pythonie 3.10)."""
+    return try_parse_api_datetime(value)
 
 
 def _enforce_invoice_date_range_limit(date_range: dict[str, Any]) -> None:
@@ -113,6 +117,11 @@ def _enforce_invoice_date_range_limit(date_range: dict[str, Any]) -> None:
     else:
         return
 
+    # Porównanie DAT KALENDARZOWYCH jest tu celowe: KSeF rozumie limit jako okno
+    # 100 dni kalendarzowych w UTC, nie jako 100 x 24 h. Sufit „do końca setnego
+    # dnia" (`2026-01-01` → `2026-04-11T23:59:59Z`, czyli 100 dni 23:59:59
+    # rzeczywistego czasu) jest przez API przyjmowany, a dopiero `2026-04-12`
+    # przekracza okno. Zmiana na porównanie czasów odrzucałaby poprawny zakres.
     if (parsed_to.date() - parsed_from.date()).days > INVOICE_QUERY_MAX_RANGE_DAYS:
         raise ValueError(
             "Invoice query/export date range cannot exceed "

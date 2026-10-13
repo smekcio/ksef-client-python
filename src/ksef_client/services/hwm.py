@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ..utils.datetime_parsing import try_parse_api_datetime
+
 
 def _get_value(
     payload: Any,
@@ -33,15 +35,18 @@ def _get_direct_last_permanent_storage_date(payload: Any) -> str | None:
     return str(direct_value)
 
 
-def _permanent_storage_date_sort_key(value: str) -> tuple[str, str]:
-    normalized = value.replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        return ("", value)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return (parsed.astimezone(timezone.utc).isoformat(), value)
+def _permanent_storage_date_sort_key(value: str) -> tuple[datetime, str]:
+    """Klucz sortowania po RZECZYWISTYM czasie, nie po zapisie tekstowym.
+
+    Zwracanie ``("", value)`` dla nieparsowalnej wartości (a tak działo się na
+    Pythonie 3.10 z 7-cyfrowym ułamkiem) sprawiało, że ``max()`` wybierał
+    chronologicznie **starszą** datę, a przy różnych strefach porównanie
+    leksykograficzne dawało wynik zależny od zapisu, nie od czasu.
+    """
+    parsed = try_parse_api_datetime(value)
+    if parsed is None:
+        return (datetime.min.replace(tzinfo=timezone.utc), value)
+    return (parsed, value)
 
 
 def _get_latest_invoice_permanent_storage_date(payload: Any) -> str | None:
@@ -64,15 +69,29 @@ def update_continuation_point(
     subject_type: str,
     package: Any,
 ) -> None:
+    """Ustala punkt wznowienia przyrostowego pobierania faktur.
+
+    Kolejność wynika z dokumentacji MF („Przyrostowe pobieranie faktur"): dla
+    paczki **obciętej** kontynuujemy od daty OSTATNIEGO REKORDU, który zmieścił
+    się w paczce. `permanentStorageHwmDate` to watermark serwera równy końcowi
+    zapytanego okna (`dateRange.to`), więc wznowienie od niego pomijałoby
+    wszystkie faktury z przedziału między ostatnim rekordem a watermarkiem —
+    i nie zostałyby one pobrane NIGDY.
+
+    Wartość `lastPermanentStorageDate` bierzemy, gdy API ją zwróci (nie ma jej
+    w kontrakcie OpenAPI, więc nie można na niej polegać), a w przeciwnym razie
+    liczymy datę ostatniego rekordu z `invoices[]`.
+    """
     hwm_date = _get_value(package, "permanent_storage_hwm_date", "permanentStorageHwmDate")
     is_truncated = bool(_get_value(package, "is_truncated", "isTruncated", False))
     last_permanent_storage_date = _get_direct_last_permanent_storage_date(package)
     fallback_date = _get_latest_invoice_permanent_storage_date(package)
 
-    if hwm_date:
+    truncated_resume_point = last_permanent_storage_date or fallback_date
+    if is_truncated and truncated_resume_point:
+        continuation_points[subject_type] = str(truncated_resume_point)
+    elif hwm_date:
         continuation_points[subject_type] = str(hwm_date)
-    elif is_truncated and last_permanent_storage_date:
-        continuation_points[subject_type] = str(last_permanent_storage_date)
     elif fallback_date:
         continuation_points[subject_type] = fallback_date
     else:

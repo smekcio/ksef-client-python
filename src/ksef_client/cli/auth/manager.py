@@ -9,6 +9,7 @@ from ksef_client import models as m
 from ksef_client.config import KsefClientOptions, KsefEnvironment, KsefLighthouseEnvironment
 from ksef_client.services.workflows import AuthCoordinator
 from ksef_client.services.xades import XadesKeyPair
+from ksef_client.utils.datetime_parsing import try_parse_api_datetime
 
 from ..config.loader import load_config
 from ..errors import CliError
@@ -96,15 +97,15 @@ def _collect_active_token_reference_numbers(
 
 
 def _parse_certificate_datetime(value: Any) -> datetime | None:
+    """Parsuje znacznik czasu certyfikatu (toleruje 7 cyfr ułamka na 3.10).
+
+    Ta sama pułapka, którą naprawiono w ``clients.security``: na Pythonie 3.10
+    znacznik ``2026-07-11T12:23:56.0154302+00:00`` był nieparsowalny, więc filtr
+    ważności uznawał wygasły certyfikat za aktualny.
+    """
     if value in {None, ""}:
         return None
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    return try_parse_api_datetime(str(value))
 
 
 def _is_current_certificate(cert: Any, now: datetime) -> bool:
@@ -116,6 +117,12 @@ def _is_current_certificate(cert: Any, now: datetime) -> bool:
         valid_to_raw = getattr(cert, "valid_to", None)
     valid_from = _parse_certificate_datetime(valid_from_raw)
     valid_to = _parse_certificate_datetime(valid_to_raw)
+    # Nieparsowalna GRANICA (obecna, ale nieczytelna) nie oznacza „ważny
+    # bezterminowo" — bezpieczniej odrzucić certyfikat niż użyć niewłaściwego.
+    if valid_from_raw not in {None, ""} and valid_from is None:
+        return False
+    if valid_to_raw not in {None, ""} and valid_to is None:
+        return False
     if valid_from is not None and valid_from > now:
         return False
     return not (valid_to is not None and valid_to < now)

@@ -19,6 +19,7 @@ from ksef_client.services.workflows import (
     OnlineSessionWorkflow,
 )
 from ksef_client.utils.collective_identifier import expand_query_date_bound
+from ksef_client.utils.datetime_parsing import try_parse_api_datetime
 from ksef_client.utils.zip_utils import build_tar_gz, build_zip
 
 from ..auth.keyring_store import get_tokens
@@ -273,20 +274,30 @@ def _extract_upo_reference(payload: Any) -> str:
 
 
 def _parse_certificate_datetime(value: Any) -> datetime | None:
+    """Parsuje znacznik czasu certyfikatu (toleruje 7 cyfr ułamka na 3.10).
+
+    API KSeF zwraca np. ``2026-07-11T12:23:56.0154302+00:00``, czego
+    ``datetime.fromisoformat`` na Pythonie 3.10 nie przyjmuje. Wcześniejsza
+    wersja połykała wtedy ``ValueError`` i zwracała ``None``, przez co filtr
+    ważności uznawał **każdy** certyfikat — także wygasły — za aktualny i CLI
+    szyfrowało klucz sesji kluczem wycofanym z obiegu.
+    """
     if value in {None, ""}:
         return None
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    return try_parse_api_datetime(str(value))
 
 
 def _is_current_certificate(cert: Any, now: datetime) -> bool:
-    valid_from = _parse_certificate_datetime(_get_value(cert, "valid_from", "validFrom"))
-    valid_to = _parse_certificate_datetime(_get_value(cert, "valid_to", "validTo"))
+    valid_from_raw = _get_value(cert, "valid_from", "validFrom")
+    valid_to_raw = _get_value(cert, "valid_to", "validTo")
+    valid_from = _parse_certificate_datetime(valid_from_raw)
+    valid_to = _parse_certificate_datetime(valid_to_raw)
+    # Nieparsowalna GRANICA (obecna, ale nieczytelna) nie oznacza „ważny
+    # bezterminowo" — bezpieczniej odrzucić certyfikat niż użyć niewłaściwego.
+    if valid_from_raw not in {None, ""} and valid_from is None:
+        return False
+    if valid_to_raw not in {None, ""} and valid_to is None:
+        return False
     if valid_from is not None and valid_from > now:
         return False
     return not (valid_to is not None and valid_to < now)

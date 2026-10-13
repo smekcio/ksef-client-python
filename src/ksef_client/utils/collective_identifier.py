@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from ..models import (
@@ -11,6 +11,7 @@ from ..models import (
     CollectiveIdentifierInvoicePayment,
     CurrencyCode,
 )
+from .datetime_parsing import parse_api_datetime
 from .ksef_number import ValidationResult, _crc8, require_ksef_number
 
 COLLECTIVE_IDENTIFIER_LENGTH = 35
@@ -226,12 +227,9 @@ def _parse_query_datetime(value: str, *, field_name: str) -> datetime:
     if not value:
         raise ValueError(f"{field_name} is required")
     normalized = expand_query_date_bound(value, end_of_day=field_name == "dateCreatedTo")
-    if normalized.endswith("Z"):
-        normalized = f"{normalized[:-1]}+00:00"
     try:
-        parsed = datetime.fromisoformat(normalized)
+        # Wspólny parser toleruje 7-cyfrowy ułamek, który API KSeF zwraca
+        # (a którego `fromisoformat` na Pythonie 3.10 nie przyjmuje).
+        return parse_api_datetime(normalized)
     except ValueError as exc:
         raise ValueError(f"Invalid {field_name} datetime: {value}") from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)

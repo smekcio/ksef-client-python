@@ -52,7 +52,14 @@ class HwmServiceTests(unittest.TestCase):
         update_continuation_point(points, "seller", payload)
         self.assertEqual(points["seller"], "2024-03-05T00:00:00Z")
 
-    def test_update_continuation_point_uses_server_hwm_before_other_sources(self):
+    def test_update_continuation_point_prefers_last_date_when_truncated(self):
+        """Paczka obcięta: wznawiamy od `lastPermanentStorageDate`, nie od HWM.
+
+        Dokumentacja MF ("Przyrostowe pobieranie faktur") stawia przypadek
+        obcięcia na pierwszym miejscu hierarchii: `PermanentStorageHwmDate`
+        wskazuje koniec okna, więc wznowienie od niego pomijałoby faktury
+        z przedziału między obiema datami.
+        """
         points: dict[str, str | None] = {}
         payload = models.QueryInvoicesMetadataResponse.from_dict(
             {
@@ -65,7 +72,57 @@ class HwmServiceTests(unittest.TestCase):
             }
         )
         update_continuation_point(points, "seller", payload)
+        self.assertEqual(points["seller"], "2024-03-05T00:00:00Z")
+
+    def test_update_continuation_point_uses_server_hwm_when_not_truncated(self):
+        """Bez obcięcia obowiązuje watermark serwera."""
+        points: dict[str, str | None] = {}
+        payload = models.QueryInvoicesMetadataResponse.from_dict(
+            {
+                "isTruncated": False,
+                "permanentStorageHwmDate": "2024-03-09T00:00:00Z",
+                "invoices": [],
+            }
+        )
+        update_continuation_point(points, "seller", payload)
         self.assertEqual(points["seller"], "2024-03-09T00:00:00Z")
+
+    def test_truncated_package_without_direct_last_date_uses_the_last_record(self):
+        """Kontrakt OpenAPI nie ma `lastPermanentStorageDate`, więc liczy się rekord.
+
+        `permanentStorageHwmDate` jest równy końcowi okna (`dateRange.to`), więc
+        wznowienie od niego pomijałoby faktury z przedziału między ostatnim
+        rekordem a watermarkiem — i nie pobrano by ich nigdy.
+        """
+        points: dict[str, str | None] = {}
+        payload = models.QueryInvoicesMetadataResponse.from_dict(
+            {
+                "isTruncated": True,
+                "permanentStorageHwmDate": "2024-03-31T23:59:59Z",
+                "invoices": [
+                    {"permanentStorageDate": "2024-03-04T00:00:00Z"},
+                    {"permanentStorageDate": "2024-03-15T10:00:00Z"},
+                    {"permanentStorageDate": "2024-03-10T00:00:00Z"},
+                ],
+            }
+        )
+        update_continuation_point(points, "seller", payload)
+        self.assertEqual(points["seller"], "2024-03-15T10:00:00Z")
+
+    def test_package_without_watermark_uses_the_last_record(self):
+        """Brak `permanentStorageHwmDate` (i braku obcięcia) → najnowszy rekord."""
+        points: dict[str, str | None] = {}
+        payload = models.QueryInvoicesMetadataResponse.from_dict(
+            {
+                "isTruncated": False,
+                "invoices": [
+                    {"permanentStorageDate": "2024-03-04T00:00:00Z"},
+                    {"permanentStorageDate": "2024-03-05T00:00:00Z"},
+                ],
+            }
+        )
+        update_continuation_point(points, "seller", payload)
+        self.assertEqual(points["seller"], "2024-03-05T00:00:00Z")
 
     def test_update_continuation_point_uses_explicit_last_date_before_invoice_fallback(self):
         points: dict[str, str | None] = {}
