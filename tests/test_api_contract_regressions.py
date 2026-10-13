@@ -512,6 +512,38 @@ class TestFa3SchemaContract:
         errors = builder.build().validate().errors
         assert not errors, [issue.message for issue in errors]
 
+    def test_attachment_row_must_have_a_cell(self):
+        """`Wiersz` wymaga co najmniej jednego `WKom`."""
+        from dataclasses import replace
+
+        from ksef_client.documents.fa3 import BasicInvoiceBuilder
+        from ksef_client.documents.fa3.domain import (
+            Attachment,
+            AttachmentBlock,
+            AttachmentTable,
+        )
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/T")
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        invoice = replace(
+            builder.build(),
+            attachment=Attachment(
+                (
+                    AttachmentBlock(
+                        header="H",
+                        metadata=(("K", "V"),),
+                        tables=(AttachmentTable(headers=("A", "B"), rows=(("x", "y"), ())),),
+                    ),
+                )
+            ),
+        )
+        errors = invoice.validate().errors
+        assert any("komórki" in issue.message for issue in errors), [
+            issue.message for issue in errors
+        ]
+
     def test_settlement_with_unsupported_proportion_is_rejected(self):
         """SDK nie wyprowadza proporcji `P_13_x` z pełnej wartości zamówienia."""
         from datetime import date
@@ -1287,6 +1319,79 @@ class TestOrderLineDiscountIdentity:
         assert "<P_11NettoZ>18000.00</P_11NettoZ>" in row
 
 
+class TestLineScopedFieldsAreRejected:
+    """Pola, których schemat nie ma na poziomie `FaWiersz`, nie mogą znikać cicho."""
+
+    def test_line_period_is_reported_instead_of_dropped(self):
+        from dataclasses import replace
+        from datetime import date
+
+        from ksef_client.documents.fa3 import BasicInvoiceBuilder, InvoiceParty
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/OKRES")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+        )
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        invoice = builder.build()
+        line = replace(
+            invoice.lines[0], period_from=date(2026, 1, 1), period_to=date(2026, 1, 31)
+        )
+        broken = replace(invoice, lines=(line,))
+        messages = [issue.message for issue in broken.validate().errors]
+        assert any("OkresFa" in message for message in messages), messages
+
+    def test_line_additional_description_is_reported_instead_of_dropped(self):
+        from dataclasses import replace
+
+        from ksef_client.documents.fa3 import BasicInvoiceBuilder, InvoiceParty
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/OPIS")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+        )
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        invoice = builder.build()
+        line = replace(invoice.lines[0], additional_description={"Klucz": "Wartosc"})
+        broken = replace(invoice, lines=(line,))
+        messages = [issue.message for issue in broken.validate().errors]
+        assert any("DodatkowyOpis" in message for message in messages), messages
+
+
+class TestLineIdentifiersUniqueId:
+    """`LineIdentifiers.unique_id` musi trafiać do `UU_ID` tak jak pozostałe pola."""
+
+    def test_identifiers_unique_id_is_emitted(self):
+        from ksef_client.documents.fa3 import (
+            BasicInvoiceBuilder,
+            InvoiceParty,
+            LineIdentifiers,
+        )
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/UUID")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+        )
+        builder.add_service_line(
+            "Usługa",
+            quantity="1",
+            unit_net_price="100",
+            identifiers=LineIdentifiers(unique_id="UU-1", gtin="1234567890123"),
+        )
+        xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+        assert "<UU_ID>UU-1</UU_ID>" in xml
+        assert "<GTIN>1234567890123</GTIN>" in xml
+
+
 class TestContactLimit:
     """`DaneKontaktowe` ma `maxOccurs="3"` — nadmiar nie może znikać bez słowa."""
 
@@ -1312,6 +1417,30 @@ class TestContactLimit:
         broken = replace(invoice, buyer=replace(invoice.buyer, contacts=contacts))
         messages = [issue.message for issue in broken.validate().errors]
         assert any("kontakt" in message for message in messages), messages
+
+
+class TestAttachmentBlocksAccumulate:
+    """`attachment_text()` + `attachment_table()` nie mogą się wzajemnie nadpisywać."""
+
+    def test_text_and_table_blocks_are_both_kept(self):
+        from ksef_client.documents.fa3 import BasicInvoiceBuilder, InvoiceParty
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/ZAL")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+        )
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        builder.attachment_text("Naglowek", "akapit")
+        builder.attachment_table(columns=("A",), rows=(("1",),))
+        invoice = builder.build()
+        assert invoice.attachment is not None
+        assert len(invoice.attachment.blocks) == 2
+        xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+        assert "akapit" in xml
+        assert "<Tabela>" in xml
 
 
 class TestVatCodePreservation:

@@ -732,8 +732,15 @@ def _domain_advance_references(fa: ET.Element, invoice: FA3Invoice) -> None:
 def _domain_line(fa: ET.Element, index: int, line: InvoiceLine) -> None:
     row = ET.SubElement(fa, _q("FaWiersz"))
     ET.SubElement(row, _q("NrWierszaFa")).text = str(index)
-    if line.unique_id:
-        ET.SubElement(row, _q("UU_ID")).text = line.unique_id
+    # `UU_ID` może przyjść albo przez `InvoiceLine.unique_id`, albo przez
+    # `LineIdentifiers.unique_id` — wcześniej ta druga droga była ignorowana,
+    # mimo że pozostałe pola `LineIdentifiers` (GTIN, PKWiU, CN, PKOB, Indeks)
+    # działały, a pozycja zamówienia używała `identifiers.unique_id`.
+    unique_id = line.unique_id or (
+        line.identifiers.unique_id if line.identifiers is not None else None
+    )
+    if unique_id:
+        ET.SubElement(row, _q("UU_ID")).text = unique_id
     if line.service_date:
         ET.SubElement(row, _q("P_6A")).text = line.service_date.isoformat()
     ET.SubElement(row, _q("P_7")).text = line.description

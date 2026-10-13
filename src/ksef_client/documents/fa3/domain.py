@@ -797,6 +797,30 @@ class InvoiceLine:
             issues.append(FA3ValidationIssue(f"{path}: stawka VAT nie może być ujemna."))
         if self.discount is not None:
             issues.extend(self.discount.validate(f"{path}.discount"))
+        # `OkresFa`/`P_6_Od`/`P_6_Do` oraz `DodatkowyOpis` istnieją w schemacie
+        # WYŁĄCZNIE na poziomie `Fa` (nie w `FaWiersz`), więc pól `period_from`,
+        # `period_to` i `additional_description` na pozycji nie da się zapisać.
+        # Serializator je pomijał, więc wołający tracił dane bez komunikatu —
+        # teraz dostaje błąd ze wskazaniem właściwego API.
+        if self.period_from is not None or self.period_to is not None:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.period_from: okres faktury (`OkresFa`/`P_6_Od`/`P_6_Do`) "
+                    "jest polem na poziomie faktury, nie pozycji — ustaw go na "
+                    "`FA3Invoice.period_from`/`period_to`.",
+                    column=f"{path}.period_from",
+                )
+            )
+        if self.additional_description:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.additional_description: informacja dodatkowa "
+                    "(`DodatkowyOpis`) jest polem na poziomie faktury — użyj "
+                    "`additional_description(key, value, row_number=...)` na builderze, "
+                    "żeby powiązać ją z tą pozycją.",
+                    column=f"{path}.additional_description",
+                )
+            )
 
         # Spójność arytmetyczna wiersza (`P_11 = P_13_x + P_14_x`). Nadpisanie
         # brutto różne od netto + VAT dawało dokument z `P_15` różnym od sumy
@@ -1784,6 +1808,14 @@ def _validate_attachment_table(table: AttachmentTable, path: str) -> list[FA3Val
             )
         )
     for index, row in enumerate(table.rows, start=1):
+        if not row:
+            # `Wiersz` wymaga co najmniej jednego `WKom` (XSD: minOccurs=1).
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.rows[{index}]: wiersz tabeli wymaga co najmniej jednej "
+                    "komórki (WKom)."
+                )
+            )
         if len(row) > TABLE_MAX_COLUMNS:
             issues.append(
                 FA3ValidationIssue(
