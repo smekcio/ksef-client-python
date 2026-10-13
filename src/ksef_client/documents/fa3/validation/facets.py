@@ -50,6 +50,9 @@ _DECIMAL_TEXT = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?")
 #: Wzorzec liczby całkowitej (schemat używa ``xsd:integer``/``xsd:byte``).
 _INTEGER_TEXT = re.compile(r"-?\d+")
 
+#: Od ilu wartości słownik przestajemy wypisywać w komunikacie walidacji.
+_MAX_LISTED_ALLOWED = 32
+
 
 @dataclass(frozen=True)
 class Facet:
@@ -61,7 +64,16 @@ class Facet:
     * ``decimals`` — ``xsd:fractionDigits``,
     * ``allowed`` — ``xsd:enumeration`` (dla typów wyliczeniowych),
     * ``minimum``/``maximum`` — ``xsd:minInclusive``/``xsd:maxInclusive``,
-    * ``minimum_length`` — ``xsd:minLength`` (np. ``NrRB`` ma 10).
+    * ``minimum_length`` — ``xsd:minLength`` (np. ``NrRB`` ma 10),
+    * ``whitespace`` — ``xsd:whiteSpace`` typu bazowego: ``preserve`` (``xsd:string``),
+      ``replace`` (``xsd:normalizedString``) albo ``collapse`` (``xsd:token``,
+      typy liczbowe i daty).
+
+    ``whitespace`` jest istotne, bo schemat liczy długość i dopasowuje wzorce do
+    wartości PO zastosowaniu tego trybu. Mierzenie surowej wartości odrzucało
+    dokument zgodny ze schematem (``P_2`` z wcięciem), a mierzenie zawsze
+    obciętej przepuszczało dokument niezgodny (``<NIP> 1111111111</NIP>`` —
+    ``TNrNIP`` bazuje na ``xsd:string``, czyli ``preserve``).
     """
 
     kind: FacetKind
@@ -78,12 +90,21 @@ class Facet:
     maximum_date: str | None = None
     lengths: frozenset[int] | None = None
     date_format: str | None = None
+    whitespace: str = "preserve"
 
     def describe(self) -> str:
         """Krótki, czytelny opis ograniczenia do komunikatów walidacji."""
         parts: list[str] = []
         if self.allowed is not None:
-            parts.append("dozwolone wartości: " + ", ".join(sorted(self.allowed)))
+            # Duże słowniki (np. 254 kody krajów) wypisane w całości czyniłyby
+            # komunikat nieczytelnym — samą nazwę typu wystarczy podać.
+            if len(self.allowed) > _MAX_LISTED_ALLOWED:
+                parts.append(
+                    f"wartość musi należeć do słownika {self.xsd_type} "
+                    f"({len(self.allowed)} wartości)"
+                )
+            else:
+                parts.append("dozwolone wartości: " + ", ".join(sorted(self.allowed)))
         if self.lengths is not None:
             allowed_lengths = ", ".join(str(value) for value in sorted(self.lengths))
             parts.append(f"długość {allowed_lengths} znaków")
@@ -114,29 +135,62 @@ class Facet:
 # Typy schematu FA(3)
 # ---------------------------------------------------------------------------
 
+# Tryby `ws-collapse` (``xsd:token``, typy liczbowe, daty) i `ws-replace`
+# (``xsd:normalizedString``) wynikają wprost z ``xsd:whiteSpace`` typu bazowego
+# w schemacie; pilnuje tego ``tests/test_fa3_validation_facets.py``.
+_WS_COLLAPSE = "collapse"
+_WS_REPLACE = "replace"
+_WS_PRESERVE = "preserve"
+
 #: `tns:TZnakowy` — tekst do 256 znaków (schemat: maxLength=256, minLength=1).
-TZN = Facet(FacetKind.STRING, "TZnakowy", max_length=256, minimum_length=1)
+TZN = Facet(
+    FacetKind.STRING, "TZnakowy", max_length=256, minimum_length=1, whitespace=_WS_COLLAPSE
+)
 #: `tns:TZnakowy2` — jak wyżej, ale schemat dopuszcza tu wartość pustą (`minLength=0`).
-TZN2 = Facet(FacetKind.STRING, "TZnakowy2", max_length=256, minimum_length=0)
+TZN2 = Facet(
+    FacetKind.STRING, "TZnakowy2", max_length=256, minimum_length=0, whitespace=_WS_COLLAPSE
+)
 #: `tns:TZnakowy512` — tekst do 512 znaków.
-TZN512 = Facet(FacetKind.STRING, "TZnakowy512", max_length=512, minimum_length=1)
+TZN512 = Facet(
+    FacetKind.STRING, "TZnakowy512", max_length=512, minimum_length=1, whitespace=_WS_COLLAPSE
+)
 #: `tns:TZnakowy50` — tekst do 50 znaków.
-TZN50 = Facet(FacetKind.STRING, "TZnakowy50", max_length=50, minimum_length=1)
+TZN50 = Facet(
+    FacetKind.STRING, "TZnakowy50", max_length=50, minimum_length=1, whitespace=_WS_COLLAPSE
+)
 #: `tns:TZnakowy20` — tekst do 20 znaków.
-TZN20 = Facet(FacetKind.STRING, "TZnakowy20", max_length=20, minimum_length=1)
+TZN20 = Facet(
+    FacetKind.STRING, "TZnakowy20", max_length=20, minimum_length=1, whitespace=_WS_COLLAPSE
+)
 #: `etd:TAdresEmail` — 3-255 znaków z co najmniej jednym `@`.
-EMAIL = Facet(FacetKind.STRING, "TAdresEmail", max_length=255, minimum_length=3)
+EMAIL = Facet(
+    FacetKind.STRING, "TAdresEmail", max_length=255, minimum_length=3, whitespace=_WS_COLLAPSE
+)
 #: `tns:TNumerTelefonu` — tekst do 16 znaków.
-TELEFON = Facet(FacetKind.STRING, "TNumerTelefonu", max_length=16, minimum_length=1)
+TELEFON = Facet(
+    FacetKind.STRING, "TNumerTelefonu", max_length=16, minimum_length=1, whitespace=_WS_COLLAPSE
+)
 #: `tns:TGLN` — do 13 znaków.
-GLN = Facet(FacetKind.STRING, "TGLN", max_length=13, minimum_length=1)
-#: `tns:TNrRB` — numer rachunku 10-34 znaków.
+GLN = Facet(FacetKind.STRING, "TGLN", max_length=13, minimum_length=1, whitespace=_WS_COLLAPSE)
+#: `tns:TNrRB` — numer rachunku 10-34 znaków. Baza `xsd:string` → `preserve`,
+#: więc spacje w numerze rachunku NIE są obcinane i muszą zostać zgłoszone.
 NRRB = Facet(FacetKind.STRING, "TNrRB", max_length=34, minimum_length=10)
-#: `tns:TKodWaluty` — zamknięty słownik kodów walut (182 wartości).
-KOD_WALUTY = Facet(FacetKind.STRING, "TKodWaluty", max_length=3)
+#: `tns:TKodWaluty` — trzyliterowy kod waluty. Schemat ma 182 wartości, ale
+#: słownik OpenAPI KSeF bywa od niego nowszy (API 2.8.1 dodaje CNH/VED/XTS/ZWG/SLE),
+#: więc rozjazd wykrywa osobny moduł :mod:`ksef_client.documents.fa3.currency`:
+#: domyślna ścieżka ostrzega, a `xsd_validate=True` odrzuca dokument. Twardy
+#: słownik w tej tabeli odebrałby wołającemu możliwość świadomej decyzji.
+KOD_WALUTY = Facet(FacetKind.STRING, "TKodWaluty", max_length=3, whitespace=_WS_REPLACE)
 #: `tns:TIlosci` — liczba dziesiętna: 6 miejsc, do 16 cyfr całkowitych.
 #: Schemat: `pattern="-?([1-9]\d{0,15}|0)(\.\d{1,6})?"`, `totalDigits=22`.
-ILOSCI = Facet(FacetKind.DECIMAL, "TIlosci", decimals=6, total_digits=22, integer_digits=16)
+ILOSCI = Facet(
+    FacetKind.DECIMAL,
+    "TIlosci",
+    decimals=6,
+    total_digits=22,
+    integer_digits=16,
+    whitespace=_WS_COLLAPSE,
+)
 #: `tns:TProcentowy` — procent: 0-100, do 6 miejsc po przecinku.
 PROCENT = Facet(
     FacetKind.DECIMAL,
@@ -145,15 +199,32 @@ PROCENT = Facet(
     total_digits=9,
     minimum=Decimal("0"),
     maximum=Decimal("100"),
+    whitespace=_WS_COLLAPSE,
 )
 #: `tns:TKwotowy` — kwota: 2 miejsca, do 16 cyfr całkowitych.
 #: Schemat: `pattern="-?([1-9]\d{0,15}|0)(\.\d{1,2})?"`, `totalDigits=18`.
-KWOTOWY = Facet(FacetKind.DECIMAL, "TKwotowy", decimals=2, total_digits=18, integer_digits=16)
+KWOTOWY = Facet(
+    FacetKind.DECIMAL,
+    "TKwotowy",
+    decimals=2,
+    total_digits=18,
+    integer_digits=16,
+    whitespace=_WS_COLLAPSE,
+)
 #: `tns:TKwotowy2` — cena jednostkowa/rabat: 8 miejsc, do 14 cyfr całkowitych.
 #: Schemat: `pattern="-?([1-9]\d{0,13}|0)(\.\d{1,8})?"`, `totalDigits=22`.
-KWOTOWY2 = Facet(FacetKind.DECIMAL, "TKwotowy2", decimals=8, total_digits=22, integer_digits=14)
+KWOTOWY2 = Facet(
+    FacetKind.DECIMAL,
+    "TKwotowy2",
+    decimals=8,
+    total_digits=22,
+    integer_digits=14,
+    whitespace=_WS_COLLAPSE,
+)
 #: `tns:TNaturalny` — liczba całkowita większa od zera.
-NATURALNY = Facet(FacetKind.INTEGER, "TNaturalny", minimum=Decimal("1"))
+NATURALNY = Facet(
+    FacetKind.INTEGER, "TNaturalny", minimum=Decimal("1"), whitespace=_WS_COLLAPSE
+)
 
 #: `tns:TData` — data ``YYYY-MM-DD`` z zakresem 2016-07-01..2050-01-01.
 DATA = Facet(
@@ -162,6 +233,7 @@ DATA = Facet(
     minimum_date="2016-07-01",
     maximum_date="2050-01-01",
     date_format="%Y-%m-%d",
+    whitespace=_WS_COLLAPSE,
 )
 #: `tns:TDataU` — data umowy/zamówienia: 1990-01-01..2050-01-01.
 DATA_UMOWY = Facet(
@@ -170,6 +242,7 @@ DATA_UMOWY = Facet(
     minimum_date="1990-01-01",
     maximum_date="2050-01-01",
     date_format="%Y-%m-%d",
+    whitespace=_WS_COLLAPSE,
 )
 #: `tns:TDataT` — data dopuszczenia środka transportu: 2006-01-01..2050-01-01.
 DATA_TRANSPORTU = Facet(
@@ -178,6 +251,7 @@ DATA_TRANSPORTU = Facet(
     minimum_date="2006-01-01",
     maximum_date="2050-01-01",
     date_format="%Y-%m-%d",
+    whitespace=_WS_COLLAPSE,
 )
 #: `tns:TDataCzas` — znacznik czasu UTC: 2021-10-01T00:00:00Z..2050-01-01T23:59:59Z.
 DATA_CZAS = Facet(
@@ -186,11 +260,33 @@ DATA_CZAS = Facet(
     minimum_date="2021-10-01T00:00:00Z",
     maximum_date="2050-01-01T23:59:59Z",
     date_format="%Y-%m-%dT%H:%M:%S%z",
+    whitespace=_WS_COLLAPSE,
+)
+#: `Naglowek/DataWytworzeniaFa` — element ma WŁASNE, węższe ograniczenie inline
+#: (`xsd:restriction base="etd:TDataCzas"` z `minInclusive="2025-09-01T00:00:00Z"`),
+#: a nie dolne ograniczenie `TDataCzas` (2021-10-01). Użycie samego `DATA_CZAS`
+#: przepuszczało ok. 4 lata znaczników, które schemat odrzuca.
+DATA_WYTWORZENIA_FA = Facet(
+    FacetKind.STRING,
+    "TDataCzas",
+    minimum_date="2025-09-01T00:00:00Z",
+    maximum_date="2050-01-01T23:59:59Z",
+    date_format="%Y-%m-%dT%H:%M:%S%z",
+    whitespace=_WS_COLLAPSE,
 )
 
 
-def _enum(name: str, values: frozenset[str], *, kind: FacetKind = FacetKind.INTEGER) -> Facet:
-    return Facet(kind, name, allowed=values)
+def _enum(
+    name: str,
+    values: frozenset[str],
+    *,
+    kind: FacetKind = FacetKind.INTEGER,
+    whitespace: str = _WS_COLLAPSE,
+) -> Facet:
+    """Słownik wartości. Domyślnie ``collapse`` — schemat opiera je na ``xsd:token``
+    albo typie liczbowym; wyjątki (``TKodyKrajowUE``, ``TKodKraju``, ``TKodWaluty``,
+    ``TKodFormularza``) mają bazę ``normalizedString``/``string`` i podają tryb jawnie."""
+    return Facet(kind, name, allowed=values, whitespace=whitespace)
 
 
 #: `tns:TNumerKSeF` — numer KSeF: NIP/M-dowolny/kod-data-6hex-6hex-2hex.
@@ -200,6 +296,7 @@ NUMER_KSEF = Facet(
     FacetKind.STRING,
     "TNumerKSeF",
     lengths=frozenset({35, 36}),
+    whitespace=_WS_COLLAPSE,
 )
 
 #: `tns:TWybor1` — znacznik „tak" (schemat: enumeration {1}).
@@ -312,9 +409,47 @@ KODY_KRAJOW_UE = _enum(
         }
     ),
     kind=FacetKind.STRING,
+    whitespace=_WS_REPLACE,
+)
+#: `etd:TKodKraju` — pełny słownik 254 kodów krajów z `KodyKrajow_v10-0E.xsd`.
+#:
+#: Bez niego literówka (`XX`, `UK` zamiast `GB`) przechodziła walidację SDK,
+#: a całą fakturę odrzucał dopiero KSeF surowym `SCHEMAV_CVC_ENUMERATION_VALID`.
+KODY_KRAJOW = _enum(
+    "TKodKraju",
+    frozenset(
+        (
+            "AF", "AX", "AL", "DZ", "AD", "AO", "AI", "AQ", "AG", "AN", "SA", "AR",
+            "AM", "AW", "AU", "AT", "AZ", "BS", "BH", "BD", "BB", "BE", "BZ", "BJ",
+            "BM", "BT", "BY", "BO", "BQ", "BA", "BW", "BR", "BN", "IO", "BG", "BF",
+            "BI", "XC", "CL", "CN", "HR", "CW", "CY", "TD", "ME", "DK", "DM", "DO",
+            "DJ", "EG", "EC", "ER", "EE", "ET", "FK", "FJ", "PH", "FI", "FR", "TF",
+            "GA", "GM", "GH", "GI", "GR", "GD", "GL", "GE", "GU", "GG", "GY", "GF",
+            "GP", "GT", "GN", "GQ", "GW", "HT", "ES", "HN", "HK", "IN", "ID", "IQ",
+            "IR", "IE", "IS", "IL", "JM", "JP", "YE", "JE", "JO", "KY", "KH", "CM",
+            "CA", "QA", "KZ", "KE", "KG", "KI", "CO", "KM", "CG", "CD", "KP", "XK",
+            "CR", "CU", "KW", "LA", "LS", "LB", "LR", "LY", "LI", "LT", "LV", "LU",
+            "MK", "MG", "YT", "MO", "MW", "MV", "MY", "ML", "MT", "MP", "MA", "MQ",
+            "MR", "MU", "MX", "XL", "FM", "UM", "MD", "MC", "MN", "MS", "MZ", "MM",
+            "NA", "NR", "NP", "NL", "DE", "NE", "NG", "NI", "NU", "NF", "NO", "NC",
+            "NZ", "PS", "OM", "PK", "PW", "PA", "PG", "PY", "PE", "PN", "PF", "PL",
+            "GS", "PT", "PR", "CF", "CZ", "KR", "ZA", "RE", "RU", "RO", "RW", "EH",
+            "BL", "KN", "LC", "MF", "VC", "SV", "WS", "AS", "SM", "SN", "RS", "SC",
+            "SL", "SG", "SK", "SI", "SO", "LK", "PM", "US", "SZ", "SD", "SS", "SR",
+            "SJ", "SH", "SY", "CH", "SE", "TJ", "TH", "TW", "TZ", "TG", "TK", "TO",
+            "TT", "TN", "TR", "TM", "TV", "UG", "UA", "UY", "UZ", "VU", "WF", "VA",
+            "HU", "VE", "GB", "VN", "IT", "TL", "CI", "BV", "CX", "IM", "SX", "CK",
+            "VI", "VG", "HM", "CC", "MH", "FO", "SB", "ST", "TC", "ZM", "CV", "ZW",
+            "AE", "XI",
+        )
+    ),
+    kind=FacetKind.STRING,
+    whitespace=_WS_REPLACE,
 )
 #: `tns:TKodFormularza` — schemat dopuszcza wyłącznie wartość ``FA``.
-KOD_FORMULARZA = _enum("TKodFormularza", frozenset({"FA"}), kind=FacetKind.STRING)
+KOD_FORMULARZA = _enum(
+    "TKodFormularza", frozenset({"FA"}), kind=FacetKind.STRING, whitespace=_WS_PRESERVE
+)
 
 
 @dataclass(frozen=True)
@@ -332,6 +467,26 @@ class ElementFacet:
     extra: tuple[str, ...] = field(default=())
 
 
+#: Element o typie ``tns:TNumerKSeF`` (``NrKSeFFaKorygowanej``,
+#: ``NrKSeFFaZaliczkowej``): 35 albo 36 znaków i wzorzec
+#: ``NIP|M-dowolny|kod-dowolny`` + data + 6hex + 6hex + 2hex.
+#:
+#: Jedna definicja dla obu elementów — wcześniej ``NrKSeFFaZaliczkowej``
+#: deklarował wyłącznie długości, więc dowolny 35-znakowy napis (``"X" * 35``)
+#: przechodził walidację, a dokument odrzucał dopiero KSeF.
+NUMER_KSEF_ELEMENT = ElementFacet(
+    NUMER_KSEF,
+    pattern=re.compile(
+        r"([1-9]((\d[1-9])|([1-9]\d))\d{7}|M\d{9}|[A-Z]{3}\d{7})-"
+        r"(20[2-9][0-9]|2[1-9][0-9]{2}|[3-9][0-9]{3})"
+        r"(0[1-9]|1[0-2])(0[1-9]|[1-2][0-9]|3[0-1])-"
+        r"([0-9A-F]{6})-?([0-9A-F]{6})-([0-9A-F]{2})"
+    ),
+    pattern_hint=(
+        "numer KSeF: NIP-data-6hex-6hex-2hex, np. 1111111111-20260714-D5FB0C-9ED490-9A"
+    ),
+)
+
 # ---------------------------------------------------------------------------
 # Mapa element -> ograniczenie
 # ---------------------------------------------------------------------------
@@ -343,7 +498,9 @@ class ElementFacet:
 ELEMENT_FACETS: dict[str, ElementFacet] = {
     # --- Naglowek ---------------------------------------------------------
     "KodFormularza": ElementFacet(Facet(FacetKind.STRING, None, allowed=frozenset({"FA"}))),
-    "WariantFormularza": ElementFacet(Facet(FacetKind.INTEGER, None, allowed=frozenset({"3"}))),
+    "WariantFormularza": ElementFacet(
+        Facet(FacetKind.INTEGER, None, allowed=frozenset({"3"}), whitespace=_WS_COLLAPSE)
+    ),
     "SystemInfo": ElementFacet(TZN),
     # --- Podmioty: identyfikacja i dane opisowe ---------------------------
     "NIP": ElementFacet(
@@ -352,7 +509,13 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
         pattern_hint="10 cyfr, bez zer wiodących na dwóch pierwszych pozycjach",
     ),
     "IDWew": ElementFacet(
-        Facet(FacetKind.STRING, "TNIPIdWew", max_length=16, minimum_length=16),
+        Facet(
+            FacetKind.STRING,
+            "TNIPIdWew",
+            max_length=16,
+            minimum_length=16,
+            whitespace=_WS_COLLAPSE,
+        ),
         pattern=re.compile(r"[1-9]((\d[1-9])|([1-9]\d))\d{7}-\d{5}"),
         pattern_hint="NIP i 5 cyfr, np. 1111111111-00001",
     ),
@@ -363,15 +526,29 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
         pattern_hint="do 12 znaków: cyfry, wielkie litery, '+' lub '*'",
     ),
     "KodUE": ElementFacet(KODY_KRAJOW_UE),
-    "KodKraju": ElementFacet(Facet(FacetKind.STRING, "TKodKraju", max_length=2)),
+    "KodKraju": ElementFacet(KODY_KRAJOW),
     "NrID": ElementFacet(
-        Facet(FacetKind.STRING, "TNrIdentyfikacjiPodatkowej", max_length=50, minimum_length=1)
+        Facet(
+            FacetKind.STRING,
+            "TNrIdentyfikacjiPodatkowej",
+            max_length=50,
+            minimum_length=1,
+            whitespace=_WS_REPLACE,
+        )
     ),
     "BrakID": ElementFacet(WYBOR1),
     "PrefiksPodatnika": ElementFacet(KODY_KRAJOW_UE),
     "StatusInfoPodatnika": ElementFacet(STATUS_PODATNIKA),
     "NrKlienta": ElementFacet(TZN),
-    "IDNabywcy": ElementFacet(Facet(FacetKind.STRING, None, max_length=32, minimum_length=1)),
+    "IDNabywcy": ElementFacet(
+        Facet(
+            FacetKind.STRING,
+            None,
+            max_length=32,
+            minimum_length=1,
+            whitespace=_WS_COLLAPSE,
+        )
+    ),
     "NrEORI": ElementFacet(TZN),
     # --- Adres ------------------------------------------------------------
     "AdresL1": ElementFacet(TZN512),
@@ -390,7 +567,7 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "Telefon": ElementFacet(TELEFON),
     "TelefonPU": ElementFacet(TELEFON),
     # --- Znaczniki JST/GV -------------------------------------------------
-    "DataWytworzeniaFa": ElementFacet(DATA_CZAS),
+    "DataWytworzeniaFa": ElementFacet(DATA_WYTWORZENIA_FA),
     "FP": ElementFacet(WYBOR1),
     "TP": ElementFacet(WYBOR1),
     "ZwrotAkcyzy": ElementFacet(WYBOR1),
@@ -403,8 +580,12 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "P_22BRP": ElementFacet(TZN),
     "P_22BT": ElementFacet(TZN),
     "P_22D1": ElementFacet(TZN),
-    "JST": ElementFacet(Facet(FacetKind.INTEGER, None, allowed=frozenset({"1", "2"}))),
-    "GV": ElementFacet(Facet(FacetKind.INTEGER, None, allowed=frozenset({"1", "2"}))),
+    "JST": ElementFacet(
+        Facet(FacetKind.INTEGER, None, allowed=frozenset({"1", "2"}), whitespace=_WS_COLLAPSE)
+    ),
+    "GV": ElementFacet(
+        Facet(FacetKind.INTEGER, None, allowed=frozenset({"1", "2"}), whitespace=_WS_COLLAPSE)
+    ),
     "Rola": ElementFacet(ROLA_PODMIOTU3),
     "RolaInna": ElementFacet(WYBOR1),
     "OpisRoli": ElementFacet(TZN),
@@ -561,7 +742,7 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "KwotaZaplatyCzesciowej": ElementFacet(KWOTOWY),
     "DataZaplatyCzesciowej": ElementFacet(DATA),
     "Termin": ElementFacet(DATA),
-    "Ilosc": ElementFacet(Facet(FacetKind.INTEGER, None)),
+    "Ilosc": ElementFacet(Facet(FacetKind.INTEGER, None, whitespace=_WS_COLLAPSE)),
     "Jednostka": ElementFacet(TZN50),
     "ZdarzeniePoczatkowe": ElementFacet(TZN),
     "FormaPlatnosci": ElementFacet(FORMA_PLATNOSCI),
@@ -580,7 +761,7 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "WysokoscSkonta": ElementFacet(TZN),
     "LinkDoPlatnosci": ElementFacet(TZN512),
     "IPKSeF": ElementFacet(
-        Facet(FacetKind.STRING, None, lengths=frozenset({13})),
+        Facet(FacetKind.STRING, None, lengths=frozenset({13}), whitespace=_WS_COLLAPSE),
         pattern=re.compile(r"[0-9]{3}[a-zA-Z0-9]{10}"),
         pattern_hint="3 cyfry i 10 znaków alfanumerycznych",
     ),
@@ -617,7 +798,7 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
         pattern=re.compile(r"\d{9}|\d{14}"),
         pattern_hint="9 albo 14 cyfr",
     ),
-    "BDO": ElementFacet(Facet(FacetKind.STRING, None, max_length=9)),
+    "BDO": ElementFacet(Facet(FacetKind.STRING, None, max_length=9, whitespace=_WS_COLLAPSE)),
     # --- Załącznik --------------------------------------------------------
     "ZNaglowek": ElementFacet(TZN512),
     "ZKlucz": ElementFacet(TZN),
@@ -627,7 +808,8 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "TWartosc": ElementFacet(TZN),
     "Akapit": ElementFacet(TZN512),
     "Opis": ElementFacet(TZN512),
-    "NKom": ElementFacet(Facet(FacetKind.STRING, None, max_length=256, minimum_length=1)),
+    # `NKom` to `xsd:extension base="tns:TZnakowy2"` (minLength=0), tak jak `SKom`.
+    "NKom": ElementFacet(TZN2),
     "WKom": ElementFacet(TZN2),
     "SKom": ElementFacet(TZN2),
     # --- Nowe środki transportu ------------------------------------------
@@ -662,6 +844,13 @@ OCCURRENCE_LIMITS: dict[tuple[str, str], int] = {
     ("Platnosc", "TerminPlatnosci"): 100,
     ("Platnosc", "RachunekBankowy"): 100,
     ("Platnosc", "RachunekBankowyFaktora"): 20,
+    # Schemat: `Platnosc/ZaplataCzesciowa` ma `maxOccurs="100"`.
+    ("Platnosc", "ZaplataCzesciowa"): 100,
+    # Schemat: `DaneKontaktowe` ma `maxOccurs="3"` w każdym z podmiotów.
+    ("Podmiot1", "DaneKontaktowe"): 3,
+    ("Podmiot2", "DaneKontaktowe"): 3,
+    ("Podmiot3", "DaneKontaktowe"): 3,
+    ("PodmiotUpowazniony", "DaneKontaktowe"): 3,
     ("Rozliczenie", "Obciazenia"): 100,
     ("Rozliczenie", "Odliczenia"): 100,
     ("WarunkiTransakcji", "Umowy"): 100,
@@ -716,9 +905,11 @@ REQUIRED_IN_PARENT: frozenset[tuple[str, str]] = frozenset(
         ("ZaplataCzesciowa", "DataZaplatyCzesciowej"),
         # Pary wynikające z typów dziedzinowych: schemat nie ma tam `minOccurs="0"`,
         # więc pominięcie któregokolwiek daje XML odrzucany przez KSeF.
+        ("Podmiot1K", "Adres"),
+        ("Podmiot1K", "DaneIdentyfikacyjne"),
+        ("Wiersz", "WKom"),
         ("Adres", "KodKraju"),
         ("Adres", "AdresL1"),
-        ("DaneIdentyfikacyjne", "Nazwa"),
         ("Fa", "RodzajFaktury"),
         ("Fa", "Adnotacje"),
         ("FaWiersz", "NrWierszaFa"),
@@ -729,6 +920,47 @@ REQUIRED_IN_PARENT: frozenset[tuple[str, str]] = frozenset(
         ("TerminOpis", "ZdarzeniePoczatkowe"),
     }
 )
+
+
+#: Wartości wymuszone przez ``xsd:element/@fixed`` — klucz to
+#: ``(rodzic, element, wartość)``.
+#:
+#: Kluczem jest PARA (rodzic, element), bo ten sam element bywa wolny w innym
+#: miejscu schematu: ``Podmiot1/PrefiksPodatnika`` ma ``fixed="PL"``
+#: (schemat_FA(3):2137), ale ``Podmiot1K/PrefiksPodatnika`` już nie
+#: (schemat_FA(3):2948) — tam typ ``TKodyKrajowUE`` dopuszcza 28 kodów i
+#: odrzucanie ich byłoby błędem (dokument jest wtedy zgodny ze schematem).
+FIXED_IN_PARENT: frozenset[tuple[str, str, str]] = frozenset(
+    {
+        ("Podmiot1", "PrefiksPodatnika", "PL"),
+    }
+)
+
+
+#: Wymagania zależne od PRZODKA (``(przodek, rodzic, element)``).
+#:
+#: ``REQUIRED_IN_PARENT`` dopasowuje rodzica po nazwie lokalnej, a ta sama nazwa
+#: ``DaneIdentyfikacyjne`` występuje w siedmiu kontekstach o różnych typach:
+#: ``Nazwa`` jest obowiązkowa w ``TPodmiot1`` (``<xsd:sequence>`` bez
+#: ``minOccurs="0"``), ale opcjonalna w ``TPodmiot2``/``TPodmiot3``
+#: (``<xsd:sequence minOccurs="0">`` — faktura uproszczona, art. 106e ust. 5
+#: pkt 3). Bez rozróżnienia kontekstu SDK odrzucał dwa z 26 oficjalnych
+#: przykładów MF (``FA_3_Przykład_15/16.xml``: nabywca bez nazwy).
+REQUIRED_IN_ANCESTOR: frozenset[tuple[str, str, str]] = frozenset(
+    {
+        ("Podmiot1", "DaneIdentyfikacyjne", "Nazwa"),
+        ("Podmiot1K", "DaneIdentyfikacyjne", "Nazwa"),
+        ("PodmiotUpowazniony", "DaneIdentyfikacyjne", "Nazwa"),
+    }
+)
+
+
+def fixed_value(parent: str, child: str) -> str | None:
+    """Wartość wymuszona przez ``xsd:element/@fixed`` dla pary rodzic/element."""
+    for fixed_parent, fixed_child, value in FIXED_IN_PARENT:
+        if fixed_parent == parent and fixed_child == child:
+            return value
+    return None
 
 
 def facet_for(element_name: str) -> ElementFacet | None:

@@ -16,7 +16,7 @@ import re
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -29,6 +29,7 @@ from ksef_client.documents.fa3 import (
 from ksef_client.documents.fa3.validation import (
     ELEMENT_FACETS,
     OCCURRENCE_LIMITS,
+    REQUIRED_IN_ANCESTOR,
     REQUIRED_IN_PARENT,
     Facet,
     FacetKind,
@@ -261,6 +262,253 @@ def _tree(**line_kwargs: Any) -> ET.Element:
 
 def test_valid_invoice_has_no_facet_issues() -> None:
     assert validate_xml_facets(_tree()) == []
+
+
+def test_self_closing_element_is_not_silently_skipped() -> None:
+    """`<Nazwa/>` ma `text is None`, ale `minLength=1` nadal obowiązuje.
+
+    Wcześniej silnik zwracał `[]` dla `text is None`, więc samozamykający się
+    element wymagany omijał **całą** walidację faset, a dokument wychodził
+    z SDK i był odrzucany dopiero przez KSeF (`SCHEMAV_CVC_MINLENGTH_VALID`).
+    """
+    root = _tree()
+    element = root.find(f".//{_q('Podmiot1')}/{_q('DaneIdentyfikacyjne')}/{_q('Nazwa')}")
+    assert element is not None
+    element.text = None
+    issues = validate_xml_facets(root)
+    assert any(
+        issue.path.endswith("/Nazwa") and "minimum 1" in issue.message for issue in issues
+    ), [str(issue) for issue in issues]
+
+
+def test_whitespace_padded_value_is_not_over_rejected() -> None:
+    """Typy tekstowe schematu to `xsd:token` — białe znaki są zwijane."""
+    root = _tree()
+    number = root.find(f".//{_q('P_2')}")
+    assert number is not None and number.text is not None
+    number.text = " " * 250 + number.text
+    assert validate_xml_facets(root) == []
+
+
+def test_whitespace_preserving_type_still_rejects_padding() -> None:
+    """`TNrNIP` bazuje na `xsd:string`, więc spacje NIE są zwijane.
+
+    Mierzenie zawsze wartości obciętej przepuszczało `<NIP> 1111111111</NIP>`:
+    SDK emitował dokument, a KSeF odrzucał go facetem `pattern`/`maxLength`.
+    """
+    root = _tree()
+    nip = root.find(f".//{_q('Podmiot2')}//{_q('NIP')}")
+    assert nip is not None
+    nip.text = " 2222222222"
+    issues = validate_xml_facets(root)
+    assert any("nie pasuje do formatu" in issue.message for issue in issues), [
+        str(issue) for issue in issues
+    ]
+
+
+def _schema_namespaces() -> dict[str, str]:
+    """Mapa prefiks -> URI zadeklarowanych w plikach schematu.
+
+    ``ElementTree`` nie udostępnia deklaracji ``xmlns`` w ``attrib`` (zjadają je
+    parser), więc czytamy je z tekstu — inaczej typy dziedzinowe (``etd:TData``,
+    ``etd:TWybor1``) byłyby nierozwiązywalne.
+    """
+    namespaces = {"xsd": "http://www.w3.org/2001/XMLSchema"}
+    for schema in XSD_FILES:
+        text = (SCHEMAS / schema).read_text(encoding="utf-8")
+        for match in re.finditer(r'xmlns(?::([A-Za-z0-9_.-]+))?="([^"]+)"', text):
+            namespaces.setdefault(match.group(1) or "", match.group(2))
+    return namespaces
+
+
+def _xsd_whitespace_modes() -> tuple[dict[str, set[str]], set[str]]:
+    """Tryb `xsd:whiteSpace` dla każdego elementu schematu.
+
+    Zwraca ``(tryby, elementy_kompleksowe)``. Kluczem typu jest pełna nazwa z
+    przestrzenią nazw, bo ten sam lokalny typ występuje w kilku schematach
+    (np. `TNaturalny` w FA(3) i w typach dziedzinowych).
+    """
+    builtin = {
+        "xsd:string": "preserve",
+        "xsd:normalizedString": "replace",
+        "xsd:token": "collapse",
+        "xsd:decimal": "collapse",
+        "xsd:integer": "collapse",
+        "xsd:int": "collapse",
+        "xsd:byte": "collapse",
+        "xsd:date": "collapse",
+        "xsd:dateTime": "collapse",
+        "xsd:nonNegativeInteger": "collapse",
+        "xsd:positiveInteger": "collapse",
+        "xsd:anyURI": "collapse",
+        "xsd:base64Binary": "collapse",
+    }
+    namespaces = _schema_namespaces()
+    types: dict[tuple[str, str], ET.Element] = {}
+    elements: list[tuple[str, ET.Element]] = []
+
+    for schema in XSD_FILES:
+        root = ET.parse(SCHEMAS / schema).getroot()
+        target = root.get("targetNamespace") or ""
+        for node in root.iter(f"{_XSD}simpleType"):
+            if node.get("name"):
+                types.setdefault((target, node.get("name") or ""), node)
+        for node in root.iter(f"{_XSD}element"):
+            if node.get("name"):
+                elements.append((target, node))
+
+    def split_qualified(target: str, qualified: str) -> tuple[str, str]:
+        prefix, _, local = qualified.partition(":")
+        if not local:
+            return target, prefix
+        return namespaces.get(prefix, target), local
+
+    def mode(target: str, qualified: str, seen: frozenset[str]) -> str:
+        if qualified in builtin:
+            return builtin[qualified]
+        uri, local = split_qualified(target, qualified)
+        key = f"{uri}|{local}"
+        if key in seen:
+            return "nieznany"
+        node = types.get((uri, local))
+        if node is None:
+            return "nieznany"
+        restriction = node.find(f"{_XSD}restriction")
+        if restriction is None:
+            union = node.find(f"{_XSD}union")
+            if union is not None:
+                members = (union.get("memberTypes") or "").split()
+                if not members:
+                    inline = union.find(f"{_XSD}simpleType/{_XSD}restriction")
+                    if inline is not None:
+                        return mode(uri, inline.get("base") or "", seen | {key})
+                    return "nieznany"
+                modes = {mode(uri, member, seen | {key}) for member in members}
+                return modes.pop() if len(modes) == 1 else "nieznany"
+            return "nieznany"
+        explicit = None
+        for child in restriction:
+            if child.tag == f"{_XSD}whiteSpace":
+                explicit = child.get("value")
+        return explicit or mode(uri, restriction.get("base") or "", seen | {key})
+
+    modes: dict[str, set[str]] = {}
+    complex_elements: set[str] = set()
+    for target, node in elements:
+        name = node.get("name") or ""
+        declared = node.get("type")
+        if declared:
+            modes.setdefault(name, set()).add(mode(target, declared, frozenset()))
+            continue
+        inline_simple = node.find(f"{_XSD}simpleType/{_XSD}restriction")
+        if inline_simple is not None:
+            base = inline_simple.get("base") or ""
+            modes.setdefault(name, set()).add(mode(target, base, frozenset()))
+            continue
+        inline_complex = node.find(f"{_XSD}complexType/{_XSD}simpleContent/{_XSD}extension")
+        if inline_complex is not None:
+            modes.setdefault(name, set()).add(
+                mode(target, inline_complex.get("base") or "", frozenset())
+            )
+            continue
+        complex_elements.add(name)
+    return modes, complex_elements
+
+
+def test_whitespace_mode_matches_the_schema() -> None:
+    """`Facet.whitespace` musi odpowiadać `xsd:whiteSpace` typu bazowego.
+
+    Rozjazd w obie strony jest realnym błędem: zbyt surowy tryb odrzuca dokument
+    zgodny ze schematem (np. `P_2` z wcięciem), a zbyt łagodny przepuszcza
+    `<NIP> 1111111111</NIP>` albo `KodKraju=" PL "`, które XSD odrzuca.
+    """
+    modes, complex_elements = _xsd_whitespace_modes()
+    mismatches: list[str] = []
+    checked = 0
+    unresolved: list[str] = []
+    for element, entry in sorted(ELEMENT_FACETS.items()):
+        element_modes = modes.get(element)
+        if not element_modes or element_modes == {"nieznany"}:
+            unresolved.append(element)
+            continue
+        checked += 1
+        if entry.facet.whitespace not in element_modes:
+            mismatches.append(
+                f"{element}: tabela={entry.facet.whitespace} schemat={sorted(element_modes)}"
+            )
+    assert checked >= 200, (
+        f"test sprawdził tylko {checked} elementów; nierozwiązane: {sorted(unresolved)}"
+    )
+    assert not mismatches, "\n".join(mismatches)
+
+    # Kontrola czułości: gdyby wszystko było `collapse`, test nie miałby zębów.
+    non_collapse = {
+        element
+        for element, entry in ELEMENT_FACETS.items()
+        if entry.facet.whitespace != "collapse" and element in modes
+    }
+    assert {"NIP", "KRS", "NrRB", "NrVatUE", "SWIFT", "StopkaFaktury"} <= non_collapse
+    assert {"KodKraju", "KodUE", "PrefiksPodatnika", "NrID"} <= {
+        element
+        for element in non_collapse
+        if ELEMENT_FACETS[element].facet.whitespace == "replace"
+    }
+    _ = complex_elements
+
+
+def test_comment_and_processing_instruction_do_not_crash() -> None:
+    """`validate_xml_facets` jest publiczne i musi przyjąć drzewo z lxml/treebuilder."""
+    parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
+    root = ET.fromstring(
+        _invoice_xml().replace("<Naglowek>", "<!-- komentarz --><?pi test?><Naglowek>", 1),
+        parser=parser,
+    )
+    assert any(not isinstance(child.tag, str) for child in root)
+    assert validate_xml_facets(root) == []
+    # Węzeł nie-elementowy jako korzeń też nie może wywrócić walidatora.
+    assert validate_xml_facets(cast(Any, ET.Comment("x"))) == []
+
+
+def test_non_string_text_is_ignored() -> None:
+    """Ręcznie zbudowane drzewo może mieć w `text` obiekt zamiast łańcucha."""
+    root = _tree()
+    element = root.find(f".//{_q('P_7')}")
+    assert element is not None
+    element.text = object()  # type: ignore[assignment]
+    assert validate_xml_facets(root) == []
+
+
+def test_data_wytworzenia_fa_uses_the_element_restriction() -> None:
+    """Element ma własne `minInclusive=2025-09-01`, węższe niż `TDataCzas`."""
+    root = _tree()
+    created = root.find(f".//{_q('DataWytworzeniaFa')}")
+    assert created is not None
+    created.text = "2024-01-01T00:00:00Z"
+    issues = validate_xml_facets(root)
+    assert any("2025-09-01" in issue.message for issue in issues), [
+        str(issue) for issue in issues
+    ]
+
+
+def test_empty_nkom_is_legal() -> None:
+    """`NKom` to `xsd:extension base="TZnakowy2"` (minLength=0), tak jak `SKom`."""
+    assert ELEMENT_FACETS["NKom"].facet.minimum_length == 0
+    root = _tree()
+    kol = ET.SubElement(root, _q("Kol"))
+    ET.SubElement(kol, _q("NKom"))
+    assert validate_xml_facets(root) == []
+
+
+def test_country_code_dictionary_is_enforced() -> None:
+    """`TKodKraju` to 254-wartościowy słownik — `XX` musi zostać zgłoszone."""
+    root = _tree()
+    country = root.find(f".//{_q('Adres')}/{_q('KodKraju')}")
+    assert country is not None
+    country.text = "XX"
+    issues = validate_xml_facets(root)
+    assert any(
+        issue.element == "KodKraju" and "TKodKraju" in issue.message for issue in issues
+    ), [str(issue) for issue in issues]
 
 
 def test_unknown_vat_rate_is_reported() -> None:
@@ -585,7 +833,15 @@ def _xsd_element_declarations() -> dict[str, set[str]]:
                 if restriction is not None:
                     declared = restriction.get("base")
                 else:
-                    declared = "(inline complexType)"
+                    # `complexType/simpleContent/extension` (np. `NKom`
+                    # rozszerza `TZnakowy2`) też jest deklaracją typu.
+                    extension = node.find(
+                        f"{_XSD}complexType/{_XSD}simpleContent/{_XSD}extension"
+                    )
+                    if extension is not None:
+                        declared = extension.get("base")
+                    else:
+                        declared = "(inline complexType)"
             declarations.setdefault(element_name, set()).add(declared or "")
     return declarations
 
@@ -895,7 +1151,6 @@ _MUST_BE_REQUIRED: frozenset[tuple[str, str]] = frozenset(
         ("ZaplataCzesciowa", "DataZaplatyCzesciowej"),
         ("Adres", "KodKraju"),
         ("Adres", "AdresL1"),
-        ("DaneIdentyfikacyjne", "Nazwa"),
         ("MetaDane", "ZKlucz"),
         ("MetaDane", "ZWartosc"),
         ("FaWiersz", "NrWierszaFa"),
@@ -907,9 +1162,83 @@ _MUST_BE_REQUIRED: frozenset[tuple[str, str]] = frozenset(
 
 
 def test_required_table_covers_mandatory_schema_pairs() -> None:
-    """Każda para wymagana przez schemat musi być w `REQUIRED_IN_PARENT`."""
-    missing = sorted(_MUST_BE_REQUIRED - REQUIRED_IN_PARENT)
+    """Każda para wymagana przez schemat musi być pokryta przez jedną z tabel.
+
+    Para może być wymagana bezwarunkowo (`REQUIRED_IN_PARENT`) albo tylko
+    w konkretnym kontekście (`REQUIRED_IN_ANCESTOR`) — ta sama nazwa
+    `DaneIdentyfikacyjne` występuje w siedmiu typach i `Nazwa` jest obowiązkowa
+    wyłącznie w `TPodmiot1` (w `TPodmiot2`/`TPodmiot3` schemat ma
+    `<xsd:sequence minOccurs="0">`, żeby dało się wystawić fakturę uproszczoną).
+    """
+    covered = set(REQUIRED_IN_PARENT)
+    covered |= {(parent, child) for _ancestor, parent, child in REQUIRED_IN_ANCESTOR}
+    missing = sorted(_MUST_BE_REQUIRED - covered)
     assert not missing, "brak wymaganych wpisów: " + ", ".join(f"{p}/{c}" for p, c in missing)
+
+
+def test_ancestor_scoped_requirements_match_the_schema() -> None:
+    """Wymagania zależne od przodka muszą odpowiadać deklaracjom typów w XSD.
+
+    `Nazwa` jest obowiązkowa w `TPodmiot1` (sekwencja bez `minOccurs="0"`),
+    a opcjonalna w `TPodmiot2`/`TPodmiot3` — czyli pod `Podmiot2`, `Podmiot3`,
+    `Podmiot2K` i `Przewoznik` NIE wolno jej wymagać.
+    """
+    schema = ET.parse(SCHEMAS / "schemat_FA(3)_v1-0E.xsd").getroot()
+    nazwa_min_occurs: dict[str, str | None] = {}
+    for complex_type in schema.iter(f"{_XSD}complexType"):
+        type_name = complex_type.get("name")
+        if type_name is None:
+            continue
+        # `Nazwa` w TPodmiot2/TPodmiot3 siedzi w ZAGNIEŻDŻONEJ sekwencji
+        # (`<xsd:sequence minOccurs="0">` wewnątrz sekwencji głównej).
+        for sequence in complex_type.iter(f"{_XSD}sequence"):
+            for child in sequence.findall(f"{_XSD}element"):
+                if child.get("name") == "Nazwa":
+                    nazwa_min_occurs[type_name] = sequence.get("minOccurs")
+
+    assert nazwa_min_occurs == {
+        "TPodmiot1": None,
+        "TPodmiot2": "0",
+        "TPodmiot3": "0",
+    }, nazwa_min_occurs
+
+    # Typy użyte przez elementy FA(3) rozstrzygają, gdzie `Nazwa` jest wymagana.
+    parents_requiring_nazwa: set[str] = set()
+    parents_allowing_omission: set[str] = set()
+    for parent_name in (
+        "Podmiot1",
+        "Podmiot2",
+        "Podmiot3",
+        "Podmiot1K",
+        "Podmiot2K",
+        "PodmiotUpowazniony",
+        "Przewoznik",
+    ):
+        for parent in schema.iter(f"{_XSD}element"):
+            if parent.get("name") != parent_name:
+                continue
+            for identity in parent.iter(f"{_XSD}element"):
+                if identity.get("name") != "DaneIdentyfikacyjne":
+                    continue
+                type_name = (identity.get("type") or "").split(":", 1)[-1]
+                if nazwa_min_occurs.get(type_name) == "0":
+                    parents_allowing_omission.add(parent_name)
+                else:
+                    parents_requiring_nazwa.add(parent_name)
+
+    assert {"Podmiot1", "Podmiot1K", "PodmiotUpowazniony"} <= parents_requiring_nazwa
+    assert {"Podmiot2", "Podmiot3", "Podmiot2K", "Przewoznik"} <= parents_allowing_omission
+
+    declared = {(ancestor, parent, child) for ancestor, parent, child in REQUIRED_IN_ANCESTOR}
+    assert declared == {
+        ("Podmiot1", "DaneIdentyfikacyjne", "Nazwa"),
+        ("Podmiot1K", "DaneIdentyfikacyjne", "Nazwa"),
+        ("PodmiotUpowazniony", "DaneIdentyfikacyjne", "Nazwa"),
+    }
+    flat_pairs = {pair for pair in REQUIRED_IN_PARENT if pair[1] == "Nazwa"}
+    assert not flat_pairs, (
+        f"`Nazwa` nie może być wymagana płasko (łapie też Podmiot2/Podmiot3): {flat_pairs}"
+    )
 
 
 def _xsd_declared_type_map() -> dict[str, set[str]]:
@@ -936,6 +1265,34 @@ def xsd_declared_types() -> dict[str, set[str]]:
     return _xsd_declared_type_map()
 
 
+def _xsd_element_inline_bounds() -> dict[str, tuple[set[str], set[str]]]:
+    """Granice dat zadeklarowane BEZPOŚREDNIO w elemencie (restriction inline).
+
+    ``Naglowek/DataWytworzeniaFa`` ma własne, węższe ``minInclusive`` niż typ
+    ``TDataCzas`` (2025-09-01 zamiast 2021-10-01), więc tabela musi móc podać
+    granicę elementu, a nie tylko granicę nazwanego typu.
+    """
+    bounds: dict[str, tuple[set[str], set[str]]] = {}
+    for name in XSD_FILES:
+        root = ET.parse(SCHEMAS / name).getroot()
+        for node in root.iter(f"{_XSD}element"):
+            element_name = node.get("name")
+            if not element_name:
+                continue
+            lowers: set[str] = set()
+            uppers: set[str] = set()
+            for restriction in node.iter(f"{_XSD}restriction"):
+                for child in restriction:
+                    if child.tag == f"{_XSD}minInclusive":
+                        lowers.add(child.get("value") or "")
+                    elif child.tag == f"{_XSD}maxInclusive":
+                        uppers.add(child.get("value") or "")
+            if lowers or uppers:
+                existing = bounds.get(element_name, (set(), set()))
+                bounds[element_name] = (existing[0] | lowers, existing[1] | uppers)
+    return bounds
+
+
 def test_date_bounds_match_the_declared_xsd_type(
     xsd_types: dict[str, ET.Element], xsd_declared_types: dict[str, set[str]]
 ) -> None:
@@ -944,7 +1301,10 @@ def test_date_bounds_match_the_declared_xsd_type(
     Test rozwiązuje typ Z DEKLARACJI ELEMENTU (nie z tabeli), więc wyłapuje
     mapowanie elementu na zły typ — np. `P_1` na `TData` (2016-07-01) zamiast
     `TDataT` (2006-01-01), przez co schemat-valid faktury były odrzucane.
+    Granica zadeklarowana wprost w elemencie (restriction inline) też jest
+    dopuszczalna — jest wtedy węższa niż granica typu.
     """
+    inline_bounds = _xsd_element_inline_bounds()
     mismatches: list[str] = []
     checked = 0
     for element, entry in sorted(ELEMENT_FACETS.items()):
@@ -964,6 +1324,9 @@ def test_date_bounds_match_the_declared_xsd_type(
                 lowers.add(resolved["minInclusive"])
             if resolved.get("maxInclusive"):
                 uppers.add(resolved["maxInclusive"])
+        inline_lowers, inline_uppers = inline_bounds.get(element, (set(), set()))
+        lowers |= inline_lowers
+        uppers |= inline_uppers
         if not lowers and not uppers:
             continue
         checked += 1

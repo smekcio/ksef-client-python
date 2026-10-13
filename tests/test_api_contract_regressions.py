@@ -532,6 +532,43 @@ class TestRemainingBranches:
         assert builder.build()._validate_settlement_proportion() == []
 
 
+class TestCountryCodeDictionary:
+    """`KodKraju` jest 254-wartościowym słownikiem, nie dowolnym dwuznakiem."""
+
+    def test_unknown_country_code_is_rejected(self):
+        from ksef_client.documents.fa3 import (
+            Address,
+            BasicInvoiceBuilder,
+            InvoiceParty,
+            PartyIdentifier,
+        )
+        from ksef_client.documents.fa3.xml import FA3XmlValidationError
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/KRAJ")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty(
+                name="Nabywca",
+                identifier=PartyIdentifier.polish_nip("2222222222"),
+                address=Address.foreign("XX", "Somewhere 1"),
+            )
+        )
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        with pytest.raises(FA3XmlValidationError, match="słownika TKodKraju"):
+            builder.build().to_xml()
+
+    def test_country_dictionary_matches_the_schema(self):
+        """Słownik w tabeli to komplet 254 kodów z `KodyKrajow_v10-0E.xsd`."""
+        from ksef_client.documents.fa3.validation import ELEMENT_FACETS
+
+        entry = ELEMENT_FACETS["KodKraju"]
+        assert entry.facet.allowed is not None
+        assert len(entry.facet.allowed) == 254
+        assert {"PL", "DE", "GB", "XI"} <= entry.facet.allowed
+
+
 class TestTimestampNormalisationIsVersionUniform:
     """Ułamek sekundy musi być sprowadzany do 6 cyfr niezależnie od długości."""
 
@@ -738,6 +775,33 @@ class TestOrderLineDiscountIdentity:
         # `FA_3_Przykład_29.xml`: P_8BZ × P_9AZ = P_11NettoZ.
         assert "<P_9AZ>900</P_9AZ>" in row
         assert "<P_11NettoZ>18000.00</P_11NettoZ>" in row
+
+
+class TestContactLimit:
+    """`DaneKontaktowe` ma `maxOccurs="3"` — nadmiar nie może znikać bez słowa."""
+
+    def test_more_than_three_contacts_are_reported(self):
+        from dataclasses import replace
+
+        from ksef_client.documents.fa3 import (
+            BasicInvoiceBuilder,
+            Contact,
+            InvoiceParty,
+        )
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/KONTAKTY")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+        )
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        invoice = builder.build()
+        contacts = tuple(Contact(email=f"osoba{i}@example.com") for i in range(1, 5))
+        broken = replace(invoice, buyer=replace(invoice.buyer, contacts=contacts))
+        messages = [issue.message for issue in broken.validate().errors]
+        assert any("kontakt" in message for message in messages), messages
 
 
 class TestVatCodePreservation:

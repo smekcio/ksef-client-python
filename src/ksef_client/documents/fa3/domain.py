@@ -294,6 +294,17 @@ class InvoiceParty:
             issues.extend(self.correspondence_address.validate(f"{path}.correspondence_address"))
         for index, contact in enumerate(self.contacts, start=1):
             issues.extend(contact.validate(f"{path}.contacts[{index}]"))
+        if len(self.contacts) > MAX_CONTACTS_PER_PARTY:
+            # Schemat: `DaneKontaktowe` ma `maxOccurs="3"`. Serializator obcinał
+            # listę (`contacts[:3]`), więc nadmiarowe kontakty znikały bez
+            # komunikatu — teraz wołający dowiaduje się o utracie danych.
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.contacts: podano {len(self.contacts)} kontaktów, "
+                    f"a schemat FA(3) dopuszcza maksymalnie {MAX_CONTACTS_PER_PARTY}.",
+                    column=f"{path}.contacts",
+                )
+            )
         if self.share is not None and not (Decimal("0") < self.share <= Decimal("100")):
             issues.append(FA3ValidationIssue(f"{path}: udział musi być z zakresu 0-100."))
         role_value = str(getattr(self.role, "value", self.role))
@@ -1666,6 +1677,9 @@ COLUMN_TYPES: frozenset[str] = frozenset({"date", "datetime", "dec", "int", "tim
 #: Limity tabeli załącznika (schemat: `Kol`/`WKom` max 20, `Wiersz` 1..1000).
 TABLE_MAX_COLUMNS = 20
 TABLE_MAX_ROWS = 1000
+
+#: Maksymalna liczba `DaneKontaktowe` na podmiot (schemat: `maxOccurs="3"`).
+MAX_CONTACTS_PER_PARTY = 3
 
 
 def _validate_attachment_table(table: AttachmentTable, path: str) -> list[FA3ValidationIssue]:

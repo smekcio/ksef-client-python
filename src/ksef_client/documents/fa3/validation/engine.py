@@ -22,16 +22,19 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
+from ....utils.datetime_parsing import parse_api_datetime
 from .facets import (
     _DECIMAL_TEXT,
     ELEMENT_FACETS,
+    REQUIRED_IN_ANCESTOR,
     REQUIRED_IN_PARENT,
     Facet,
     FacetKind,
+    fixed_value,
     occurrence_limit,
 )
 
@@ -41,16 +44,24 @@ if TYPE_CHECKING:
 _NAMESPACE_OPEN = "{"
 
 
-def _local_name(tag: str) -> str:
-    """Zwraca nazwę lokalną elementu (bez przestrzeni nazw)."""
+def _local_name(tag: object) -> str:
+    """Zwraca nazwę lokalną elementu (bez przestrzeni nazw).
+
+    ``tag`` bywa obiektem, a nie łańcuchem, gdy drzewo zbudował ``lxml`` albo
+    ``ET.TreeBuilder(insert_comments=True)``: komentarze i instrukcje
+    przetwarzania mają ``tag`` będący funkcją. Taki węzeł nie jest elementem
+    FA(3) i nie może wywracać publicznego walidatora.
+    """
+    if not isinstance(tag, str):
+        return ""
     if tag.startswith(_NAMESPACE_OPEN):
         return tag.split("}", 1)[1]
     return tag
 
 
-def _is_fa3_element(tag: str) -> bool:
+def _is_fa3_element(tag: object) -> bool:
     """Czy element należy do przestrzeni nazw FA(3) (pomijamy np. `xsi`)."""
-    return tag.startswith(_NAMESPACE_OPEN)
+    return isinstance(tag, str) and tag.startswith(_NAMESPACE_OPEN)
 
 
 @dataclass(frozen=True)
@@ -204,19 +215,21 @@ def _check_text(value: str, facet: Facet, path: str, element: str) -> list[Facet
 
 def _parse_bound(value: str) -> datetime:
     """Parsuje granice zakresu daty (obsługuje ``Z`` jako UTC)."""
-    text = value[:-1] + "+00:00" if value.endswith("Z") else value
-    parsed = datetime.fromisoformat(text)
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+    return parse_api_datetime(value)
 
 
 def _parse_datetime(value: str) -> datetime | None:
-    """Parsuje datę lub znacznik czasu z XML (``Z`` i brak strefy => UTC)."""
-    text = value[:-1] + "+00:00" if value.endswith("Z") else value
+    """Parsuje datę lub znacznik czasu z XML (``Z`` i brak strefy => UTC).
+
+    Używa wspólnego parsera API, więc 7-cyfrowy ułamek sekundy (którego
+    ``datetime.fromisoformat`` na Pythonie 3.10 nie przyjmuje) jest obsługiwany
+    tak samo na każdej wspieranej wersji Pythona — wcześniej poprawny znacznik
+    ``xsd:dateTime`` był na 3.10 zgłaszany jako „nie jest poprawną datą".
+    """
     try:
-        parsed = datetime.fromisoformat(text)
+        return parse_api_datetime(value)
     except ValueError:
         return None
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 def _check_date_range(value: str, facet: Facet, path: str, element: str) -> list[FacetIssue]:
@@ -289,15 +302,39 @@ def _illegal_xml_characters(text: str) -> list[int]:
     return illegal
 
 
+def _apply_whitespace(value: str, mode: str) -> str:
+    """Stosuje ``xsd:whiteSpace`` typu bazowego, tak jak robi to walidator XSD.
+
+    Schemat liczy długość i dopasowuje wzorce do wartości PO tej normalizacji:
+
+    * ``preserve`` (``xsd:string``) — bez zmian: ``<NIP> 1111111111</NIP>`` jest
+      niezgodny ze schematem i musi zostać zgłoszony,
+    * ``replace`` (``xsd:normalizedString``) — ``\\t``/``\\n``/``\\r`` na spację,
+    * ``collapse`` (``xsd:token``, typy liczbowe i daty) — dodatkowo zwinięcie
+      powtórzonych spacji i obcięcie skrajnych.
+    """
+    if mode == "collapse":
+        return " ".join(value.split())
+    if mode == "replace":
+        return value.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+    return value
+
+
 def _check_value(element: Element, name: str, path: str) -> list[FacetIssue]:
     """Sprawdza tekst elementu: typ, słownik, wzorzec i znaki dozwolone w XML."""
     entry = ELEMENT_FACETS.get(name)
     if entry is None:
         return []
-    text = element.text
-    # `Element.text` może być dowolnym obiektem, jeśli drzewo zbudowano ręcznie
+    raw_text = element.text
+    # `Element.text` bywa dowolnym obiektem, jeśli drzewo zbudowano ręcznie
     # (np. wstawiono model zamiast łańcucha) — walidujemy wyłącznie tekst.
-    if not isinstance(text, str):
+    # `None` oznacza jednak element pusty (`<Nazwa/>`) i TAKI przypadek musi
+    # przejść przez walidację: schemat wymaga tam `minLength=1`.
+    if raw_text is None:
+        text = ""
+    elif isinstance(raw_text, str):
+        text = raw_text
+    else:
         return []
 
     illegal = _illegal_xml_characters(text)
@@ -313,15 +350,21 @@ def _check_value(element: Element, name: str, path: str) -> list[FacetIssue]:
             )
         ]
 
+    # Tryb białych znaków bierzemy z typu bazowego w schemacie: `xsd:token`
+    # i typy liczbowe zwijają spacje, ale `xsd:string` (np. `TNrNIP`, `TNrRB`)
+    # ich NIE zwija — mierzenie tam wartości obciętej przepuszczałoby dokument,
+    # który KSeF odrzuci (`<NIP> 1111111111</NIP>`).
+    value = _apply_whitespace(text, entry.facet.whitespace)
+
     # Pusty tekst nie jest „brakiem wartości": schemat wymaga `minLength=1`,
     # więc `<Klucz/>` musi zostać zgłoszony, a nie pominięty.
-    issues = _check_text(text, entry.facet, path, name)
-    if entry.pattern is not None and not entry.pattern.fullmatch(text):
+    issues = _check_text(value, entry.facet, path, name)
+    if entry.pattern is not None and not entry.pattern.fullmatch(value):
         issues.append(
             FacetIssue(
                 path,
                 name,
-                f"wartość {text!r} nie pasuje do formatu: {entry.pattern_hint}",
+                f"wartość {value!r} nie pasuje do formatu: {entry.pattern_hint}",
             )
         )
     return issues
@@ -346,13 +389,33 @@ def _check_occurrences(
     return issues
 
 
-def _check_required(present: set[str], parent_name: str, path: str) -> list[FacetIssue]:
-    """Zgłasza brak elementów wymaganych w danym rodzicu."""
-    return [
+def _check_required(
+    present: set[str], parent_name: str, path: str
+) -> list[FacetIssue]:
+    """Zgłasza brak elementów wymaganych w danym rodzicu.
+
+    Poza płaską tabelą ``REQUIRED_IN_PARENT`` sprawdzane są wymagania zależne od
+    przodka (``REQUIRED_IN_ANCESTOR``) — ta sama nazwa ``DaneIdentyfikacyjne``
+    występuje w kilku typach, a ``Nazwa`` jest obowiązkowa tylko w ``TPodmiot1``.
+    """
+    issues = [
         FacetIssue(path, child, f"brak wymaganego elementu {child} w {parent_name}")
         for parent, child in sorted(REQUIRED_IN_PARENT)
         if parent == parent_name and child not in present
     ]
+    for ancestor, parent, child in sorted(REQUIRED_IN_ANCESTOR):
+        if parent != parent_name or child in present:
+            continue
+        if not path.endswith(f"/{ancestor}/{parent}"):
+            continue
+        issues.append(
+            FacetIssue(
+                path,
+                child,
+                f"brak wymaganego elementu {child} w {ancestor}/{parent}",
+            )
+        )
+    return issues
 
 
 def _walk(element: Element, path: str) -> list[FacetIssue]:
@@ -372,7 +435,22 @@ def _walk(element: Element, path: str) -> list[FacetIssue]:
         child_path = f"{path}/{name}"
         if counter[name] > 1:
             child_path = f"{child_path}[{seen[name]}]"
-        issues.extend(_check_value(child, name, child_path))
+        fixed = fixed_value(parent_name, name)
+        if fixed is not None and isinstance(child.text, str) and child.text != fixed:
+            # `xsd:element/@fixed` wymusza dokładnie jedną wartość, niezależnie od
+            # słownika typu. `Podmiot1/PrefiksPodatnika` ma `fixed="PL"`, choć jego
+            # typ `TKodyKrajowUE` dopuszcza 28 kodów — bez tej kontroli `DE`
+            # przechodziło przez słownik, a dokument odrzucał dopiero KSeF.
+            issues.append(
+                FacetIssue(
+                    child_path,
+                    name,
+                    f"wartość {child.text!r} musi być równa {fixed!r} — schemat ma dla "
+                    f"tego elementu w {parent_name} stałą wartość",
+                )
+            )
+        else:
+            issues.extend(_check_value(child, name, child_path))
         issues.extend(_walk(child, child_path))
     return issues
 

@@ -317,7 +317,10 @@ def _domain_party(
         _address(node, "Adres", party.address)
     if party.correspondence_address is not None:
         _address(node, "AdresKoresp", party.correspondence_address)
-    for contact in party.contacts[:3]:
+    # Bez obcinania listy: limit `DaneKontaktowe` (maxOccurs=3) pilnuje
+    # `InvoiceParty.validate` i tabela liczności. Wcześniejsze `contacts[:3]`
+    # gubiło nadmiarowe kontakty bez żadnego komunikatu.
+    for contact in party.contacts:
         contact_node = ET.SubElement(node, _q("DaneKontaktowe"))
         if contact.email:
             email_tag = "EmailPU" if authorized else "Email"
