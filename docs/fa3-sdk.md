@@ -200,7 +200,10 @@ a schemat dopuszcza 8 (TKwotowy2)
 ```
 
 Tabela ograniczeń jest jednym źródłem prawdy i jest weryfikowana ze schematem
-przez test `tests/test_fa3_validation_facets.py` — rozjazd z XSD daje czerwony test.
+przez `tests/test_fa3_validation_facets.py`. Testy porównują z deklaracjami XSD:
+typ elementu, `maxLength`/`minLength`, `fractionDigits`, `enumeration`,
+`minInclusive`/`maxInclusive`, wzorce, `maxOccurs` i `minOccurs`. Rozjazd w
+którejkolwiek z tych wartości daje czerwony test (sprawdzone mutacyjnie).
 Walidację można też uruchomić samodzielnie na gotowym drzewie XML:
 
 ```python

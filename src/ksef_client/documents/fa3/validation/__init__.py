@@ -24,6 +24,7 @@ from .facets import (
     Facet,
     FacetKind,
     facet_for,
+    occurrence_limit,
 )
 
 __all__ = [
@@ -35,5 +36,6 @@ __all__ = [
     "FacetIssue",
     "FacetKind",
     "facet_for",
+    "occurrence_limit",
     "validate_xml_facets",
 ]

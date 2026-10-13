@@ -126,6 +126,7 @@ def draft_to_xml(
     draft: FA3Draft,
     *,
     validate: bool = True,
+    facets: bool = True,
     xsd_validate: bool = False,
 ) -> bytes:
     structure_errors = draft._validate_xml_shape()
@@ -146,7 +147,7 @@ def draft_to_xml(
     _party(root, "Podmiot2", draft.buyer)
     _invoice(root, draft)
     _basic_xml_validation(root)
-    if validate:
+    if facets:
         _raise_on_facet_issues(root)
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     if xsd_validate:
@@ -160,8 +161,11 @@ def _raise_on_facet_issues(root: ET.Element) -> None:
     """Podnosi `FA3XmlValidationError`, gdy drzewo łamie ograniczenia schematu.
 
     Sprawdzenie jest tańsze i czytelniejsze niż walidacja XSD: działa bez `lxml`
-    i wskazuje ścieżkę elementu. Pełna walidacja XSD pozostaje dostępna przez
-    `xsd_validate=True` i nadal jest uruchamiana, gdy o nią poproszono.
+    i wskazuje ścieżkę elementu. Uruchamiane jest przez parametr `facets`
+    (domyślnie włączony), **niezależnie** od biznesowego `validate` — inaczej
+    `to_xml(validate=False)` wypuszczałoby dokument łamiący schemat bez żadnego
+    sygnału, a `xsd_validate` jest domyślnie wyłączone. Pełna walidacja XSD
+    pozostaje dostępna przez `xsd_validate=True`.
     """
     issues = validate_xml_facets(root)
     if issues:
@@ -172,6 +176,7 @@ def invoice_to_xml(
     invoice: FA3Invoice,
     *,
     validate: bool = True,
+    facets: bool = True,
     xsd_validate: bool = False,
 ) -> bytes:
     structure_errors = invoice._validate_xml_shape()
@@ -200,7 +205,7 @@ def invoice_to_xml(
     if invoice.attachment is not None:
         _attachment(root, invoice.attachment)
     _basic_xml_validation(root)
-    if validate:
+    if facets:
         _raise_on_facet_issues(root)
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     if xsd_validate:
@@ -299,7 +304,10 @@ def _domain_party(
     node = ET.SubElement(root, _q(tag))
     if third_party and party.buyer_id:
         ET.SubElement(node, _q("IDNabywcy")).text = party.buyer_id
-    if (seller or authorized) and party.taxpayer_prefix:
+    if seller and party.taxpayer_prefix:
+        # `PrefiksPodatnika` występuje wyłącznie w `Podmiot1` i `Podmiot1K`
+        # (schemat ma tam dodatkowo `fixed="PL"`). `PodmiotUpowazniony` go nie
+        # dopuszcza - emisja dawała XML odrzucany przez KSeF.
         ET.SubElement(node, _q("PrefiksPodatnika")).text = party.taxpayer_prefix
     if party.eori:
         ET.SubElement(node, _q("NrEORI")).text = party.eori
@@ -532,6 +540,15 @@ _DRAFT_VAT_BUCKETS: dict[str, tuple[str, str | None]] = {
     "5": ("P_13_3", "P_14_3"),
     "4": ("P_13_4", "P_14_4"),
     "3": ("P_13_4", "P_14_4"),
+}
+
+#: Kody stawek, które nie mają stawki procentowej ani koszyka zerowego. Każdy z nich
+#: ma własne pole podsumowania i **żadnego** pola VAT (`P_14_x`).
+_DRAFT_CODE_BUCKETS: dict[str, tuple[str, str | None]] = {
+    "zw": ("P_13_7", None),
+    "np I": ("P_13_8", None),
+    "np II": ("P_13_9", None),
+    "oo": ("P_13_10", None),
 }
 
 
@@ -1130,16 +1147,33 @@ def _draft_vat_bucket(
     co dokument był zgodny z XSD, ale podawał złą kwotę podatku (np. pozycja 8% była
     deklarowana jako sprzedaż opodatkowana stawką podstawową).
 
-    ``None`` oznacza zwolnienie z podatku -> ``P_13_7`` (bez pola VAT).
-
-    Stawki zerowe mają osobne koszyki (``P_13_6_1``/``P_13_6_2``/``P_13_6_3``), więc
-    wybór opiera się na pełnym kodzie `TStawkaPodatku`, a nie na samym procencie.
+    Rozstrzygającym źródłem jest **pełny kod stawki** (``vat_code``), bo tylko on
+    rozróżnia ``0 KR``/``0 WDT``/``0 EX`` oraz przypadki bez stawki procentowej
+    (``zw``, ``oo``, ``np I``, ``np II``). ``vat_rate`` służy wyłącznie jako
+    odwrotność dla obiektów zbudowanych przed wprowadzeniem ``vat_code`` —
+    wcześniejsza wersja sprawdzała kod tylko dla trzech stawek zerowych, więc
+    ``np I``/``oo`` trafiały do koszyka zwolnienia (``P_13_7``) zamiast
+    ``P_13_8``/``P_13_10``, czyli deklarowały zwolnienie zamiast odwrotnego
+    obciążenia albo sprzedaży poza terytorium kraju.
     """
+    if vat_code is not None:
+        if vat_code in _ZERO_RATE_BUCKETS:
+            return (_ZERO_RATE_BUCKETS[vat_code], None)
+        if vat_code in _DRAFT_CODE_BUCKETS:
+            return _DRAFT_CODE_BUCKETS[vat_code]
+        # Kod stawki procentowej (``"23"``, ``"8"``, ...) trafia do tego samego
+        # koszyka co odpowiadająca mu stawka liczbowa.
+        bucket = _DRAFT_VAT_BUCKETS.get(vat_code)
+        if bucket is not None:
+            return bucket
+        raise ValueError(
+            f"Nieobsługiwany kod stawki VAT w pozycji faktury: {vat_code!r}. "
+            "Dozwolone są stawki 23, 22, 8, 7, 5, 4, 3, '0 KR', '0 WDT', '0 EX', "
+            "'zw', 'oo', 'np I', 'np II'."
+        )
+
     if vat_rate is None:
         return ("P_13_7", None)
-
-    if vat_code in _ZERO_RATE_BUCKETS:
-        return (_ZERO_RATE_BUCKETS[vat_code], None)
 
     normalized = format(vat_rate.normalize(), "f")
     if normalized == "0":
@@ -1253,12 +1287,22 @@ def _q(tag: str) -> str:
     return f"{{{FA3_NAMESPACE}}}{tag}"
 
 
-def _amount(value: Decimal) -> str:
-    """Kwota w polach typu `TKwotowy` (do 2 miejsc po przecinku)."""
-    return f"{value:.2f}"
+def _amount(value: Decimal | str | int | float) -> str:
+    """Kwota w polach typu `TKwotowy` (dokładnie 2 miejsca po przecinku).
+
+    Kwantyfikacja idzie przez `money()` (ROUND_HALF_UP), a nie przez samo
+    ``f"{value:.2f}"``: f-string zaokrągla według kontekstu dziesiętnego
+    (ROUND_HALF_EVEN), więc `0.005` dawało `0.00`, podczas gdy suma
+    `SumaObciazen` liczona przez `money()` dawała `0.01` — dokument deklarował
+    obciążenie 0.00 i jego sumę 0.01. Formatowanie zostaje 2-decymalne, bo pola
+    kwotowe FA(3) są zapisywane z pełną precyzją typu.
+    """
+    if not isinstance(value, Decimal):
+        value = decimal_from_value(value, field_name="amount")
+    return f"{money(value):.2f}"
 
 
-def _amount2(value: Decimal) -> str:
+def _amount2(value: Decimal | str | int | float) -> str:
     """Kwota w polach typu `TKwotowy2` (do 8 miejsc po przecinku).
 
     Dotyczy `P_9A`, `P_9B`, `P_10` i `P_9AZ`: broszura MF mówi wprost
@@ -1269,6 +1313,8 @@ def _amount2(value: Decimal) -> str:
     `1.00` przy `P_11 = 1.01` — czyli wiersz nie spełniał `P_8B * P_9A = P_11`,
     a wartość faktury była cicho zniekształcana.
     """
+    if not isinstance(value, Decimal):
+        value = decimal_from_value(value, field_name="amount")
     return _decimal(value)
 
 

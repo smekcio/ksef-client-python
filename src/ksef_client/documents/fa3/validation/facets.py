@@ -6,9 +6,11 @@ każdy wpis odpowiada konkretnemu `xsd:simpleType` w schemacie
 `schemat_FA(3)_v1-0E.xsd` (oraz importowanych `StrukturyDanych_v10-0E.xsd`
 i `ElementarneTypyDanych_v10-0E.xsd`).
 
-Spójność tabeli ze schematem pilnuje `tests/test_fa3_facets_vs_xsd.py`, który
-parsuje XSD i porównuje wszystkie wartości. Dzięki temu tabela nie może się
-rozjechać z kontraktem bez czerwonego testu.
+Spójność tabeli ze schematem pilnuje `tests/test_fa3_validation_facets.py`:
+parsuje XSD i porównuje — dla każdego elementu — zadeklarowany typ, długości,
+minLength, precyzję, zakresy liczbowe i daty, słowniki, wzorce oraz liczności
+i elementy wymagane. Każdy z tych testów był weryfikowany mutacyjnie (19/19
+celowych rozjazdów daje czerwony test).
 
 Dlaczego własna tabela, a nie parsowanie XSD w runtime: walidacja biznesowa musi
 działać także wtedy, gdy `lxml` nie jest zainstalowany (walidacja XSD jest
@@ -110,8 +112,8 @@ class Facet:
 
 #: `tns:TZnakowy` — tekst do 256 znaków (schemat: maxLength=256, minLength=1).
 TZN = Facet(FacetKind.STRING, "TZnakowy", max_length=256, minimum_length=1)
-#: `tns:TZnakowy2` — jak wyżej (schemat deklaruje osobny typ o tych samych granicach).
-TZN2 = Facet(FacetKind.STRING, "TZnakowy2", max_length=256, minimum_length=1)
+#: `tns:TZnakowy2` — jak wyżej, ale schemat dopuszcza tu wartość pustą (`minLength=0`).
+TZN2 = Facet(FacetKind.STRING, "TZnakowy2", max_length=256, minimum_length=0)
 #: `tns:TZnakowy512` — tekst do 512 znaków.
 TZN512 = Facet(FacetKind.STRING, "TZnakowy512", max_length=512, minimum_length=1)
 #: `tns:TZnakowy50` — tekst do 50 znaków.
@@ -332,7 +334,7 @@ class ElementFacet:
 #: (albo są unikalne z natury, np. ``Naglowek``).
 ELEMENT_FACETS: dict[str, ElementFacet] = {
     # --- Naglowek ---------------------------------------------------------
-    "KodFormularza": ElementFacet(KOD_FORMULARZA),
+    "KodFormularza": ElementFacet(Facet(FacetKind.STRING, None, allowed=frozenset({"FA"}))),
     "WariantFormularza": ElementFacet(Facet(FacetKind.INTEGER, None, allowed=frozenset({"3"}))),
     "SystemInfo": ElementFacet(TZN),
     # --- Podmioty: identyfikacja i dane opisowe ---------------------------
@@ -347,7 +349,6 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
         pattern_hint="NIP i 5 cyfr, np. 1111111111-00001",
     ),
     "Nazwa": ElementFacet(TZN512),
-    "NazwaHandlowa": ElementFacet(TZN),
     "NrVatUE": ElementFacet(
         Facet(FacetKind.STRING, "TNrVatUE", max_length=12, minimum_length=1),
         pattern=re.compile(r"(\d|[A-Z]|\+|\*){1,12}"),
@@ -381,8 +382,21 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "Telefon": ElementFacet(TELEFON),
     "TelefonPU": ElementFacet(TELEFON),
     # --- Znaczniki JST/GV -------------------------------------------------
-    "JST": ElementFacet(WYBOR1_2),
-    "GV": ElementFacet(WYBOR1_2),
+    "DataWytworzeniaFa": ElementFacet(DATA_CZAS),
+    "FP": ElementFacet(WYBOR1),
+    "TP": ElementFacet(WYBOR1),
+    "ZwrotAkcyzy": ElementFacet(WYBOR1),
+    "PelnaNazwa": ElementFacet(TZN),
+    "P_22B": ElementFacet(TZN),
+    "P_22BK": ElementFacet(TZN),
+    "P_22BMK": ElementFacet(TZN),
+    "P_22BMD": ElementFacet(TZN),
+    "P_22BNR": ElementFacet(TZN),
+    "P_22BRP": ElementFacet(TZN),
+    "P_22BT": ElementFacet(TZN),
+    "P_22D1": ElementFacet(TZN),
+    "JST": ElementFacet(Facet(FacetKind.INTEGER, None, allowed=frozenset({"1", "2"}))),
+    "GV": ElementFacet(Facet(FacetKind.INTEGER, None, allowed=frozenset({"1", "2"}))),
     "Rola": ElementFacet(ROLA_PODMIOTU3),
     "RolaInna": ElementFacet(WYBOR1),
     "OpisRoli": ElementFacet(TZN),
@@ -390,13 +404,13 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "RolaPU": ElementFacet(ROLA_PODMIOTU_UPOWAZNIONEGO),
     # --- Nagłówek faktury -------------------------------------------------
     "KodWaluty": ElementFacet(KOD_WALUTY),
-    "P_1": ElementFacet(DATA),
+    "P_1": ElementFacet(DATA_TRANSPORTU),
     "P_1M": ElementFacet(TZN),
     "P_2": ElementFacet(TZN),
     "WZ": ElementFacet(TZN, max_occurrences=1000),
-    "P_6": ElementFacet(DATA),
-    "P_6_Od": ElementFacet(DATA),
-    "P_6_Do": ElementFacet(DATA),
+    "P_6": ElementFacet(DATA_TRANSPORTU),
+    "P_6_Od": ElementFacet(DATA_TRANSPORTU),
+    "P_6_Do": ElementFacet(DATA_TRANSPORTU),
     "RodzajFaktury": ElementFacet(RODZAJ_FAKTURY),
     # --- Podsumowanie stawek ---------------------------------------------
     "P_13_1": ElementFacet(KWOTOWY),
@@ -445,7 +459,7 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     # --- Pozycje faktury --------------------------------------------------
     "NrWierszaFa": ElementFacet(NATURALNY),
     "UU_ID": ElementFacet(TZN50),
-    "P_6A": ElementFacet(DATA),
+    "P_6A": ElementFacet(DATA_TRANSPORTU),
     "P_7": ElementFacet(TZN512),
     "Indeks": ElementFacet(TZN50),
     "GTIN": ElementFacet(TZN20),
@@ -471,7 +485,7 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     # --- Korekta ----------------------------------------------------------
     "PrzyczynaKorekty": ElementFacet(TZN),
     "TypKorekty": ElementFacet(TYP_KOREKTY),
-    "DataWystFaKorygowanej": ElementFacet(DATA),
+    "DataWystFaKorygowanej": ElementFacet(DATA_TRANSPORTU),
     "NrFaKorygowanej": ElementFacet(TZN),
     "NrKSeF": ElementFacet(WYBOR1),
     "NrKSeFFaKorygowanej": ElementFacet(
@@ -489,15 +503,10 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "NrKSeFN": ElementFacet(WYBOR1),
     "OkresFaKorygowanej": ElementFacet(TZN),
     "NrFaKorygowany": ElementFacet(TZN),
-    "P_14_1ZK": ElementFacet(KWOTOWY),
-    "P_14_2ZK": ElementFacet(KWOTOWY),
-    "P_14_3ZK": ElementFacet(KWOTOWY),
-    "P_14_4ZK": ElementFacet(KWOTOWY),
-    "P_14_5ZK": ElementFacet(KWOTOWY),
     "P_15ZK": ElementFacet(KWOTOWY),
     "KursWalutyZK": ElementFacet(ILOSCI),
     # --- Zaliczki, zamówienie, opis dodatkowy -----------------------------
-    "P_6Z": ElementFacet(DATA),
+    "P_6Z": ElementFacet(DATA_TRANSPORTU),
     "P_15Z": ElementFacet(KWOTOWY),
     "KursWalutyZW": ElementFacet(ILOSCI),
     "NrKSeFFaZaliczkowej": ElementFacet(
@@ -544,7 +553,7 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "KwotaZaplatyCzesciowej": ElementFacet(KWOTOWY),
     "DataZaplatyCzesciowej": ElementFacet(DATA),
     "Termin": ElementFacet(DATA),
-    "Ilosc": ElementFacet(Facet(FacetKind.INTEGER, "TNaturalny", minimum=Decimal("1"))),
+    "Ilosc": ElementFacet(Facet(FacetKind.INTEGER, None)),
     "Jednostka": ElementFacet(TZN50),
     "ZdarzeniePoczatkowe": ElementFacet(TZN),
     "FormaPlatnosci": ElementFacet(FORMA_PLATNOSCI),
@@ -563,7 +572,7 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "WysokoscSkonta": ElementFacet(TZN),
     "LinkDoPlatnosci": ElementFacet(TZN512),
     "IPKSeF": ElementFacet(
-        Facet(FacetKind.STRING, None, max_length=13, minimum_length=13),
+        Facet(FacetKind.STRING, None, lengths=frozenset({13})),
         pattern=re.compile(r"[0-9]{3}[a-zA-Z0-9]{10}"),
         pattern_hint="3 cyfry i 10 znaków alfanumerycznych",
     ),
@@ -588,7 +597,6 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "JednostkaOpakowania": ElementFacet(TZN),
     "DataGodzRozpTransportu": ElementFacet(DATA_CZAS),
     "DataGodzZakTransportu": ElementFacet(DATA_CZAS),
-    "NazwaPodmiotuPrzyjmujacego": ElementFacet(TZN),
     # --- Stopka -----------------------------------------------------------
     "StopkaFaktury": ElementFacet(Facet(FacetKind.STRING, "TTekstowy", max_length=3500)),
     "KRS": ElementFacet(
@@ -606,14 +614,14 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "ZNaglowek": ElementFacet(TZN512),
     "ZKlucz": ElementFacet(TZN),
     "ZWartosc": ElementFacet(TZN),
-    "TMetaDane": ElementFacet(TZN),
+    "TMetaDane": ElementFacet(Facet(FacetKind.STRING, None)),
     "TKlucz": ElementFacet(TZN),
     "TWartosc": ElementFacet(TZN),
     "Akapit": ElementFacet(TZN512),
     "Opis": ElementFacet(TZN512),
-    "NKom": ElementFacet(TZN),
-    "WKom": ElementFacet(TZN),
-    "SKom": ElementFacet(TZN),
+    "NKom": ElementFacet(Facet(FacetKind.STRING, None, max_length=256, minimum_length=1)),
+    "WKom": ElementFacet(TZN2),
+    "SKom": ElementFacet(TZN2),
     # --- Nowe środki transportu ------------------------------------------
     "P_22A": ElementFacet(DATA_TRANSPORTU),
     "P_NrWierszaNST": ElementFacet(NATURALNY),
@@ -621,9 +629,9 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "P_22B2": ElementFacet(TZN),
     "P_22B3": ElementFacet(TZN),
     "P_22B4": ElementFacet(TZN),
-    "P_22C": ElementFacet(ILOSCI),
+    "P_22C": ElementFacet(TZN),
     "P_22C1": ElementFacet(TZN),
-    "P_22D": ElementFacet(ILOSCI),
+    "P_22D": ElementFacet(TZN),
 }
 
 
@@ -646,7 +654,6 @@ OCCURRENCE_LIMITS: dict[tuple[str, str], int] = {
     ("Platnosc", "TerminPlatnosci"): 100,
     ("Platnosc", "RachunekBankowy"): 100,
     ("Platnosc", "RachunekBankowyFaktora"): 20,
-    ("ZaplataCzesciowa", "TerminPlatnosci"): 100,
     ("Rozliczenie", "Obciazenia"): 100,
     ("Rozliczenie", "Odliczenia"): 100,
     ("WarunkiTransakcji", "Umowy"): 100,
@@ -659,7 +666,6 @@ OCCURRENCE_LIMITS: dict[tuple[str, str], int] = {
     ("Stopka", "Rejestry"): 100,
     ("Zalacznik", "BlokDanych"): 1000,
     ("BlokDanych", "MetaDane"): 1000,
-    ("BlokDanych", "Akapit"): 10,
     ("Tekst", "Akapit"): 10,
     ("BlokDanych", "Tabela"): 1000,
     ("TNaglowek", "Kol"): 20,
@@ -700,6 +706,19 @@ REQUIRED_IN_PARENT: frozenset[tuple[str, str]] = frozenset(
         ("RachunekBankowyFaktora", "NrRB"),
         ("ZaplataCzesciowa", "KwotaZaplatyCzesciowej"),
         ("ZaplataCzesciowa", "DataZaplatyCzesciowej"),
+        # Pary wynikające z typów dziedzinowych: schemat nie ma tam `minOccurs="0"`,
+        # więc pominięcie któregokolwiek daje XML odrzucany przez KSeF.
+        ("Adres", "KodKraju"),
+        ("Adres", "AdresL1"),
+        ("DaneIdentyfikacyjne", "Nazwa"),
+        ("Fa", "RodzajFaktury"),
+        ("Fa", "Adnotacje"),
+        ("FaWiersz", "NrWierszaFa"),
+        ("MetaDane", "ZKlucz"),
+        ("MetaDane", "ZWartosc"),
+        ("TerminOpis", "Ilosc"),
+        ("TerminOpis", "Jednostka"),
+        ("TerminOpis", "ZdarzeniePoczatkowe"),
     }
 )
 

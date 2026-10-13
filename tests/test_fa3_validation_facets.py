@@ -28,8 +28,11 @@ from ksef_client.documents.fa3 import (
 )
 from ksef_client.documents.fa3.validation import (
     ELEMENT_FACETS,
+    OCCURRENCE_LIMITS,
+    REQUIRED_IN_PARENT,
     Facet,
     FacetKind,
+    occurrence_limit,
     validate_xml_facets,
 )
 from ksef_client.documents.fa3.xml import FA3XmlValidationError, _q
@@ -89,12 +92,19 @@ def _xsd_restriction_facets(node: ET.Element) -> dict[str, Any]:
 
 
 def _resolve(type_name: str, types: dict[str, ET.Element], seen: set[str] | None = None):
-    """Idzie po łańcuchu `base` aż do typu z ograniczeniami; scala napotkane facety."""
+    """Facety typu prostego wraz z odziedziczonymi, z zachowaniem ``xsd:restriction``.
+
+    W schemacie XSD facet zdefiniowany w typie **pochodnym zastępuje** facet typu
+    bazowego (restriction może go tylko zaostrzyć), więc idąc w górę łańcucha
+    ``base`` nadpisujemy wartości tylko wtedy, gdy typ pochodny ich nie podał.
+    Wcześniejsza wersja scalała je w drugą stronę, przez co ``TZnakowy2``
+    (``minLength=0``) dziedziczyło ``minLength=1`` z ``TZnakowy``.
+    """
     seen = seen or set()
     if type_name in seen or type_name not in types:
         return {}
     seen.add(type_name)
-    facets = _xsd_restriction_facets(types[type_name])
+    facets = dict(_xsd_restriction_facets(types[type_name]))
     base = facets.get("base")
     if base and base not in {
         "xsd:string",
@@ -357,13 +367,27 @@ def test_invalid_date_is_reported() -> None:
 
 
 def test_date_before_schema_minimum_is_reported() -> None:
-    """`TData` ma dolną granicę 2016-07-01 (schemat: minInclusive)."""
+    """`P_1` jest typu `TDataT`, którego dolna granica to 2006-01-01.
+
+    Wcześniejsza wersja tabeli mapowała `P_1` na `TData` (granica 2016-07-01),
+    przez co faktura z datą wystawienia z lat 2006-2016 była odrzucana, mimo że
+    schemat ją dopuszcza.
+    """
+    root = _tree()
+    issue_date = root.find(f".//{_q('P_1')}")
+    assert issue_date is not None
+    issue_date.text = "2005-12-31"
+    issues = validate_xml_facets(root)
+    assert any("wcześniejsza niż minimum" in issue.message for issue in issues)
+
+
+def test_date_in_the_2006_2016_window_is_accepted() -> None:
+    """Data wystawienia między 2006-01-01 a 2016-06-30 musi przechodzić."""
     root = _tree()
     issue_date = root.find(f".//{_q('P_1')}")
     assert issue_date is not None
     issue_date.text = "2010-01-01"
-    issues = validate_xml_facets(root)
-    assert any("wcześniejsza niż minimum" in issue.message for issue in issues)
+    assert validate_xml_facets(root) == []
 
 
 def test_date_after_schema_maximum_is_reported() -> None:
@@ -490,7 +514,7 @@ def test_regex_patterns_in_table_are_anchored() -> None:
 
 def test_date_facets_declare_schema_bounds() -> None:
     """Zakresy dat w tabeli muszą odpowiadać schematowi."""
-    assert ELEMENT_FACETS["P_1"].facet.minimum_date == "2016-07-01"
+    assert ELEMENT_FACETS["P_1"].facet.minimum_date == "2006-01-01"
     assert ELEMENT_FACETS["P_1"].facet.maximum_date == "2050-01-01"
     assert ELEMENT_FACETS["DataUmowy"].facet.minimum_date == "1990-01-01"
     assert ELEMENT_FACETS["P_22A"].facet.minimum_date == "2006-01-01"
@@ -528,3 +552,843 @@ def test_disallowed_length_is_reported() -> None:
     )
     assert issues and "niedozwolona" in issues[0].message
     assert _check_text("1111111111-20260101-AAAAAA-BBBBBB-01", NUMER_KSEF, "p", "X") == []
+
+
+# ---------------------------------------------------------------------------
+# 3. Spójność tabeli ze schematem: deklarowany typ, nazwy, liczności, wymagane
+# ---------------------------------------------------------------------------
+#
+# Poprzednia wersja tych testów rozwiązywała typ Z TABELI (a nie z deklaracji
+# elementu), więc błędne mapowania typów (P_1 -> TData zamiast TDataT,
+# P_22C -> TIlosci zamiast TZnakowy, Ilosc -> TNaturalny zamiast xsd:integer)
+# i literówki w nazwach elementów przechodziły na zielono. Poniższe testy
+# porównują tabelę z FAKTYCZNĄ deklaracją elementu w schemacie.
+
+
+def _xsd_element_declarations() -> dict[str, set[str]]:
+    """Mapa nazwa elementu -> zbiór zadeklarowanych typów (po wszystkich XSD)."""
+    declarations: dict[str, set[str]] = {}
+    for name in XSD_FILES:
+        root = ET.parse(SCHEMAS / name).getroot()
+        for node in root.iter(f"{_XSD}element"):
+            element_name = node.get("name")
+            if not element_name:
+                continue
+            declared = node.get("type")
+            if declared is None:
+                restriction = node.find(f"{_XSD}simpleType/{_XSD}restriction")
+                if restriction is not None:
+                    declared = restriction.get("base")
+                else:
+                    declared = "(inline complexType)"
+            declarations.setdefault(element_name, set()).add(declared or "")
+    return declarations
+
+
+def _xsd_sequence_children() -> dict[tuple[str, str], tuple[str | None, str | None]]:
+    """Mapa (rodzic, dziecko) -> (minOccurs, maxOccurs) z całego kompletu schematów.
+
+    Schemat FA(3) miesza typy anonimowe (struktura wprost w elemencie) z nazwanymi
+    (`type="tns:TNaglowek"`), a część z nich żyje w importowanych plikach
+    dziedzinowych. Walker musi więc rozwiązywać referencje do nazwanych typów —
+    wcześniejsza wersja widziała tylko typy anonimowe i uznawała m.in.
+    `Naglowek/KodFormularza` oraz `RachunekBankowy/NrRB` za nieistniejące.
+    """
+    from lxml import etree as _lxml_etree
+
+    children: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    named_types: dict[str, object] = {}
+
+    roots = [_lxml_etree.parse(str(SCHEMAS / schema)).getroot() for schema in XSD_FILES]
+    for root in roots:
+        for node in root.iter(f"{_XSD}complexType"):
+            type_name = node.get("name")
+            if type_name:
+                named_types.setdefault(type_name, node)
+
+    def record(parent: str, child: Any) -> None:
+        name = child.get("name")
+        if name is None:
+            return
+        key = (parent, name)
+        value = (child.get("minOccurs"), child.get("maxOccurs"))
+        if key not in children or children[key][0] in (None, "1"):
+            children[key] = value
+
+    def walk(node: Any, parent: str | None, seen: frozenset[str]) -> None:
+        for child in node:
+            tag = child.tag
+            if not isinstance(tag, str):
+                continue
+            if tag.endswith("}element"):
+                name = child.get("name")
+                if name is None:
+                    continue
+                if parent is not None:
+                    record(parent, child)
+                walk(child, name, seen)
+                declared = child.get("type")
+                if declared:
+                    local = declared.split(":", 1)[-1]
+                    definition = named_types.get(local)
+                    if definition is not None and local not in seen:
+                        walk(definition, name, seen | {local})
+            elif tag.endswith("}complexContent"):
+                walk(child, parent, seen)
+            else:
+                walk(child, parent, seen)
+
+    for root in roots:
+        walk(root, None, frozenset())
+    return children
+
+
+@pytest.fixture(scope="module")
+def xsd_elements() -> dict[str, set[str]]:
+    return _xsd_element_declarations()
+
+
+@pytest.fixture(scope="module")
+def xsd_children() -> dict[tuple[str, str], tuple[str | None, str | None]]:
+    return _xsd_sequence_children()
+
+
+def test_every_table_element_exists_in_the_schema(xsd_elements: dict[str, set[str]]) -> None:
+    """Literówka w nazwie elementu = reguła, która nigdy nie zadziała."""
+    unknown = sorted(name for name in ELEMENT_FACETS if name not in xsd_elements)
+    assert not unknown, f"elementy spoza schematu (reguły martwe): {unknown}"
+
+
+def test_declared_type_matches_the_element_declaration(
+    xsd_elements: dict[str, set[str]],
+) -> None:
+    """`xsd_type` w tabeli musi być typem ZADEKLAROWANYM dla tego elementu.
+
+    To jest test, który wyłapałby mapowanie `P_1` na `TData` zamiast `TDataT`
+    oraz `P_22C` na `TIlosci` zamiast `TZnakowy`.
+    """
+    mismatches: list[str] = []
+    checked = 0
+    for element, entry in sorted(ELEMENT_FACETS.items()):
+        facet = entry.facet
+        if facet.xsd_type is None:
+            continue  # ograniczenie inline, bez nazwanego typu
+        declared = xsd_elements.get(element)
+        if not declared:
+            continue
+        expected = f"tns:{facet.xsd_type}"
+        normalized = {candidate.split(":", 1)[-1] for candidate in declared}
+        if facet.xsd_type not in normalized:
+            mismatches.append(f"{element}: tabela={expected} schemat={sorted(declared)}")
+            continue
+        checked += 1
+    assert checked >= 150, f"test sprawdził tylko {checked} elementów"
+    assert not mismatches, "\n".join(mismatches)
+
+
+#: Pary, których limitu celowo nie pilnujemy w tabeli: elementy jednokrotne
+#: w schemacie, ale wyprowadzane strukturalnie (nie przez powtarzalny blok).
+_OCCURRENCE_EXEMPT: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("Fa", "KodWaluty"),
+        ("Fa", "P_1"),
+        ("Fa", "P_1M"),
+        ("Fa", "P_2"),
+        ("Fa", "P_6"),
+        ("Fa", "OkresFa"),
+        ("Fa", "RodzajFaktury"),
+        ("Fa", "Adnotacje"),
+        ("Fa", "P_15"),
+        ("Fa", "Platnosc"),
+        ("Fa", "WarunkiTransakcji"),
+        ("Fa", "Rozliczenie"),
+        ("Fa", "Zamowienie"),
+        ("Fa", "Stopka"),
+        ("Fa", "Zalacznik"),
+        ("Faktura", "Fa"),
+        ("Faktura", "Naglowek"),
+        ("Faktura", "Podmiot1"),
+        ("Faktura", "Podmiot2"),
+        ("Naglowek", "KodFormularza"),
+        ("Naglowek", "WariantFormularza"),
+        ("Naglowek", "DataWytworzeniaFa"),
+        ("Adres", "KodKraju"),
+        ("Adres", "AdresL1"),
+        ("Adres", "AdresL2"),
+        ("Adres", "GLN"),
+        ("DaneIdentyfikacyjne", "NIP"),
+        ("DaneIdentyfikacyjne", "Nazwa"),
+        ("DaneIdentyfikacyjne", "KodUE"),
+        ("DaneIdentyfikacyjne", "NrVatUE"),
+        ("DaneIdentyfikacyjne", "KodKraju"),
+        ("DaneIdentyfikacyjne", "NrID"),
+        ("DaneIdentyfikacyjne", "BrakID"),
+        ("FaWiersz", "NrWierszaFa"),
+        ("MetaDane", "ZKlucz"),
+        ("MetaDane", "ZWartosc"),
+        ("TMetaDane", "TKlucz"),
+        ("TMetaDane", "TWartosc"),
+        ("Kol", "NKom"),
+        ("OkresFa", "P_6_Od"),
+        ("OkresFa", "P_6_Do"),
+        ("Obciazenia", "Kwota"),
+        ("Obciazenia", "Powod"),
+        ("Odliczenia", "Kwota"),
+        ("Odliczenia", "Powod"),
+        ("DodatkowyOpis", "Klucz"),
+        ("DodatkowyOpis", "Wartosc"),
+        ("DodatkowyOpis", "NrWiersza"),
+        ("NowySrodekTransportu", "P_22A"),
+        ("NowySrodekTransportu", "P_NrWierszaNST"),
+        ("DaneFaKorygowanej", "DataWystFaKorygowanej"),
+        ("DaneFaKorygowanej", "NrFaKorygowanej"),
+        ("Podmiot1", "DaneIdentyfikacyjne"),
+        ("Podmiot1", "Adres"),
+        ("Podmiot1K", "DaneIdentyfikacyjne"),
+        ("Podmiot1K", "Adres"),
+        ("Podmiot2", "DaneIdentyfikacyjne"),
+        ("Podmiot2", "Adres"),
+        ("Przewoznik", "DaneIdentyfikacyjne"),
+        ("Adnotacje", "P_16"),
+        ("Adnotacje", "P_17"),
+        ("Adnotacje", "P_18"),
+        ("Adnotacje", "P_18A"),
+        ("Adnotacje", "P_23"),
+        ("Adnotacje", "Zwolnienie"),
+        ("Adnotacje", "NoweSrodkiTransportu"),
+        ("Adnotacje", "PMarzy"),
+        ("TerminOpis", "Ilosc"),
+        ("TerminOpis", "Jednostka"),
+        ("TerminOpis", "ZdarzeniePoczatkowe"),
+        ("ZaliczkaCzesciowa", "P_6Z"),
+        ("ZaliczkaCzesciowa", "P_15Z"),
+        ("Zamowienie", "WartoscZamowienia"),
+        ("RachunekBankowy", "NrRB"),
+        ("RachunekBankowyFaktora", "NrRB"),
+        ("ZaplataCzesciowa", "KwotaZaplatyCzesciowej"),
+        ("ZaplataCzesciowa", "DataZaplatyCzesciowej"),
+        ("BlokDanych", "ZNaglowek"),
+        ("BlokDanych", "Tekst"),
+        ("Tabela", "Opis"),
+        ("Tabela", "TNaglowek"),
+        ("TNaglowek", "Kol"),
+        ("Kol", "NKom"),
+        ("Wiersz", "WKom"),
+        ("Suma", "SKom"),
+        ("Stopka", "StopkaFaktury"),
+    }
+)
+
+
+def test_occurrence_limits_cover_every_single_occurrence_pair(
+    xsd_children: dict[tuple[str, str], tuple[str | None, str | None]],
+) -> None:
+    """Każda para z `maxOccurs=1` w schemacie musi mieć limit w tabeli.
+
+    Kontrola w OBIE strony: sam wpis bez odpowiednika w schemacie nigdy nie
+    zadziała, ale też usunięcie wpisu dla pary, która w schemacie występuje raz,
+    pozwalałoby wyemitować zdublowany element obowiązkowy (`KodWaluty`, `P_15`).
+    """
+    dead = sorted(key for key in OCCURRENCE_LIMITS if key not in xsd_children)
+    assert not dead, f"wiersze bez odpowiednika w schemacie (nigdy nie zadziałają): {dead}"
+
+    uncovered: list[str] = []
+    for key, (_min_occurs, max_occurs) in sorted(xsd_children.items()):
+        if max_occurs != "1" or key in _OCCURRENCE_EXEMPT:
+            continue
+        if occurrence_limit(*key) is None:
+            uncovered.append(f"{key[0]}/{key[1]}")
+    assert not uncovered, "pary jednokrotne bez limitu w tabeli: " + ", ".join(uncovered)
+
+
+def test_required_entries_exist_in_the_schema(
+    xsd_children: dict[tuple[str, str], tuple[str | None, str | None]],
+) -> None:
+    """Każdy wiersz `REQUIRED_IN_PARENT` musi istnieć i być naprawdę wymagany."""
+    problems: list[str] = []
+    for key in sorted(REQUIRED_IN_PARENT):
+        if key not in xsd_children:
+            problems.append(f"{key[0]}/{key[1]}: brak pary w schemacie")
+            continue
+        min_occurs = xsd_children[key][0]
+        if min_occurs == "0":
+            problems.append(f"{key[0]}/{key[1]}: schemat ma minOccurs=0")
+    assert not problems, "\n".join(problems)
+
+
+def test_no_declared_element_is_missing_a_value_facet(
+    xsd_elements: dict[str, set[str]],
+) -> None:
+    """Elementy ze schematu, które serializer emituje, powinny mieć wpis w tabeli.
+
+    Kontrola kompletności: brak wpisu nie jest błędem sam w sobie (element może
+    być kontenerem), ale każdy element, który SDK faktycznie wypisuje jako tekst,
+    musi mieć zdefiniowane ograniczenie.
+    """
+    import re as _re
+    from pathlib import Path as _Path
+
+    serializer = (
+        _Path(__file__).resolve().parents[1] / "src/ksef_client/documents/fa3/xml.py"
+    ).read_text(encoding="utf-8")
+    emitted = set(_re.findall(r'_q\("([A-Za-z_][A-Za-z0-9_.]*)"\)', serializer))
+    missing = sorted(
+        name
+        for name in emitted
+        if name in xsd_elements and name not in ELEMENT_FACETS
+    )
+    # Elementy-kontenery nie mają wartości tekstowej, więc nie potrzebują faceta.
+    containers = {
+        "Faktura", "Naglowek", "Fa", "Podmiot1", "Podmiot2", "Podmiot3",
+        "PodmiotUpowazniony", "Podmiot1K", "Podmiot2K", "DaneIdentyfikacyjne",
+        "Adres", "AdresKoresp", "DaneKontaktowe", "FaWiersz", "Adnotacje",
+        "Zwolnienie", "NoweSrodkiTransportu", "NowySrodekTransportu", "PMarzy",
+        "DaneFaKorygowanej", "ZaliczkaCzesciowa", "FakturaZaliczkowa",
+        "DodatkowyOpis", "Rozliczenie", "Obciazenia", "Odliczenia", "Platnosc",
+        "ZaplataCzesciowa", "TerminPlatnosci", "TerminOpis", "RachunekBankowy",
+        "RachunekBankowyFaktora", "Skonto", "WarunkiTransakcji", "Umowy",
+        "Zamowienia", "Transport", "Przewoznik", "WysylkaZ", "WysylkaPrzez",
+        "WysylkaDo", "Zamowienie", "ZamowienieWiersz", "Stopka", "Rejestr",
+        "Rejestry", "Zalacznik", "BlokDanych", "MetaDane", "Tekst", "Tabela",
+        "TNaglowek", "Kol", "Wiersz", "Suma", "PodmiotPosredniczacy",
+        "WariantFormularza", "OkresFa", "Informacje", "P_22B1", "P_22B2",
+        "P_22B3", "P_22B4",
+    }
+    unresolved = [name for name in missing if name not in containers]
+    assert not unresolved, f"elementy bez ograniczeń: {unresolved}"
+
+
+#: Pary, których obecność w `REQUIRED_IN_PARENT` jest wymagana przez schemat
+#: (minOccurs=1 i poza `xsd:choice`). Lista jest kontrolą w drugą stronę:
+#: poprzednia wersja testu sprawdzała tylko, że wpisy tabeli istnieją w schemacie,
+#: więc USUNIĘCIE wpisu przechodziło na zielono.
+_MUST_BE_REQUIRED: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("Faktura", "Naglowek"),
+        ("Faktura", "Podmiot1"),
+        ("Faktura", "Podmiot2"),
+        ("Faktura", "Fa"),
+        ("Naglowek", "KodFormularza"),
+        ("Naglowek", "WariantFormularza"),
+        ("Fa", "KodWaluty"),
+        ("Fa", "P_1"),
+        ("Fa", "P_2"),
+        ("Fa", "P_15"),
+        ("Fa", "RodzajFaktury"),
+        ("Fa", "Adnotacje"),
+        ("BlokDanych", "MetaDane"),
+        ("Zalacznik", "BlokDanych"),
+        ("Tabela", "TNaglowek"),
+        ("Tabela", "Wiersz"),
+        ("TNaglowek", "Kol"),
+        ("Zamowienie", "WartoscZamowienia"),
+        ("Zamowienie", "ZamowienieWiersz"),
+        ("Przewoznik", "AdresPrzewoznika"),
+        ("RachunekBankowy", "NrRB"),
+        ("RachunekBankowyFaktora", "NrRB"),
+        ("ZaplataCzesciowa", "KwotaZaplatyCzesciowej"),
+        ("ZaplataCzesciowa", "DataZaplatyCzesciowej"),
+        ("Adres", "KodKraju"),
+        ("Adres", "AdresL1"),
+        ("DaneIdentyfikacyjne", "Nazwa"),
+        ("MetaDane", "ZKlucz"),
+        ("MetaDane", "ZWartosc"),
+        ("FaWiersz", "NrWierszaFa"),
+        ("TerminOpis", "Ilosc"),
+        ("TerminOpis", "Jednostka"),
+        ("TerminOpis", "ZdarzeniePoczatkowe"),
+    }
+)
+
+
+def test_required_table_covers_mandatory_schema_pairs() -> None:
+    """Każda para wymagana przez schemat musi być w `REQUIRED_IN_PARENT`."""
+    missing = sorted(_MUST_BE_REQUIRED - REQUIRED_IN_PARENT)
+    assert not missing, "brak wymaganych wpisów: " + ", ".join(f"{p}/{c}" for p, c in missing)
+
+
+def _xsd_declared_type_map() -> dict[str, set[str]]:
+    """Mapa element -> zadeklarowane typy (z prefiksem, np. ``tns:TDataT``)."""
+    declared: dict[str, set[str]] = {}
+    for name in XSD_FILES:
+        root = ET.parse(SCHEMAS / name).getroot()
+        for node in root.iter(f"{_XSD}element"):
+            element_name = node.get("name")
+            if not element_name:
+                continue
+            type_name = node.get("type")
+            if type_name is None:
+                restriction = node.find(f"{_XSD}simpleType/{_XSD}restriction")
+                if restriction is not None:
+                    type_name = restriction.get("base")
+            if type_name:
+                declared.setdefault(element_name, set()).add(type_name.split(":", 1)[-1])
+    return declared
+
+
+@pytest.fixture(scope="module")
+def xsd_declared_types() -> dict[str, set[str]]:
+    return _xsd_declared_type_map()
+
+
+def test_date_bounds_match_the_declared_xsd_type(
+    xsd_types: dict[str, ET.Element], xsd_declared_types: dict[str, set[str]]
+) -> None:
+    """`minimum_date`/`maximum_date` muszą zgadzać się z `xsd:minInclusive`.
+
+    Test rozwiązuje typ Z DEKLARACJI ELEMENTU (nie z tabeli), więc wyłapuje
+    mapowanie elementu na zły typ — np. `P_1` na `TData` (2016-07-01) zamiast
+    `TDataT` (2006-01-01), przez co schemat-valid faktury były odrzucane.
+    """
+    mismatches: list[str] = []
+    checked = 0
+    for element, entry in sorted(ELEMENT_FACETS.items()):
+        facet = entry.facet
+        if facet.minimum_date is None and facet.maximum_date is None:
+            continue
+        declared = xsd_declared_types.get(element)
+        if not declared:
+            continue
+        # Zbierz granice ze WSZYSTKICH zadeklarowanych typów (element może mieć
+        # różne deklaracje w różnych plikach).
+        lowers: set[str] = set()
+        uppers: set[str] = set()
+        for type_name in declared:
+            resolved = _resolve(type_name, xsd_types)
+            if resolved.get("minInclusive"):
+                lowers.add(resolved["minInclusive"])
+            if resolved.get("maxInclusive"):
+                uppers.add(resolved["maxInclusive"])
+        if not lowers and not uppers:
+            continue
+        checked += 1
+        if facet.minimum_date is not None and facet.minimum_date not in lowers:
+            mismatches.append(
+                f"{element}: tabela min={facet.minimum_date} schemat={sorted(lowers)}"
+            )
+        if facet.maximum_date is not None and uppers and facet.maximum_date not in uppers:
+            mismatches.append(
+                f"{element}: tabela max={facet.maximum_date} schemat={sorted(uppers)}"
+            )
+    assert checked >= 8, f"test sprawdził tylko {checked} elementów z granicami dat"
+    assert not mismatches, "\n".join(mismatches)
+
+
+def test_lengths_match_the_declared_xsd_type(
+    xsd_types: dict[str, ET.Element], xsd_declared_types: dict[str, set[str]]
+) -> None:
+    """`lengths` (zamknięta lista długości) musi odpowiadać schematowi."""
+    mismatches: list[str] = []
+    checked = 0
+    for element, entry in sorted(ELEMENT_FACETS.items()):
+        facet = entry.facet
+        if facet.lengths is None:
+            continue
+        declared = xsd_declared_types.get(element)
+        if not declared:
+            continue
+        lengths: set[int] = set()
+        for type_name in declared:
+            resolved = _resolve(type_name, xsd_types)
+            if resolved.get("minLength") and resolved.get("maxLength"):
+                lengths.add(int(resolved["minLength"]))
+                lengths.add(int(resolved["maxLength"]))
+        if not lengths:
+            continue
+        checked += 1
+        # Wartości z tabeli muszą mieścić się w granicach typu bazowego: żadna nie
+        # może przekroczyć `maxLength` ani zejść poniżej `minLength`.
+        lowest, highest = min(facet.lengths), max(facet.lengths)
+        if highest > max(lengths) or lowest < min(lengths):
+            mismatches.append(
+                f"{element}: tabela lengths={sorted(facet.lengths)} "
+                f"granice schematu={min(lengths)}-{max(lengths)}"
+            )
+    # Tylko `IPKSeF` ma w schemacie zamknięty zbiór długości (minLength+maxLength
+    # na tym samym typie). `SWIFT`/numer KSeF mają wzorce, nie długości.
+    assert checked >= 1, f"test sprawdził tylko {checked} elementów z listą długości"
+    assert not mismatches, "\n".join(mismatches)
+
+
+def test_minimum_length_matches_the_declared_xsd_type(
+    xsd_types: dict[str, ET.Element], xsd_declared_types: dict[str, set[str]]
+) -> None:
+    """`minimum_length` musi odpowiadać `xsd:minLength` zadeklarowanego typu."""
+    mismatches: list[str] = []
+    checked = 0
+    for element, entry in sorted(ELEMENT_FACETS.items()):
+        facet = entry.facet
+        if facet.minimum_length is None or facet.lengths is not None:
+            continue
+        declared = xsd_declared_types.get(element)
+        if not declared:
+            continue
+        expected: set[int] = set()
+        for type_name in declared:
+            resolved = _resolve(type_name, xsd_types)
+            if resolved.get("minLength"):
+                expected.add(int(resolved["minLength"]))
+        if not expected:
+            continue
+        checked += 1
+        if facet.minimum_length not in expected:
+            mismatches.append(
+                f"{element}: tabela minLength={facet.minimum_length} schemat={sorted(expected)}"
+            )
+    assert checked >= 8, f"test sprawdził tylko {checked} elementów z minLength"
+    assert not mismatches, "\n".join(mismatches)
+
+
+def test_numeric_bounds_match_the_declared_xsd_type(
+    xsd_types: dict[str, ET.Element], xsd_declared_types: dict[str, set[str]]
+) -> None:
+    """`minimum`/`maximum` dla wartości liczbowych muszą odpowiadać schematowi."""
+    mismatches: list[str] = []
+    checked = 0
+    for element, entry in sorted(ELEMENT_FACETS.items()):
+        facet = entry.facet
+        if facet.minimum is None and facet.maximum is None:
+            continue
+        declared = xsd_declared_types.get(element)
+        if not declared:
+            continue
+        lowers: set[str] = set()
+        uppers: set[str] = set()
+        for type_name in declared:
+            resolved = _resolve(type_name, xsd_types)
+            if resolved.get("minInclusive"):
+                lowers.add(resolved["minInclusive"])
+            if resolved.get("maxInclusive"):
+                uppers.add(resolved["maxInclusive"])
+        if not lowers and not uppers:
+            continue
+        checked += 1
+        if facet.minimum is not None and str(facet.minimum) not in lowers:
+            mismatches.append(
+                f"{element}: tabela min={facet.minimum} schemat={sorted(lowers)}"
+            )
+        if facet.maximum is not None and uppers and str(facet.maximum) not in uppers:
+            mismatches.append(
+                f"{element}: tabela max={facet.maximum} schemat={sorted(uppers)}"
+            )
+    assert checked >= 1, f"test sprawdził tylko {checked} elementów z zakresem liczbowym"
+    assert not mismatches, "\n".join(mismatches)
+
+
+#: Limity liczności, które muszą być w tabeli (schemat: maxOccurs o tej wartości).
+_MUST_BE_LIMITED: dict[tuple[str, str], int] = {
+    ("Fa", "FaWiersz"): 10000,
+    ("Fa", "DodatkowyOpis"): 10000,
+    ("Fa", "ZaliczkaCzesciowa"): 31,
+    ("Fa", "FakturaZaliczkowa"): 100,
+    ("Fa", "DaneFaKorygowanej"): 50000,
+    ("Fa", "Podmiot2K"): 101,
+    ("Faktura", "Podmiot3"): 100,
+    ("Platnosc", "TerminPlatnosci"): 100,
+    ("Platnosc", "RachunekBankowy"): 100,
+    ("Platnosc", "RachunekBankowyFaktora"): 20,
+    ("Rozliczenie", "Obciazenia"): 100,
+    ("Rozliczenie", "Odliczenia"): 100,
+    ("WarunkiTransakcji", "Transport"): 20,
+    ("WarunkiTransakcji", "NrPartiiTowaru"): 1000,
+    ("Transport", "WysylkaPrzez"): 20,
+    ("Zamowienie", "ZamowienieWiersz"): 10000,
+    ("Stopka", "Informacje"): 3,
+    ("Stopka", "Rejestry"): 100,
+    ("Zalacznik", "BlokDanych"): 1000,
+    ("BlokDanych", "MetaDane"): 1000,
+    ("Tekst", "Akapit"): 10,
+    ("TNaglowek", "Kol"): 20,
+    ("Tabela", "Wiersz"): 1000,
+    ("Wiersz", "WKom"): 20,
+    ("Suma", "SKom"): 20,
+}
+
+
+def test_occurrence_limits_match_the_schema_value(
+    xsd_children: dict[tuple[str, str], tuple[str | None, str | None]],
+) -> None:
+    """Wartości limitów muszą zgadzać się z `xsd:maxOccurs` (nie tylko istnieć)."""
+    mismatches: list[str] = []
+    for key, expected in sorted(_MUST_BE_LIMITED.items()):
+        actual = occurrence_limit(*key)
+        if actual != expected:
+            mismatches.append(f"{key[0]}/{key[1]}: tabela={actual} schemat={expected}")
+        schema_value = xsd_children.get(key, (None, None))[1]
+        if schema_value is not None and int(schema_value) != expected:
+            mismatches.append(
+                f"{key[0]}/{key[1]}: oczekiwano {expected}, schemat={schema_value}"
+            )
+    assert not mismatches, "\n".join(mismatches)
+
+
+#: Elementy, których wzorzec pochodzi wprost ze schematu, wraz z wartościami,
+#: które schemat ODRZUCA (a więc i tabela nie może ich zaakceptować).
+_PATTERN_MUST_REJECT: dict[str, tuple[str, ...]] = {
+    "NIP": ("0000000000", "123456789", "12345678901", "123456789a"),
+    "IDWew": ("1111111111", "1111111111-0000", "1111111111-000011"),
+    "SWIFT": ("DEUTDEFF5", "DEUTDEFF50", "deutdeff", "DEUTDEFF5000"),
+    "KRS": ("000011111", "00001111111", "000011111a"),
+    "REGON": ("12345678", "1234567890", "1234567890123", "123456789012345"),
+    "IPKSeF": ("123abc456DEF", "123abc456DEFGH", "12abc456DEFG", "123abc456DE-"),
+    "NrKSeFFaKorygowanej": (
+        "1111111111-20260101-AAAAAA-BBBBBB-0G",
+        "1111111111-20260101-AAAAAA-BBBBBB-GG",
+        "0111111111-20260101-AAAAAA-BBBBBB-01",
+    ),
+    "NrKSeFFaZaliczkowej": (
+        "x" * 35,
+        "1111111111-20260101-AAAAAA-BBBBBB-01",
+    ),
+}
+
+
+def test_patterns_reject_values_the_schema_rejects() -> None:
+    """Wzorzec w tabeli nie może być łagodniejszy niż wzorzec schematu.
+
+    Samo sprawdzenie, że poprawna wartość przechodzi, nie wykrywa osłabienia
+    wzorca (np. zamiany wzorca NIP na ``\d{10}``) — trzeba dowieść, że wartości
+    spoza schematu są odrzucane.
+    """
+    problems: list[str] = []
+    for element, invalid_values in sorted(_PATTERN_MUST_REJECT.items()):
+        entry = ELEMENT_FACETS[element]
+        for value in invalid_values:
+            # Sam wzorzec: długość nie rozstrzyga, bo 35/36 znaków może być
+            # poprawne wymiarowo, a niepoprawne co do zawartości grup hex.
+            if entry.pattern is not None and entry.pattern.fullmatch(value):
+                problems.append(f"{element}: wzorzec akceptuje {value!r}")
+    assert not problems, "\n".join(problems)
+
+
+def test_patterns_accept_values_the_schema_accepts() -> None:
+    """Wzorzec nie może być ostrzejszy niż schemat."""
+    valid = {
+        "NIP": "1111111111",
+        "IDWew": "1111111111-00001",
+        "SWIFT": "DEUTDEFF",
+        "KRS": "0000111111",
+        "REGON": "12345678901234",
+        "IPKSeF": "123abc456DEFG",
+        "NrKSeFFaKorygowanej": "1111111111-20260101-AAAAAA-BBBBBB-01",
+        "NrKSeFFaZaliczkowej": "1111111111-20260101-AAAAAABBBBBB-01",
+    }
+    problems: list[str] = []
+    for element, value in sorted(valid.items()):
+        entry = ELEMENT_FACETS[element]
+        if entry.pattern is not None and not entry.pattern.fullmatch(value):
+            problems.append(f"{element}: wzorzec odrzuca poprawną wartość {value!r}")
+        if entry.facet.lengths is not None and len(value) not in entry.facet.lengths:
+            problems.append(f"{element}: długość {len(value)} odrzucona dla {value!r}")
+    assert not problems, "\n".join(problems)
+
+
+def test_patterns_come_from_the_declared_xsd_type(
+    xsd_types: dict[str, ET.Element], xsd_declared_types: dict[str, set[str]]
+) -> None:
+    """Wzorzec w tabeli musi być zgodny ze wzorcem typu zadeklarowanego w schemacie.
+
+    Porównujemy zbiory wartości akceptowanych na reprezentatywnej próbce: wzorzec
+    tabeli nie może przyjmować niczego, co odrzuca schemat, ani odwrotnie.
+    """
+    from itertools import product
+
+    alphabet = "0123456789ABCDEFabcdef-"
+    samples = [
+        "".join(chars)
+        for length in (8, 9, 10, 11, 13, 14, 16, 35, 36)
+        for chars in list(product(alphabet[:8], repeat=min(length, 3)))
+    ]
+    problems: list[str] = []
+    checked = 0
+    for element, entry in sorted(ELEMENT_FACETS.items()):
+        if entry.pattern is None:
+            continue
+        declared = xsd_declared_types.get(element)
+        if not declared:
+            continue
+        schema_patterns: list[str] = []
+        for type_name in declared:
+            resolved = _resolve(type_name, xsd_types)
+            if resolved.get("pattern"):
+                schema_patterns.append(resolved["pattern"])
+        if not schema_patterns:
+            continue
+        checked += 1
+        compiled = [re.compile(p) for p in schema_patterns]
+        for sample in samples:
+            table_ok = bool(entry.pattern.fullmatch(sample))
+            schema_ok = any(p.fullmatch(sample) for p in compiled)
+            if table_ok and not schema_ok:
+                problems.append(f"{element}: tabela akceptuje {sample!r}, schemat nie")
+                break
+    assert checked >= 3, f"test sprawdził tylko {checked} elementów ze wzorcem"
+    assert not problems, "\n".join(problems)
+
+
+def _inline_restriction(element_name: str) -> dict[str, str]:
+    """Facety z inline `xsd:simpleType/xsd:restriction` danego elementu.
+
+    Część elementów FA(3) ma ograniczenia wpisane wprost w deklarację (np.
+    ``IPKSeF``: ``maxLength=13`` na bazie ``TZnakowy20``, ``SWIFT``: sam wzorzec).
+    Wtedy o dopuszczalnych wartościach decyduje ta deklaracja, a nie typ bazowy.
+    """
+    for name in XSD_FILES:
+        root = ET.parse(SCHEMAS / name).getroot()
+        for node in root.iter(f"{_XSD}element"):
+            if node.get("name") != element_name:
+                continue
+            restriction = node.find(f"{_XSD}simpleType/{_XSD}restriction")
+            if restriction is None:
+                continue
+            return {
+                child.tag.replace(_XSD, ""): child.get("value") or ""
+                for child in restriction
+            }
+    return {}
+
+
+#: Elementy z inline wzorcem: wzorzec tabeli musi akceptować dokładnie to samo,
+#: co wzorzec schematu (na wspólnej próbce).
+_INLINE_PATTERN_ELEMENTS = ("SWIFT", "IPKSeF", "LinkDoPlatnosci")
+
+
+def test_inline_patterns_match_the_element_declaration() -> None:
+    """Wzorzec tabeli nie może być łagodniejszy ani ostrzejszy od inline wzorca."""
+    samples = [
+        "",
+        "123",
+        "123abc456DEFG",
+        "12abc456DEFG",
+        "123abc456DEFGH",
+        "DEUTDEFF",
+        "DEUTDEFF5",
+        "DEUTDEFF50",
+        "deutdeff",
+        "DEUTDEFF500",
+        "https://pay.example.com/i?IPKSeF=123abc456DEFG",
+        "https://pay.example.com/i",
+        "https://pay.example.com/i?IPKSeF=12abc456DEFG",
+        "https://pay.example.com/i?IPKSeF=123abc456DEFGH",
+        "http://a.pl/x?y=1&IPKSeF=123abc456DEFG#f",
+    ]
+    problems: list[str] = []
+    checked = 0
+    for element in _INLINE_PATTERN_ELEMENTS:
+        entry = ELEMENT_FACETS[element]
+        inline = _inline_restriction(element)
+        schema_pattern = inline.get("pattern")
+        if not schema_pattern or entry.pattern is None:
+            continue
+        checked += 1
+        compiled = re.compile(schema_pattern)
+        for sample in samples:
+            table_ok = bool(entry.pattern.fullmatch(sample))
+            schema_ok = bool(compiled.fullmatch(sample))
+            if table_ok != schema_ok:
+                problems.append(
+                    f"{element}: {sample!r} tabela={table_ok} schemat={schema_ok}"
+                )
+    # Tylko `IPKSeF` ma wzorzec wpisany wprost w deklarację elementu; `SWIFT`
+    # i `LinkDoPlatnosci` używają typów nazwanych (patrz test niżej).
+    assert checked >= 1, f"test sprawdził tylko {checked} elementów z inline wzorcem"
+    assert not problems, "\n".join(problems)
+
+
+def test_inline_length_bounds_match_the_element_declaration() -> None:
+    """`lengths`/`max_length` muszą mieścić się w granicach inline `maxLength`."""
+    problems: list[str] = []
+    checked = 0
+    for element in _INLINE_PATTERN_ELEMENTS + ("BDO", "IDNabywcy"):
+        entry = ELEMENT_FACETS[element]
+        inline = _inline_restriction(element)
+        max_length = inline.get("maxLength")
+        if not max_length:
+            continue
+        checked += 1
+        limit = int(max_length)
+        if entry.facet.lengths is not None:
+            if max(entry.facet.lengths) > limit:
+                problems.append(
+                    f"{element}: tabela lengths={sorted(entry.facet.lengths)} "
+                    f"przekracza inline maxLength={limit}"
+                )
+        elif entry.facet.max_length is not None and entry.facet.max_length > limit:
+            problems.append(
+                f"{element}: tabela max_length={entry.facet.max_length} "
+                f"przekracza inline maxLength={limit}"
+            )
+    assert checked >= 2, f"test sprawdził tylko {checked} elementów z inline maxLength"
+    assert not problems, "\n".join(problems)
+
+
+def test_swift_pattern_and_lengths_match_the_named_type(
+    xsd_types: dict[str, ET.Element], xsd_declared_types: dict[str, set[str]]
+) -> None:
+    """`SWIFT_Type` dopuszcza 8 albo 11 znaków — tabela nie może dopuścić 9/10."""
+    entry = ELEMENT_FACETS["SWIFT"]
+    declared = xsd_declared_types["SWIFT"]
+    patterns = {
+        _resolve(type_name, xsd_types).get("pattern")
+        for type_name in declared
+    } - {None}
+    assert patterns, "SWIFT nie ma wzorca w schemacie"
+    compiled = [re.compile(p) for p in patterns]
+    samples = [f"DEUTDEFF{n}" for n in ("", "0", "00", "000", "0000")]
+    for sample in samples:
+        schema_ok = any(p.fullmatch(sample) for p in compiled)
+        table_ok = bool(entry.pattern and entry.pattern.fullmatch(sample))
+        assert table_ok == schema_ok, f"{sample!r}: tabela={table_ok} schemat={schema_ok}"
+        assert schema_ok == (len(sample) in {8, 11})
+
+
+def test_lengths_match_the_lengths_allowed_by_the_schema_pattern() -> None:
+    """`lengths` musi odpowiadać zbiorowi długości dopuszczonych przez wzorzec.
+
+    Dla `SWIFT` schemat nie podaje `minLength`/`maxLength` — o dopuszczalnych
+    długościach decyduje wzorzec `[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?`, czyli
+    dokładnie 8 albo 11 znaków. Usunięcie 11 z tabeli pozwoliłoby wyemitować
+    numer SWIFT, który KSeF odrzuci.
+    """
+    # Próbka dla SWIFT musi mieć DOKŁADNIE długość `n`, inaczej wzorzec dopasuje
+    # krótszy prefiks i zbiór „dozwolonych długości" wyjdzie fałszywie szeroki.
+    probe = {
+        "SWIFT": lambda n: ("DEUTDEFF" + "0" * n)[:n],
+    }
+    for element, build in sorted(probe.items()):
+        entry = ELEMENT_FACETS[element]
+        assert entry.facet.lengths is not None, element
+        declared = _xsd_declared_types_cached()
+        patterns = {
+            _resolve(type_name, _xsd_types_cached()).get("pattern")
+            for type_name in declared.get(element, set())
+        } - {None}
+        assert patterns, f"{element}: brak wzorca w schemacie"
+        compiled = [re.compile(p) for p in patterns]
+        allowed = {
+            length
+            for length in range(1, 21)
+            if any(p.fullmatch(build(length)) for p in compiled)
+        }
+        assert allowed, f"{element}: nie znaleziono żadnej dozwolonej długości"
+        assert entry.facet.lengths == frozenset(allowed), (
+            f"{element}: tabela={sorted(entry.facet.lengths)} wzorzec={sorted(allowed)}"
+        )
+
+
+_XSD_TYPES_CACHE: dict[str, ET.Element] | None = None
+_XSD_DECLARED_CACHE: dict[str, set[str]] | None = None
+
+
+def _xsd_types_cached() -> dict[str, ET.Element]:
+    global _XSD_TYPES_CACHE
+    if _XSD_TYPES_CACHE is None:
+        _XSD_TYPES_CACHE = _xsd_simple_types()
+    return _XSD_TYPES_CACHE
+
+
+def _xsd_declared_types_cached() -> dict[str, set[str]]:
+    global _XSD_DECLARED_CACHE
+    if _XSD_DECLARED_CACHE is None:
+        _XSD_DECLARED_CACHE = _xsd_declared_type_map()
+    return _XSD_DECLARED_CACHE

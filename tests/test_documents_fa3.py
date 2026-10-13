@@ -85,6 +85,7 @@ from ksef_client.documents.fa3.models import (
     FA3ValidationIssue,
     _coerce_optional_decimal,
     _first_non_empty_text,
+    _looks_like_zero,
     _optional_decimal,
     _optional_iso_date,
     _parse_iso_date,
@@ -93,12 +94,19 @@ from ksef_client.documents.fa3.models import (
     parse_vat_code,
     parse_vat_rate,
 )
+from ksef_client.documents.fa3.validation import validate_xml_facets
 from ksef_client.documents.fa3.xml import (
     FA3XmlValidationError,
+    _amount,
+    _amount2,
     _basic_xml_validation,
+    _q,
     _schema_resolver,
     _vat_rate,
     validate_fa3_xml_xsd,
+)
+from ksef_client.documents.fa3.xml import (
+    _draft_vat_bucket as _draft_bucket,
 )
 from ksef_client.documents.fa3.xsd_map import (
     RAW_EXTENSION_PATHS,
@@ -4385,3 +4393,214 @@ def test_parse_vat_code_accepts_decimal_and_none() -> None:
     assert parse_vat_code(None) is None
     assert parse_vat_code(Decimal("23")) == "23"
     assert parse_vat_code(23) == "23"
+
+
+# ---------------------------------------------------------------------------
+# Regresje z audytu branchu: kody stawek bez procentu, spójność vat_code,
+# walidacja niezależna od flagi biznesowej, znaki niedozwolone w XML.
+# ---------------------------------------------------------------------------
+
+
+
+def _facets_tree() -> ET.Element:
+    """Drzewo faktury zbudowanej przez publiczne API (do testów silnika facetów)."""
+    builder = BasicInvoiceBuilder(invoice_number="FV/FACETS-TREE")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+    return ET.fromstring(builder.build().to_xml().decode("utf-8"))
+
+def test_parse_vat_code_normalises_numeric_zero() -> None:
+    """`0.0`/`0e0`/`0,0` muszą dać pełny kod `0 KR`, nie gołe `"0"`.
+
+    Gołe `"0"` nie należy do `TStawkaPodatku`, więc KSeF odrzucał taki dokument
+    (`SCHEMAV_CVC_ENUMERATION_VALID`), a `validate()` był zielony.
+    """
+    for value in ("0", "0.0", "0,0", "0e0", "0E-7", "0.0%", Decimal("0.0"), 0, 0.0):
+        assert parse_vat_code(value) == "0 KR", value
+
+
+def test_parse_vat_code_accepts_non_percent_codes() -> None:
+    """`oo`, `np I`, `np II` nie mają stawki procentowej — muszą przejść dosłownie."""
+    assert parse_vat_code("oo") == "oo"
+    assert parse_vat_code("np I") == "np I"
+    assert parse_vat_code("np II") == "np II"
+    assert parse_vat_code("np 1") == "np I"
+    assert parse_vat_code("np ii") == "np II"
+    assert parse_vat_rate("oo") is None
+    assert parse_vat_rate("np I") is None
+
+
+def test_looks_like_zero_handles_junk() -> None:
+    """Wartość nieliczbowa nie może być uznana za stawkę zerową."""
+    assert _looks_like_zero("0.0") is True
+    assert _looks_like_zero("23") is False
+    assert _looks_like_zero("zw") is False
+
+
+@pytest.mark.parametrize(
+    ("code", "bucket"),
+    [("oo", "P_13_10"), ("np I", "P_13_8"), ("np II", "P_13_9"), ("zw", "P_13_7")],
+)
+def test_draft_non_percent_codes_get_their_own_bucket(code: str, bucket: str) -> None:
+    """Odwrotne obciążenie i sprzedaż poza terytorium nie mogą iść do zwolnienia."""
+    builder = FA3InvoiceBuilder(
+        invoice_number=f"FV/{code}",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. Prosta 1"),
+        buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. Testowa 2"),
+    )
+    kwargs: dict[str, str] = {"vat_rate": code}
+    if code == "zw":
+        kwargs["exemption_basis"] = "art. 43 ust. 1 pkt 1"
+    builder.add_line("Usługa", quantity="1", unit_net_price="100", **kwargs)
+    found = _tag_texts(builder.build().to_xml(xsd_validate=True))
+    assert found["P_12"] == code
+    assert found[bucket] == "100.00"
+    assert "P_14_1" not in found
+
+
+def test_draft_rejects_unknown_rate_code() -> None:
+    """Kod spoza `TStawkaPodatku` musi zostać odrzucony, a nie trafić do XML."""
+    with pytest.raises(ValueError, match="(?i)nieobs"):
+        _draft_bucket("0 XX", Decimal("0"))
+
+
+def test_draft_bucket_rejects_unknown_code() -> None:
+    with pytest.raises(ValueError, match="(?i)nieobs"):
+        _draft_bucket("99", None)
+
+
+def test_amount_rounds_half_up_like_money() -> None:
+    """Zapisywanie kwot musi używać tego samego trybu zaokrąglania co `money()`.
+
+    `f"{value:.2f}"` zaokrąglało ROUND_HALF_EVEN, więc obciążenie 0.005 dawało
+    `0.00` przy `SumaObciazen = 0.01` — dokument przeczył sam sobie.
+    """
+    assert _amount(Decimal("0.005")) == "0.01"
+    assert _amount(Decimal("1.005")) == "1.01"
+    assert _amount(Decimal("100")) == "100.00"
+    assert _amount("12.5") == "12.50"
+
+
+def test_amount2_accepts_string_and_decimal() -> None:
+    assert _amount2("1.12345678") == "1.12345678"
+    assert _amount2(Decimal("100")) == "100"
+
+
+def test_xml_illegal_control_character_is_reported() -> None:
+    """Znaki spoza produkcji `Char` XML 1.0 dają bajty, których nie przyjmie parser."""
+    root = _facets_tree()
+    description = root.find(f".//{_q('P_7')}")
+    assert description is not None
+    description.text = "Usługa\x0bopis"
+    issues = validate_xml_facets(root)
+    assert any("niedozwolone w XML 1.0" in issue.message for issue in issues)
+    assert any("U+000B" in issue.message for issue in issues)
+
+
+def test_empty_required_text_is_reported() -> None:
+    """`minLength=1`: pusty element nie może przejść jako „brak wartości"."""
+    root = _facets_tree()
+    description = root.find(f".//{_q('P_7')}")
+    assert description is not None
+    description.text = ""
+    issues = validate_xml_facets(root)
+    assert any("mniejsza niż minimum" in issue.message for issue in issues)
+
+
+def test_facet_check_runs_even_without_business_validation() -> None:
+    """`validate=False` wyłącza walidację biznesową, ale nie kontrolę schematu.
+
+    Inaczej `to_xml(validate=False)` (domyślne `xsd_validate=False`) wypuszczało
+    dokument łamiący kontrakt bez żadnego sygnału.
+    """
+    builder = BasicInvoiceBuilder(invoice_number="FV/FACETS-OFF")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+    invoice = builder.build()
+    broken = invoice.to_xml().decode("utf-8").replace("<P_12>23</P_12>", "<P_12>99</P_12>")
+    root = ET.fromstring(broken)
+    assert validate_xml_facets(root)
+
+    # Kontrola schematu jest nadal wyłączalna świadomie.
+    xml = replace(invoice, lines=()).to_xml(validate=False, facets=False)
+    assert xml
+
+
+def test_validation_error_message_names_element_and_rule() -> None:
+    """Komunikat `to_xml()` musi wskazywać ścieżkę elementu, nie surowy SCHEMAV."""
+    builder = BasicInvoiceBuilder(invoice_number="FV/FACETS-MSG")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+    invoice = builder.build()
+    xml = invoice.to_xml().decode("utf-8").replace("<P_12>23</P_12>", "<P_12>99</P_12>")
+    root = ET.fromstring(xml)
+    issues = validate_xml_facets(root)
+    assert issues and all(issue.path.startswith("Faktura") for issue in issues)
+    assert any(issue.element == "P_12" for issue in issues)
+
+
+def test_draft_non_percent_line_does_not_require_exemption_basis() -> None:
+    """`np I`/`np II`/`oo` to nie zwolnienie — nie wolno żądać podstawy prawnej."""
+    for code in ("np I", "np II", "oo"):
+        builder = FA3InvoiceBuilder(
+            invoice_number=f"FV/{code}",
+            issue_date=date(2026, 1, 15),
+            seller=FA3Party(name="S", tax_id="1234567890", address="ul. A 1"),
+            buyer=FA3Party(name="B", tax_id="1111111111", address="ul. B 2"),
+        )
+        builder.add_line("Usługa", quantity="1", unit_net_price="100", vat_rate=code)
+        draft = builder.build()
+        errors, _warnings = draft.validate()
+        assert not errors, (code, [e.message for e in errors])
+
+
+def test_draft_exempt_line_still_requires_exemption_basis() -> None:
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/zw",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="S", tax_id="1234567890", address="ul. A 1"),
+        buyer=FA3Party(name="B", tax_id="1111111111", address="ul. B 2"),
+    )
+    builder.add_line("Usługa", quantity="1", unit_net_price="100", vat_rate="zw")
+    # `build()` rzuca, więc sprawdzamy walidację na poziomie szkicu.
+    from ksef_client.documents.fa3.models import FA3Draft
+
+    draft = FA3Draft(
+        invoice_number="FV/zw",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="S", tax_id="1234567890", address="ul. A 1"),
+        buyer=FA3Party(name="B", tax_id="1111111111", address="ul. B 2"),
+        lines=builder._lines,
+    )
+    errors, _warnings = draft.validate()
+    assert any("podstawy prawnej" in issue.message for issue in errors)
+
+
+def test_illegal_character_reporting_deduplicates_codes() -> None:
+    """Ten sam niedozwolony znak zgłaszamy raz, żeby komunikat był czytelny."""
+    from ksef_client.documents.fa3.validation.engine import _illegal_xml_characters
+
+    assert _illegal_xml_characters("a\x0bb\x0bc") == [0x0B]
+    assert _illegal_xml_characters("poprawny tekst") == []
+
+
+def test_draft_bucket_rejects_unsupported_numeric_rate() -> None:
+    """Stawka liczbowa spoza tabeli (np. 17%) musi zostać zgłoszona, nie wysłana."""
+    with pytest.raises(ValueError, match="(?i)nieobs"):
+        _draft_bucket(None, Decimal("17"))

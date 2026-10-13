@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Final
 
-from typing_extensions import Self
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:  # pragma: no cover - Python 3.10 nie ma `typing.Self`
+    from typing_extensions import Self
 
 from .domain import (
     Annotation,

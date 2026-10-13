@@ -309,6 +309,22 @@ class FA3Line:
         )
 
 
+#: Kody `TStawkaPodatku`, które nie mają stawki procentowej. Draft przyjmuje je
+#: dosłownie (z normalizacją zapisu), bo nie da się ich wyprowadzić z liczby.
+_NON_PERCENT_RATE_CODES: dict[str, str] = {
+    "zw": "zw",
+    "oo": "oo",
+    "np i": "np I",
+    "np ii": "np II",
+    "np 1": "np I",
+    "np 2": "np II",
+    # Formy kanoniczne: `vat_code` zbudowany ręcznie albo wczytany z JSON-a
+    # przechodzi tędy bez normalizacji.
+    "np I": "np I",
+    "np II": "np II",
+}
+
+
 def parse_vat_code(value: Any) -> str | None:
     """Zwraca **kod** stawki z `TStawkaPodatku` (albo ``None`` dla zwolnienia).
 
@@ -330,9 +346,6 @@ def parse_vat_code(value: Any) -> str | None:
     text = text.replace("vat", "").strip()
     if text in {"", "zw", "zwolniony", "zwolniona", "zwolnione", "np", "nie podlega"}:
         return None
-    if text == "0":
-        # Skrót: sama stawka 0% bez znacznika -> krajowa sprzedaż 0%.
-        return "0 KR"
     if text.startswith("0 "):
         suffix = text[2:].strip().upper()
         code = f"0 {suffix}"
@@ -342,7 +355,31 @@ def parse_vat_code(value: Any) -> str | None:
                 "Dozwolone są '0 KR', '0 WDT' i '0 EX'."
             )
         return code
-    return format(decimal_from_value(text, field_name="VAT").normalize(), "f")
+    if text in _NON_PERCENT_RATE_CODES:
+        # Kody bez stawki procentowej: `TStawkaPodatku` wymaga ich dosłownie,
+        # więc nie przechodzą przez konwersję na liczbę.
+        return _NON_PERCENT_RATE_CODES[text]
+    # Stawka zerowa zapisana jako liczba (``0``, ``0.0``, ``0e0``, ``0,0``)
+    # musi dać pełny kod ``0 KR``: gołe ``"0"`` nie należy do `TStawkaPodatku`
+    # i KSeF odrzuca taki dokument (SCHEMAV_CVC_ENUMERATION_VALID). Wcześniejsza
+    # wersja porównywała tekst z ``"0"`` literalnie, więc ``"0.0"`` przechodziło
+    # do ``P_12`` w postaci niepoprawnej.
+    rate = decimal_from_value(text, field_name="VAT")
+    if rate == 0:
+        return "0 KR"
+    return format(rate.normalize(), "f")
+
+
+def _looks_like_zero(text: str) -> bool:
+    """Czy tekst jest stawką zerową zapisaną liczbowo (``0``, ``0.0``, ``0e0``).
+
+    Samo porównanie z ``"0"`` nie wystarcza: arkusz kalkulacyjny wysyła ``"0.0"``
+    albo ``"0,0"``, a ``Decimal`` potrafi zapisać zero jako ``0E-7``.
+    """
+    try:
+        return decimal_from_value(text, field_name="VAT") == 0
+    except (ValueError, ArithmeticError):
+        return False
 
 
 def parse_vat_rate(value: Any) -> Decimal | None:
@@ -369,7 +406,12 @@ def parse_vat_rate(value: Any) -> Decimal | None:
     text = text.replace("vat", "").strip()
     if text in {"", "zw", "zwolniony", "zwolniona", "zwolnione", "np", "nie podlega"}:
         return None
-    if text == "0" or text.startswith("0 "):
+    if text in _NON_PERCENT_RATE_CODES:
+        # Kody bez stawki procentowej (`oo`, `np I`, `np II`) nie mają wartości
+        # liczbowej — draft musi je przyjąć dosłownie, tak jak ścieżka typowana.
+        parse_vat_code(text)
+        return None
+    if text.startswith("0 ") or _looks_like_zero(text):
         # Walidacja kodu (i jego dopuszczalności) należy do `parse_vat_code`.
         parse_vat_code(text)
         return Decimal("0")
@@ -491,6 +533,13 @@ class FA3Draft:
                             column="VAT",
                         )
                     )
+                continue
+            # Kody bez stawki procentowej, które NIE są zwolnieniem (`oo`, `np I`,
+            # `np II`), mają własny koszyk w P_13_x i nie wymagają podstawy prawnej.
+            # Wcześniejsza wersja traktowała każdą pozycję bez `vat_rate` jak
+            # zwolnioną, więc deklaracja odwrotnego obciążenia była odrzucana
+            # komunikatem o brakującej podstawie zwolnienia.
+            if line.vat_code is not None and line.vat_code != "zw":
                 continue
             if not (line.exemption_basis or "").strip():
                 issues.append(
@@ -643,10 +692,18 @@ class FA3Draft:
             settlement_amount=_optional_decimal(settlement, "kwota", "amount"),
         )
 
-    def to_xml(self, *, validate: bool = True, xsd_validate: bool = False) -> bytes:
+    def to_xml(
+        self,
+        *,
+        validate: bool = True,
+        facets: bool = True,
+        xsd_validate: bool = False,
+    ) -> bytes:
         from .xml import draft_to_xml
 
-        return draft_to_xml(self, validate=validate, xsd_validate=xsd_validate)
+        return draft_to_xml(
+            self, validate=validate, facets=facets, xsd_validate=xsd_validate
+        )
 
 
 def _parse_iso_date(value: Any) -> date:

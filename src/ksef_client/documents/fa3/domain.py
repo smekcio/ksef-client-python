@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from typing_extensions import Self
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:  # pragma: no cover - Python 3.10 nie ma `typing.Self`
+    from typing_extensions import Self
 
 from .models import (
     FA3InvoiceKind,
@@ -1094,10 +1098,18 @@ class FA3Invoice:
         errors.extend(self._validate_xml_shape())
         return FA3ValidationResult(tuple(errors), tuple(warnings))
 
-    def to_xml(self, *, validate: bool = True, xsd_validate: bool = False) -> bytes:
+    def to_xml(
+        self,
+        *,
+        validate: bool = True,
+        facets: bool = True,
+        xsd_validate: bool = False,
+    ) -> bytes:
         from .xml import invoice_to_xml
 
-        return invoice_to_xml(self, validate=validate, xsd_validate=xsd_validate)
+        return invoice_to_xml(
+            self, validate=validate, facets=facets, xsd_validate=xsd_validate
+        )
 
     def _validate_xml_shape(self) -> list[FA3ValidationIssue]:
         issues: list[FA3ValidationIssue] = []
@@ -1410,8 +1422,16 @@ class FA3InvoiceBuilderV2:
             return FA3ValidationResult((FA3ValidationIssue(str(exc)),), ())
         return invoice.validate()
 
-    def to_xml(self, *, validate: bool = True, xsd_validate: bool = False) -> bytes:
-        return self.build().to_xml(validate=validate, xsd_validate=xsd_validate)
+    def to_xml(
+        self,
+        *,
+        validate: bool = True,
+        facets: bool = True,
+        xsd_validate: bool = False,
+    ) -> bytes:
+        return self.build().to_xml(
+            validate=validate, facets=facets, xsd_validate=xsd_validate
+        )
 
 
 def _coerce_address(

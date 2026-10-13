@@ -185,9 +185,16 @@ def test_runtime_typing_extensions_importers_exist() -> None:
         import_lines = [
             line
             for line in source.splitlines()
-            if line.startswith(("import ", "from ")) and "typing_extensions" in line
+            if line.startswith(("import ", "from ", "    from ")) and "typing_extensions" in line
         ]
         assert import_lines, f"{relative} nie importuje już typing_extensions w runtime"
+        # Import musi być warunkowany wersją: `Self` jest w `typing` od 3.11,
+        # więc bezwarunkowy import czyniłby typing_extensions zależnością runtime
+        # na interpreterach, które go nie potrzebują (i na których żadna
+        # zależność przechodnia go nie dostarcza - patrz test poniżej).
+        assert "sys.version_info" in source, (
+            f"{relative} importuje typing_extensions bez warunku wersji"
+        )
 
 
 @REQUIRES_TOML_PARSER
@@ -197,12 +204,22 @@ def test_typing_extensions_is_a_declared_dependency() -> None:
 
 @REQUIRES_TOML_PARSER
 def test_typing_extensions_dependency_covers_the_supported_python_range() -> None:
-    """Zależność musi obowiązywać wszędzie, gdzie ``Self`` nie ma w ``typing``."""
+    """Zależność musi być dostępna na KAŻDYM wspieranym interpreterze.
+
+    Marker ``python_version < '3.11'`` był niewystarczający: na Pythonie 3.13+
+    żadna z pozostałych zależności (httpx -> anyio, cryptography) nie dostarcza
+    ``typing_extensions``, więc ``import ksef_client.documents.fa3`` kończył się
+    ``ModuleNotFoundError``. Dopuszczamy wyłącznie deklarację bez markera
+    wersji albo marker obejmujący całe ``requires-python``.
+    """
     specs = _typing_extensions_specs()
     assert specs, "brak wpisu typing_extensions w pyproject.toml"
-    marker = " ".join(specs)
-    assert "python_version" in marker, specs
-    assert "3.11" in marker, specs
+    for spec in specs:
+        marker = spec.split(";", 1)[1].strip() if ";" in spec else ""
+        assert not marker or "python_version" not in marker, (
+            f"deklaracja {spec!r} nie pokrywa całego wspieranego zakresu Pythona; "
+            "użyj deklaracji bez markera wersji"
+        )
 
 
 @REQUIRES_TOML_PARSER

@@ -132,7 +132,6 @@ def _check_text(value: str, facet: Facet, path: str, element: str) -> list[Facet
                     f"{facet.minimum_length} ({facet.xsd_type})",
                 )
             )
-        issues.extend(_check_date_range(value, facet, path, element))
         return issues
 
     number = _parse_decimal(value)
@@ -239,17 +238,58 @@ def _check_date_range(value: str, facet: Facet, path: str, element: str) -> list
     return issues
 
 
+def _illegal_xml_characters(text: str) -> list[int]:
+    """Zwraca kody znaków spoza produkcji ``Char`` XML 1.0 (bez duplikatów).
+
+    XML 1.0 dopuszcza ``#x9``, ``#xA``, ``#xD``, ``#x20``-``#xD7FF``,
+    ``#xE000``-``#xFFFD`` oraz ``#x10000``-``#x10FFFF``. Wszystko inne (np.
+    ``\\x0b`` wklejone z PDF-a albo ``\\x00``) sprawia, że ``ET.tostring``
+    zwraca bajty, których nie zaakceptuje żaden parser — a KSeF tym bardziej.
+    """
+    illegal: list[int] = []
+    seen: set[int] = set()
+    for character in text:
+        code = ord(character)
+        if code in seen:
+            continue
+        allowed = (
+            code in (0x09, 0x0A, 0x0D)
+            or 0x20 <= code <= 0xD7FF
+            or 0xE000 <= code <= 0xFFFD
+            or 0x10000 <= code <= 0x10FFFF
+        )
+        if not allowed:
+            seen.add(code)
+            illegal.append(code)
+    return illegal
+
+
 def _check_value(element: Element, name: str, path: str) -> list[FacetIssue]:
-    """Sprawdza tekst elementu: typ, słownik i wzorzec."""
+    """Sprawdza tekst elementu: typ, słownik, wzorzec i znaki dozwolone w XML."""
     entry = ELEMENT_FACETS.get(name)
     if entry is None:
         return []
     text = element.text
     # `Element.text` może być dowolnym obiektem, jeśli drzewo zbudowano ręcznie
     # (np. wstawiono model zamiast łańcucha) — walidujemy wyłącznie tekst.
-    if not isinstance(text, str) or text == "":
+    if not isinstance(text, str):
         return []
 
+    illegal = _illegal_xml_characters(text)
+    if illegal:
+        # Znaki spoza produkcji `Char` XML 1.0 dają bajty, których nie przyjmie
+        # żaden parser — dalsze sprawdzanie tej wartości nie ma sensu.
+        return [
+            FacetIssue(
+                path,
+                name,
+                "wartość zawiera znaki niedozwolone w XML 1.0 "
+                f"({', '.join(f'U+{code:04X}' for code in illegal)})",
+            )
+        ]
+
+    # Pusty tekst nie jest „brakiem wartości": schemat wymaga `minLength=1`,
+    # więc `<Klucz/>` musi zostać zgłoszony, a nie pominięty.
     issues = _check_text(text, entry.facet, path, name)
     if entry.pattern is not None and not entry.pattern.fullmatch(text):
         issues.append(

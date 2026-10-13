@@ -4,6 +4,11 @@
 
 ### Features
 
+* **fa3:** add `ksef_client.documents.fa3.validation` — schema-constraint validation of the generated
+  XML (field lengths, decimal precision, value dictionaries, patterns, date ranges, element
+  cardinality and required elements). It runs inside `to_xml()` independently of the business
+  `validate` flag, needs no `lxml`, and reports the element path instead of a raw `SCHEMAV_*` error.
+  `to_xml(facets=False)` disables it explicitly.
 * **api:** align with KSeF API 2.7.1 (IZ invoices POST, generate min 2, query/export 100 days UTC, export compressionType from package)
 * **api:** align with KSeF API 2.7.0 (collective identifiers, testdata certificate update)
 * **api:** add collective identifier helpers, pagination iterators and CLI `ksef iz`
@@ -14,6 +19,22 @@
 
 ### Bug Fixes
 
+* **fa3:** emit the elements the schema makes mandatory and the SDK omitted — `BlokDanych/MetaDane`
+  in attachments (every attachment was schema-invalid), `ZamowienieWiersz` in an order, and
+  `AdresPrzewoznika` for a transport carrier
+* **fa3:** restrict `IDWew` to `Podmiot3` (`TPodmiot2` does not allow it) and stop emitting
+  `PrefiksPodatnika` in `PodmiotUpowazniony` and for an authorized party
+* **fa3:** normalise `P_8B`, `P_12_XII`, `KursWaluty*`, `KursUmowny` and `Udzial` to the 6 decimals
+  the schema allows (`TIlosci`/`TProcentowy`), and format `P_9A`/`P_9B`/`P_10` with up to 8
+  decimals (`TKwotowy2`) instead of 2
+* **fa3:** teach the draft/JSON layer the `oo`, `np I` and `np II` rate codes and route each of them
+  to its own `P_13_x` bucket, instead of rejecting them or booking them as tax-exempt
+* **fa3:** accept a zero rate spelled `0.0`/`0e0`/`0,0` as `0 KR` — a bare `0` in `P_12` is not a
+  member of `TStawkaPodatku` and KSeF rejected the document
+* **fa3:** round monetary fields half-up in the writer (the validator already did), so a settlement
+  charge of `0.005` no longer prints as `0.00` while its sum prints as `0.01`
+* **fa3:** reject XML 1.0 control characters and empty values for `minLength=1` fields instead of
+  returning unparseable or schema-invalid XML
 * **collective-identifiers:** validate context invoice limits, common seller, finite payment amounts,
   precise UTC ranges, and resumable CLI pagination
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
@@ -21,8 +42,9 @@
   `session batch close --wait-upo` and `upo wait --batch-auto` no longer fail on a real session status
 * **utils:** make `b64decode` reject the base64url alphabet instead of silently discarding it, so
   `_decode_base64_or_url` actually falls back and verification links keep the whole invoice hash
-* **packaging:** declare `typing_extensions` as a runtime dependency of the FA(3) SDK
-  (`import ksef_client.documents.fa3` failed on Python 3.13+ without an unrelated package providing it)
+* **packaging:** declare `typing_extensions` unconditionally and import `Self` from `typing` on
+  Python 3.11+ — the earlier `python_version < '3.11'` marker left `import
+  ksef_client.documents.fa3` failing on Python 3.13+ whenever no unrelated package provided it
 * **fa3:** put each VAT rate into its own `P_13_x`/`P_14_x` bucket in the draft XML instead of
   declaring every rate as basic-rate sales, and emit `0 KR` for a 0% line
 * **fa3:** keep the sign in `parse_vat_rate`, so a negative VAT rate is reported as an error
