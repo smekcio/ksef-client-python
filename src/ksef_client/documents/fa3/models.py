@@ -147,6 +147,11 @@ class FA3Party:
             issues.append(FA3ValidationIssue(f"{label}: NIP jest wymagany."))
         if not self.country_code.strip():
             issues.append(FA3ValidationIssue(f"{label}: kraj jest wymagany."))
+        if not self.address.strip():
+            # Schemat wymaga `AdresL1` (`minLength=1`). Wcześniej draft wstawiał
+            # w to miejsce literał "brak", więc na dokumencie pojawiał się
+            # fałszywy adres, a `validate()` milczał.
+            issues.append(FA3ValidationIssue(f"{label}: adres jest wymagany."))
         return issues
 
     def to_dict(self) -> dict[str, Any]:

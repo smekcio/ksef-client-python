@@ -1387,6 +1387,68 @@ class TestVatCodePreservation:
         assert TaxCategory.from_vat_rate(None).xml_rate == "zw"
 
 
+class TestDraftRequiresAnAddress:
+    """Draft nie może wstawiać literału "brak" ani wymyślonych danych kontaktowych."""
+
+    def test_draft_without_address_is_reported(self):
+        from datetime import date
+
+        from ksef_client.documents.fa3 import FA3InvoiceBuilder, FA3Party
+
+        builder = FA3InvoiceBuilder(
+            invoice_number="FV/DRAFT",
+            issue_date=date(2026, 9, 23),
+            seller=FA3Party(name="Sprzedawca", tax_id="1234567890"),
+            buyer=FA3Party(name="Nabywca", tax_id="1111111111"),
+        )
+        builder.add_line("Usługa", quantity="1", unit_net_price="100", vat_rate="23")
+        # `build()` już odrzuca brak adresu (wcześniej wstawiał literał "brak").
+        with pytest.raises(ValueError, match="adres jest wymagany"):
+            builder.build()
+
+    def test_draft_does_not_invent_buyer_contacts(self):
+        from datetime import date
+
+        from ksef_client.documents.fa3 import FA3InvoiceBuilder, FA3Party
+
+        draft = (
+            FA3InvoiceBuilder(
+                invoice_number="FV/DRAFT2",
+                issue_date=date(2026, 9, 23),
+                seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. A 1"),
+                buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. B 2"),
+            )
+            .add_line("Usługa", quantity="1", unit_net_price="100", vat_rate="23")
+            .build()
+        )
+        xml = draft.to_xml().decode("utf-8")
+        assert "brak@example.com" not in xml
+        assert "000000000" not in xml
+        assert "<AdresL1>brak</AdresL1>" not in xml
+
+    def test_draft_serializer_refuses_a_missing_address_even_without_validation(self):
+        """Warstwa XML broni się niezależnie od walidacji domenowej."""
+        from dataclasses import replace
+        from datetime import date
+
+        from ksef_client.documents.fa3 import FA3InvoiceBuilder, FA3Party
+        from ksef_client.documents.fa3.xml import FA3XmlValidationError
+
+        draft = (
+            FA3InvoiceBuilder(
+                invoice_number="FV/DRAFT3",
+                issue_date=date(2026, 9, 23),
+                seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. A 1"),
+                buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. B 2"),
+            )
+            .add_line("Usługa", quantity="1", unit_net_price="100", vat_rate="23")
+            .build()
+        )
+        broken = replace(draft, seller=FA3Party(name="Sprzedawca", tax_id="1234567890"))
+        with pytest.raises(FA3XmlValidationError, match="adres jest wymagany"):
+            broken.to_xml(validate=False)
+
+
 class TestExportArchiveLimits:
     """Paczka eksportu może mieć 10 000 faktur + `_metadata.json` (nie liczy się)."""
 

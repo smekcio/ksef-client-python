@@ -280,14 +280,23 @@ def _party(root: ET.Element, tag: str, party: FA3Party) -> None:
     node = ET.SubElement(root, _q(tag))
     identity = ET.SubElement(node, _q("DaneIdentyfikacyjne"))
     ET.SubElement(identity, _q("NIP")).text = party.tax_id
-    ET.SubElement(identity, _q("Nazwa")).text = party.name
+    if party.name:
+        ET.SubElement(identity, _q("Nazwa")).text = party.name
+    if not str(party.address or "").strip():
+        # `AdresL1` jest w schemacie wymagane (`minLength=1`), a draft wstawiał
+        # tu literał "brak" — czyli fałszywy adres na dokumencie podatkowym,
+        # którego wołający nigdy nie podał.
+        raise FA3XmlValidationError(
+            f"{tag}: adres jest wymagany "
+            "(AdresL1 jest elementem wymaganym w schemacie FA(3))."
+        )
     address = ET.SubElement(node, _q("Adres"))
     ET.SubElement(address, _q("KodKraju")).text = party.country_code or "PL"
-    ET.SubElement(address, _q("AdresL1")).text = party.address or "brak"
+    ET.SubElement(address, _q("AdresL1")).text = party.address
     if tag == "Podmiot2":
-        contact = ET.SubElement(node, _q("DaneKontaktowe"))
-        ET.SubElement(contact, _q("Email")).text = "brak@example.com"
-        ET.SubElement(contact, _q("Telefon")).text = "000000000"
+        # `DaneKontaktowe` jest opcjonalne — draft wstawiał tu wymyślony adres
+        # e-mail (`brak@example.com`) i telefon (`000000000`), czyli dane
+        # kontaktowe nabywcy, których nikt nie podał.
         ET.SubElement(node, _q("JST")).text = "2"
         ET.SubElement(node, _q("GV")).text = "2"
 
@@ -1167,9 +1176,20 @@ def _draft_exemption_basis(draft: FA3Draft) -> str | None:
 
     ``P_19N`` („brak dostawy zwolnionej") jest sprzeczne z pozycją o stawce ``zw``,
     dlatego dla takich faktur wymagana jest podstawa prawna (``FA3Line.exemption_basis``).
+
+    Bierzemy pod uwagę WYŁĄCZNIE pozycje faktycznie zwolnione (``zw``), a nie
+    każdą bez stawki procentowej: ``oo``/``np I``/``np II`` też mają
+    ``vat_rate is None``, ale nie są zwolnieniem. Wcześniejsza wersja zwracała
+    podstawę z PIERWSZEJ takiej pozycji, więc faktura ``[oo bez podstawy,
+    zw z podstawą]`` emitowała ``P_19N=1`` przy ``P_13_7 > 0`` (sprzeczność),
+    a ``[zw z podstawą, oo]`` działała — wynik zależał od kolejności wierszy.
     """
     for line in draft.lines:
-        if line.vat_rate is None:
+        if line.vat_code is not None and line.vat_code != "zw":
+            continue
+        if line.vat_code is None and line.vat_rate is not None:
+            continue
+        if (line.exemption_basis or "").strip():
             return line.exemption_basis
     return None
 

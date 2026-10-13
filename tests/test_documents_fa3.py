@@ -365,7 +365,10 @@ def test_models_cover_human_aliases_and_validation_edges() -> None:
     assert issue.cell == "A7"
 
     party_errors = FA3Party(name="", tax_id="", country_code="").validate("Podmiot")
-    assert len(party_errors) == 3
+    # `AdresL1` jest wymagane w schemacie, a draft wstawiał w to miejsce literał
+    # "brak" — czyli fałszywy adres zamiast komunikatu o brakującym polu.
+    assert len(party_errors) == 4
+    assert any("adres jest wymagany" in issue.message for issue in party_errors)
 
     exempt_line = FA3Line(
         description="Zwolnione",

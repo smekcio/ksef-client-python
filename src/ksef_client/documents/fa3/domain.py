@@ -161,9 +161,11 @@ class Address:
 
     def validate(self, path: str) -> list[FA3ValidationIssue]:
         issues: list[FA3ValidationIssue] = []
-        if not self.country_code.strip():
+        # Pola pochodzą z danych wołającego, więc `None` (np. z JSON-a) ma dać
+        # czytelny komunikat, a nie `AttributeError: 'NoneType' ... strip()`.
+        if not str(self.country_code or "").strip():
             issues.append(FA3ValidationIssue(f"{path}: kod kraju jest wymagany.", column=path))
-        if not self.line1.strip():
+        if not str(self.line1 or "").strip():
             issues.append(FA3ValidationIssue(f"{path}: adres jest wymagany.", column=path))
         return issues
 
