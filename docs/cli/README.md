@@ -602,6 +602,7 @@ Usage: ksef session status [OPTIONS]
 Options:
   --id TEXT                 [required]
   --invoice-ref TEXT
+  --base-url TEXT
 ```
 
 Uwagi:
@@ -628,6 +629,7 @@ Usage: ksef session import [OPTIONS]
 Options:
   --in TEXT                 [required]
   --id TEXT
+  --base-url TEXT
 ```
 
 Uwagi:
@@ -672,6 +674,7 @@ Options:
   --max-attempts INTEGER    [default: 60]
   --save-upo TEXT
   --save-upo-overwrite
+  --base-url TEXT
 ```
 
 Uwagi:
@@ -682,7 +685,11 @@ Uwagi:
 ## `ksef session online close`
 
 ```text
-Usage: ksef session online close --id TEXT
+Usage: ksef session online close [OPTIONS]
+
+Options:
+  --id TEXT                 [required]
+  --base-url TEXT
 ```
 
 Zamyka sesje online i aktualizuje checkpoint do stanu `closed`.
@@ -716,6 +723,7 @@ Usage: ksef session batch upload [OPTIONS]
 Options:
   --id TEXT                 [required]
   --parallelism INTEGER     [default: 4]
+  --base-url TEXT
 ```
 
 Uwagi:
@@ -736,6 +744,7 @@ Options:
   --max-attempts INTEGER    [default: 120]
   --save-upo TEXT
   --save-upo-overwrite
+  --base-url TEXT
 ```
 
 Uwagi:

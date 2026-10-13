@@ -87,6 +87,68 @@ def test_session_status_command_passes_invoice_ref(runner, monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
+    ("attribute_name", "argv"),
+    [
+        (
+            "send_online_session_invoice",
+            [
+                "--json",
+                "session",
+                "online",
+                "send",
+                "--id",
+                "resume-1",
+                "--invoice",
+                "invoice.xml",            ],
+        ),
+        ("close_online_session", ["--json", "session", "online", "close", "--id", "resume-1"]),
+        (
+            "get_saved_session_status",
+            ["--json", "session", "status", "--id", "resume-1"],
+        ),
+        (
+            "import_saved_session",
+            ["--json", "session", "import", "--in", "resume.json"],
+        ),
+        (
+            "upload_batch_session",
+            ["--json", "session", "batch", "upload", "--id", "resume-1"],
+        ),
+        (
+            "close_batch_session",
+            ["--json", "session", "batch", "close", "--id", "resume-1"],
+        ),
+    ],
+)
+def test_session_commands_pass_the_base_url_override(
+    runner, monkeypatch, attribute_name, argv
+) -> None:
+    """`--base-url`/`KSEF_BASE_URL` musi docierać do operacji.
+
+    Sesja otwarta z override adresu nie dawała się wysłać ani zamknąć, bo strażnik
+    checkpointu porównywał adres wyłącznie z profilem, a te komendy nie miały
+    nawet opcji `--base-url`.
+    """
+    captured: dict[str, object] = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(session_cmd, attribute_name, _capture)
+
+    result = runner.invoke(app, [*argv, "--base-url", "https://api-test.ksef.mf.gov.pl"])
+    assert result.exit_code == 0
+    assert captured["base_url"] == "https://api-test.ksef.mf.gov.pl"
+
+    captured.clear()
+    monkeypatch.setenv("KSEF_BASE_URL", "https://api-test.ksef.mf.gov.pl")
+    result = runner.invoke(app, argv)
+    assert result.exit_code == 0
+    assert captured["base_url"] == "https://api-test.ksef.mf.gov.pl"
+
+
+@pytest.mark.parametrize(
     ("attribute_name", "argv", "command"),
     [
         ("show_saved_session", ["--json", "session", "show", "--id", "resume-1"], "session.show"),

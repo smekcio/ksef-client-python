@@ -151,6 +151,30 @@ def test_build_batch_payload_source_and_load_source_bytes(monkeypatch, tmp_path:
     assert mismatch_exc.value.code == ExitCode.VALIDATION_ERROR
 
 
+def test_require_checkpoint_base_url_accepts_the_command_override() -> None:
+    """Override adresu z komendy musi być respektowany przez strażnika.
+
+    Sesja otwarta przez `session online open --base-url https://api-test…` ma ten
+    adres w checkpoincie, a profil zostaje na DEMO — bez honorowania override nie
+    dało się jej wysłać ani zamknąć.
+    """
+    checkpoint = _online_checkpoint()
+
+    assert (
+        session_ops._require_checkpoint_base_url(
+            checkpoint,
+            profile="demo",
+            base_url="https://api-demo.ksef.mf.gov.pl/",
+        )
+        == "https://api-demo.ksef.mf.gov.pl"
+    )
+
+    with pytest.raises(CliError, match="base_url does not match"):
+        session_ops._require_checkpoint_base_url(
+            checkpoint, profile="demo", base_url="https://api.ksef.mf.gov.pl"
+        )
+
+
 def test_session_ops_require_checkpoint_type_and_simple_commands(monkeypatch) -> None:
     batch_checkpoint = _batch_checkpoint()
     online_checkpoint = _online_checkpoint()

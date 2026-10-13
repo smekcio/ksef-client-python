@@ -196,21 +196,34 @@ def import_saved_session(
     profile: str,
     source_path: str,
     session_id: str | None = None,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     checkpoint = import_checkpoint(
         profile,
         Path(source_path),
         session_id=session_id,
-        # Checkpoint z pliku nie może wskazywać innego środowiska niż profil —
-        # inaczej token dostępowy trafiłby pod host wybrany przez autora pliku.
-        expected_base_url=resolve_base_url(None, profile=profile),
+        # Checkpoint z pliku nie może wskazywać innego środowiska niż to, pod
+        # które trafi token dostępowy — dlatego porównujemy z efektywnym
+        # adresem komendy (`--base-url`, `KSEF_BASE_URL` albo profil).
+        expected_base_url=resolve_base_url(base_url, profile=profile),
     )
     return _checkpoint_summary(checkpoint)
 
 
-def _require_checkpoint_base_url(checkpoint: SessionCheckpoint, *, profile: str) -> str:
-    """`base_url` checkpointu po sprawdzeniu wobec konfiguracji profilu."""
-    require_matching_base_url(checkpoint, resolve_base_url(None, profile=profile))
+def _require_checkpoint_base_url(
+    checkpoint: SessionCheckpoint,
+    *,
+    profile: str,
+    base_url: str | None = None,
+) -> str:
+    """`base_url` checkpointu po sprawdzeniu wobec efektywnego adresu komendy.
+
+    `base_url` to override przekazany przez komendę (`--base-url` /
+    `KSEF_BASE_URL`) — bez niego liczy się adres profilu. Wcześniej strażnik
+    patrzył wyłącznie na profil, więc sesja otwarta z `--base-url` (udokumentowana
+    opcja) nie dawała się już wysłać ani zamknąć.
+    """
+    require_matching_base_url(checkpoint, resolve_base_url(base_url, profile=profile))
     return checkpoint.base_url
 
 
@@ -271,6 +284,7 @@ def send_online_session_invoice(
     max_attempts: int,
     save_upo: str | None,
     save_upo_overwrite: bool = False,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     checkpoint = _require_online_checkpoint(profile, session_id)
     _ensure_checkpoint_not_closed(
@@ -290,7 +304,9 @@ def send_online_session_invoice(
 
     invoice_xml = adapters._load_invoice_xml(invoice)
     with adapters.create_client(
-        _require_checkpoint_base_url(checkpoint, profile=profile), access_token=access_token
+        _require_checkpoint_base_url(
+            checkpoint, profile=profile, base_url=base_url
+        ), access_token=access_token
     ) as client:
         workflow = OnlineSessionWorkflow(client.sessions)
         session = workflow.resume_session(checkpoint.session_state, access_token=access_token)
@@ -369,6 +385,7 @@ def close_online_session(
     *,
     profile: str,
     session_id: str,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     checkpoint = _require_online_checkpoint(profile, session_id)
     _ensure_checkpoint_not_closed(
@@ -381,7 +398,9 @@ def close_online_session(
     )
     access_token = adapters._require_access_token(profile)
     with adapters.create_client(
-        _require_checkpoint_base_url(checkpoint, profile=profile), access_token=access_token
+        _require_checkpoint_base_url(
+            checkpoint, profile=profile, base_url=base_url
+        ), access_token=access_token
     ) as client:
         workflow = OnlineSessionWorkflow(client.sessions)
         session = workflow.resume_session(checkpoint.session_state, access_token=access_token)
@@ -441,6 +460,7 @@ def upload_batch_session(
     profile: str,
     session_id: str,
     parallelism: int,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     checkpoint = _require_batch_checkpoint(profile, session_id)
     _ensure_checkpoint_not_closed(
@@ -467,7 +487,9 @@ def upload_batch_session(
     uploaded_ordinals = sorted(set(checkpoint.uploaded_ordinals))
 
     with adapters.create_client(
-        _require_checkpoint_base_url(checkpoint, profile=profile), access_token=access_token
+        _require_checkpoint_base_url(
+            checkpoint, profile=profile, base_url=base_url
+        ), access_token=access_token
     ) as client:
         workflow = BatchSessionWorkflow(client.sessions, client.http_client)
         session = workflow.resume_session(
@@ -525,6 +547,7 @@ def close_batch_session(
     max_attempts: int,
     save_upo: str | None,
     save_upo_overwrite: bool = False,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     checkpoint = _require_batch_checkpoint(profile, session_id)
     if save_upo and not wait_upo:
@@ -541,7 +564,9 @@ def close_batch_session(
 
     access_token = adapters._require_access_token(profile)
     with adapters.create_client(
-        _require_checkpoint_base_url(checkpoint, profile=profile), access_token=access_token
+        _require_checkpoint_base_url(
+            checkpoint, profile=profile, base_url=base_url
+        ), access_token=access_token
     ) as client:
         if checkpoint.stage != "closed":
             session = BatchSessionHandle.from_state(
@@ -611,11 +636,12 @@ def get_saved_session_status(
     profile: str,
     session_id: str,
     invoice_ref: str | None,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     checkpoint = load_checkpoint(profile, session_id)
     return adapters.get_send_status(
         profile=profile,
-        base_url=_require_checkpoint_base_url(checkpoint, profile=profile),
+        base_url=_require_checkpoint_base_url(checkpoint, profile=profile, base_url=base_url),
         session_ref=checkpoint.session_state.reference_number,
         invoice_ref=invoice_ref,
     ) | {"id": checkpoint.id, "kind": checkpoint.kind, "stage": checkpoint.stage}
