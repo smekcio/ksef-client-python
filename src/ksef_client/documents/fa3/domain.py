@@ -331,7 +331,22 @@ class Discount:
     def percent(cls, value: Decimal | str | int | float, reason: str | None = None) -> Discount:
         return cls(DiscountKind.PERCENT, decimal_from_value(value, field_name="discount"), reason)
 
+    def unit_amount_for(self, unit_net_price: Decimal) -> Decimal:
+        """Obniżka przypadająca na JEDNOSTKĘ — to ona trafia do `P_10`.
+
+        Schemat opisuje `P_10` jako „kwoty wszelkich opustów lub obniżek cen",
+        a oficjalny `FA_3_Przykład_4.xml` rozstrzyga semantykę: wiersz
+        `P_8B=20, P_9A=1000, P_10=100` ma `P_11=18000`, czyli
+        `20 × (1000 − 100)`, a nie `20 × 1000 − 100`. Wcześniejsza wersja
+        traktowała wartość jako kwotę łączną, przez co dla tych samych liczb
+        emitowała `P_11=19900` i zawyżała netto o 1900 zł oraz VAT o 437 zł.
+        """
+        if self.kind is DiscountKind.PERCENT:
+            return money(unit_net_price * self.value / Decimal("100"))
+        return money(self.value)
+
     def amount_for(self, base: Decimal) -> Decimal:
+        """Łączna kwota obniżki dla podanej podstawy (do wyliczeń wewnętrznych)."""
         if self.kind is DiscountKind.PERCENT:
             return money(base * self.value / Decimal("100"))
         return money(self.value)
@@ -444,7 +459,15 @@ class TaxCategory:
 
     @classmethod
     def margin(cls) -> TaxCategory:
-        return cls(TaxCategoryKind.MARGIN, None, "np I")
+        """Procedura marży (art. 119/120): wiersz NIE niesie stawki (`P_12`).
+
+        Podręcznik KSeF: faktura marży nie zawiera stawki podatku, ceny
+        jednostkowej netto ani wartości sprzedaży netto. Wcześniejsza wersja
+        ustawiała `P_12="np I"` („dostawa poza terytorium kraju, niepodlegająca
+        opodatkowaniu"), co na krajowej sprzedaży opodatkowanej od marży było
+        nieprawdziwą deklaracją.
+        """
+        return cls(TaxCategoryKind.MARGIN, None, None)
 
     @classmethod
     def xii(cls, rate: Decimal | str | int | float) -> TaxCategory:
@@ -674,10 +697,21 @@ class InvoiceLine:
         return money(self.quantity * self.unit_net_price)
 
     @property
-    def discount_amount(self) -> Decimal:
+    def discount_unit_amount(self) -> Decimal:
+        """Wartość `P_10` — obniżka na jednostkę (zgodnie z przykładem MF 4)."""
         if self.discount is None:
             return Decimal("0.00")
-        return min(self.discount.amount_for(self.base_net_amount), self.base_net_amount)
+        return min(self.discount.unit_amount_for(self.unit_net_price), self.unit_net_price)
+
+    @property
+    def discount_amount(self) -> Decimal:
+        """Łączna obniżka wiersza (`P_10 × P_8B`), ograniczona do wartości netto."""
+        if self.discount is None:
+            return Decimal("0.00")
+        return min(
+            money(self.discount_unit_amount * self.quantity),
+            self.base_net_amount,
+        )
 
     @property
     def computed_net_amount(self) -> Decimal:

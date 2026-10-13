@@ -28,6 +28,7 @@ from .domain import (
     PartyIdentifierKind,
     PaymentTerms,
     Settlement,
+    TaxCategoryKind,
 )
 from .models import FA3Draft, FA3InvoiceKind, FA3Line, FA3Party, decimal_from_value, money
 from .sections import (
@@ -695,17 +696,25 @@ def _domain_line(fa: ET.Element, index: int, line: InvoiceLine) -> None:
             ET.SubElement(row, _q("CN")).text = line.identifiers.cn
         if line.identifiers.pkob:
             ET.SubElement(row, _q("PKOB")).text = line.identifiers.pkob
+    # Procedura marży (art. 119/120): wiersz nie zawiera ceny jednostkowej netto,
+    # wartości sprzedaży netto ani stawki — podstawa jest marża, a nie obrót.
+    # Oficjalne `FA_3_Przykład_8.xml` i `_19.xml` mają wyłącznie `P_8A`, `P_8B`,
+    # `P_9B`, `P_11A` i `GTU`; wcześniejsza wersja dokładała `P_9A`, `P_11`
+    # i `P_12="np I"`, czyli ujawniała netto i deklarowała dostawę poza krajem.
+    margin_procedure = line.tax.kind is TaxCategoryKind.MARGIN
     ET.SubElement(row, _q("P_8A")).text = line.unit
     ET.SubElement(row, _q("P_8B")).text = _rate6(line.quantity)
-    ET.SubElement(row, _q("P_9A")).text = _amount2(line.unit_net_price)
+    if not margin_procedure:
+        ET.SubElement(row, _q("P_9A")).text = _amount2(line.unit_net_price)
     if line.unit_gross_price is not None:
         ET.SubElement(row, _q("P_9B")).text = _amount2(line.unit_gross_price)
     if line.discount_amount:
-        ET.SubElement(row, _q("P_10")).text = _amount2(line.discount_amount)
-    ET.SubElement(row, _q("P_11")).text = _amount(line.effective_net_amount)
+        ET.SubElement(row, _q("P_10")).text = _amount2(line.discount_unit_amount)
+    if not margin_procedure:
+        ET.SubElement(row, _q("P_11")).text = _amount(line.effective_net_amount)
     if line.gross_amount is not None:
         ET.SubElement(row, _q("P_11A")).text = _amount(line.effective_gross_amount)
-    if line.tax.vat_rate is not None or line.vat_amount is not None:
+    if not margin_procedure and (line.tax.vat_rate is not None or line.vat_amount is not None):
         ET.SubElement(row, _q("P_11Vat")).text = _amount(line.effective_vat_amount)
     if line.tax.xml_rate:
         ET.SubElement(row, _q("P_12")).text = line.tax.xml_rate
@@ -899,7 +908,10 @@ def _domain_order_line(parent: ET.Element, index: int, line: OrderLine) -> None:
             ET.SubElement(row, _q("PKOBZ")).text = line.identifiers.pkob
     ET.SubElement(row, _q("P_8AZ")).text = line.unit
     ET.SubElement(row, _q("P_8BZ")).text = _rate6(line.quantity)
-    ET.SubElement(row, _q("P_9AZ")).text = _amount2(line.unit_net_price)
+    # `ZamowienieWiersz` nie ma pola rabatu, więc `P_9AZ` musi nieść cenę już
+    # po obniżce — inaczej `P_8BZ × P_9AZ` nie równa się `P_11NettoZ`
+    # (oficjalny `FA_3_Przykład_29.xml` trzyma tę tożsamość).
+    ET.SubElement(row, _q("P_9AZ")).text = _amount2(line.effective_unit_net_price)
     ET.SubElement(row, _q("P_11NettoZ")).text = _amount(line.effective_net_amount)
     ET.SubElement(row, _q("P_11VatZ")).text = _amount(line.effective_vat_amount)
     if line.tax.xml_rate:

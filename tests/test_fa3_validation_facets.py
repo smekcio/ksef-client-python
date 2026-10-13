@@ -496,10 +496,15 @@ def test_validation_error_message_points_at_element() -> None:
 
 
 def test_margin_rate_code_is_accepted() -> None:
-    """`np I` (procedura marży) musi przechodzić słownik `P_12`."""
+    """Procedura marży nie podaje stawki — wiersz nie może nieść `P_12`.
+
+    Oficjalny `FA_3_Przykład_8.xml` ma w wierszu wyłącznie `P_8A`, `P_8B`,
+    `P_9B`, `P_11A` i `GTU`; wcześniejsza wersja SDK emitowała tam
+    `P_12="np I"` („dostawa poza terytorium kraju"), co było nieprawdziwą
+    deklaracją dla krajowej sprzedaży opodatkowanej od marży.
+    """
     root = _tree(tax=TaxCategory.margin())
-    rate = root.find(f".//{_q('P_12')}")
-    assert rate is not None and rate.text == "np I"
+    assert root.find(f".//{_q('P_12')}") is None
     assert validate_xml_facets(root) == []
 
 

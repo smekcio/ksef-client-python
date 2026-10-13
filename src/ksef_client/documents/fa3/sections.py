@@ -210,14 +210,34 @@ class OrderLine:
         return money(self.quantity * self.unit_net_price)
 
     @property
-    def discount_amount(self) -> Decimal:
+    def unit_discount_amount(self) -> Decimal:
+        """Obniżka na JEDNOSTKĘ (ta sama semantyka co `InvoiceLine`)."""
         if self.discount is None:
             return Decimal("0.00")
-        return min(self.discount.amount_for(self.base_net_amount), self.base_net_amount)
+        return min(self.discount.unit_amount_for(self.unit_net_price), self.unit_net_price)
+
+    @property
+    def discount_amount(self) -> Decimal:
+        """Łączna obniżka wiersza zamówienia (`P_10` × `P_8BZ`)."""
+        return min(money(self.unit_discount_amount * self.quantity), self.base_net_amount)
+
+    @property
+    def effective_unit_net_price(self) -> Decimal:
+        """Cena jednostkowa netto PO obniżce — to ona trafia do `P_9AZ`.
+
+        `ZamowienieWiersz` nie ma pola na rabat (w całym schemacie FA(3) nie ma
+        `P_10Z`), a oficjalny `FA_3_Przykład_29.xml` trzyma tożsamość
+        `P_11NettoZ = P_8BZ × P_9AZ`. Emisja ceny sprzed rabatu dawała dokument
+        wewnętrznie sprzeczny (dla 20 × 1000 z rabatem 100: `P_9AZ × P_8BZ`
+        = 20 000, a `P_11NettoZ` = 18 000), mimo że `xsd_validate=True` go
+        przepuszczało.
+        """
+        return money(self.unit_net_price - self.unit_discount_amount)
 
     @property
     def effective_net_amount(self) -> Decimal:
-        return money(self.base_net_amount - self.discount_amount)
+        """Wartość netto wiersza (`P_11NettoZ`) — zawsze `P_8BZ × P_9AZ`."""
+        return money(self.effective_unit_net_price * self.quantity)
 
     @property
     def effective_vat_amount(self) -> Decimal:

@@ -1132,8 +1132,10 @@ def test_domain_invoice_builds_discount_annotations_parties_payment_and_attachme
 
     assert "<KodUE>DE</KodUE>" in xml
     assert "<Podmiot3>" in xml
-    # P_10 jest typu TKwotowy2 (do 8 miejsc po przecinku) - wartość jest normalizowana.
-    assert "<P_10>20</P_10>" in xml
+    # `P_10` to obniżka na JEDNOSTKĘ (10% ze 100 = 10), a `P_11` = 2 × (100 − 10).
+    # Semantyka zgodna z oficjalnym `FA_3_Przykład_4.xml`.
+    assert "<P_10>10</P_10>" in xml
+    assert "<P_11>180.00</P_11>" in xml
     assert "<P_13_" in xml
     assert "<P_14_" in xml
     assert "<P_13_7>50.00</P_13_7>" in xml
@@ -1981,7 +1983,8 @@ def test_domain_validation_and_value_object_branches() -> None:
     assert VatClass.from_rate_code("np II").xml_rate == "np II"
     assert VatClass.from_rate_code("3").xml_rate == "3"
     assert VatClass.outside_country().xml_rate == "np I"
-    assert VatClass.margin().xml_rate == "np I"
+    # Procedura marży nie podaje stawki — podstawa jest marża, nie obrót.
+    assert VatClass.margin().xml_rate is None
     assert VatClass.xii("12").xii_rate == Decimal("12")
     with pytest.raises(ValueError, match="Nieobsługiwana"):
         VatClass.from_rate_code("bad")

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -320,6 +321,124 @@ class TestUpoAcceptHeader:
             assert method == "GET" and headers == {"Accept": "application/xml"}, path
 
 
+class TestDecimalAcceptance:
+    """`Decimal` nie może wymagać dodatkowej konwersji, a `str` musi działać."""
+
+    def test_discount_is_per_unit_like_the_official_sample(self):
+        from ksef_client.documents.fa3 import (
+            BasicInvoiceBuilder,
+            Discount,
+            InvoiceParty,
+            VatClass,
+        )
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/D")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+        )
+        builder.add_service_line(
+            "zamrażarka",
+            quantity="20",
+            unit_net_price="1000",
+            tax=VatClass.standard_23(),
+            discount=Discount.amount(Decimal("100")),
+        )
+        xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+        # `FA_3_Przykład_4.xml`: 20 × (1000 − 100) = 18000, nie 20 × 1000 − 100.
+        assert "<P_10>100</P_10>" in xml
+        assert "<P_11>18000.00</P_11>" in xml
+
+    def test_percent_discount_applies_to_the_unit_price(self):
+        from ksef_client.documents.fa3 import (
+            BasicInvoiceBuilder,
+            Discount,
+            InvoiceParty,
+            VatClass,
+        )
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/D2")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+        )
+        builder.add_service_line(
+            "Usługa",
+            quantity="2",
+            unit_net_price="100",
+            tax=VatClass.standard_23(),
+            discount=Discount.percent("10"),
+        )
+        xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+        assert "<P_10>10</P_10>" in xml
+        assert "<P_11>180.00</P_11>" in xml
+
+    def test_order_line_discount_uses_the_same_per_unit_semantics(self):
+        """Ten sam obiekt `Discount` musi znaczyć to samo w pozycji zamówienia."""
+        from ksef_client.documents.fa3 import (
+            AdvanceInvoiceBuilder,
+            Discount,
+            InvoiceParty,
+            VatClass,
+        )
+
+        builder = AdvanceInvoiceBuilder(invoice_number="ZAL/D")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+        )
+        builder.add_service_line(
+            "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+        )
+        builder.order(total_gross="1000")
+        builder.order_line(
+            "Pozycja",
+            quantity="20",
+            unit_net_price="50",
+            tax=VatClass.standard_23(),
+            discount=Discount.amount("5"),
+        )
+        invoice = builder.build()
+        assert invoice.order is not None
+        line = invoice.order.lines[0]
+        # 20 × 5 = 100 (obniżka na jednostkę), a nie 5 zł łącznie.
+        assert line.discount_amount == Decimal("100.00")
+        assert line.effective_net_amount == Decimal("900.00")
+
+
+class TestRemainingBranches:
+    """Gałęzie wprowadzone przez poprawki muszą być wykonywane przez testy."""
+
+    @staticmethod
+    def _seller():
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        return InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+
+    @staticmethod
+    def _buyer():
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        return InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+
+    def test_line_without_discount_has_zero_unit_discount(self):
+        from ksef_client.documents.fa3 import BasicInvoiceBuilder
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/ND")
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        line = builder.build().lines[0]
+        assert line.discount_unit_amount == Decimal("0.00")
+        assert line.discount_amount == Decimal("0.00")
+
+
 class TestTimestampNormalisationIsVersionUniform:
     """Ułamek sekundy musi być sprowadzany do 6 cyfr niezależnie od długości."""
 
@@ -427,3 +546,36 @@ class TestCliCertificateValidity:
             False,
             datetime.min.replace(tzinfo=timezone.utc),
         )
+
+
+class TestOrderLineDiscountIdentity:
+    """`ZamowienieWiersz` nie ma pola rabatu, więc `P_9AZ` musi być ceną po rabacie."""
+
+    def test_unit_price_after_discount_keeps_the_schema_identity(self):
+        from ksef_client.documents.fa3 import (
+            AdvanceInvoiceBuilder,
+            Discount,
+            InvoiceParty,
+            VatClass,
+        )
+
+        builder = AdvanceInvoiceBuilder(invoice_number="FZ/RABAT")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+        )
+        builder.order(total_gross="22140")
+        builder.order_line(
+            "pozycja zamowienia",
+            quantity="20",
+            unit_net_price="1000",
+            tax=VatClass.standard_23(),
+            discount=Discount.amount("100"),
+        )
+        xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+        row = xml.split("<ZamowienieWiersz>", 1)[1].split("</ZamowienieWiersz>", 1)[0]
+        # `FA_3_Przykład_29.xml`: P_8BZ × P_9AZ = P_11NettoZ.
+        assert "<P_9AZ>900</P_9AZ>" in row
+        assert "<P_11NettoZ>18000.00</P_11NettoZ>" in row
