@@ -32,7 +32,11 @@ PAGE_SIZE_MAX = 200
 PAGE_SIZE_INVOICES_MAX = 500
 
 COLLECTIVE_IDENTIFIER_EXCEPTION_CODES = {
-    71001: "Invoice cannot be assigned to a collective identifier",
+    # Opisy 1:1 z kontraktem OpenAPI KSeF: 71001 to „faktura o podanym
+    # identyfikatorze nie istnieje", a nie „nie można przypisać do identyfikatora
+    # zbiorczego" — wcześniejszy opis dotyczył innej sytuacji niż ta, którą
+    # zwraca API.
+    71001: "Invoice with the given KSeF number does not exist",
     71002: "Invoice is already assigned to the maximum number of collective identifiers",
     71004: "Invoices belong to different sellers",
     71005: "Duplicated KSeF number in the request",

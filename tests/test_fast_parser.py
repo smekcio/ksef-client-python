@@ -74,5 +74,46 @@ def test_fast_extract_ksef_metadata_buffered_io():
 
 def test_fast_extract_ksef_metadata_too_long_p11():
     xml = '<Faktura><Fa><FaWiersz><P_11>' + '1' * 35 + '</P_11></FaWiersz></Fa></Faktura>'
-    with pytest.raises(ValueError, match="Wartość P_11 jest zbyt długa"):
+    with pytest.raises(ValueError, match="zbyt długa"):
         fast_extract_ksef_metadata(xml)
+
+
+KSEF_P_11A_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
+<Faktura><Fa>
+  <FaWiersz><P_8B>1</P_8B><P_11A>2000</P_11A><P_12>23</P_12></FaWiersz>
+  <FaWiersz><P_8B>1</P_8B><P_11A>1000</P_11A><P_12>23</P_12></FaWiersz>
+</Fa></Faktura>
+"""
+
+KSEF_KOR_ROZ_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
+<Faktura><Fa>
+  <FaWiersz><NrWierszaFa>1</NrWierszaFa><P_11>307500</P_11><StanPrzed>1</StanPrzed></FaWiersz>
+  <FaWiersz><NrWierszaFa>1</NrWierszaFa><P_11>307500</P_11></FaWiersz>
+  <FaWiersz><NrWierszaFa>2</NrWierszaFa><P_11>4500</P_11><StanPrzed>1</StanPrzed></FaWiersz>
+  <FaWiersz><NrWierszaFa>2</NrWierszaFa><P_11>4500</P_11></FaWiersz>
+</Fa></Faktura>
+"""
+
+
+def test_fast_extract_ksef_metadata_handles_gross_only_lines():
+    """Faktury z art. 106e ust. 7 i 8 mają `P_11A`, a nie `P_11`.
+
+    Wcześniej parser dopasowywał wyłącznie `P_11` (dokładne porównanie), więc dla
+    takich dokumentów zwracał `total_netto=0.00` i `item_count=0` bez sygnału.
+    """
+    res = fast_extract_ksef_metadata(KSEF_P_11A_SAMPLE)
+    assert res["item_count"] == 2
+    assert res["total_brutto"] == Decimal("3000")
+    assert res["total_netto"] == Decimal("0.00")
+
+
+def test_fast_extract_ksef_metadata_skips_before_correction_rows():
+    """`StanPrzed` to stan przed korektą — nie może wchodzić do sumy.
+
+    Wcześniej korekta (KOR_ROZ) liczyła oba stany, więc `total_netto` był
+    podwojony (624000 zamiast 312000) i sprzeczny z podsumowaniem dokumentu.
+    """
+    res = fast_extract_ksef_metadata(KSEF_KOR_ROZ_SAMPLE)
+    assert res["total_netto"] == Decimal("312000")
+    assert res["item_count"] == 4
+    assert res["stan_przed_item_count"] == 2
