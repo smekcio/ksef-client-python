@@ -1558,13 +1558,28 @@ _PATTERN_MUST_REJECT: dict[str, tuple[str, ...]] = {
     ),
     "NrKSeFFaZaliczkowej": (
         "x" * 35,
-        "1111111111-20260101-AAAAAA-BBBBBB-01",
+        "1111111111-20260101-AAAAAA-BBBBBB-0G",
+        "0111111111-20260101-AAAAAA-BBBBBB-01",
     ),
 }
 
 
+def test_ksef_number_elements_share_the_schema_pattern() -> None:
+    """`NrKSeFFaKorygowanej` i `NrKSeFFaZaliczkowej` mają ten sam typ `TNumerKSeF`.
+
+    Wcześniej `NrKSeFFaZaliczkowej` deklarował wyłącznie długości (35/36), więc
+    dowolny napis tej długości przechodził walidację i dopiero KSeF go odrzucał.
+    """
+    correcting = ELEMENT_FACETS["NrKSeFFaKorygowanej"]
+    advance = ELEMENT_FACETS["NrKSeFFaZaliczkowej"]
+    assert advance.pattern is not None
+    assert correcting.pattern is not None
+    assert advance.facet == correcting.facet
+    assert advance.pattern.pattern == correcting.pattern.pattern
+
+
 def test_patterns_reject_values_the_schema_rejects() -> None:
-    """Wzorzec w tabeli nie może być łagodniejszy niż wzorzec schematu.
+    r"""Wzorzec w tabeli nie może być łagodniejszy niż wzorzec schematu.
 
     Samo sprawdzenie, że poprawna wartość przechodzi, nie wykrywa osłabienia
     wzorca (np. zamiany wzorca NIP na ``\d{10}``) — trzeba dowieść, że wartości

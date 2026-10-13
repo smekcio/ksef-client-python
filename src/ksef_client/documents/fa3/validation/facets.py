@@ -677,18 +677,7 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "DataWystFaKorygowanej": ElementFacet(DATA_TRANSPORTU),
     "NrFaKorygowanej": ElementFacet(TZN),
     "NrKSeF": ElementFacet(WYBOR1),
-    "NrKSeFFaKorygowanej": ElementFacet(
-        NUMER_KSEF,
-        pattern=re.compile(
-            r"([1-9]((\d[1-9])|([1-9]\d))\d{7}|M\d{9}|[A-Z]{3}\d{7})-"
-            r"(20[2-9][0-9]|2[1-9][0-9]{2}|[3-9][0-9]{3})"
-            r"(0[1-9]|1[0-2])(0[1-9]|[1-2][0-9]|3[0-1])-"
-            r"([0-9A-F]{6})-?([0-9A-F]{6})-([0-9A-F]{2})"
-        ),
-        pattern_hint=(
-            "numer KSeF: NIP-data-6hex-6hex-2hex, np. 1111111111-20260714-D5FB0C-9ED490-9A"
-        ),
-    ),
+    "NrKSeFFaKorygowanej": NUMER_KSEF_ELEMENT,
     "NrKSeFN": ElementFacet(WYBOR1),
     "OkresFaKorygowanej": ElementFacet(TZN),
     "NrFaKorygowany": ElementFacet(TZN),
@@ -698,9 +687,7 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "P_6Z": ElementFacet(DATA_TRANSPORTU),
     "P_15Z": ElementFacet(KWOTOWY),
     "KursWalutyZW": ElementFacet(ILOSCI),
-    "NrKSeFFaZaliczkowej": ElementFacet(
-        NUMER_KSEF,
-    ),
+    "NrKSeFFaZaliczkowej": NUMER_KSEF_ELEMENT,
     "NrKSeFZN": ElementFacet(WYBOR1),
     "NrFaZaliczkowej": ElementFacet(TZN),
     "Klucz": ElementFacet(TZN),

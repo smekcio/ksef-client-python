@@ -938,6 +938,39 @@ class TestSimplifiedInvoice:
             builder.build()
 
 
+class TestAdvanceInvoiceKsefNumber:
+    """`NrKSeFFaZaliczkowej` ma ten sam typ `TNumerKSeF` co pole korygowane."""
+
+    @staticmethod
+    def _builder(invoice_number: str):
+        from ksef_client.documents.fa3 import AdvanceInvoiceBuilder, InvoiceParty, VatClass
+
+        builder = AdvanceInvoiceBuilder(invoice_number=invoice_number)
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+        )
+        builder.add_service_line(
+            "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+        )
+        return builder
+
+    def test_bogus_advance_ksef_number_is_rejected(self):
+        from ksef_client.documents.fa3.xml import FA3XmlValidationError
+
+        builder = self._builder("ZAL/1")
+        builder.settles_advance(ksef_number="X" * 35)
+        with pytest.raises(FA3XmlValidationError, match="nie pasuje do formatu"):
+            builder.build().to_xml()
+
+    def test_valid_advance_ksef_number_is_accepted(self):
+        builder = self._builder("ZAL/2")
+        builder.settles_advance(ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01")
+        assert builder.build().to_xml(xsd_validate=True)
+
+
 class TestCountryCodeDictionary:
     """`KodKraju` jest 254-wartościowym słownikiem, nie dowolnym dwuznakiem."""
 
