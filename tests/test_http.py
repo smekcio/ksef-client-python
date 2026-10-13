@@ -638,5 +638,52 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("Authorization", kwargs["headers"])
 
 
+class RedirectHandlingTests(unittest.TestCase):
+    """3xx nie może być traktowane jak sukces.
+
+    `httpx` nie podąża za przekierowaniami (`follow_redirects=False`), więc treść
+    odpowiedzi 3xx to strona pośrednika albo puste ciało — przyjmowanie jej jako
+    sukcesu zapisywało PUSTY plik UPO/faktury i raportowało sukces.
+    """
+
+    def test_sync_redirect_without_expected_status_is_an_error(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(302, headers={"Location": "https://example.com/login"})
+        with (
+            patch.object(client._client, "request", Mock(return_value=response)),
+            self.assertRaises(KsefHttpError),
+        ):
+            client.request("GET", "/path")
+
+    def test_sync_redirect_is_accepted_when_explicitly_expected(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(302, headers={"Location": "https://example.com/x"})
+        with patch.object(client._client, "request", Mock(return_value=response)):
+            result = client.request("GET", "/path", expected_status={302})
+            self.assertEqual(result.status_code, 302)
+
+    def test_sync_2xx_is_still_a_success(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options, access_token="token")
+        for status_code in (200, 201, 202, 204):
+            response = httpx.Response(status_code)
+            with patch.object(client._client, "request", Mock(return_value=response)):
+                self.assertEqual(client.request("GET", "/path").status_code, status_code)
+
+
+class AsyncRedirectHandlingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_redirect_is_an_error(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = AsyncBaseHttpClient(options, access_token="token")
+        response = httpx.Response(307, headers={"Location": "https://example.com/x"})
+        with (
+            patch.object(client._client, "request", AsyncMock(return_value=response)),
+            self.assertRaises(KsefHttpError),
+        ):
+            await client.request("GET", "/path")
+
+
 if __name__ == "__main__":
     unittest.main()

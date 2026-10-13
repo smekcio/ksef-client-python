@@ -628,8 +628,14 @@ class BaseHttpClient:
             expected_status
             and response.status_code not in expected_status
             or not expected_status
-            and response.status_code >= 400
+            and response.status_code >= 300
         ):
+            # Bez `expected_status` każda odpowiedź spoza 2xx jest błędem —
+            # także przekierowanie (3xx). `httpx` nie podąża za przekierowaniami
+            # (domyślnie `follow_redirects=False`), więc treścią takiej
+            # odpowiedzi jest strona pośrednika albo puste ciało. Przyjmowanie
+            # jej jako sukcesu zapisywało PUSTY plik UPO/faktury i raportowało
+            # sukces (`upo download` tworzył plik o rozmiarze 0).
             self._raise_for_status(response)
 
         return HttpResponse(response.status_code, response.headers, response.content)
@@ -743,8 +749,14 @@ class AsyncBaseHttpClient:
             expected_status
             and response.status_code not in expected_status
             or not expected_status
-            and response.status_code >= 400
+            and response.status_code >= 300
         ):
+            # Bez `expected_status` każda odpowiedź spoza 2xx jest błędem —
+            # także przekierowanie (3xx). `httpx` nie podąża za przekierowaniami
+            # (domyślnie `follow_redirects=False`), więc treścią takiej
+            # odpowiedzi jest strona pośrednika albo puste ciało. Przyjmowanie
+            # jej jako sukcesu zapisywało PUSTY plik UPO/faktury i raportowało
+            # sukces (`upo download` tworzył plik o rozmiarze 0).
             self._raise_for_status(response)
 
         return HttpResponse(response.status_code, response.headers, response.content)
