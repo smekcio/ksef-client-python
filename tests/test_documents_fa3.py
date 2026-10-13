@@ -809,6 +809,18 @@ def test_xml_exports_advanced_fields_and_payment_variants() -> None:
     assert xml_text.index("<Rozliczenie>") < xml_text.index("<Platnosc>")
 
 
+def test_payment_method_without_a_due_date_is_still_emitted() -> None:
+    """Sama forma płatności (bez terminu) jest poprawnym, wspieranym wejściem.
+
+    Test wariantów płatności ustawia zawsze oba pola naraz, więc regresja, w której
+    `<FormaPlatnosci>` znika, gdy nie ma terminu, przechodziła na zielono.
+    """
+    draft = _draft("FV/PAY/1", payment_method="gotówka")
+    xml = draft.to_xml(xsd_validate=True).decode("utf-8")
+    assert "<Platnosc>" in xml
+    assert "<FormaPlatnosci>1</FormaPlatnosci>" in xml
+
+
 def test_xsd_validation_accepts_basic_generated_invoice_and_rejects_invalid_xml() -> None:
     draft = _draft("FV/XSD/1")
 
