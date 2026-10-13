@@ -412,6 +412,66 @@ class TestDecimalAcceptance:
         assert line.effective_net_amount == Decimal("900.00")
 
 
+class TestFa3SchemaContract:
+    """Reguły schematu FA(3) potwierdzone oficjalnymi próbkami MF."""
+
+    @staticmethod
+    def _seller():
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        return InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+
+    @staticmethod
+    def _buyer():
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        return InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+
+    def _correction_builder(self, invoice_number: str):
+        from datetime import date
+
+        from ksef_client.documents.fa3 import (
+            CorrectionInvoiceBuilder,
+            CorrectionType,
+            VatClass,
+        )
+
+        builder = CorrectionInvoiceBuilder(invoice_number=invoice_number)
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line(
+            "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+        )
+        builder.corrects_invoice(
+            number="FV/1",
+            issue_date=date(2026, 2, 15),
+            reason="zmiana danych",
+            correction_type=CorrectionType.OTHER,
+        )
+        return builder
+
+    def test_settlement_with_unsupported_proportion_is_rejected(self):
+        """SDK nie wyprowadza proporcji `P_13_x` z pełnej wartości zamówienia."""
+        from datetime import date
+
+        from ksef_client.documents.fa3 import (
+            SettlementInvoiceBuilder,
+            VatClass,
+        )
+
+        builder = SettlementInvoiceBuilder(invoice_number="ROZ/1")
+        builder.issued_on(date(2026, 3, 1))
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line(
+            "Dostawa 8%", quantity="1", unit_net_price="307500", tax=VatClass.reduced_8()
+        )
+        builder.settles_advance(ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01")
+        builder.remaining_to_pay(Decimal("307635"))
+        with pytest.raises(ValueError, match="(?i)proporcj|pozostałej"):
+            builder.build()
+
+
 class TestRemainingBranches:
     """Gałęzie wprowadzone przez poprawki muszą być wykonywane przez testy."""
 
@@ -437,6 +497,39 @@ class TestRemainingBranches:
         line = builder.build().lines[0]
         assert line.discount_unit_amount == Decimal("0.00")
         assert line.discount_amount == Decimal("0.00")
+
+    def test_gross_with_advances_includes_advance_payments(self):
+        from ksef_client.documents.fa3 import AdvanceInvoiceBuilder, VatClass
+
+        builder = AdvanceInvoiceBuilder(invoice_number="ZAL/1")
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.advance_payment(amount="123", tax=VatClass.standard_23())
+        invoice = builder.build()
+        assert invoice.line_gross_total == Decimal("0.00")
+        assert invoice.gross_with_advances == Decimal("123.00")
+
+    def test_non_settlement_kind_skips_the_proportion_check(self):
+        from ksef_client.documents.fa3 import BasicInvoiceBuilder
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/PROP")
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        assert builder.build()._validate_settlement_proportion() == []
+
+    def test_settlement_without_amount_due_skips_the_proportion_check(self):
+        from datetime import date
+
+        from ksef_client.documents.fa3 import SettlementInvoiceBuilder
+
+        builder = SettlementInvoiceBuilder(invoice_number="ROZ/2")
+        builder.issued_on(date(2026, 3, 1))
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line("Dostawa", quantity="1", unit_net_price="100")
+        builder.settles_advance(ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01")
+        assert builder.build()._validate_settlement_proportion() == []
 
 
 class TestTimestampNormalisationIsVersionUniform:
@@ -546,6 +639,72 @@ class TestCliCertificateValidity:
             False,
             datetime.min.replace(tzinfo=timezone.utc),
         )
+
+
+def _tax_buckets(xml: str) -> tuple[Decimal, Decimal]:
+    """Suma `P_13_x`/`P_14_x` oraz `P_15` z wygenerowanego dokumentu."""
+    from xml.etree import ElementTree as ET
+
+    from ksef_client.documents.fa3.xml import FA3_NAMESPACE
+
+    root = ET.fromstring(xml)
+    fa = root.find(f"{{{FA3_NAMESPACE}}}Fa")
+    assert fa is not None
+    buckets = Decimal("0")
+    for child in fa:
+        tag = child.tag.rsplit("}", 1)[-1]
+        if (tag.startswith("P_13_") or tag.startswith("P_14_")) and not tag.endswith("W"):
+            buckets += Decimal(child.text or "0")
+    p15 = fa.find(f"{{{FA3_NAMESPACE}}}P_15")
+    return buckets, Decimal(p15.text or "0") if p15 is not None else Decimal("0")
+
+
+class TestTaxSummaryIdentity:
+    """`P_15 = ΣP_13_x + ΣP_14_x` musi zachodzić dla każdego rodzaju faktury.
+
+    Zapłata częściowa trafia do XML jako `ZaliczkaCzesciowa`/`P_15Z`, a schemat
+    opisuje `P_15` jako kwotę ZAWIERAJĄCĄ `P_15Z`. Pominięcie jej w koszykach
+    (tak działo się dla `KOR_ZAL` po zawężeniu podsumowania do `ZAL`) dawało
+    dokument bez podstawy opodatkowania dla tej części kwoty.
+    """
+
+    @staticmethod
+    def _seller():
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        return InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+
+    @staticmethod
+    def _buyer():
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        return InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+
+    def test_advance_correction_with_payment_keeps_the_identity(self):
+        from datetime import date
+
+        from ksef_client.documents.fa3 import FA3Invoice, VatClass
+
+        builder = FA3Invoice.advance_correction("KOR_ZAL/1")
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.advance_payment(amount="20000", tax=VatClass.standard_23())
+        builder.corrects_invoice(
+            number="ZAL/1", issue_date=date(2026, 1, 1), reason="korekta zaliczki"
+        )
+        builder.corrected_advance_state("30000")
+        buckets, p15 = _tax_buckets(builder.build().to_xml().decode("utf-8"))
+        assert buckets == p15 == Decimal("20000.00")
+
+    def test_advance_invoice_keeps_the_identity(self):
+        from ksef_client.documents.fa3 import AdvanceInvoiceBuilder, VatClass
+
+        builder = AdvanceInvoiceBuilder(invoice_number="ZAL/1")
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.advance_payment(amount="12300", tax=VatClass.standard_23())
+        buckets, p15 = _tax_buckets(builder.build().to_xml().decode("utf-8"))
+        assert buckets == p15 == Decimal("12300.00")
 
 
 class TestOrderLineDiscountIdentity:

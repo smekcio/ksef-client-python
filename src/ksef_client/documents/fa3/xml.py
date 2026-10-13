@@ -441,6 +441,44 @@ def _domain_invoice(root: ET.Element, invoice: FA3Invoice) -> None:
     _domain_order(fa, invoice.order)
 
 
+def _add_advance_summary(
+    invoice: FA3Invoice,
+    summary: dict[str, Decimal],
+    vat_summary: dict[str, Decimal],
+    foreign_vat_summary: dict[str, Decimal],
+) -> None:
+    """Dodaje zapłaty częściowe do pól podsumowania (`P_13_x`/`P_14_x`).
+
+    Zaliczka trafia do XML jako `ZaliczkaCzesciowa`/`P_15Z`, a schemat opisuje
+    tę zależność wprost: „różnica kwoty w polu P_15 i sumy poszczególnych pól
+    P_15Z stanowi kwotę pozostałą ponad płatności otrzymane przed wykonaniem
+    czynności". Innymi słowy `P_15` **zawiera** `P_15Z`, więc pominięcie zaliczek
+    w `P_13_x`/`P_14_x` łamie tożsamość `P_15 = ΣP_13_x + ΣP_14_x` i daje
+    dokument bez podstawy opodatkowania dla tej części kwoty.
+
+    Dotyczy to także korekt (`KOR_ZAL`/`KOR_ROZ`): oficjalny
+    `FA_3_Przykład_12.xml` ma `ΣP_13_x + ΣP_14_x = P_15 = 10000`, a korekta
+    różnicy zaliczki jest dokumentem tego samego kształtu.
+    """
+    for payment in invoice.advance_payments:
+        net_tag, vat_tag, vat_w_tag = payment.tax.summary_fields
+        net_amount = invoice._advance_payment_net_amount(payment)
+        vat_amount = invoice._advance_payment_vat_amount(payment)
+        summary[net_tag] = money(summary.get(net_tag, Decimal("0.00")) + net_amount)
+        if vat_tag:
+            vat_summary[vat_tag] = money(vat_summary.get(vat_tag, Decimal("0.00")) + vat_amount)
+            payment_currency_rate = payment.currency_rate or invoice.foreign_currency_rate
+            if (
+                vat_w_tag
+                and payment_currency_rate is not None
+                and invoice.currency.upper() != "PLN"
+            ):
+                foreign_vat_summary[vat_w_tag] = money(
+                    foreign_vat_summary.get(vat_w_tag, Decimal("0.00"))
+                    + money(vat_amount * payment_currency_rate)
+                )
+
+
 def _tax_summary(fa: ET.Element, invoice: FA3Invoice) -> None:
     summary: dict[str, Decimal] = {}
     vat_summary: dict[str, Decimal] = {}
@@ -464,25 +502,12 @@ def _tax_summary(fa: ET.Element, invoice: FA3Invoice) -> None:
                     foreign_vat_summary.get(vat_w_tag, Decimal("0.00"))
                     + money(vat_amount * line_currency_rate)
                 )
-    for payment in invoice.advance_payments:
-        net_tag, vat_tag, vat_w_tag = payment.tax.summary_fields
-        net_amount = invoice._advance_payment_net_amount(payment)
-        vat_amount = invoice._advance_payment_vat_amount(payment)
-        summary[net_tag] = money(summary.get(net_tag, Decimal("0.00")) + net_amount)
-        if vat_tag:
-            vat_summary[vat_tag] = money(
-                vat_summary.get(vat_tag, Decimal("0.00")) + vat_amount
-            )
-            payment_currency_rate = payment.currency_rate or invoice.foreign_currency_rate
-            if (
-                vat_w_tag
-                and payment_currency_rate is not None
-                and invoice.currency.upper() != "PLN"
-            ):
-                foreign_vat_summary[vat_w_tag] = money(
-                    foreign_vat_summary.get(vat_w_tag, Decimal("0.00"))
-                    + money(vat_amount * payment_currency_rate)
-                )
+    # Zapłaty częściowe wchodzą do podsumowania dla KAŻDEGO rodzaju faktury:
+    # są emitowane jako `ZaliczkaCzesciowa`/`P_15Z`, a `P_15` je zawiera
+    # (patrz `_add_advance_summary`). Pominięcie ich w `P_13_x`/`P_14_x`
+    # łamało tożsamość `P_15 = ΣP_13_x + ΣP_14_x` — np. dla `KOR_ZAL`
+    # z zaliczką dokument nie deklarował żadnej podstawy opodatkowania.
+    _add_advance_summary(invoice, summary, vat_summary, foreign_vat_summary)
     for net_tag, vat_tag, _vat_w_tag in _TAX_SUMMARY_ORDER:
         if net_tag in summary:
             ET.SubElement(fa, _q(net_tag)).text = _amount(summary[net_tag])
@@ -490,7 +515,7 @@ def _tax_summary(fa: ET.Element, invoice: FA3Invoice) -> None:
                 ET.SubElement(fa, _q(vat_tag)).text = _amount(vat_summary[vat_tag])
         if _vat_w_tag and _vat_w_tag in foreign_vat_summary:
             ET.SubElement(fa, _q(_vat_w_tag)).text = _amount(foreign_vat_summary[_vat_w_tag])
-    ET.SubElement(fa, _q("P_15")).text = _amount(invoice.total_gross)
+    ET.SubElement(fa, _q("P_15")).text = _amount(invoice.summary_gross)
 
 
 _TAX_SUMMARY_ORDER = (

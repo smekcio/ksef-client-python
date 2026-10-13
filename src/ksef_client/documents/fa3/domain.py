@@ -1005,6 +1005,45 @@ class FA3Invoice:
         return SettlementCorrectionInvoiceBuilder(invoice_number=invoice_number)
 
     @property
+    def line_gross_total(self) -> Decimal:
+        """Suma brutto samych pozycji (bez zaliczek)."""
+        return money(
+            sum(
+                (
+                    self._signed_line_amount(line, line.effective_gross_amount)
+                    for line in self.lines
+                ),
+                Decimal("0.00"),
+            )
+        )
+
+    @property
+    def gross_with_advances(self) -> Decimal:
+        """Brutto pozycji powiększone o zapłacone zaliczki (wartość zamówienia)."""
+        advance_total = sum(
+            (payment.amount for payment in self.advance_payments),
+            Decimal("0.00"),
+        )
+        return money(self.line_gross_total + advance_total)
+
+    @property
+    def summary_gross(self) -> Decimal:
+        """Wartość `P_15` — kwota należna z tytułu sprzedaży.
+
+        To brutto pozycji powiększone o zapłaty częściowe otrzymane przy
+        wystawianiu tej faktury (`ZaliczkaCzesciowa`/`P_15Z`), zgodnie z opisem
+        pola w schemacie („różnica kwoty w polu P_15 i sumy poszczególnych pól
+        P_15Z stanowi kwotę pozostałą…").
+
+        Dla faktury rozliczającej (ROZ) wiersze muszą nieść kwoty odpowiadające
+        kwocie pozostałej do zapłaty — proporcji `P_13_x`/`P_14_x` SDK nie
+        wyprowadza z pełnej wartości zamówienia (patrz
+        :meth:`_validate_settlement_proportion`), więc `P_13_x + P_14_x == P_15`
+        zachodzi także tam.
+        """
+        return self.total_gross
+
+    @property
     def total_net(self) -> Decimal:
         line_total = sum(
             (self._signed_line_amount(line, line.effective_net_amount) for line in self.lines),
@@ -1123,7 +1162,10 @@ class FA3Invoice:
                     Decimal("0.00"),
                 )
             )
-            expected_due = money(self.total_gross + charges_total - deductions_total)
+            # `P_15` to dla rozliczenia KWOTA POZOSTAŁA DO ZAPŁATY, a dla
+            # pozostałych rodzajów suma brutto — więc kontrolę wiążemy z tym, co
+            # faktycznie trafia do `P_15`, a nie z pełnym brutto zamówienia.
+            expected_due = money(self.summary_gross + charges_total - deductions_total)
             provided_due = money(self.settlement_data.amount_due)
             if provided_due != expected_due:
                 errors.append(
@@ -1153,6 +1195,7 @@ class FA3Invoice:
                     "invoice.raw_extensions: RawXmlExtension nie jest wspierany w typed FA(3) SDK."
                 )
             )
+        errors.extend(self._validate_settlement_proportion())
         errors.extend(self._validate_xml_shape())
         return FA3ValidationResult(tuple(errors), tuple(warnings))
 
@@ -1166,6 +1209,49 @@ class FA3Invoice:
         from .xml import invoice_to_xml
 
         return invoice_to_xml(self, validate=validate, facets=facets, xsd_validate=xsd_validate)
+
+    def _validate_settlement_proportion(self) -> list[FA3ValidationIssue]:
+        """Odrzuca ROZ, w którym SDK nie potrafi wyliczyć proporcji `P_13_x`.
+
+        Schemat i podręcznik wymagają, by dla faktury rozliczającej `FaWiersz`
+        pokazywało **pełną wartość zamówienia**, a `P_13_x`/`P_14_x` proporcję
+        tej wartości w odniesieniu do kwoty pozostałej do zapłaty. Podział
+        z oficjalnego `FA_3_Przykład_14.xml` nie jest prostym skalowaniem
+        wszystkich koszyków (tam zmniejsza się tylko koszyk 8%), więc SDK nie
+        wyprowadza go z wierszy. Zamiast emitować błędną deklarację podatkową,
+        wymagamy podania w wierszach kwot już odpowiadających `P_15`.
+        """
+        if self.kind not in _SETTLEMENT_SCALE_KINDS:
+            return []
+        if self.settlement_data is None or self.settlement_data.amount_due is None:
+            return []
+        remaining = money(self.settlement_data.amount_due)
+        charges = money(
+            sum((charge.amount for charge in self.settlement_data.charges), Decimal("0.00"))
+        )
+        deductions = money(
+            sum((item.amount for item in self.settlement_data.deductions), Decimal("0.00"))
+        )
+        full = money(
+            self.line_gross_total
+            + sum((payment.amount for payment in self.advance_payments), Decimal("0.00"))
+        )
+        # DoZaplaty = P_15 + SumaObciazen - SumaOdliczen, więc proporcja jest
+        # potrzebna tylko wtedy, gdy po tej korekcie P_15 nadal różni się od
+        # kwoty wynikającej z wierszy.
+        expected_p15 = money(remaining - charges + deductions)
+        if full == 0 or expected_p15 == full:
+            return []
+        return [
+            FA3ValidationIssue(
+                "invoice.settlement_data.amount_due: faktura rozliczająca wymaga, by "
+                "suma wierszy (plus zapłacone zaliczki) równała się kwocie pozostałej "
+                f"do zapłaty — P_15 = {self.total_gross:.2f}, otrzymano {remaining:.2f}. "
+                "SDK nie wyprowadza proporcji P_13_x/P_14_x z pełnej wartości "
+                "zamówienia (podział zależy od stawek i zaliczek), więc w wierszach "
+                "podaj kwoty odpowiadające kwocie pozostałej do zapłaty."
+            )
+        ]
 
     def _validate_xml_shape(self) -> list[FA3ValidationIssue]:
         issues: list[FA3ValidationIssue] = []
@@ -1565,6 +1651,13 @@ def _replace_party_role(
         is_vat_group_member=party.is_vat_group_member,
         other_role_description=party.other_role_description,
     )
+
+
+#: Rodzaje faktur, dla których `P_13_x`/`P_14_x` są PROPORCJĄ kwoty pozostałej
+#: do zapłaty (art. 106f ust. 3): rozliczenie zamówienia i jego korekta.
+_SETTLEMENT_SCALE_KINDS = frozenset(
+    {FA3InvoiceKind.SETTLEMENT, FA3InvoiceKind.SETTLEMENT_CORRECTION}
+)
 
 
 #: Dozwolone wartości atrybutu `Kol/@Typ` (schemat: `use="required"` + enumeracja).
