@@ -28,6 +28,27 @@
 
 ### Bug Fixes
 
+* **http:** a presigned URL (`skip_auth`) never follows a redirect, whatever `follow_redirects`
+  says. The security validation covers only the initial address and no `Authorization` header is
+  sent, so following a redirect performed a request to a server-chosen address (including the
+  internal network) and returned its body as the result
+* **cli:** the token metadata cache lock heals itself. A process killed mid-run left
+  `cache.json.lock` behind and every later call failed after a 5 s wait until someone deleted the
+  file by hand; a lock older than 30 s is now taken over, and lock/directory errors are reported as
+  `CliError` instead of a raw `OSError`
+* **cli:** the checkpoint `base_url` guard honours `--base-url` and `KSEF_BASE_URL`. A session
+  opened with an address override could not be sent or closed at all (the guard compared only with
+  the profile), and the `send`/`close`/`status`/`import`/`batch upload`/`batch close` commands did
+  not even offer `--base-url`
+* **cli:** `auth logout` fails loudly when the fallback token store cannot be rewritten. The error
+  used to be swallowed, so the command reported "Stored tokens removed." and `logged_out: true`
+  while a valid refresh token stayed in `tokens.json`
+* **packaging:** `requirements.txt` lists `typing-extensions`, which `documents/fa3` imports
+  unconditionally — installing from the documented requirements file ended with
+  `ModuleNotFoundError: No module named 'typing_extensions'`
+* **utils:** `fast_extract_ksef_metadata` counts `ZamowienieWiersz` rows (`P_11NettoZ` net,
+  `P_11NettoZ + P_11VatZ` gross) and skips `StanPrzedZ` rows. Order/settlement documents used to be
+  reported as empty (`total_netto=0.00`, `item_count=0`) with no signal
 * **cli:** an imported session checkpoint can no longer decide where the profile's access token goes.
   `session import` compared only the profile *name*, so a crafted checkpoint file with a foreign
   `base_url` sent the KSeF token (and the invoice body) to that host on `session online send`,
