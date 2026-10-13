@@ -621,6 +621,13 @@ class BaseHttpClient:
             headers=final_headers,
             json=json,
             content=data,
+            # Przy `skip_auth` walidacja bezpieczeństwa dotyczy WYŁĄCZNIE adresu
+            # początkowego, a nagłówka `Authorization` i tak nie ma — podążenie za
+            # przekierowaniem wykonałoby więc żądanie pod adres wskazany przez
+            # serwer (także do sieci wewnętrznej) i zwróciło jego treść jako
+            # wynik. Dlatego dla presigned URL przekierowań nie śledzimy
+            # niezależnie od `options.follow_redirects`.
+            follow_redirects=False if skip_auth else self._options.follow_redirects,
         )
         _handle_system_warning(self._options, response)
 
@@ -742,6 +749,9 @@ class AsyncBaseHttpClient:
             headers=final_headers,
             json=json,
             content=data,
+            # Patrz `BaseHttpClient.request`: presigned URL nigdy nie podąża za
+            # przekierowaniem, bo walidacja dotyczy tylko adresu początkowego.
+            follow_redirects=False if skip_auth else self._options.follow_redirects,
         )
         _handle_system_warning(self._options, response)
 

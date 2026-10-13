@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
@@ -683,6 +684,63 @@ class AsyncRedirectHandlingTests(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(KsefHttpError),
         ):
             await client.request("GET", "/path")
+
+
+class PresignedUrlRedirectTests(unittest.TestCase):
+    """Presigned URL nie może podążać za przekierowaniem.
+
+    Walidacja `_validate_presigned_url_security` dotyczy wyłącznie adresu
+    początkowego, a przy `skip_auth` nie ma nagłówka `Authorization` — podążenie
+    za przekierowaniem wykonałoby żądanie pod adres wskazany przez serwer (także
+    do sieci wewnętrznej) i zwróciło jego treść jako wynik.
+    """
+
+    def test_skip_auth_never_follows_redirects(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl", follow_redirects=True
+        )
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(302, headers={"Location": "http://169.254.169.254/secret"})
+        request_mock = Mock(return_value=response)
+        with (
+            patch.object(client._client, "request", request_mock),
+            self.assertRaises(KsefHttpError),
+        ):
+            client.request("GET", "https://storage.example.com/presigned?x=1", skip_auth=True)
+
+        self.assertFalse(request_mock.call_args.kwargs["follow_redirects"])
+
+    def test_authenticated_request_keeps_the_option(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl", follow_redirects=True
+        )
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(200)
+        request_mock = Mock(return_value=response)
+        with patch.object(client._client, "request", request_mock):
+            client.request("GET", "/path")
+
+        self.assertTrue(request_mock.call_args.kwargs["follow_redirects"])
+
+    def test_async_skip_auth_never_follows_redirects(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl", follow_redirects=True
+        )
+        client = AsyncBaseHttpClient(options, access_token="token")
+        response = httpx.Response(302, headers={"Location": "http://169.254.169.254/secret"})
+        request_mock = AsyncMock(return_value=response)
+
+        async def _run() -> None:
+            with (
+                patch.object(client._client, "request", request_mock),
+                self.assertRaises(KsefHttpError),
+            ):
+                await client.request(
+                    "GET", "https://storage.example.com/presigned?x=1", skip_auth=True
+                )
+
+        asyncio.run(_run())
+        self.assertFalse(request_mock.call_args.kwargs["follow_redirects"])
 
 
 if __name__ == "__main__":
