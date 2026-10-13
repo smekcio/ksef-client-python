@@ -460,28 +460,26 @@ def _merge_permanent_storage_hwm_date(current: str, candidate: str) -> str:
 
 
 def _normalize_invoice_sort_value(value: Any) -> str:
+    """Sprowadza znacznik daty do UTC, żeby sortowanie było chronologiczne.
+
+    Na Pythonie 3.10 ``datetime.fromisoformat`` nie przyjmuje 7-cyfrowego ułamka
+    sekundy, jaki zwraca API KSeF — wtedy funkcja zwracała surowy tekst, a
+    sortowanie faktur degradowało się do porządku leksykalnego (różnice stref
+    czasowych przestawały być respektowane).
+    """
     if value is None:
         return ""
     text = str(value).strip()
     if not text:
         return ""
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
+    parsed = try_parse_api_datetime(text)
+    if parsed is None:
         return text
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    else:
-        parsed = parsed.astimezone(timezone.utc)
     return parsed.isoformat()
 
 
 def _is_iso_datetime(value: str) -> bool:
-    try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    return True
+    return try_parse_api_datetime(value) is not None
 
 
 def _invoice_identity_key(invoice: Any) -> str:

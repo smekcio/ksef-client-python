@@ -1116,6 +1116,17 @@ class TestCliCertificateValidity:
             datetime.min.replace(tzinfo=timezone.utc),
         )
 
+    def test_cli_invoice_sort_normalises_seven_digit_timestamps(self):
+        from ksef_client.cli.sdk.adapters import (
+            _is_iso_datetime,
+            _normalize_invoice_sort_value,
+        )
+
+        value = "2025-09-25T13:48:26.8700925+02:00"
+        assert _normalize_invoice_sort_value(value) == "2025-09-25T11:48:26.870092+00:00"
+        assert _is_iso_datetime(value) is True
+        assert _is_iso_datetime("nie-data") is False
+
 
 def _tax_buckets(xml: str) -> tuple[Decimal, Decimal]:
     """Suma `P_13_x`/`P_14_x` oraz `P_15` z wygenerowanego dokumentu."""
