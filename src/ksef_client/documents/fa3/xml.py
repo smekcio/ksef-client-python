@@ -306,9 +306,11 @@ def _domain_party(
     if third_party and party.buyer_id:
         ET.SubElement(node, _q("IDNabywcy")).text = party.buyer_id
     if seller and party.taxpayer_prefix:
-        # `PrefiksPodatnika` występuje wyłącznie w `Podmiot1` i `Podmiot1K`
-        # (schemat ma tam dodatkowo `fixed="PL"`). `PodmiotUpowazniony` go nie
-        # dopuszcza - emisja dawała XML odrzucany przez KSeF.
+        # `PrefiksPodatnika` występuje wyłącznie w `Podmiot1` i `Podmiot1K`.
+        # W `Podmiot1` schemat wymusza `fixed="PL"` (schemat_FA(3):2137), w
+        # `Podmiot1K` już nie (:2948) — dlatego kontrolę stałej wartości prowadzi
+        # walidacja faset per rodzic, a nie sam serializator. `PodmiotUpowazniony`
+        # tego elementu nie dopuszcza wcale - emisja dawała XML odrzucany przez KSeF.
         ET.SubElement(node, _q("PrefiksPodatnika")).text = party.taxpayer_prefix
     if party.eori:
         ET.SubElement(node, _q("NrEORI")).text = party.eori
@@ -381,7 +383,12 @@ def _party_identity(
                 "Dla nabywcy/przewoźnika użyj NIP, KodUE+NrVatUE, KodKraju+NrID albo BrakID."
             )
         ET.SubElement(identity, _q("IDWew")).text = identifier.value
-    ET.SubElement(identity, _q("Nazwa")).text = party.name
+    # W `TPodmiot2`/`TPodmiot3` element `Nazwa` jest opcjonalny
+    # (`<xsd:sequence minOccurs="0">`), więc pustej nazwy NIE wolno emitować:
+    # `<Nazwa/>` łamie `minLength=1` i cały plik odrzuca KSeF. Tak wygląda
+    # oficjalny `FA_3_Przykład_15/16.xml` (nabywca tylko z NIP-em).
+    if party.name:
+        ET.SubElement(identity, _q("Nazwa")).text = party.name
 
 
 def _address(node: ET.Element, tag: str, address: Address) -> None:
@@ -646,6 +653,14 @@ def _domain_correction(fa: ET.Element, invoice: FA3Invoice) -> None:
     if invoice.corrected_invoice_number_override:
         ET.SubElement(fa, _q("NrFaKorygowany")).text = invoice.corrected_invoice_number_override
     if invoice.corrected_seller is not None:
+        if invoice.corrected_seller.address is None:
+            # `Podmiot1K/Adres` jest w schemacie wymagane (minOccurs=1, w odróżnieniu
+            # od `Podmiot2K/Adres`), a podręcznik KSeF wymaga „pełnych danych
+            # sprzedawcy występującego na fakturze korygowanej".
+            raise FA3XmlValidationError(
+                "invoice.corrected_seller: korekta danych sprzedawcy wymaga adresu "
+                "(Podmiot1K/Adres jest elementem wymaganym w schemacie FA(3))."
+            )
         node = ET.SubElement(fa, _q("Podmiot1K"))
         if invoice.corrected_seller.taxpayer_prefix:
             ET.SubElement(node, _q("PrefiksPodatnika")).text = (

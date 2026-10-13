@@ -281,6 +281,35 @@ def test_self_closing_element_is_not_silently_skipped() -> None:
     ), [str(issue) for issue in issues]
 
 
+def test_buyer_without_name_is_accepted() -> None:
+    """`TPodmiot2` ma `<xsd:sequence minOccurs="0">` wokół `Nazwa` (faktura uproszczona).
+
+    Oficjalny `FA_3_Przykład_15.xml` ma `Podmiot2` złożony z samego `NIP`.
+    """
+    root = _tree()
+    identity = root.find(f".//{_q('Podmiot2')}/{_q('DaneIdentyfikacyjne')}")
+    assert identity is not None
+    name = identity.find(_q("Nazwa"))
+    assert name is not None
+    identity.remove(name)
+    assert validate_xml_facets(root) == []
+
+
+def test_seller_without_name_is_reported() -> None:
+    """`TPodmiot1` wymaga `Nazwa` — brak jest błędem, nie milczeniem."""
+    root = _tree()
+    identity = root.find(f".//{_q('Podmiot1')}/{_q('DaneIdentyfikacyjne')}")
+    assert identity is not None
+    name = identity.find(_q("Nazwa"))
+    assert name is not None
+    identity.remove(name)
+    issues = validate_xml_facets(root)
+    assert any(
+        "brak wymaganego elementu Nazwa" in issue.message and "Podmiot1" in issue.message
+        for issue in issues
+    ), [str(issue) for issue in issues]
+
+
 def test_whitespace_padded_value_is_not_over_rejected() -> None:
     """Typy tekstowe schematu to `xsd:token` — białe znaki są zwijane."""
     root = _tree()
@@ -476,6 +505,29 @@ def test_non_string_text_is_ignored() -> None:
     assert element is not None
     element.text = object()  # type: ignore[assignment]
     assert validate_xml_facets(root) == []
+
+
+def test_fixed_value_is_enforced_only_in_podmiot1() -> None:
+    """`Podmiot1/PrefiksPodatnika` ma `fixed="PL"`, `Podmiot1K` już nie."""
+    root = _tree()
+    podmiot1 = root.find(_q("Podmiot1"))
+    assert podmiot1 is not None
+    ET.SubElement(podmiot1, _q("PrefiksPodatnika")).text = "DE"
+    issues = validate_xml_facets(root)
+    assert any("stałą wartość" in issue.message for issue in issues), [
+        str(issue) for issue in issues
+    ]
+
+    other = _tree()
+    podmiot1k = ET.SubElement(other, _q("Podmiot1K"))
+    ET.SubElement(podmiot1k, _q("PrefiksPodatnika")).text = "DE"
+    identity = ET.SubElement(podmiot1k, _q("DaneIdentyfikacyjne"))
+    ET.SubElement(identity, _q("NIP")).text = "2222222222"
+    ET.SubElement(identity, _q("Nazwa")).text = "Stary"
+    address = ET.SubElement(podmiot1k, _q("Adres"))
+    ET.SubElement(address, _q("KodKraju")).text = "PL"
+    ET.SubElement(address, _q("AdresL1")).text = "ul. Stara 1"
+    assert validate_xml_facets(other) == []
 
 
 def test_data_wytworzenia_fa_uses_the_element_restriction() -> None:

@@ -281,11 +281,36 @@ class InvoiceParty:
             address=_coerce_address(address, country_code=country_code),
         )
 
-    def validate(self, path: str, *, address_required: bool = False) -> list[FA3ValidationIssue]:
+    def validate(
+        self,
+        path: str,
+        *,
+        address_required: bool = False,
+        buyer: bool = False,
+        name_optional: bool = False,
+    ) -> list[FA3ValidationIssue]:
         issues: list[FA3ValidationIssue] = []
-        if not self.name.strip():
+        if not self.name.strip() and not name_optional:
             issues.append(FA3ValidationIssue(f"{path}: nazwa jest wymagana.", column=path))
         issues.extend(self.identifier.validate(f"{path}.identifier"))
+        if buyer and self.identifier.kind in (
+            PartyIdentifierKind.EU_VAT,
+            PartyIdentifierKind.FOREIGN,
+        ):
+            # GEN-20 / P2-16 broszury MF: polski NIP nabywcy MUSI trafić w pole
+            # `NIP`. W `NrVatUE`/`NrID` faktura jest zgodna ze schematem, ale
+            # KSeF nie udostępni jej nabywcy — czyli cicha porażka biznesowa.
+            country = str(self.identifier.country_code or "").strip().upper()
+            if country == "PL":
+                issues.append(
+                    FA3ValidationIssue(
+                        f"{path}.identifier: nabywcę z polskim NIP wskazuj w polu NIP, "
+                        "a nie w NrVatUE/NrID — KSeF udostępni fakturę nabywcy tylko "
+                        "wtedy, gdy NIP znajdzie się w NIP (GEN-20/P2-16 broszury MF). "
+                        "Użyj PartyIdentifier.polish_nip(...).",
+                        column=f"{path}.identifier",
+                    )
+                )
         if address_required and self.address is None:
             issues.append(FA3ValidationIssue(f"{path}: adres jest wymagany.", column=path))
         if self.address is not None:
@@ -1114,8 +1139,56 @@ class FA3Invoice:
         if self.issue_date is None:
             errors.append(FA3ValidationIssue("invoice.issue_date: data jest wymagana."))
         errors.extend(self.seller.validate("invoice.seller", address_required=True))
-        errors.extend(self.buyer.validate("invoice.buyer"))
-        line_optional_kinds = {FA3InvoiceKind.ADVANCE, FA3InvoiceKind.ADVANCE_CORRECTION}
+        if self.seller.taxpayer_prefix is not None and self.seller.taxpayer_prefix != "PL":
+            # Schemat wymusza w `Podmiot1/PrefiksPodatnika` wartość 'PL'
+            # (`xsd:element/@fixed="PL"`, schemat_FA(3):2137), a jego typ
+            # `TKodyKrajowUE` dopuszcza 28 kodów — dlatego 'DE' przeszłoby przez
+            # sam słownik i dokument odrzuciłby dopiero KSeF. Kontrola dotyczy
+            # wyłącznie `Podmiot1`: w `Podmiot1K` schemat tego nie wymusza.
+            errors.append(
+                FA3ValidationIssue(
+                    "invoice.seller.taxpayer_prefix: schemat FA(3) wymusza w "
+                    f"Podmiot1 wartość 'PL', otrzymano {self.seller.taxpayer_prefix!r}.",
+                    column="invoice.seller.taxpayer_prefix",
+                )
+            )
+        # Nazwa nabywcy jest w `TPodmiot2` opcjonalna (`<xsd:sequence minOccurs="0">`),
+        # ale tylko po to, by dało się wystawić fakturę uproszczoną (art. 106e
+        # ust. 5 pkt 3 — sprzedaż do 450 zł). Dla pozostałych rodzajów jej brak
+        # to błąd: KSeF nie udostępni faktury, na której nie ma nabywcy.
+        buyer_name_optional = self.kind is FA3InvoiceKind.SIMPLIFIED
+        errors.extend(
+            self.buyer.validate(
+                "invoice.buyer",
+                buyer=True,
+                name_optional=buyer_name_optional,
+            )
+        )
+        # `Podmiot1K` musi nieść pełne dane sprzedawcy z faktury korygowanej,
+        # więc adres jest tam wymagany (XSD: minOccurs=1). Nabywca korygowany
+        # (`Podmiot2K`) ma adres opcjonalny — zgodnie ze schematem.
+        if self.corrected_seller is not None:
+            errors.extend(
+                self.corrected_seller.validate("invoice.corrected_seller", address_required=True)
+            )
+        for index, corrected_buyer in enumerate(self.corrected_buyers, start=1):
+            errors.extend(
+                corrected_buyer.validate(
+                    f"invoice.corrected_buyers[{index}]",
+                    buyer=True,
+                    name_optional=buyer_name_optional,
+                )
+            )
+        # `FaWiersz` jest opcjonalne dla faktury zaliczkowej, faktury korygującej
+        # zaliczkę ORAZ korekty zbiorczej z art. 106j ust. 3 (podręcznik KSeF:
+        # taka faktura „nie zawiera żadnych danych w części FaWiersz”; oficjalny
+        # `FA_3_Przykład_6.xml` ma zero wierszy przy P_13_1=-40650.41 i P_15=-50000).
+        line_optional_kinds = {
+            FA3InvoiceKind.ADVANCE,
+            FA3InvoiceKind.ADVANCE_CORRECTION,
+            FA3InvoiceKind.CORRECTION,
+            FA3InvoiceKind.SETTLEMENT_CORRECTION,
+        }
         if not self.lines and self.kind not in line_optional_kinds:
             errors.append(
                 FA3ValidationIssue("invoice.lines: faktura wymaga co najmniej jednej pozycji.")

@@ -450,6 +450,68 @@ class TestFa3SchemaContract:
         )
         return builder
 
+    def test_corrected_seller_requires_an_address(self):
+        """`Podmiot1K/Adres` jest w schemacie wymagane (minOccurs=1)."""
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        builder = self._correction_builder("FK/1")
+        builder.corrected_seller(InvoiceParty.polish_company(nip="2222222222", name="Stary"))
+        with pytest.raises(ValueError, match="(?i)adres"):
+            builder.build()
+
+    def test_corrected_seller_with_address_is_accepted(self):
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        builder = self._correction_builder("FK/2")
+        builder.corrected_seller(
+            InvoiceParty.polish_company(nip="2222222222", name="Stary", address="ul. Stara 1")
+        )
+        xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+        assert "<Podmiot1K>" in xml and "<Adres>" in xml
+
+    def test_margin_line_has_no_rate_or_net_amounts(self):
+        """Oficjalny `FA_3_Przykład_8.xml`: brak `P_9A`, `P_11`, `P_12`."""
+        from ksef_client.documents.fa3 import BasicInvoiceBuilder, TaxCategory
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/M")
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line(
+            "samochód używany",
+            quantity="1",
+            unit_net_price=Decimal("15000"),
+            tax=TaxCategory.margin(),
+            unit_gross_price=Decimal("15000"),
+            gross_amount=Decimal("15000"),
+        )
+        xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+        row = xml.split("<FaWiersz>", 1)[1].split("</FaWiersz>", 1)[0]
+        assert "<P_9A>" not in row
+        assert "<P_11>" not in row
+        assert "<P_12>" not in row
+        assert "<P_9B>" in row and "<P_11A>" in row
+
+    def test_correction_can_have_no_rows(self):
+        """Art. 106j ust. 3: korekta zbiorcza nie zawiera `FaWiersz`."""
+        from datetime import date
+
+        from ksef_client.documents.fa3 import CorrectionInvoiceBuilder, CorrectionReference
+
+        builder = CorrectionInvoiceBuilder(invoice_number="FK/3")
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.corrects_many(
+            (
+                CorrectionReference("FV/2026/01/1", date(2026, 1, 15)),
+                CorrectionReference("FV/2026/02/1", date(2026, 2, 15)),
+            ),
+            reason="rabat",
+            correction_type="2",
+        )
+        builder.corrected_period("pierwsze półrocze 2026")
+        errors = builder.build().validate().errors
+        assert not errors, [issue.message for issue in errors]
+
     def test_settlement_with_unsupported_proportion_is_rejected(self):
         """SDK nie wyprowadza proporcji `P_13_x` z pełnej wartości zamówienia."""
         from datetime import date
@@ -530,6 +592,350 @@ class TestRemainingBranches:
         builder.add_service_line("Dostawa", quantity="1", unit_net_price="100")
         builder.settles_advance(ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01")
         assert builder.build()._validate_settlement_proportion() == []
+
+    def test_serializer_rejects_corrected_seller_without_address(self):
+        """Warstwa XML broni się niezależnie od walidacji domenowej."""
+        from dataclasses import replace
+        from datetime import date
+
+        from ksef_client.documents.fa3 import (
+            CorrectionInvoiceBuilder,
+            CorrectionType,
+            InvoiceParty,
+            VatClass,
+        )
+        from ksef_client.documents.fa3.xml import FA3XmlValidationError, invoice_to_xml
+
+        builder = CorrectionInvoiceBuilder(invoice_number="FK/4")
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line(
+            "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+        )
+        builder.corrects_invoice(
+            number="FV/1",
+            issue_date=date(2026, 2, 15),
+            reason="zmiana",
+            correction_type=CorrectionType.OTHER,
+        )
+        # Najpierw budujemy dokument POPRAWNIE (z adresem)…
+        builder.corrected_seller(
+            InvoiceParty.polish_company(nip="2222222222", name="Stary", address="ul. Stara 1")
+        )
+        invoice = builder.build()
+        # …a potem odbieramy adres, żeby sprawdzić samą warstwę XML przy
+        # wyłączonej walidacji domenowej (`validate=False`).
+        broken = replace(
+            invoice,
+            corrected_seller=InvoiceParty.polish_company(nip="2222222222", name="Stary"),
+        )
+        with pytest.raises(FA3XmlValidationError, match="(?i)adres"):
+            invoice_to_xml(broken, validate=False)
+
+    def test_corrected_seller_guard_fires_before_the_facet_layer(self):
+        """Strażnik z `xml.py` musi działać także przy wyłączonych fasetach.
+
+        Sam `match="(?i)adres"` spełnia również komunikat warstwy faset
+        (`brak wymaganego elementu Adres w Podmiot1K`), więc usunięcie strażnika
+        z serializatora przechodziło na zielono. Tutaj wyłączamy fasety, żeby
+        sprawdzić dokładnie tę warstwę.
+        """
+        from dataclasses import replace
+        from datetime import date
+
+        from ksef_client.documents.fa3 import (
+            CorrectionInvoiceBuilder,
+            CorrectionType,
+            InvoiceParty,
+            VatClass,
+        )
+        from ksef_client.documents.fa3.xml import FA3XmlValidationError, invoice_to_xml
+
+        builder = CorrectionInvoiceBuilder(invoice_number="FK/5")
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line(
+            "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+        )
+        builder.corrects_invoice(
+            number="FV/1",
+            issue_date=date(2026, 2, 15),
+            reason="zmiana",
+            correction_type=CorrectionType.OTHER,
+        )
+        builder.corrected_seller(
+            InvoiceParty.polish_company(nip="2222222222", name="Stary", address="ul. Stara 1")
+        )
+        invoice = builder.build()
+        broken = replace(
+            invoice,
+            corrected_seller=InvoiceParty.polish_company(nip="2222222222", name="Stary"),
+        )
+        with pytest.raises(FA3XmlValidationError, match="korekta danych sprzedawcy"):
+            invoice_to_xml(broken, validate=False, facets=False)
+
+
+class TestPurchaserIdentification:
+    """GEN-20 / P2-16 broszury MF: polski NIP nabywcy trafia wyłącznie w `NIP`.
+
+    Schemat przyjmuje `KodUE=PL`/`KodKraju=PL`, więc XSD tego nie wychwyci —
+    a KSeF **nie udostępni faktury nabywcy**, jeśli NIP nie będzie w `NIP`.
+    """
+
+    @staticmethod
+    def _seller():
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        return InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+
+    @staticmethod
+    def _party(identifier, name="Nabywca"):
+        from ksef_client.documents.fa3 import Address, InvoiceParty
+
+        return InvoiceParty(name=name, identifier=identifier, address=Address.polish("ul. B 2"))
+
+    def _valid_invoice(self):
+        from ksef_client.documents.fa3 import (
+            BasicInvoiceBuilder,
+            PartyIdentifier,
+        )
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/GEN20")
+        builder.seller(self._seller())
+        builder.buyer(self._party(PartyIdentifier.polish_nip("2222222222")))
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        return builder.build()
+
+    def _invoice_with_buyer(self, buyer):
+        from dataclasses import replace
+
+        return replace(self._valid_invoice(), buyer=buyer)
+
+    def test_polish_nip_in_kodue_is_rejected(self):
+        from ksef_client.documents.fa3 import PartyIdentifier
+
+        invoice = self._invoice_with_buyer(
+            self._party(PartyIdentifier.eu_vat("PL", "1111111111"))
+        )
+        messages = [issue.message for issue in invoice.validate().errors]
+        assert any("GEN-20" in message for message in messages), messages
+        # `build()` też nie przepuszcza takiego dokumentu (walidacja domenowa).
+        with pytest.raises(ValueError, match="GEN-20"):
+            invoice.to_xml()
+
+    def test_polish_nip_in_nrid_is_rejected(self):
+        from ksef_client.documents.fa3 import PartyIdentifier
+
+        invoice = self._invoice_with_buyer(
+            self._party(PartyIdentifier.foreign("1111111111", country_code="PL"))
+        )
+        with pytest.raises(ValueError, match="GEN-20"):
+            invoice.to_xml()
+
+    def test_corrected_buyer_is_checked_too(self):
+        from datetime import date
+
+        from ksef_client.documents.fa3 import (
+            CorrectionInvoiceBuilder,
+            CorrectionType,
+            InvoiceParty,
+            PartyIdentifier,
+            VatClass,
+        )
+
+        builder = CorrectionInvoiceBuilder(invoice_number="FK/GEN20")
+        builder.seller(self._seller())
+        builder.buyer(self._party(PartyIdentifier.polish_nip("2222222222")))
+        builder.add_service_line(
+            "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+        )
+        builder.corrects_invoice(
+            number="FV/1",
+            issue_date=date(2026, 2, 15),
+            reason="zmiana",
+            correction_type=CorrectionType.OTHER,
+        )
+        builder.corrected_buyer(
+            InvoiceParty(
+                name="Stary nabywca",
+                identifier=PartyIdentifier.eu_vat("PL", "1111111111"),
+            )
+        )
+        with pytest.raises(ValueError, match="GEN-20"):
+            builder.build()
+
+    def test_foreign_vat_identifier_is_still_accepted(self):
+        from ksef_client.documents.fa3 import PartyIdentifier
+
+        invoice = self._invoice_with_buyer(
+            self._party(PartyIdentifier.eu_vat("DE", "123456789"), "Firma DE")
+        )
+        assert not [issue for issue in invoice.validate().errors if "GEN-20" in issue.message]
+        assert invoice.to_xml(xsd_validate=True)
+
+    def test_third_party_identifier_is_not_covered_by_gen20(self):
+        """Reguła dotyczy nabywcy (Podmiot2); Podmiot3 ma własne role."""
+        from ksef_client.documents.fa3 import (
+            BasicInvoiceBuilder,
+            PartyIdentifier,
+            ThirdPartyRole,
+        )
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/P3")
+        builder.seller(self._seller())
+        builder.buyer(self._party(PartyIdentifier.polish_nip("2222222222")))
+        builder.add_party(
+            self._party(PartyIdentifier.eu_vat("PL", "1111111111"), "Odbiorca"),
+            ThirdPartyRole.RECIPIENT,
+        )
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        invoice = builder.build()
+        assert not [issue for issue in invoice.validate().errors if "GEN-20" in issue.message]
+
+
+class TestTaxpayerPrefix:
+    """`Podmiot1/PrefiksPodatnika` ma w schemacie `fixed="PL"` (S:2137)."""
+
+    @staticmethod
+    def _seller(prefix=None):
+        from dataclasses import replace
+
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        party = InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+        return replace(party, taxpayer_prefix=prefix) if prefix else party
+
+    @staticmethod
+    def _buyer():
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        return InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+
+    def _invoice(self, prefix=None):
+        from ksef_client.documents.fa3 import BasicInvoiceBuilder
+
+        builder = BasicInvoiceBuilder(invoice_number="FV/PREF")
+        builder.seller(self._seller(prefix))
+        builder.buyer(self._buyer())
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        return builder.build()
+
+    def _invoice_with_prefix(self, prefix):
+        from dataclasses import replace
+
+        invoice = self._invoice()
+        return replace(invoice, seller=replace(invoice.seller, taxpayer_prefix=prefix))
+
+    def test_seller_prefix_other_than_pl_is_rejected(self):
+        from ksef_client.documents.fa3.xml import FA3XmlValidationError
+
+        invoice = self._invoice_with_prefix("DE")
+        messages = [issue.message for issue in invoice.validate().errors]
+        assert any("'PL'" in message for message in messages), messages
+        # Warstwa faset (domyślna) też musi to wyłapać — inaczej dokument
+        # wychodzi z SDK i dopiero KSeF go odrzuca.
+        with pytest.raises(FA3XmlValidationError, match="stałą wartość"):
+            invoice.to_xml(validate=False)
+
+    def test_seller_prefix_pl_is_accepted(self):
+        invoice = self._invoice("PL")
+        assert not [issue for issue in invoice.validate().errors if "prefix" in issue.message]
+        assert invoice.to_xml(xsd_validate=True)
+
+    def test_corrected_seller_prefix_is_not_constrained_by_the_schema(self):
+        """`Podmiot1K/PrefiksPodatnika` nie ma `fixed` — nie wolno odrzucać."""
+        from datetime import date
+
+        from ksef_client.documents.fa3 import (
+            CorrectionInvoiceBuilder,
+            CorrectionType,
+            InvoiceParty,
+            VatClass,
+        )
+
+        builder = CorrectionInvoiceBuilder(invoice_number="FK/PREF")
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line(
+            "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+        )
+        builder.corrects_invoice(
+            number="FV/1",
+            issue_date=date(2026, 2, 15),
+            reason="zmiana",
+            correction_type=CorrectionType.OTHER,
+        )
+        builder.corrected_seller(
+            InvoiceParty.polish_company(
+                nip="2222222222", name="Stary", address="ul. Stara 1"
+            )
+        )
+        invoice = builder.build()
+        from dataclasses import replace as _replace
+
+        corrected_seller = invoice.corrected_seller
+        assert corrected_seller is not None
+        invoice = _replace(
+            invoice,
+            corrected_seller=_replace(corrected_seller, taxpayer_prefix="DE"),
+        )
+        assert not [issue for issue in invoice.validate().errors if "prefix" in issue.message]
+        xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+        assert "<Podmiot1K>" in xml and "<PrefiksPodatnika>DE</PrefiksPodatnika>" in xml
+
+
+class TestSimplifiedInvoice:
+    """Faktura uproszczona (art. 106e ust. 5 pkt 3) może nie mieć nazwy nabywcy.
+
+    Oficjalny `FA_3_Przykład_15/16.xml` ma `Podmiot2` złożony z samego `NIP`
+    (bez `Nazwa` i bez `Adres`) — `TPodmiot2` trzyma `Nazwa` w
+    `<xsd:sequence minOccurs="0">`, właśnie dla tego przypadku.
+    """
+
+    @staticmethod
+    def _seller():
+        from ksef_client.documents.fa3 import InvoiceParty
+
+        return InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+
+    def _build(self, *, simplified: bool, buyer_name: str = ""):
+        from ksef_client.documents.fa3 import (
+            BasicInvoiceBuilder,
+            InvoiceParty,
+            PartyIdentifier,
+            SimplifiedInvoiceBuilder,
+            VatClass,
+        )
+
+        builder = (
+            SimplifiedInvoiceBuilder(invoice_number="FV/UPR")
+            if simplified
+            else BasicInvoiceBuilder(invoice_number="FV/VAT")
+        )
+        builder.seller(self._seller())
+        builder.buyer(
+            InvoiceParty(name=buyer_name, identifier=PartyIdentifier.polish_nip("2222222222"))
+        )
+        builder.add_service_line(
+            "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+        )
+        return builder
+
+    def test_simplified_invoice_without_buyer_name_matches_the_official_shape(self):
+        invoice = self._build(simplified=True).build()
+        assert not invoice.validate().errors
+        xml = invoice.to_xml(xsd_validate=True).decode("utf-8")
+        assert "<Podmiot2>" in xml
+        buyer_section = xml.split("<Podmiot2>", 1)[1].split("</Podmiot2>", 1)[0]
+        assert "<NIP>2222222222</NIP>" in buyer_section
+        assert "<Nazwa>" not in buyer_section
+        assert "<Adres>" not in buyer_section
+
+    def test_regular_invoice_still_requires_the_buyer_name(self):
+        """Bez nazwy nabywcy buduje się wyłącznie faktura uproszczona."""
+        builder = self._build(simplified=False)
+        with pytest.raises(ValueError, match="nazwa jest wymagana"):
+            builder.build()
 
 
 class TestCountryCodeDictionary:
