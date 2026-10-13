@@ -19,6 +19,7 @@ from .models import (
     FA3ValidationIssue,
     decimal_from_value,
     money,
+    parse_vat_code,
     parse_vat_rate,
 )
 
@@ -489,7 +490,18 @@ class TaxCategory:
         """
         parsed = parse_vat_rate(value)
         if parsed is None:
+            # `parse_vat_rate` zwraca `None` zarówno dla zwolnienia, jak i dla
+            # kodów bez stawki procentowej (`oo`, `np I`, `np II`) oraz dla
+            # zapisu wprost kodu (`zw`) — te przypadki rozstrzyga kod.
+            code = parse_vat_code(value)
+            if code is not None:
+                return cls.from_rate_code(code)
             return cls.exempt("zwolnienie")
+        if parsed == Decimal("0"):
+            # Sama wartość `0` nie rozróżnia `0 KR`/`0 WDT`/`0 EX`: kod z zapisu
+            # (`"0 WDT"`) wygrywa, a `0`/`0.0`/`0e0` znaczy stawkę krajową
+            # (`parse_vat_code` zwraca dla nich pełny kod `0 KR`).
+            return cls.from_rate_code(parse_vat_code(value) or "0 KR")
         if parsed == Decimal("23"):
             return cls.standard_23()
         if parsed == Decimal("22"):
@@ -502,8 +514,6 @@ class TaxCategory:
             return cls.reduced_5()
         if parsed in {Decimal("4"), Decimal("3")}:
             return cls(TaxCategoryKind.TAXI_FLAT_RATE, parsed, format(parsed.normalize(), "f"))
-        if parsed == Decimal("0"):
-            return cls.zero_domestic()
         raise ValueError(
             f"Nieobsługiwana stawka VAT FA(3): {value!r}. "
             "Dozwolone stawki to 23, 22, 8, 7, 5, 4, 3 oraz stawki zerowe "

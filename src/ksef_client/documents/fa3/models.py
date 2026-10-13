@@ -290,10 +290,16 @@ class FA3Line:
         return errors, warnings
 
     def to_dict(self) -> dict[str, Any]:
-        if self.vat_rate is None:
-            vat_value: str | None = "zw"
+        # Pełny kod stawki (`vat_code`) ma pierwszeństwo ZAWSZE, także gdy
+        # `vat_rate` jest `None`: wcześniej każda pozycja bez stawki procentowej
+        # zapisywała się jako `"zw"`, więc round-trip JSON zamieniał `oo`,
+        # `np I` i `np II` na zwolnienie.
+        if self.vat_code:
+            vat_value: str | None = self.vat_code
+        elif self.vat_rate is None:
+            vat_value = "zw"
         else:
-            vat_value = self.vat_code or _decimal_to_json(self.vat_rate)
+            vat_value = _decimal_to_json(self.vat_rate)
         return {
             "opis": self.description,
             "ilosc": _decimal_to_json(self.quantity),

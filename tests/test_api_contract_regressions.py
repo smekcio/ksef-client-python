@@ -579,3 +579,76 @@ class TestOrderLineDiscountIdentity:
         # `FA_3_Przykład_29.xml`: P_8BZ × P_9AZ = P_11NettoZ.
         assert "<P_9AZ>900</P_9AZ>" in row
         assert "<P_11NettoZ>18000.00</P_11NettoZ>" in row
+
+
+class TestVatCodePreservation:
+    """Kod stawki nie może zniknąć w `from_vat_rate` ani w round-tripie JSON."""
+
+    def test_from_vat_rate_keeps_zero_subtypes_and_non_percent_codes(self):
+        from ksef_client.documents.fa3 import TaxCategory
+
+        for value, expected_rate in (
+            ("0 WDT", "0 WDT"),
+            ("0 EX", "0 EX"),
+            ("0 KR", "0 KR"),
+            ("0", "0 KR"),
+            ("oo", "oo"),
+            ("np I", "np I"),
+            ("np II", "np II"),
+            ("zw", "zw"),
+        ):
+            assert TaxCategory.from_vat_rate(value).xml_rate == expected_rate, value
+
+    def test_json_round_trip_keeps_non_percent_codes(self):
+        from decimal import Decimal
+
+        from ksef_client.documents.fa3 import FA3Line
+        from ksef_client.documents.fa3.models import parse_vat_code, parse_vat_rate
+
+        for code in ("oo", "np I", "np II", "0 WDT", "0 EX", "0 KR"):
+            line = FA3Line(
+                description="pozycja",
+                quantity=Decimal("1"),
+                unit="szt",
+                unit_net_price=Decimal("100"),
+                vat_rate=parse_vat_rate(code),
+                vat_code=parse_vat_code(code),
+            )
+            restored = FA3Line.from_dict(line.to_dict())
+            assert restored.vat_code == line.vat_code, code
+
+    def test_plain_rate_is_written_as_a_number(self):
+        """Pozycja bez kodu stawki zapisuje procent (a bez stawki — `zw`)."""
+        from decimal import Decimal
+
+        from ksef_client.documents.fa3 import FA3Line
+
+        rated = FA3Line(
+            description="pozycja",
+            quantity=Decimal("1"),
+            unit="szt",
+            unit_net_price=Decimal("100"),
+            vat_rate=Decimal("8.5"),
+        )
+        assert rated.to_dict()["vat"] == "8.5"
+
+        exempt = FA3Line(
+            description="pozycja",
+            quantity=Decimal("1"),
+            unit="szt",
+            unit_net_price=Decimal("100"),
+            vat_rate=None,
+            exemption_basis="art. 43 ust. 1 pkt 1 ustawy",
+        )
+        assert exempt.to_dict()["vat"] == "zw"
+
+    def test_from_vat_rate_without_a_code_falls_back_to_zero_domestic(self):
+        """`0` bez kodu (np. `Decimal("0")`) to stawka krajowa `0 KR`."""
+        from decimal import Decimal
+
+        from ksef_client.documents.fa3 import TaxCategory
+
+        assert TaxCategory.from_vat_rate(Decimal("0")).xml_rate == "0 KR"
+        assert TaxCategory.from_vat_rate(0).xml_rate == "0 KR"
+        # Wartość bez stawki i bez kodu (`None`) pozostaje zwolnieniem.
+        assert TaxCategory.from_vat_rate(None).xml_rate == "zw"
