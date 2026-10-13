@@ -241,7 +241,12 @@ class ClientsTests(unittest.TestCase):
             request_json.assert_any_call(
                 "POST", "/sessions/online/ref/close", access_token="token", expected_status={204}
             )
-            request_bytes.assert_any_call("GET", "/sessions/ref/upo/upo", access_token="token")
+            request_bytes.assert_any_call(
+            "GET",
+            "/sessions/ref/upo/upo",
+            headers={"Accept": "application/xml"},
+            access_token="token",
+        )
 
         with patch.object(client, "_request_model", Mock(return_value=object())) as request_model:
             client.get_sessions(

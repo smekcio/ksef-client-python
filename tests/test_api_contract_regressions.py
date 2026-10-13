@@ -7,10 +7,13 @@ tylko pilnować implementacji.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 
+from ksef_client.http import HttpResponse
 from ksef_client.utils.datetime_parsing import (
     normalize_api_timestamp,
     parse_api_datetime,
@@ -251,6 +254,70 @@ class TestInvoiceRangeDatetime:
             }
         )
         assert payload["dateRange"]["from"].startswith("2025-10-11")
+
+
+class _RecordingHttp:
+    """Minimalny transport zapisujący nagłówki każdego żądania."""
+
+    def __init__(self) -> None:
+        import httpx
+
+        self.requests: list[tuple[str, str, dict[str, Any]]] = []
+        self._response = HttpResponse(200, httpx.Headers(), b"<UPO/>")
+
+    def request(self, method: str, path: str, **kwargs: Any) -> HttpResponse:
+        self.requests.append((method, path, dict(kwargs.get("headers") or {})))
+        return self._response
+
+
+class _AsyncRecordingHttp(_RecordingHttp):
+    async def request(self, method: str, path: str, **kwargs: Any) -> HttpResponse:  # type: ignore[override]
+        return super().request(method, path, **kwargs)
+
+
+class TestUpoAcceptHeader:
+    """Snapshot deklaruje `application/xml` jako jedyny typ odpowiedzi UPO.
+
+    Kontrakt: `GET /sessions/{ref}/invoices/{invoiceRef}/upo`,
+    `GET /sessions/{ref}/invoices/ksef/{ksefNumber}/upo` oraz
+    `GET /sessions/{ref}/upo/{upoRef}` zwracają wyłącznie XML, więc bez
+    nagłówka `Accept` serwer może zwrócić 406. Test przechodzi przez WSZYSTKIE
+    sześć metod (sync i async), a nie przez dopasowanie tekstu źródła.
+    """
+
+    def test_sync_upo_downloads_request_xml(self):
+        from ksef_client.clients.sessions import SessionsClient
+
+        http = _RecordingHttp()
+        client = SessionsClient(http)
+        client.get_session_invoice_upo_by_ref("ref", "inv", access_token="t")
+        client.get_session_invoice_upo_by_ksef(
+            "ref", "1234567890-20260101-AAAAAA-BBBBBB-01", access_token="t"
+        )
+        client.get_session_upo("ref", "upo", access_token="t")
+        assert [path for _m, path, _h in http.requests] == [
+            "/sessions/ref/invoices/inv/upo",
+            "/sessions/ref/invoices/ksef/1234567890-20260101-AAAAAA-BBBBBB-01/upo",
+            "/sessions/ref/upo/upo",
+        ]
+        for method, path, headers in http.requests:
+            assert method == "GET" and headers == {"Accept": "application/xml"}, path
+
+    def test_async_upo_downloads_request_xml(self):
+        from ksef_client.clients.sessions import AsyncSessionsClient
+
+        http = _AsyncRecordingHttp()
+        client = AsyncSessionsClient(http)
+
+        async def _run() -> None:
+            await client.get_session_invoice_upo_by_ref("ref", "inv", access_token="t")
+            await client.get_session_invoice_upo_by_ksef("ref", "ksef", access_token="t")
+            await client.get_session_upo("ref", "upo", access_token="t")
+
+        asyncio.run(_run())
+        assert len(http.requests) == 3
+        for method, path, headers in http.requests:
+            assert method == "GET" and headers == {"Accept": "application/xml"}, path
 
 
 class TestTimestampNormalisationIsVersionUniform:
