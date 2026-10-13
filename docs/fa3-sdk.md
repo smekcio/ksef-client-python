@@ -218,6 +218,29 @@ for issue in issues:
 `xsd_validate=True` pozostaje ostatecznym arbitrem — sprawdza dodatkowo kolejność
 elementów i pełną strukturę schematu.
 
+### Reguły, których nie da się wyrazić w XSD
+
+Część wymagań broszury MF nie ma odpowiednika w schemacie, więc SDK sprawdza je sam —
+inaczej dokument jest formalnie poprawny, ale KSeF go odrzuca albo nie udostępnia nabywcy:
+
+* **polski NIP nabywcy wyłącznie w polu `NIP`** (GEN-20/P2-16). `KodUE=PL`/`KodKraju=PL`
+  jest zgodne ze schematem, ale faktura nie trafi do nabywcy w KSeF. SDK zgłasza błąd
+  i podpowiada `PartyIdentifier.polish_nip(...)`.
+* **`Podmiot1/PrefiksPodatnika` = `PL`** — element ma w schemacie `fixed="PL"`, a jego typ
+  `TKodyKrajowUE` dopuszcza 28 kodów, więc `DE` przechodziło przez sam słownik. W `Podmiot1K`
+  schemat tego nie wymusza i SDK tego nie zawęża.
+* **nabywca bez nazwy tylko na fakturze uproszczonej** — `TPodmiot2` trzyma `Nazwa`
+  w `<xsd:sequence minOccurs="0">` dla art. 106e ust. 5 pkt 3. Użyj
+  `SimplifiedInvoiceBuilder` (np. `FA3Invoice.simplified("FV/1")`), a powstały `Podmiot2`
+  będzie zawierał sam `NIP`, tak jak w oficjalnym `FA_3_Przykład_15.xml`.
+* **`P_10` to obniżka na jednostkę**, nie kwota łączna — `Discount.amount(100)` przy
+  `20 × 1000 zł` daje `P_11 = 18 000 zł` (zgodnie z `FA_3_Przykład_4.xml`).
+* **procedura marży nie podaje stawki** — wiersz `TaxCategory.margin()` nie emituje `P_12`,
+  `P_9A` ani `P_11`, bo podstawą jest marża (`FA_3_Przykład_8.xml`).
+* **faktura rozliczająca (ROZ)** — `P_13_x`/`P_14_x` są proporcją kwoty pozostałej do zapłaty
+  i zależą od stawek oraz zaliczek, więc SDK nie wyprowadza ich z pełnej wartości zamówienia.
+  Zamiast deklarować błędny podatek, wymaga wierszy odpowiadających kwocie pozostałej do zapłaty.
+
 ## Drafty JSON i batch helper
 
 `FA3Draft`, `FA3InvoiceBuilder` i `FA3BatchDraft` są prostszą warstwą draftową przydatną, gdy integracja

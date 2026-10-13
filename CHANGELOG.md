@@ -4,6 +4,15 @@
 
 ### Features
 
+* **utils:** add `ksef_client.utils.datetime_parsing` — one place that parses the timestamps the KSeF
+  API returns (`2025-10-11T12:23:56.0154302+00:00`), normalising any fractional part to exactly 6
+  digits. `datetime.fromisoformat` on Python 3.10 accepts only 3 or 6 digits, so every 7-digit
+  timestamp used to be unparseable on the lowest supported interpreter
+* **fa3:** honour the schema's `fixed` values and ancestor-scoped requirements —
+  `Podmiot1/PrefiksPodatnika` is fixed to `PL`, and `DaneIdentyfikacyjne/Nazwa` is required only
+  under `Podmiot1`/`Podmiot1K`/`PodmiotUpowazniony`, not under `Podmiot2`/`Podmiot3`
+* **fa3:** the simplified invoice (`SimplifiedInvoiceBuilder`) can now emit a buyer identified by NIP
+  alone (`Podmiot2` without `Nazwa`/`Adres`), matching the official `FA_3_Przykład_15.xml`/`_16.xml`
 * **fa3:** add `ksef_client.documents.fa3.validation` — schema-constraint validation of the generated
   XML (field lengths, decimal precision, value dictionaries, patterns, date ranges, element
   cardinality and required elements). It runs inside `to_xml()` independently of the business
@@ -19,11 +28,103 @@
 
 ### Bug Fixes
 
+* **cli:** an imported session checkpoint can no longer decide where the profile's access token goes.
+  `session import` compared only the profile *name*, so a crafted checkpoint file with a foreign
+  `base_url` sent the KSeF token (and the invoice body) to that host on `session online send`,
+  `close` and `status`. The base URL is now verified at import time and at every use site
+* **cli:** a partial keyring write no longer leaves a mixed pair (new access token + stale refresh
+  token) that looks complete and shadows the fallback store; a failed keyring delete now makes
+  `auth logout` fail instead of claiming "Stored tokens removed."
+* **cli:** the token metadata cache is written atomically and guarded by a cross-process lock —
+  concurrent runs used to overwrite each other and lose profile metadata — and an invalid cache is
+  quarantined with a warning, like `config.json` already was
+* **utils:** `fast_extract_ksef_metadata` handles `P_11A` (gross, art. 106e ust. 7 and 8) instead of
+  returning `total_netto=0.00`/`item_count=0` for such invoices, and skips rows marked `StanPrzed`,
+  so a KOR/KOR_ROZ document is no longer counted twice (624000 → 312000 for `Fa_3_Przykład_18.xml`)
+* **utils:** `unzip_bytes_safe`/`unzip_bytes`/`untar_gz_bytes*` default to the export package limit
+  (10 000 invoices + `_metadata.json`), so the documented "use it for export packages" advice works
+  without passing `max_files` by hand
+* **utils:** the `COLLECTIVE_IDENTIFIER_EXCEPTION_CODES[71001]` description matches the contract
+  ("invoice does not exist") instead of describing a different situation
+* **fa3:** the advance payment feeds the rate summary for **every** invoice kind again. Restricting
+  it to `ZAL` left `KOR_ZAL` with an empty `P_13_x`/`P_14_x` while `P_15` still contained the
+  advance — a document without a tax base for that amount. The schema describes `P_15` as
+  containing `P_15Z`, so `P_15 = ΣP_13_x + ΣP_14_x` must hold for all kinds
+* **fa3:** `ZamowienieWiersz` has no discount field, so `P_9AZ` now carries the price **after** the
+  discount: `P_8BZ × P_9AZ == P_11NettoZ` (official `FA_3_Przykład_29.xml`). A 100 zł discount on
+  20 × 1000 zł used to emit `P_9AZ=1000` with `P_11NettoZ=18000`
+* **fa3:** `TaxCategory.from_vat_rate()` keeps the rate code — `0 WDT`/`0 EX` no longer collapse to
+  `0 KR`, and `oo`/`np I`/`np II` are no longer declared as tax-exempt
+* **fa3:** `FA3Line.to_dict()` writes `vat_code` first, so a JSON round-trip no longer turns `oo`,
+  `np I` or `np II` into `zw`
+* **fa3:** the draft no longer loses the exemption basis (`P_19A`) when a non-exempt line comes
+  first: only `zw` lines are consulted, so `P_19N=1` can no longer contradict `P_13_7 > 0`
+* **fa3:** `DaneKontaktowe` is limited to 3 per party (schema `maxOccurs="3"`) and the serializer no
+  longer truncates the list silently; `Platnosc/ZaplataCzesciowa` is limited to 100
+* **fa3:** `LineIdentifiers.unique_id` reaches `UU_ID` (it was ignored on invoice lines while every
+  other field of that class worked)
+* **fa3:** `InvoiceLine.period_from`/`period_to`/`additional_description` are reported instead of
+  being dropped — the schema has `OkresFa`/`DodatkowyOpis` only at the `Fa` level
+* **fa3:** `attachment_text()` and `attachment_table()` append blocks instead of replacing the whole
+  attachment, so `attachment_text(...).attachment_table(...)` no longer loses the text
+* **fa3:** the draft requires an address and no longer fabricates one (`AdresL1 = "brak"`) or invented
+  buyer contacts (`brak@example.com`, `000000000`)
+* **http:** a 3xx response is an error unless explicitly expected — `httpx` does not follow
+  redirects, so the body was the intermediary's page or empty, and `upo download` wrote an empty
+  file while reporting success
+* **workflows:** the export package may contain 10 000 invoices **plus** `_metadata.json`; the
+  contract excludes the metadata file from the package limits, so `max_files=10_000` rejected a
+  legal maximum package
+* **hwm:** a truncated metadata response resumes from the **last record's** `permanentStorageDate`
+  when the API does not return `lastPermanentStorageDate` (the OpenAPI contract has no such field).
+  Resuming from `permanentStorageHwmDate` (equal to `dateRange.to`) skipped every invoice between
+  the last record and the watermark
+* **csr:** the CSR carries `givenName` (2.5.4.42) and `surname` (2.5.4.4); the MF documentation
+  requires the exact DN attributes returned by the enrolment endpoint
+* **cli:** `auth refresh` no longer invents `method="token"` when the token cache has no method
+  recorded — that made `auth revoke-self-token` revoke the company's KSeF token for a profile that
+  authenticated with XAdES
+* **security:** reject a KSeF public certificate whose validity bounds cannot be parsed and pick the
+  newest one by real instant. On Python 3.10 every 7-digit API timestamp failed to parse, so
+  `_is_current_certificate` accepted **expired** certificates and `max()` returned the first list
+  element instead of the newest certificate
+* **cli:** the CLI carried two private copies of that same certificate-validity bug
+  (`cli/sdk/adapters.py`, `cli/auth/manager.py`), reachable from five call sites and covered by no
+  offline test — both now use the shared tolerant parser and reject unparseable bounds
+* **cli:** invoice sorting no longer degrades to lexical order on Python 3.10 (7-digit timestamps)
+* **invoices:** date-range normalisation and the documented 100-day UTC guard no longer silently do
+  nothing on Python 3.10
+* **collective-identifiers:** accept the 7-digit timestamps KSeF itself returns (Python 3.10)
+* **hwm:** `_permanent_storage_date_sort_key` compares real instants instead of the raw string, so the
+  continuation point is the newest `permanentStorageDate`; a truncated package resumes from
+  `LastPermanentStorageDate` (the MF-documented first case) instead of skipping to the server
+  watermark and never fetching the invoices in between
+* **fa3:** the facet engine applies the schema's `xsd:whiteSpace` mode per element — `collapse` for
+  `xsd:token`/numeric/date types, `replace` for `xsd:normalizedString`, `preserve` for `xsd:string`
+  (`TNrNIP`, `TNrRB`, `SWIFT`, `TNrKRS`, `TNrVatUE`, `TTekstowy`, `TNrREGON`). Stripping
+  unconditionally let `<NIP> 1111111111</NIP>` (and `KodKraju=" PL "`) through the default
+  `to_xml()` although the schema rejects them; measuring the raw value rejected schema-valid
+  documents such as a padded `P_2`. The mode table is verified against the schema by a test
+* **fa3:** the facet engine no longer rejects schema-valid documents — it resolves `xsd:token`
+  whitespace, honours element-level inline date restrictions, treats `<X/>` as an empty value
+  (previously `text is None` bypassed validation entirely), tolerates comments/processing
+  instructions, and accepts an empty `NKom`/`SKom` (`TZnakowy2` has `minLength=0`)
+* **fa3:** `NrKSeFFaZaliczkowej` shares the `TNumerKSeF` pattern with `NrKSeFFaKorygowanej` — a
+  35-character garbage KSeF number used to pass `validate()` and the default `to_xml()`
+* **fa3:** `KodKraju` is checked against the 254-value `TKodKraju` dictionary, so a typo like `XX`
+  is reported instead of producing a document KSeF rejects
+* **fa3:** `DataWytworzeniaFa` uses the element's own lower bound (`2025-09-01`), not the wider
+  `TDataCzas` bound, and `PrefiksPodatnika` outside `Podmiot1` is no longer over-rejected
 * **fa3:** emit the elements the schema makes mandatory and the SDK omitted — `BlokDanych/MetaDane`
   in attachments (every attachment was schema-invalid), `ZamowienieWiersz` in an order, and
   `AdresPrzewoznika` for a transport carrier
 * **fa3:** restrict `IDWew` to `Podmiot3` (`TPodmiot2` does not allow it) and stop emitting
   `PrefiksPodatnika` in `PodmiotUpowazniony` and for an authorized party
+* **fa3:** reject a Polish purchaser whose NIP is placed in `KodUE`/`NrVatUE` or `KodKraju`/`NrID`
+  (GEN-20/P2-16 of the MF brochure) — the schema accepts it, but KSeF never makes the invoice
+  available to that buyer
+* **fa3:** require `Podmiot1/PrefiksPodatnika` to be exactly `PL` (the element is `fixed="PL"`), in
+  both the business validation and the facet pass
 * **fa3:** normalise `P_8B`, `P_12_XII`, `KursWaluty*`, `KursUmowny` and `Udzial` to the 6 decimals
   the schema allows (`TIlosci`/`TProcentowy`), and format `P_9A`/`P_9B`/`P_10` with up to 8
   decimals (`TKwotowy2`) instead of 2
@@ -67,6 +168,25 @@
 * **fa3:** derive VAT and gross from the effective net amount so `net_amount` overrides keep
   `P_13_x + P_14_x == P_15`; exempt draft lines now require an `exemption_basis` (P_19A)
   instead of emitting a contradictory `P_19N`
+* **fa3:** treat `P_10` as a per-unit discount (the schema describes it next to `P_9A`/`P_9B`, and the
+  official `FA_3_Przykład_4.xml` confirms `P_11 = P_8B × (P_9A − P_10)`), so a 100 zł discount on
+  20 × 1000 zł yields 18 000 zł instead of 19 900 zł of net and 437 zł of extra VAT
+* **fa3:** `TaxCategory.margin()` no longer emits `P_12="np I"` — a margin-procedure line carries no
+  rate, no `P_9A` and no `P_11` (official `FA_3_Przykład_8.xml`/`_19.xml`)
+* **fa3:** the advance payment feeds the rate summary only for an advance invoice (`ZAL`); a
+  settlement (`ROZ`) had it counted twice
+* **fa3:** require `Podmiot1K/Adres`, and refuse to guess the `P_13_x` proportion of a settlement
+  invoice — the SDK now asks for rows that match the amount due instead of declaring the wrong tax
+* **sessions:** request UPO downloads with `Accept: application/xml`, the only media type the contract
+  declares
+* **testdata:** the limit endpoints answer `200` with an empty body, so they now use the optional-model
+  request helper instead of failing to deserialize
+* **verification-link:** use the contracted KOD II segment spelling (`Nip`, `InternalId`, `NipVatUe`,
+  `PeppolId`) and validate a string `issue_date`, which previously produced links the KSeF page
+  rejects as malformed (`2026/02/01` even injected an extra path segment)
+* **utils:** `MAX_BATCH_PART_SIZE_BYTES` is 100 MB decimally (`100_000_000`), the limit KSeF actually
+  enforces per pre-encryption part; `build_zip` sanitises entry names like `build_tar_gz`, and both
+  readers reject duplicate entry names instead of silently dropping content
 
 ## 0.18.1 (2026-09-29)
 
