@@ -425,11 +425,34 @@ def export_checkpoint(profile: str, session_id: str, out_path: Path) -> Path:
     return target
 
 
+def _normalize_base_url(value: str) -> str:
+    return value.strip().rstrip("/").lower()
+
+
+def require_matching_base_url(checkpoint: SessionCheckpoint, expected_base_url: str) -> None:
+    """Sprawdza, że checkpoint nie wskazuje innego hosta niż profil.
+
+    Checkpoint bywa plikiem z zewnątrz (`session import`), a jego `base_url`
+    decyduje, DOKĄD trafia token dostępowy profilu (`session online send`,
+    `close`, `status`). Wcześniej porównywana była wyłącznie nazwa profilu, więc
+    spreparowany plik mógł wysłać token KSeF i treść faktury na dowolny host.
+    """
+    if _normalize_base_url(checkpoint.base_url) == _normalize_base_url(expected_base_url):
+        return
+    raise CliError(
+        "Checkpoint base_url does not match the selected profile.",
+        ExitCode.VALIDATION_ERROR,
+        f"Checkpoint points at '{checkpoint.base_url}', profile at '{expected_base_url}'. "
+        "Re-import the checkpoint from the matching environment or select that profile.",
+    )
+
+
 def import_checkpoint(
     profile: str,
     source_path: Path,
     *,
     session_id: str | None = None,
+    expected_base_url: str | None = None,
 ) -> SessionCheckpoint:
     if not source_path.exists() or not source_path.is_file():
         raise CliError(
@@ -444,6 +467,8 @@ def import_checkpoint(
             ExitCode.VALIDATION_ERROR,
             f"Checkpoint profile is '{checkpoint.profile}', selected profile is '{profile}'.",
         )
+    if expected_base_url is not None:
+        require_matching_base_url(checkpoint, expected_base_url)
     if session_id is not None:
         checkpoint = replace(checkpoint, id=_validate_session_id(session_id))
     save_checkpoint(checkpoint, overwrite=True)
@@ -463,4 +488,5 @@ __all__ = [
     "update_checkpoint",
     "export_checkpoint",
     "import_checkpoint",
+    "require_matching_base_url",
 ]

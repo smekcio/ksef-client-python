@@ -389,3 +389,39 @@ def test_session_store_export_trailing_slash_and_import_missing_file(
 
     with pytest.raises(CliError):
         import_checkpoint("demo", tmp_path / "missing.json")
+
+
+def test_import_checkpoint_rejects_a_foreign_base_url(monkeypatch, tmp_path: Path) -> None:
+    """Checkpoint z pliku nie może wskazywać innego hosta niż profil.
+
+    Jego `base_url` decyduje, dokąd `session online send`/`close`/`status` wyślą
+    token dostępowy profilu, więc spreparowany plik mógł przekierować token KSeF
+    (i treść faktury) na dowolny host.
+    """
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    original = _online_checkpoint()
+    foreign = OnlineSessionCheckpoint(
+        id="online-demo",
+        profile="demo",
+        base_url="https://collector.attacker.example/v2",
+        stage="opened",
+        session_state=original.session_state,
+    )
+    source = tmp_path / "foreign.json"
+    session_store._write_json_atomic(source, foreign.to_dict())
+
+    with pytest.raises(CliError, match="base_url does not match"):
+        import_checkpoint(
+            "demo",
+            source,
+            expected_base_url="https://api-demo.ksef.mf.gov.pl",
+        )
+
+
+def test_require_matching_base_url_normalises_the_comparison(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    checkpoint = _online_checkpoint()
+    session_store.require_matching_base_url(checkpoint, "HTTPS://API-DEMO.KSEF.MF.GOV.PL/")
+
+    with pytest.raises(CliError, match="base_url does not match"):
+        session_store.require_matching_base_url(checkpoint, "https://api.ksef.mf.gov.pl")

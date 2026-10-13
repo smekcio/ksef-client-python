@@ -9,6 +9,7 @@ from ksef_client.services import BatchSessionHandle, BatchUploadHelper
 from ksef_client.services.crypto import get_file_metadata
 from ksef_client.services.workflows import BatchSessionWorkflow, OnlineSessionWorkflow
 
+from ..auth.manager import resolve_base_url
 from ..errors import CliError
 from ..exit_codes import ExitCode
 from ..session_store import (
@@ -21,6 +22,7 @@ from ..session_store import (
     import_checkpoint,
     list_checkpoints,
     load_checkpoint,
+    require_matching_base_url,
     save_checkpoint,
     update_checkpoint,
 )
@@ -195,8 +197,21 @@ def import_saved_session(
     source_path: str,
     session_id: str | None = None,
 ) -> dict[str, Any]:
-    checkpoint = import_checkpoint(profile, Path(source_path), session_id=session_id)
+    checkpoint = import_checkpoint(
+        profile,
+        Path(source_path),
+        session_id=session_id,
+        # Checkpoint z pliku nie może wskazywać innego środowiska niż profil —
+        # inaczej token dostępowy trafiłby pod host wybrany przez autora pliku.
+        expected_base_url=resolve_base_url(None, profile=profile),
+    )
     return _checkpoint_summary(checkpoint)
+
+
+def _require_checkpoint_base_url(checkpoint: SessionCheckpoint, *, profile: str) -> str:
+    """`base_url` checkpointu po sprawdzeniu wobec konfiguracji profilu."""
+    require_matching_base_url(checkpoint, resolve_base_url(None, profile=profile))
+    return checkpoint.base_url
 
 
 def drop_saved_session(*, profile: str, session_id: str) -> dict[str, Any]:
@@ -274,7 +289,9 @@ def send_online_session_invoice(
         adapters._validate_polling_options(poll_interval, max_attempts)
 
     invoice_xml = adapters._load_invoice_xml(invoice)
-    with adapters.create_client(checkpoint.base_url, access_token=access_token) as client:
+    with adapters.create_client(
+        _require_checkpoint_base_url(checkpoint, profile=profile), access_token=access_token
+    ) as client:
         workflow = OnlineSessionWorkflow(client.sessions)
         session = workflow.resume_session(checkpoint.session_state, access_token=access_token)
         send_response = session.send_invoice(invoice_xml, access_token=access_token)
@@ -363,7 +380,9 @@ def close_online_session(
         ),
     )
     access_token = adapters._require_access_token(profile)
-    with adapters.create_client(checkpoint.base_url, access_token=access_token) as client:
+    with adapters.create_client(
+        _require_checkpoint_base_url(checkpoint, profile=profile), access_token=access_token
+    ) as client:
         workflow = OnlineSessionWorkflow(client.sessions)
         session = workflow.resume_session(checkpoint.session_state, access_token=access_token)
         session.close(access_token=access_token)
@@ -447,7 +466,9 @@ def upload_batch_session(
     )
     uploaded_ordinals = sorted(set(checkpoint.uploaded_ordinals))
 
-    with adapters.create_client(checkpoint.base_url, access_token=access_token) as client:
+    with adapters.create_client(
+        _require_checkpoint_base_url(checkpoint, profile=profile), access_token=access_token
+    ) as client:
         workflow = BatchSessionWorkflow(client.sessions, client.http_client)
         session = workflow.resume_session(
             checkpoint.session_state,
@@ -519,7 +540,9 @@ def close_batch_session(
         return _checkpoint_summary(checkpoint)
 
     access_token = adapters._require_access_token(profile)
-    with adapters.create_client(checkpoint.base_url, access_token=access_token) as client:
+    with adapters.create_client(
+        _require_checkpoint_base_url(checkpoint, profile=profile), access_token=access_token
+    ) as client:
         if checkpoint.stage != "closed":
             session = BatchSessionHandle.from_state(
                 checkpoint.session_state,
@@ -592,7 +615,7 @@ def get_saved_session_status(
     checkpoint = load_checkpoint(profile, session_id)
     return adapters.get_send_status(
         profile=profile,
-        base_url=checkpoint.base_url,
+        base_url=_require_checkpoint_base_url(checkpoint, profile=profile),
         session_ref=checkpoint.session_state.reference_number,
         invoice_ref=invoice_ref,
     ) | {"id": checkpoint.id, "kind": checkpoint.kind, "stage": checkpoint.stage}

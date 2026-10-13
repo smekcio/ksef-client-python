@@ -277,6 +277,13 @@ def save_tokens(profile: str, access_token: str, refresh_token: str) -> None:
             )
             return
         except KeyringError as exc:
+            # Częściowy zapis zostawiał parę „nowy access + stary refresh", która
+            # wygląda na kompletną: `get_tokens` zwracał mieszankę nigdy nie
+            # istniejącej sesji i przesłaniał kompletny fallback. Usuwamy więc
+            # oba wpisy, żeby magazyn był albo w całości nowy, albo pusty.
+            for key in (_ACCESS_KEY, _REFRESH_KEY):
+                with suppress(KeyringError, Exception):
+                    keyring_backend.delete_password(_SERVICE_NAME, _token_key(profile, key))
             if _fallback_mode() is None:
                 fallback_hint = (
                     f"(or {_ALLOW_INSECURE_FALLBACK_ENV}=1 for plaintext fallback)."
@@ -314,9 +321,23 @@ def clear_tokens(profile: str) -> None:
         for key in (_ACCESS_KEY, _REFRESH_KEY):
             try:
                 keyring_backend.delete_password(_SERVICE_NAME, _token_key(profile, key))
-            except KeyringError:
-                # Missing entry/backend issues are non-fatal for logout path.
-                continue
+            except KeyringError as exc:
+                # Brak wpisu jest w porządku, ale NIEUDANE usunięcie nie może
+                # udawać wylogowania: wcześniej pętla szła dalej (`continue`),
+                # a `logout` raportował „Stored tokens removed.", zostawiając
+                # ważny refresh token w magazynie poświadczeń.
+                still_present = False
+                with suppress(KeyringError, Exception):
+                    still_present = bool(
+                        keyring_backend.get_password(_SERVICE_NAME, _token_key(profile, key))
+                    )
+                if still_present:
+                    raise CliError(
+                        "Cannot remove tokens from the system keyring.",
+                        ExitCode.CONFIG_ERROR,
+                        "Remove the entry manually or configure the OS keyring backend, "
+                        "then run `ksef auth logout` again.",
+                    ) from exc
 
     if not _fallback_tokens_file().exists():
         return

@@ -465,12 +465,10 @@ def refresh_access_token(*, profile: str, base_url: str, save: bool = True) -> d
     if save:
         save_tokens(profile, new_access_token, refresh_token)
         metadata = get_cached_metadata(profile) or {}
-        metadata.update(
-            {
-                "access_valid_until": str(access_valid_until or ""),
-                "method": metadata.get("method", "token"),
-            }
-        )
+        # NIE wymyślamy `method`: wcześniej brak wpisu w cache (np. uszkodzony
+        # albo skasowany plik) dawał `method="token"` nawet dla profilu XAdES,
+        # przez co `auth revoke-self-token` unieważniał firmowy token KSeF.
+        metadata["access_valid_until"] = str(access_valid_until or "")
         set_cached_metadata(profile, metadata)
 
     return {
