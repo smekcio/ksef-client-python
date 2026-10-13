@@ -342,8 +342,19 @@ def clear_tokens(profile: str) -> None:
     if not _fallback_tokens_file().exists():
         return
 
-    with suppress(OSError):
+    try:
         _update_fallback_tokens(profile, None)
+    except OSError as exc:
+        # Wcześniej błąd był połykany (`suppress(OSError)`), więc `auth logout`
+        # raportował „Stored tokens removed." i zwracał `logged_out: True`,
+        # zostawiając WAŻNY refresh token w `tokens.json`. Użytkownik musi
+        # wiedzieć, że wylogowanie się nie powiodło.
+        raise CliError(
+            "Cannot remove tokens from the fallback token store.",
+            ExitCode.CONFIG_ERROR,
+            "Remove the file manually (cache directory: tokens.json) or fix its permissions, "
+            "then run `ksef auth logout` again.",
+        ) from exc
 
 
 def get_tokens(profile: str) -> tuple[str, str] | None:

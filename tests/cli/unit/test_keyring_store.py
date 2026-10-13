@@ -204,7 +204,13 @@ def test_keyring_store_encrypted_fallback_invalid_token(monkeypatch, tmp_path) -
     assert keyring_store.get_tokens("demo") is None
 
 
-def test_keyring_store_file_fallback_clear_ignores_save_errors(monkeypatch, tmp_path) -> None:
+def test_keyring_store_file_fallback_clear_reports_save_errors(monkeypatch, tmp_path) -> None:
+    """Nieudane usunięcie tokenów z fallbacku nie może udawać wylogowania.
+
+    Wcześniej `clear_tokens` połykało `OSError`, więc `auth logout` raportował
+    „Stored tokens removed." i zwracał `logged_out: True`, zostawiając ważny
+    refresh token w `tokens.json`.
+    """
     monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", False)
     monkeypatch.setattr(keyring_store, "_keyring", None)
     monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
@@ -216,7 +222,12 @@ def test_keyring_store_file_fallback_clear_ignores_save_errors(monkeypatch, tmp_
         "_save_fallback_tokens",
         lambda payload: (_ for _ in ()).throw(OSError("disk")),
     )
-    keyring_store.clear_tokens("demo")
+
+    with pytest.raises(CliError, match="Cannot remove tokens from the fallback"):
+        keyring_store.clear_tokens("demo")
+
+    # Tokeny faktycznie zostały na dysku — dokładnie dlatego operacja musi zgłosić błąd.
+    assert (tmp_path / "tokens.json").read_text(encoding="utf-8").strip() != "{}"
 
 
 def test_keyring_store_clear_tokens_removes_legacy_fallback_entry_when_mode_disabled(
