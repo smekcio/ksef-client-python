@@ -6,7 +6,24 @@ import tarfile
 import zipfile
 from pathlib import PurePosixPath
 
-MAX_BATCH_PART_SIZE_BYTES = 100 * 1024 * 1024
+#: Maksymalny rozmiar części paczki PRZED zaszyfrowaniem.
+#:
+#: Kontrakt KSeF opisuje limit dziesiętnie („Maksymalny dozwolony rozmiar części
+#: przed zaszyfrowaniem to 100MB"), a oficjalny klient referencyjny używa
+#: ``100 * 1000 * 1000``. Wcześniejsza wartość ``100 * 1024 * 1024`` pozwalała
+#: wysłać część o 4,86% większą niż dozwolona (100 000 000-104 857 600 B),
+#: którą KSeF odrzucał komunikatem „Rozmiar części 1 przekroczył dozwolony
+#: rozmiar 100MB".
+MAX_BATCH_PART_SIZE_BYTES = 100_000_000
+#: Maksymalna liczba faktur w paczce eksportu (kontrakt: „Limit liczby faktur: 10 000 sztuk").
+EXPORT_MAX_INVOICES = 10_000
+#: Limit wpisów archiwum paczki eksportu.
+#:
+#: Paczka zawiera dodatkowo `_metadata.json`, którego kontrakt **nie wlicza** do
+#: limitów algorytmu budowania paczki („Plik z metadanymi(_metadata.json) nie jest
+#: wliczany do limitów algorytmu budowania paczki"). Limit `max_files=10_000`
+#: odrzucał więc legalną paczkę maksymalną (10 000 faktur + metadane = 10 001 wpisów).
+EXPORT_MAX_ARCHIVE_ENTRIES = EXPORT_MAX_INVOICES + 1
 _DETERMINISTIC_ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 _DETERMINISTIC_TAR_MTIME = 0
 
@@ -14,7 +31,7 @@ _DETERMINISTIC_TAR_MTIME = 0
 def build_zip(files: dict[str, bytes]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for name, content in files.items():
+        for name, content in _safe_archive_entries(files, archive_type="zip"):
             info = zipfile.ZipInfo(filename=name, date_time=_DETERMINISTIC_ZIP_DATE_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 0
@@ -29,8 +46,7 @@ def build_tar_gz(files: dict[str, bytes]) -> bytes:
         gzip.GzipFile(fileobj=buffer, mode="wb", mtime=_DETERMINISTIC_TAR_MTIME) as gz,
         tarfile.open(fileobj=gz, mode="w") as tf,
     ):
-        for name, content in files.items():
-            safe_name = _sanitize_archive_entry_name(name, archive_type="tar.gz")
+        for safe_name, content in _safe_archive_entries(files, archive_type="tar.gz"):
             info = tarfile.TarInfo(name=safe_name)
             info.size = len(content)
             info.mtime = _DETERMINISTIC_TAR_MTIME
@@ -41,6 +57,29 @@ def build_tar_gz(files: dict[str, bytes]) -> bytes:
             info.gname = ""
             tf.addfile(info, io.BytesIO(content))
     return buffer.getvalue()
+
+
+def _safe_archive_entries(
+    files: dict[str, bytes], *, archive_type: str
+) -> list[tuple[str, bytes]]:
+    """Nazwy wpisów po sanityzacji, bez kolizji (inaczej wpis ginąłby po cichu).
+
+    ``build_zip`` zapisywał nazwę wywołującego dosłownie (także ``../``), przez co
+    własny czytnik SDK odrzucał takie archiwum, a rozpakowujący narażał się na
+    path traversal. Dodatkowo dwa różne zapisy (``a//b`` i ``a/b``) normalizują
+    się do tej samej nazwy — drugi wpis nadpisałby pierwszy.
+    """
+    entries: list[tuple[str, bytes]] = []
+    seen: set[str] = set()
+    for raw_name, content in files.items():
+        safe_name = _sanitize_archive_entry_name(raw_name, archive_type=archive_type)
+        if safe_name in seen:
+            raise ValueError(
+                f"{archive_type} entry name is duplicated after normalisation: {safe_name}"
+            )
+        seen.add(safe_name)
+        entries.append((safe_name, content))
+    return entries
 
 
 def split_bytes(data: bytes, max_part_size: int = MAX_BATCH_PART_SIZE_BYTES) -> list[bytes]:
@@ -57,7 +96,7 @@ def split_bytes(data: bytes, max_part_size: int = MAX_BATCH_PART_SIZE_BYTES) -> 
 def unzip_bytes(
     data: bytes,
     *,
-    max_files: int = 10_000,
+    max_files: int = EXPORT_MAX_ARCHIVE_ENTRIES,
     max_total_uncompressed_size: int = 2_000_000_000,
     max_file_uncompressed_size: int = 500_000_000,
     max_compression_ratio: float | None = 200.0,
@@ -74,7 +113,7 @@ def unzip_bytes(
 def untar_gz_bytes(
     data: bytes,
     *,
-    max_files: int = 10_000,
+    max_files: int = EXPORT_MAX_ARCHIVE_ENTRIES,
     max_total_uncompressed_size: int = 2_000_000_000,
     max_file_uncompressed_size: int = 500_000_000,
     max_compression_ratio: float | None = 200.0,
@@ -91,7 +130,7 @@ def untar_gz_bytes(
 def untar_gz_bytes_safe(
     data: bytes,
     *,
-    max_files: int = 10_000,
+    max_files: int = EXPORT_MAX_ARCHIVE_ENTRIES,
     max_total_uncompressed_size: int = 2_000_000_000,
     max_file_uncompressed_size: int = 500_000_000,
     max_compression_ratio: float | None = 200.0,
@@ -128,6 +167,10 @@ def untar_gz_bytes_safe(
                 raise ValueError("tar.gz exceeds max_compression_ratio")
 
             safe_name = _sanitize_archive_entry_name(member.name, archive_type="tar.gz")
+            if safe_name in result:
+                # Dwa wpisy o tej samej nazwie: drugi odczytałby się „po nazwie"
+                # i pierwszy zniknąłby bez komunikatu.
+                raise ValueError(f"tar.gz contains duplicate entry name: {safe_name}")
             extracted = tf.extractfile(member)
             if extracted is None:
                 raise ValueError("tar.gz entry could not be read")
@@ -138,7 +181,7 @@ def untar_gz_bytes_safe(
 def unzip_bytes_safe(
     data: bytes,
     *,
-    max_files: int = 10_000,
+    max_files: int = EXPORT_MAX_ARCHIVE_ENTRIES,
     max_total_uncompressed_size: int = 2_000_000_000,
     max_file_uncompressed_size: int = 500_000_000,
     max_compression_ratio: float | None = 200.0,
@@ -178,7 +221,14 @@ def unzip_bytes_safe(
                         raise ValueError("zip entry exceeds max_compression_ratio")
 
             safe_name = _sanitize_archive_entry_name(info.filename, archive_type="zip")
-            result[safe_name] = zf.read(info.filename)
+            if safe_name in result:
+                # `zipfile` rozwiązuje nazwę przez NameToInfo, czyli do OSTATNIEGO
+                # wpisu o tej nazwie — wcześniejsze bajty przepadałyby po cichu,
+                # a licznik `max_files` liczyłby już zredukowany słownik.
+                raise ValueError(f"zip contains duplicate entry name: {safe_name}")
+            # Odczyt konkretnego wpisu (nie „po nazwie"), żeby nie zgubić treści.
+            with zf.open(info) as entry:
+                result[safe_name] = entry.read()
     return result
 
 

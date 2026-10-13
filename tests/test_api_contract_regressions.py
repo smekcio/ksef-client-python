@@ -1008,6 +1008,66 @@ class TestCountryCodeDictionary:
         assert {"PL", "DE", "GB", "XI"} <= entry.facet.allowed
 
 
+class TestArchiveEntryNames:
+    """`build_zip` musi być równie ostrożny jak `build_tar_gz`."""
+
+    def test_zip_sanitises_entry_names(self):
+        from ksef_client.utils.zip_utils import build_zip, unzip_bytes_safe
+
+        with pytest.raises(ValueError, match="unsafe segments"):
+            build_zip({"../evil.xml": b"x"})
+        payload = build_zip({"sub/faktura.xml": b"<xml/>"})
+        assert unzip_bytes_safe(payload) == {"sub/faktura.xml": b"<xml/>"}
+
+    def test_zip_rejects_names_colliding_after_normalisation(self):
+        from ksef_client.utils.zip_utils import build_zip
+
+        with pytest.raises(ValueError, match="duplicated after normalisation"):
+            build_zip({"a//b.xml": b"x", "a/b.xml": b"y"})
+
+    def test_unzip_reads_each_entry_and_rejects_duplicates(self):
+        import io
+        import warnings
+        import zipfile
+
+        from ksef_client.utils.zip_utils import unzip_bytes_safe
+
+        buffer = io.BytesIO()
+        with warnings.catch_warnings():
+            # `zipfile` ostrzega o powtórzonej nazwie — tworzymy ją celowo.
+            warnings.simplefilter("ignore")
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr("faktura.xml", b"FIRST")
+                archive.writestr("faktura.xml", b"SECOND")
+        with pytest.raises(ValueError, match="duplicate entry name"):
+            unzip_bytes_safe(buffer.getvalue())
+
+    def test_untar_rejects_duplicate_entries(self):
+        import io
+        import tarfile
+
+        from ksef_client.utils.zip_utils import untar_gz_bytes_safe
+
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            for payload in (b"FIRST", b"SECOND"):
+                info = tarfile.TarInfo(name="faktura.xml")
+                info.size = len(payload)
+                archive.addfile(info, io.BytesIO(payload))
+        with pytest.raises(ValueError, match="duplicate entry name"):
+            untar_gz_bytes_safe(buffer.getvalue())
+
+    def test_batch_part_size_is_the_decimal_limit(self):
+        """KSeF: „Maksymalny dozwolony rozmiar części ... to 100MB" (dziesiętnie)."""
+        from ksef_client.utils.zip_utils import MAX_BATCH_PART_SIZE_BYTES, split_bytes
+
+        assert MAX_BATCH_PART_SIZE_BYTES == 100_000_000
+        oversized = b"x" * (MAX_BATCH_PART_SIZE_BYTES + 1)
+        parts = split_bytes(oversized)
+        assert len(parts) == 2
+        assert max(len(part) for part in parts) <= MAX_BATCH_PART_SIZE_BYTES
+
+
 class TestTimestampNormalisationIsVersionUniform:
     """Ułamek sekundy musi być sprowadzany do 6 cyfr niezależnie od długości."""
 
@@ -1325,3 +1385,33 @@ class TestVatCodePreservation:
         assert TaxCategory.from_vat_rate(0).xml_rate == "0 KR"
         # Wartość bez stawki i bez kodu (`None`) pozostaje zwolnieniem.
         assert TaxCategory.from_vat_rate(None).xml_rate == "zw"
+
+
+class TestExportArchiveLimits:
+    """Paczka eksportu może mieć 10 000 faktur + `_metadata.json` (nie liczy się)."""
+
+    def test_archive_entry_limit_accounts_for_the_metadata_file(self):
+        from ksef_client.utils.zip_utils import (
+            EXPORT_MAX_ARCHIVE_ENTRIES,
+            EXPORT_MAX_INVOICES,
+        )
+
+        assert EXPORT_MAX_INVOICES == 10_000
+        assert EXPORT_MAX_ARCHIVE_ENTRIES == 10_001
+
+    def test_full_export_package_unpacks(self):
+        import io
+        import zipfile
+
+        from ksef_client.utils.zip_utils import EXPORT_MAX_ARCHIVE_ENTRIES, unzip_bytes_safe
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for index in range(EXPORT_MAX_ARCHIVE_ENTRIES - 1):
+                archive.writestr(f"{index}.xml", b"<Faktura/>")
+            archive.writestr("_metadata.json", b"{}")
+        unpacked = unzip_bytes_safe(
+            buffer.getvalue(), max_files=EXPORT_MAX_ARCHIVE_ENTRIES
+        )
+        assert len(unpacked) == EXPORT_MAX_ARCHIVE_ENTRIES
+        assert "_metadata.json" in unpacked

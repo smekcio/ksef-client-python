@@ -31,7 +31,11 @@ from ..models import (
     SendInvoiceRequest,
     SendInvoiceResponse,
 )
-from ..utils.zip_utils import untar_gz_bytes_safe, unzip_bytes_safe
+from ..utils.zip_utils import (
+    EXPORT_MAX_ARCHIVE_ENTRIES,
+    untar_gz_bytes_safe,
+    unzip_bytes_safe,
+)
 from .auth import (
     DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
     build_auth_token_request_xml,
@@ -1185,10 +1189,13 @@ def _unpack_export_archive(
     *,
     compression_type: CompressionType,
 ) -> dict[str, bytes]:
+    # `EXPORT_MAX_ARCHIVE_ENTRIES` = 10 000 faktur + `_metadata.json`: kontrakt
+    # nie wlicza pliku metadanych do limitów paczki, a domyślny limit 10 000
+    # wpisów odrzucał legalną paczkę maksymalną.
     if compression_type is CompressionType.ZIP:
-        return unzip_bytes_safe(archive_bytes)
+        return unzip_bytes_safe(archive_bytes, max_files=EXPORT_MAX_ARCHIVE_ENTRIES)
     if compression_type is CompressionType.TARGZ:
-        return untar_gz_bytes_safe(archive_bytes)
+        return untar_gz_bytes_safe(archive_bytes, max_files=EXPORT_MAX_ARCHIVE_ENTRIES)
     raise ValueError("Unsupported compression type. Use Zip or TarGz.")
 
 
