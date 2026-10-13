@@ -1040,6 +1040,53 @@ class TestCountryCodeDictionary:
         assert {"PL", "DE", "GB", "XI"} <= entry.facet.allowed
 
 
+class TestVerificationLinkInputValidation:
+    """Segmenty KOD I/KOD II muszą być dokładnie takie, jakich wymaga KSeF."""
+
+    @staticmethod
+    def _service():
+        from ksef_client.config import KsefClientOptions, KsefEnvironment
+        from ksef_client.services.verification_link import VerificationLinkService
+
+        return VerificationLinkService(KsefClientOptions(base_url=KsefEnvironment.TEST.value))
+
+    def test_context_identifier_type_is_normalised(self):
+        from ksef_client.services.verification_link import _normalize_context_identifier_type
+
+        assert _normalize_context_identifier_type("nip") == "Nip"
+        assert _normalize_context_identifier_type("NIP") == "Nip"
+        assert _normalize_context_identifier_type(" internalId ") == "InternalId"
+        assert _normalize_context_identifier_type("nipVatUe") == "NipVatUe"
+        assert _normalize_context_identifier_type("PeppolId") == "PeppolId"
+
+    def test_unknown_context_identifier_type_is_reported(self):
+        from ksef_client.services.verification_link import _normalize_context_identifier_type
+
+        with pytest.raises(ValueError, match="Unsupported context identifier type"):
+            _normalize_context_identifier_type("nip-vat")
+
+    def test_invoice_url_uses_the_contracted_date_format(self):
+        from datetime import date
+
+        service = self._service()
+        assert "/invoice/123/01-02-2026/" in service.build_invoice_verification_url(
+            "123", "01-02-2026", "YQ=="
+        )
+        assert "/invoice/123/01-02-2026/" in service.build_invoice_verification_url(
+            "123", date(2026, 2, 1), "YQ=="
+        )
+        # ISO-8601 jest wygodnym wejściem i musi zostać przekonwertowany.
+        assert "/invoice/123/01-02-2026/" in service.build_invoice_verification_url(
+            "123", "2026-02-01", "YQ=="
+        )
+
+    def test_malformed_invoice_date_is_reported(self):
+        service = self._service()
+        for value in ("2026/02/01", "1 lutego 2026", "01.02.2026"):
+            with pytest.raises(ValueError, match="Invalid invoice issue date"):
+                service.build_invoice_verification_url("123", value, "YQ==")
+
+
 class TestArchiveEntryNames:
     """`build_zip` musi być równie ostrożny jak `build_tar_gz`."""
 
@@ -1576,6 +1623,33 @@ class TestDraftRequiresAnAddress:
         broken = replace(draft, seller=FA3Party(name="Sprzedawca", tax_id="1234567890"))
         with pytest.raises(FA3XmlValidationError, match="adres jest wymagany"):
             broken.to_xml(validate=False)
+
+
+class TestCsrSubjectAttributes:
+    """CSR musi nieść `givenName` (2.5.4.42) i `surname` (2.5.4.4) z wektora KSeF."""
+
+    def test_csr_contains_given_name_and_surname(self):
+        import base64
+
+        from cryptography import x509
+
+        from ksef_client.services.csr import generate_csr_ec, generate_csr_rsa
+
+        info = {
+            "commonName": "Jan Kowalski",
+            "countryName": "PL",
+            "givenName": "Jan",
+            "surname": "Kowalski",
+            "serialNumber": "TINPL-88102341294",
+            "uniqueIdentifier": "UID-1",
+        }
+        for generator in (generate_csr_ec, generate_csr_rsa):
+            csr = x509.load_der_x509_csr(base64.b64decode(generator(info).csr_base64))
+            subject = csr.subject
+            given = subject.get_attributes_for_oid(x509.ObjectIdentifier("2.5.4.42"))
+            surname = subject.get_attributes_for_oid(x509.ObjectIdentifier("2.5.4.4"))
+            assert [attribute.value for attribute in given] == ["Jan"]
+            assert [attribute.value for attribute in surname] == ["Kowalski"]
 
 
 class TestExportArchiveLimits:

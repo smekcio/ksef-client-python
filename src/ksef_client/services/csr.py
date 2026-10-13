@@ -16,10 +16,26 @@ class CsrResult:
     private_key_base64: str
 
 
+#: OID atrybutów DN wymaganych przez KSeF dla osoby fizycznej:
+#: `2.5.4.4` (surname) i `2.5.4.42` (givenName). Dokumentacja MF
+#: („certyfikaty-KSeF", rozdz. 2-3) mówi, że system zwraca komplet atrybutów DN,
+#: które **muszą** zostać użyte przy budowie CSR — modyfikacja danych powoduje
+#: odrzucenie wniosku (kod błędu 25003).
+_SURNAME_OID = x509.ObjectIdentifier("2.5.4.4")
+_GIVEN_NAME_OID = x509.ObjectIdentifier("2.5.4.42")
+
+
 def _build_subject(info: dict[str, Any]) -> x509.Name:
     attributes = []
     if info.get("commonName"):
         attributes.append(x509.NameAttribute(NameOID.COMMON_NAME, info["commonName"]))
+    if info.get("givenName"):
+        # `CertificateEnrollmentDataResponse.givenName` — pominięcie tego
+        # atrybutu dawało CSR niezgodny z danymi wektora uwierzytelniającego
+        # (KSeF odrzuca wniosek), a funkcja nie zgłaszała nic.
+        attributes.append(x509.NameAttribute(_GIVEN_NAME_OID, info["givenName"]))
+    if info.get("surname"):
+        attributes.append(x509.NameAttribute(_SURNAME_OID, info["surname"]))
     if info.get("organizationName"):
         attributes.append(x509.NameAttribute(NameOID.ORGANIZATION_NAME, info["organizationName"]))
     if info.get("countryName"):

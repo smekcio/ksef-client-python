@@ -10,7 +10,10 @@ Wymaga `KsefClientOptions`; wartość `base_qr_url` jest wykorzystywana jako baz
 
 Buduje URL dla „KOD I” (weryfikacja faktury).
 
-- `issue_date`: `date`, `datetime` albo string (format `DD-MM-YYYY`)
+- `issue_date`: `date`, `datetime` albo string. String przyjmujemy w formacie
+  docelowym `DD-MM-YYYY` albo w ISO-8601 (`YYYY-MM-DD`, konwertowany); każdy inny
+  zapis kończy się `ValueError` — np. `2026/02/01` dokładał do ścieżki dodatkowy
+  segment i dawał kod odrzucany jako uszkodzony.
 - `invoice_hash`: może być Base64 albo Base64Url – biblioteka akceptuje oba formaty i generuje Base64Url bez paddingu
 
 ## `build_certificate_verification_url(...) -> str`
@@ -19,7 +22,10 @@ Buduje URL dla „KOD II” (offline – podpisany link certyfikatem).
 
 Parametry, które mają największe znaczenie:
 - `seller_nip`
-- `context_identifier_type`, `context_identifier_value` – np. `nip`, `526...`
+- `context_identifier_type` – jeden z czterech segmentów kontraktu: `Nip`,
+  `InternalId`, `NipVatUe`, `PeppolId`; zapis bez rozróżniania wielkości liter
+  (`nip`) jest normalizowany, a wartość spoza listy kończy się `ValueError`
+- `context_identifier_value` – np. `526...`
 - `certificate_serial`
 - `invoice_hash` (Base64 lub Base64Url)
 - `private_key_pem` – wymagany (podpis URL jest wykonywany lokalnie)
@@ -29,7 +35,7 @@ Parametry, które mają największe znaczenie:
 Podpis obejmuje fragment URL bez prefiksu `https://` / `http://`, np.:
 
 ```text
-qr-test.ksef.mf.gov.pl/certificate/nip/1234567890/1234567890/1/YQ
+qr-test.ksef.mf.gov.pl/certificate/Nip/1234567890/1234567890/1/YQ
 ```
 
 Biblioteka podpisuje ten ciąg algorytmem zgodnym z kluczem:
@@ -41,7 +47,7 @@ Przykład z zaszyfrowanym PEM:
 ```python
 url = service.build_certificate_verification_url(
     seller_nip="1234567890",
-    context_identifier_type="nip",
+    context_identifier_type="Nip",
     context_identifier_value="1234567890",
     certificate_serial="1",
     invoice_hash="YQ==",
