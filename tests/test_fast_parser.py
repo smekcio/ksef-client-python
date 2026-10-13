@@ -95,6 +95,60 @@ KSEF_KOR_ROZ_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+KSEF_ORDER_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
+<Faktura><Fa>
+  <ZamowienieWiersz>
+    <P_11NettoZ>305000.00</P_11NettoZ><P_11VatZ>70150.00</P_11VatZ>
+  </ZamowienieWiersz>
+  <ZamowienieWiersz>
+    <P_11NettoZ>5000.00</P_11NettoZ><P_11VatZ>1150.00</P_11VatZ><StanPrzedZ>1</StanPrzedZ>
+  </ZamowienieWiersz>
+</Fa></Faktura>
+"""
+
+
+def test_fast_extract_ksef_metadata_handles_order_rows():
+    """`ZamowienieWiersz` nie ma `P_11`/`P_11A` — kwoty są w `P_11NettoZ`/`P_11VatZ`.
+
+    Wcześniej każdy dokument, którego pozycje to wiersze zamówienia, dawał
+    `total_netto=0.00` i `item_count=0` bez żadnego sygnału (m.in. oficjalne
+    `FA_3_Przykład_10..13.xml`).
+    """
+    res = fast_extract_ksef_metadata(KSEF_ORDER_SAMPLE)
+    assert res["total_netto"] == Decimal("305000.00")
+    # Brak jawnego brutto w schemacie, więc brutto = netto + podatek.
+    assert res["total_brutto"] == Decimal("375150.00")
+    assert res["item_count"] == 2
+    assert res["stan_przed_item_count"] == 1
+
+
+def test_fast_extract_ksef_metadata_keeps_brutto_zero_without_p_11a():
+    """Dla `FaWiersz` brutto bierzemy tylko z `P_11A`.
+
+    Wcześniejsza wersja poprawki liczyła brutto jako netto + podatek także dla
+    zwykłych wierszy, przez co `total_brutto` równało się `total_netto` i myliło
+    odbiorcę (dla `FaWiersz` elementem podatku jest `P_11Vat`, nie `P_11VatZ`).
+    """
+    res = fast_extract_ksef_metadata(
+        '<Faktura><Fa><FaWiersz><P_11>100.00</P_11><P_11Vat>23.00</P_11Vat></FaWiersz></Fa></Faktura>'
+    )
+    assert res["total_netto"] == Decimal("100.00")
+    assert res["total_brutto"] == Decimal("0.00")
+    assert res["item_count"] == 1
+
+
+def test_fast_extract_ksef_metadata_order_row_without_amounts_is_skipped():
+    """Wiersz zamówienia bez kwot nie jest liczony (i nie wywraca parsera)."""
+    res = fast_extract_ksef_metadata(
+        '<Faktura><Fa><ZamowienieWiersz><P_8AZ>szt.</P_8AZ></ZamowienieWiersz>'
+        "<ZamowienieWiersz><P_11NettoZ>10.00</P_11NettoZ></ZamowienieWiersz></Fa></Faktura>"
+    )
+    assert res["item_count"] == 1
+    assert res["total_netto"] == Decimal("10.00")
+    # Bez `P_11VatZ` brutto = netto (nie ma z czego doliczyć podatku).
+    assert res["total_brutto"] == Decimal("10.00")
+
+
 def test_fast_extract_ksef_metadata_handles_gross_only_lines():
     """Faktury z art. 106e ust. 7 i 8 mają `P_11A`, a nie `P_11`.
 
