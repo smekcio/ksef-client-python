@@ -27,6 +27,7 @@ from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
 from .facets import (
+    _DECIMAL_TEXT,
     ELEMENT_FACETS,
     REQUIRED_IN_PARENT,
     Facet,
@@ -145,6 +146,30 @@ def _check_text(value: str, facet: Facet, path: str, element: str) -> list[Facet
         ]
 
     issues = []
+    # Schemat wymusza wzorzec `-?([1-9]\d{0,N}|0)(\.\d{1,M})?`: brak zer
+    # wiodących, brak wykładnika, brak kropki bez cyfr. `Decimal("007.50")`
+    # przechodził przez samą kontrolę precyzji i dopiero KSeF go odrzucał.
+    if not _DECIMAL_TEXT.fullmatch(value):
+        issues.append(
+            FacetIssue(
+                path,
+                element,
+                f"wartość {value!r} nie pasuje do zapisu liczby wymaganego przez "
+                f"schemat (bez zer wiodących, bez wykładnika, {facet.xsd_type})",
+            )
+        )
+        return issues
+    if facet.integer_digits is not None:
+        integer_part = value.lstrip("-").split(".", 1)[0]
+        if len(integer_part) > facet.integer_digits:
+            issues.append(
+                FacetIssue(
+                    path,
+                    element,
+                    f"wartość {value!r} ma {len(integer_part)} cyfr części całkowitej, "
+                    f"a schemat dopuszcza {facet.integer_digits} ({facet.xsd_type})",
+                )
+            )
     if facet.kind is FacetKind.INTEGER and number != number.to_integral_value():
         issues.append(FacetIssue(path, element, f"wartość {value!r} musi być liczbą całkowitą"))
     if facet.decimals is not None:

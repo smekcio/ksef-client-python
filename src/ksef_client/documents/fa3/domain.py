@@ -14,6 +14,7 @@ else:  # pragma: no cover - Python 3.10 nie ma `typing.Self`
     from typing_extensions import Self
 
 from .models import (
+    MONEY_QUANT,
     FA3InvoiceKind,
     FA3ValidationIssue,
     decimal_from_value,
@@ -295,9 +296,10 @@ class InvoiceParty:
         if self.share is not None and not (Decimal("0") < self.share <= Decimal("100")):
             issues.append(FA3ValidationIssue(f"{path}: udział musi być z zakresu 0-100."))
         role_value = str(getattr(self.role, "value", self.role))
-        if role_value == ThirdPartyRole.OTHER.value and not str(
-            self.other_role_description or ""
-        ).strip():
+        if (
+            role_value == ThirdPartyRole.OTHER.value
+            and not str(self.other_role_description or "").strip()
+        ):
             issues.append(
                 FA3ValidationIssue(
                     f"{path}.other_role_description: opis roli jest wymagany dla innego podmiotu.",
@@ -713,6 +715,26 @@ class InvoiceLine:
             issues.append(FA3ValidationIssue(f"{path}: stawka VAT nie może być ujemna."))
         if self.discount is not None:
             issues.extend(self.discount.validate(f"{path}.discount"))
+
+        # Spójność arytmetyczna wiersza (`P_11 = P_13_x + P_14_x`). Nadpisanie
+        # brutto różne od netto + VAT dawało dokument z `P_15` różnym od sumy
+        # `P_13_x`/`P_14_x` — KSeF taki dokument odrzuca, a SDK raportował sukces
+        # (kontrola istniała tylko w ścieżce szkiców).
+        if self.gross_amount is not None:
+            expected_gross = money(self.effective_net_amount + self.effective_vat_amount)
+            # Tolerancja jednego grosza: różnice zaokrągleń między pozycją
+            # a podsumowaniem występują też w oficjalnych przykładach MF.
+            if abs(money(self.gross_amount) - expected_gross) > MONEY_QUANT:
+                issues.append(
+                    FA3ValidationIssue(
+                        f"{path}: wartość brutto {money(self.gross_amount)} nie zgadza się "
+                        f"z netto + VAT ({self.effective_net_amount} + "
+                        f"{self.effective_vat_amount} = {expected_gross}). Popraw brutto "
+                        "albo usuń nadpisanie, bo KSeF odrzuci dokument, w którym P_15 "
+                        "nie równa się sumie P_13_x i P_14_x.",
+                        column=f"{path}.gross_amount",
+                    )
+                )
         return issues
 
 
@@ -801,6 +823,7 @@ class PaymentTerms:
             method="przelew",
             bank_accounts=(bank_account,) if bank_account else (),
         )
+
 
 @dataclass(frozen=True)
 class AttachmentTable:
@@ -940,10 +963,7 @@ class FA3Invoice:
     @property
     def total_net(self) -> Decimal:
         line_total = sum(
-            (
-                self._signed_line_amount(line, line.effective_net_amount)
-                for line in self.lines
-            ),
+            (self._signed_line_amount(line, line.effective_net_amount) for line in self.lines),
             Decimal("0.00"),
         )
         advance_total = sum(
@@ -955,10 +975,7 @@ class FA3Invoice:
     @property
     def total_vat(self) -> Decimal:
         line_total = sum(
-            (
-                self._signed_line_amount(line, line.effective_vat_amount)
-                for line in self.lines
-            ),
+            (self._signed_line_amount(line, line.effective_vat_amount) for line in self.lines),
             Decimal("0.00"),
         )
         advance_total = sum(
@@ -970,10 +987,7 @@ class FA3Invoice:
     @property
     def total_gross(self) -> Decimal:
         line_total = sum(
-            (
-                self._signed_line_amount(line, line.effective_gross_amount)
-                for line in self.lines
-            ),
+            (self._signed_line_amount(line, line.effective_gross_amount) for line in self.lines),
             Decimal("0.00"),
         )
         advance_total = sum(
@@ -1107,9 +1121,7 @@ class FA3Invoice:
     ) -> bytes:
         from .xml import invoice_to_xml
 
-        return invoice_to_xml(
-            self, validate=validate, facets=facets, xsd_validate=xsd_validate
-        )
+        return invoice_to_xml(self, validate=validate, facets=facets, xsd_validate=xsd_validate)
 
     def _validate_xml_shape(self) -> list[FA3ValidationIssue]:
         issues: list[FA3ValidationIssue] = []
@@ -1123,9 +1135,7 @@ class FA3Invoice:
             )
         if (self.period_from is None) ^ (self.period_to is None):
             issues.append(
-                FA3ValidationIssue(
-                    "invoice.period: okres faktury wymaga obu dat: od i do."
-                )
+                FA3ValidationIssue("invoice.period: okres faktury wymaga obu dat: od i do.")
             )
         if (
             self.payment_terms is not None
@@ -1137,6 +1147,41 @@ class FA3Invoice:
                     "invoice.payment_terms: podaj date zaplaty albo platnosci czesciowe, nie oba."
                 )
             )
+        if self.attachment is not None:
+            for block_index, block in enumerate(self.attachment.blocks, start=1):
+                for table_index, table in enumerate(block.tables, start=1):
+                    issues.extend(
+                        _validate_attachment_table(
+                            table,
+                            f"invoice.attachment.blocks[{block_index}].tables[{table_index}]",
+                        )
+                    )
+        if self.payment_terms is not None:
+            # `Skonto` ma w schemacie dwa wymagane pola; podanie jednego
+            # powodowało ciche pominięcie całego bloku (utrata danych).
+            discount_parts = (
+                bool(self.payment_terms.cash_discount_terms),
+                bool(self.payment_terms.cash_discount_amount),
+            )
+            if any(discount_parts) and not all(discount_parts):
+                issues.append(
+                    FA3ValidationIssue(
+                        "invoice.payment_terms: skonto wymaga jednocześnie warunków "
+                        "(cash_discount_terms) i wysokości (cash_discount_amount)."
+                    )
+                )
+        if self.transaction_terms is not None:
+            # `KursUmowny` i `WalutaUmowna` to w schemacie jedna opcjonalna
+            # sekwencja — jedno bez drugiego było cicho pomijane.
+            rate = self.transaction_terms.contractual_rate
+            currency = self.transaction_terms.contractual_currency
+            if (rate is None) ^ (currency is None):
+                issues.append(
+                    FA3ValidationIssue(
+                        "invoice.transaction_terms: kurs umowny i waluta umowna muszą "
+                        "być podane razem (KursUmowny + WalutaUmowna)."
+                    )
+                )
         if (
             self.settlement_data is not None
             and self.settlement_data.amount_due is not None
@@ -1429,9 +1474,7 @@ class FA3InvoiceBuilderV2:
         facets: bool = True,
         xsd_validate: bool = False,
     ) -> bytes:
-        return self.build().to_xml(
-            validate=validate, facets=facets, xsd_validate=xsd_validate
-        )
+        return self.build().to_xml(validate=validate, facets=facets, xsd_validate=xsd_validate)
 
 
 def _coerce_address(
@@ -1478,3 +1521,72 @@ def _replace_party_role(
         is_vat_group_member=party.is_vat_group_member,
         other_role_description=party.other_role_description,
     )
+
+
+#: Dozwolone wartości atrybutu `Kol/@Typ` (schemat: `use="required"` + enumeracja).
+COLUMN_TYPES: frozenset[str] = frozenset({"date", "datetime", "dec", "int", "time", "txt"})
+
+#: Limity tabeli załącznika (schemat: `Kol`/`WKom` max 20, `Wiersz` 1..1000).
+TABLE_MAX_COLUMNS = 20
+TABLE_MAX_ROWS = 1000
+
+
+def _validate_attachment_table(table: AttachmentTable, path: str) -> list[FA3ValidationIssue]:
+    """Sprawdza tabelę załącznika wobec schematu.
+
+    Wcześniej żadne z tych ograniczeń nie było pilnowane: `column_types=("text",)`
+    dawało niepoprawny atrybut `@Typ`, a krótsza lista typów niż nagłówków
+    **cicho gubiła** nadmiarowe kolumny (`zip(strict=False)`).
+    """
+    issues: list[FA3ValidationIssue] = []
+    if not table.headers:
+        issues.append(FA3ValidationIssue(f"{path}: tabela wymaga co najmniej jednej kolumny."))
+    if len(table.headers) > TABLE_MAX_COLUMNS:
+        issues.append(
+            FA3ValidationIssue(
+                f"{path}: tabela ma {len(table.headers)} kolumn, a schemat dopuszcza "
+                f"maksymalnie {TABLE_MAX_COLUMNS}."
+            )
+        )
+    if not table.rows:
+        issues.append(FA3ValidationIssue(f"{path}: tabela wymaga co najmniej jednego wiersza."))
+    if len(table.rows) > TABLE_MAX_ROWS:
+        issues.append(
+            FA3ValidationIssue(
+                f"{path}: tabela ma {len(table.rows)} wierszy, a schemat dopuszcza "
+                f"maksymalnie {TABLE_MAX_ROWS}."
+            )
+        )
+    for index, row in enumerate(table.rows, start=1):
+        if len(row) > TABLE_MAX_COLUMNS:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.rows[{index}]: wiersz ma {len(row)} komórek, a schemat "
+                    f"dopuszcza maksymalnie {TABLE_MAX_COLUMNS}."
+                )
+            )
+    if table.footer and len(table.footer) > TABLE_MAX_COLUMNS:
+        issues.append(
+            FA3ValidationIssue(
+                f"{path}.footer: suma ma {len(table.footer)} komórek, a schemat "
+                f"dopuszcza maksymalnie {TABLE_MAX_COLUMNS}."
+            )
+        )
+    if table.column_types:
+        if len(table.column_types) != len(table.headers):
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}: podano {len(table.column_types)} typów kolumn dla "
+                    f"{len(table.headers)} nagłówków — brakujące kolumny zostałyby "
+                    "cicho pominięte."
+                )
+            )
+        invalid = sorted({value for value in table.column_types if value not in COLUMN_TYPES})
+        if invalid:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}: nieznany typ kolumny {invalid}; dozwolone to "
+                    f"{', '.join(sorted(COLUMN_TYPES))}."
+                )
+            )
+    return issues

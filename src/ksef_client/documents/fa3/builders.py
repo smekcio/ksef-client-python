@@ -366,8 +366,13 @@ class BaseFA3Builder(FA3InvoiceBuilderV2):
         )
         return self
 
-    def additional_description(self, key: str, value: str) -> BaseFA3Builder:
-        self._additional_descriptions.append(AdditionalDescription.key_value(key, value))
+    def additional_description(
+        self, key: str, value: str, *, row_number: int | None = None
+    ) -> BaseFA3Builder:
+        """Dodaje informację dodatkową; `row_number` wiąże ją z pozycją faktury."""
+        self._additional_descriptions.append(
+            AdditionalDescription.key_value(key, value, row_number=row_number)
+        )
         return self
 
     def foreign_currency_rate(

@@ -659,6 +659,8 @@ def _domain_additional_descriptions(
 ) -> None:
     for description in descriptions:
         node = ET.SubElement(fa, _q("DodatkowyOpis"))
+        if description.row_number is not None:
+            ET.SubElement(node, _q("NrWiersza")).text = str(description.row_number)
         ET.SubElement(node, _q("Klucz")).text = description.key
         ET.SubElement(node, _q("Wartosc")).text = description.value
 

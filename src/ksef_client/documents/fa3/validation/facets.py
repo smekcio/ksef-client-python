@@ -70,6 +70,8 @@ class Facet:
     minimum_length: int | None = None
     decimals: int | None = None
     allowed: frozenset[str] | None = None
+    total_digits: int | None = None
+    integer_digits: int | None = None
     minimum: Decimal | None = None
     maximum: Decimal | None = None
     minimum_date: str | None = None
@@ -93,6 +95,8 @@ class Facet:
             parts.append(f"co najmniej {self.minimum_length} znaków")
         if self.decimals is not None:
             parts.append(f"maksymalnie {self.decimals} miejsc po przecinku")
+        if self.integer_digits is not None:
+            parts.append(f"maksymalnie {self.integer_digits} cyfr części całkowitej")
         if self.minimum is not None and self.maximum is not None:
             parts.append(f"zakres {self.minimum}-{self.maximum}")
         elif self.minimum is not None:
@@ -130,20 +134,24 @@ GLN = Facet(FacetKind.STRING, "TGLN", max_length=13, minimum_length=1)
 NRRB = Facet(FacetKind.STRING, "TNrRB", max_length=34, minimum_length=10)
 #: `tns:TKodWaluty` — zamknięty słownik kodów walut (182 wartości).
 KOD_WALUTY = Facet(FacetKind.STRING, "TKodWaluty", max_length=3)
-#: `tns:TIlosci` — liczba dziesiętna do 6 miejsc po przecinku.
-ILOSCI = Facet(FacetKind.DECIMAL, "TIlosci", decimals=6)
+#: `tns:TIlosci` — liczba dziesiętna: 6 miejsc, do 16 cyfr całkowitych.
+#: Schemat: `pattern="-?([1-9]\d{0,15}|0)(\.\d{1,6})?"`, `totalDigits=22`.
+ILOSCI = Facet(FacetKind.DECIMAL, "TIlosci", decimals=6, total_digits=22, integer_digits=16)
 #: `tns:TProcentowy` — procent: 0-100, do 6 miejsc po przecinku.
 PROCENT = Facet(
     FacetKind.DECIMAL,
     "TProcentowy",
     decimals=6,
+    total_digits=9,
     minimum=Decimal("0"),
     maximum=Decimal("100"),
 )
-#: `tns:TKwotowy` — kwota: do 2 miejsc po przecinku.
-KWOTOWY = Facet(FacetKind.DECIMAL, "TKwotowy", decimals=2)
-#: `tns:TKwotowy2` — cena jednostkowa/rabat: do 8 miejsc po przecinku.
-KWOTOWY2 = Facet(FacetKind.DECIMAL, "TKwotowy2", decimals=8)
+#: `tns:TKwotowy` — kwota: 2 miejsca, do 16 cyfr całkowitych.
+#: Schemat: `pattern="-?([1-9]\d{0,15}|0)(\.\d{1,2})?"`, `totalDigits=18`.
+KWOTOWY = Facet(FacetKind.DECIMAL, "TKwotowy", decimals=2, total_digits=18, integer_digits=16)
+#: `tns:TKwotowy2` — cena jednostkowa/rabat: 8 miejsc, do 14 cyfr całkowitych.
+#: Schemat: `pattern="-?([1-9]\d{0,13}|0)(\.\d{1,8})?"`, `totalDigits=22`.
+KWOTOWY2 = Facet(FacetKind.DECIMAL, "TKwotowy2", decimals=8, total_digits=22, integer_digits=14)
 #: `tns:TNaturalny` — liczba całkowita większa od zera.
 NATURALNY = Facet(FacetKind.INTEGER, "TNaturalny", minimum=Decimal("1"))
 

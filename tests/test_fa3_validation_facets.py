@@ -1392,3 +1392,39 @@ def _xsd_declared_types_cached() -> dict[str, set[str]]:
     if _XSD_DECLARED_CACHE is None:
         _XSD_DECLARED_CACHE = _xsd_declared_type_map()
     return _XSD_DECLARED_CACHE
+
+
+def test_required_and_occurrence_tables_cover_the_schema(
+    xsd_children: dict[tuple[str, str], tuple[str | None, str | None]],
+) -> None:
+    """Tabele muszą pokrywać KAŻDĄ parę, którą schemat czyni wymaganą/jednokrotną.
+
+    Poprzednie testy sprawdzały tylko, że wpisy tabeli istnieją w schemacie —
+    więc USUNIĘCIE wpisu przechodziło na zielono. Ten test wyprowadza oczekiwany
+    zbiór z XSD i porównuje go z tabelą, więc raportuje konkretne braki.
+    """
+    required_expected = {
+        key
+        for key, (min_occurs, _max) in xsd_children.items()
+        if min_occurs not in (None, "0")
+    }
+    missing_required = sorted(required_expected - REQUIRED_IN_PARENT)
+    assert not missing_required, (
+        "pary wymagane w schemacie, których brak w REQUIRED_IN_PARENT: "
+        + ", ".join(f"{p}/{c}" for p, c in missing_required[:40])
+        + (f" (+{len(missing_required) - 40} więcej)" if len(missing_required) > 40 else "")
+    )
+
+    single_expected = {
+        key
+        for key, (_min, max_occurs) in xsd_children.items()
+        if max_occurs == "1"
+    }
+    missing_limits = sorted(
+        key for key in single_expected if occurrence_limit(*key) != 1
+    )
+    assert not missing_limits, (
+        "pary jednokrotne w schemacie bez limitu w tabeli: "
+        + ", ".join(f"{p}/{c}" for p, c in missing_limits[:40])
+        + (f" (+{len(missing_limits) - 40} więcej)" if len(missing_limits) > 40 else "")
+    )

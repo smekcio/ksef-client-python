@@ -19,10 +19,16 @@ def enum_value(value: Any) -> str | None:
 class AdditionalDescription:
     key: str
     value: str
+    #: Numer wiersza faktury (`NrWierszaFa`) albo zamówienia (`NrWierszaZam`),
+    #: gdy informacja dotyczy konkretnej pozycji. Schemat czyni to pole
+    #: opcjonalnym, ale bez niego nie da się przypisać opisu do pozycji.
+    row_number: int | None = None
 
     @classmethod
-    def key_value(cls, key: str, value: str) -> AdditionalDescription:
-        return cls(key, value)
+    def key_value(
+        cls, key: str, value: str, *, row_number: int | None = None
+    ) -> AdditionalDescription:
+        return cls(key, value, row_number)
 
 
 @dataclass(frozen=True)

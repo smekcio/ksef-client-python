@@ -824,129 +824,78 @@ def test_schema_resolver_ignores_unknown_schema() -> None:
     assert resolver.resolve("NieznanySchemat.xsd", None, None) is None
 
 
-def test_xsd_coverage_audit_lists_key_fa3_sections() -> None:
+def test_xsd_coverage_audit_reports_the_whole_schema() -> None:
+    """Audyt musi widzieć CAŁY schemat, a statusy muszą pochodzić z serializatora.
+
+    Wcześniejsza wersja walkera nie rozwiązywała `type="tns:X"`, więc widziała
+    298 z 402 ścieżek (¼ schematu, w tym elementy wymagane), a status pokrycia
+    brała z mapy dopasowywanej prefiksem `"/Faktura"` — dzięki czemu każda
+    ścieżka, także wymyślona, była „pokryta" i `UNSUPPORTED` nie występowało.
+    """
     report = audit_fa3_xsd_coverage(_audit_evidence_xml_cases())
 
     paths = {entry.path: entry.status for entry in report.coverage}
-    supported = report.by_status(CoverageStatus.SUPPORTED)
-    partial = report.by_status(CoverageStatus.PARTIALLY_SUPPORTED)
-    unsupported = report.by_status(CoverageStatus.UNSUPPORTED)
-    raw_extension = report.by_status(CoverageStatus.RAW_EXTENSION)
-    missing = (*raw_extension, *unsupported, *partial)
-    section_counts: dict[str, int] = {}
-    for entry in missing:
-        section = "/".join(entry.path.split("/")[:4])
-        section_counts[section] = section_counts.get(section, 0) + 1
-    section_debug = ", ".join(
-        f"{section}={count}" for section, count in sorted(section_counts.items())
-    )
-    missing_paths = ", ".join(entry.path for entry in missing)
-
+    assert len(report.elements) == 402, "audyt nie widzi całego schematu"
     assert len(paths) == len({element.path for element in report.elements})
-    assert not raw_extension, f"RAW_EXTENSION paths: {missing_paths}"
-    assert not unsupported, f"UNSUPPORTED paths: {missing_paths}"
-    assert not partial, f"PARTIAL paths by section: {section_debug}; paths: {missing_paths}"
-    assert len(supported) == len(report.elements) == 298
-    assert paths["/Faktura/Podmiot1"] is CoverageStatus.SUPPORTED
-    assert paths["/Faktura/Podmiot2"] is CoverageStatus.SUPPORTED
-    assert paths["/Faktura/Fa/Adnotacje"] is CoverageStatus.SUPPORTED
-    assert paths["/Faktura/Fa/FaWiersz"] is CoverageStatus.SUPPORTED
-    assert paths["/Faktura/Fa/Podmiot1K"] is CoverageStatus.SUPPORTED
-    assert paths["/Faktura/Fa/Podmiot2K"] is CoverageStatus.SUPPORTED
-    assert paths["/Faktura/Fa/WarunkiTransakcji"] is CoverageStatus.SUPPORTED
-    assert paths["/Faktura/Zalacznik"] is CoverageStatus.SUPPORTED
-    coverage_by_path = {entry.path: entry for entry in report.coverage}
-    assert coverage_by_path["/Faktura/Fa/WarunkiTransakcji"].evidence_sources
-    assert coverage_by_path["/Faktura/Zalacznik"].evidence_sources
+
+    # Elementy, które SDK faktycznie emituje, muszą mieć status inny niż UNSUPPORTED.
+    for path in (
+        "/Faktura/Podmiot1",
+        "/Faktura/Podmiot2",
+        "/Faktura/Podmiot3",
+        "/Faktura/PodmiotUpowazniony",
+        "/Faktura/Naglowek/KodFormularza",
+        "/Faktura/Naglowek/WariantFormularza",
+        "/Faktura/Podmiot1/DaneIdentyfikacyjne/NIP",
+        "/Faktura/Fa/Adnotacje",
+        "/Faktura/Fa/FaWiersz",
+        "/Faktura/Fa/Podmiot1K",
+        "/Faktura/Fa/Platnosc/RachunekBankowy/NrRB",
+        "/Faktura/Fa/P_15",
+        "/Faktura/Zalacznik/BlokDanych/MetaDane",
+    ):
+        assert paths[path] is not CoverageStatus.UNSUPPORTED, path
+
+    # Kontakty podmiotu upoważnionego mają w schemacie własne znaczniki
+    # (`EmailPU`/`TelefonPU`), a nie `Email`/`Telefon`.
+    assert paths["/Faktura/PodmiotUpowazniony/DaneKontaktowe/EmailPU"] is not (
+        CoverageStatus.UNSUPPORTED
+    )
+    assert paths["/Faktura/PodmiotUpowazniony/DaneKontaktowe/TelefonPU"] is not (
+        CoverageStatus.UNSUPPORTED
+    )
+
+    assert not report.by_status(CoverageStatus.RAW_EXTENSION)
 
 
-def test_xsd_coverage_audit_without_evidence_reports_missing_proof() -> None:
+def test_xsd_audit_statuses_follow_the_serializer() -> None:
+    """Status `UNSUPPORTED` musi być osiągalny, a `SUPPORTED` wymaga dowodu."""
     report = audit_fa3_xsd_coverage()
-    assert report.by_status(CoverageStatus.SUPPORTED) == ()
-    assert report.by_status(CoverageStatus.PARTIALLY_SUPPORTED)
-
-
-def test_xsd_audit_helper_branches_for_notes_and_path_matching() -> None:
-    assert xsd_audit_module._local_xml_name("{ns}Tag") == "Tag"
-    assert xsd_audit_module._local_xml_name("Tag") == "Tag"
-
-    assert xsd_audit_module._match_path("/A/B", {"/A": "root"}) == "root"
-    assert xsd_audit_module._match_path("/X", {"/A": "root"}) is None
-
-    assert (
-        xsd_audit_module._coverage_note(
-            "/Faktura",
-            status=CoverageStatus.SUPPORTED,
-            evidence_sources=(),
-        )
-        == "root invoice document"
+    statuses = {entry.status for entry in report.coverage}
+    # Bez dowodu z testów nie ma `SUPPORTED` — tylko `PARTIALLY_SUPPORTED`.
+    assert CoverageStatus.SUPPORTED not in statuses
+    # Serializer wypisuje wszystkie elementy schematu FA(3), więc na realnym
+    # schemacie `UNSUPPORTED` nie występuje — ale musi być OSIĄGALNE dla
+    # elementu, którego serializer nie zna (inaczej status jest fikcją).
+    assert not report.by_status(CoverageStatus.UNSUPPORTED)
+    entry = xsd_audit_module._entry_for_element(
+        XsdElement("/Faktura/Fa/TotallyUnknownField", "TotallyUnknownField", None, "1", "1"),
+        evidence_sources=(),
     )
-    assert (
-        xsd_audit_module._coverage_note(
-            "/Faktura/Fa/Adnotacje/P_16",
-            status=CoverageStatus.SUPPORTED,
-            evidence_sources=(),
-        )
-        == "typed annotation section"
-    )
-    assert (
-        xsd_audit_module._coverage_note(
-            "/Faktura/Fa/Platnosc/TerminPlatnosci",
-            status=CoverageStatus.SUPPORTED,
-            evidence_sources=(),
-        )
-        == "typed payment section"
-    )
-    assert (
-        xsd_audit_module._coverage_note(
-            "/Faktura/Fa/FaWiersz/P_7",
-            status=CoverageStatus.SUPPORTED,
-            evidence_sources=(),
-        )
-        == "typed line section"
-    )
-    assert (
-        xsd_audit_module._coverage_note(
-            "/Faktura/Fa/InnaSekcja",
-            status=CoverageStatus.SUPPORTED,
-            evidence_sources=(),
-        )
-        == "typed SDK model and serializer coverage"
-    )
+    assert entry.status is CoverageStatus.UNSUPPORTED
+
+    with_evidence = audit_fa3_xsd_coverage(_audit_evidence_xml_cases())
+    assert with_evidence.by_status(CoverageStatus.SUPPORTED)
 
 
-def test_xsd_audit_entry_statuses_cover_raw_and_unsupported_paths() -> None:
-    raw_map = xsd_audit_module.RAW_EXTENSION_PATHS
-    unsupported_map = xsd_audit_module.UNSUPPORTED_PATHS
-    supported_map = xsd_audit_module.SUPPORTED_BUILDER_PATHS
-    try:
-        xsd_audit_module.RAW_EXTENSION_PATHS = {"/Faktura/Raw": "raw"}
-        xsd_audit_module.UNSUPPORTED_PATHS = {"/Faktura/Nope": "unsupported"}
-        xsd_audit_module.SUPPORTED_BUILDER_PATHS = {"/Faktura/Mapped": "mapped"}
-        raw_entry = xsd_audit_module._entry_for_element(
-            XsdElement("/Faktura/Raw", "Raw", None, "1", "1"),
-            evidence_sources=(),
-        )
-        unsupported_entry = xsd_audit_module._entry_for_element(
-            XsdElement("/Faktura/Nope", "Nope", None, "1", "1"),
-            evidence_sources=(),
-        )
-        mapped_entry = xsd_audit_module._entry_for_element(
-            XsdElement("/Faktura/Mapped", "Mapped", None, "1", "1"),
-            evidence_sources=(),
-        )
-        no_map_entry = xsd_audit_module._entry_for_element(
-            XsdElement("/Faktura/Unmapped", "Unmapped", None, "1", "1"),
-            evidence_sources=(),
-        )
-        assert raw_entry.status is CoverageStatus.RAW_EXTENSION
-        assert unsupported_entry.status is CoverageStatus.UNSUPPORTED
-        assert mapped_entry.status is CoverageStatus.PARTIALLY_SUPPORTED
-        assert no_map_entry.status is CoverageStatus.UNSUPPORTED
-    finally:
-        xsd_audit_module.RAW_EXTENSION_PATHS = raw_map
-        xsd_audit_module.UNSUPPORTED_PATHS = unsupported_map
-        xsd_audit_module.SUPPORTED_BUILDER_PATHS = supported_map
+def test_xsd_audit_maps_handlers_and_domain_fields() -> None:
+    report = audit_fa3_xsd_coverage()
+    by_path = {entry.path: entry for entry in report.coverage}
+    assert by_path["/Faktura/Fa/FaWiersz/P_7"].handler == "_domain_line"
+    assert by_path["/Faktura/Zalacznik/BlokDanych"].handler == "_attachment"
+    assert by_path["/Faktura/Fa/P_7" if False else "/Faktura/Fa/FaWiersz/P_7"].domain_field == (
+        "invoice.Fa.FaWiersz.P_7"
+    )
 
 
 def test_xsd_enum_values_match_public_fa3_enums() -> None:
@@ -4604,3 +4553,246 @@ def test_draft_bucket_rejects_unsupported_numeric_rate() -> None:
     """Stawka liczbowa spoza tabeli (np. 17%) musi zostać zgłoszona, nie wysłana."""
     with pytest.raises(ValueError, match="(?i)nieobs"):
         _draft_bucket(None, Decimal("17"))
+
+
+def test_xsd_audit_covers_raw_extension_unsupported_and_notes() -> None:
+    """Gałęzie audytu: mapa raw/unsupported, dopasowanie ścieżek i noty."""
+    raw_map = xsd_audit_module.RAW_EXTENSION_PATHS
+    unsupported_map = xsd_audit_module.UNSUPPORTED_PATHS
+    try:
+        xsd_audit_module.RAW_EXTENSION_PATHS = {"/Faktura/Raw": "raw handler"}
+        xsd_audit_module.UNSUPPORTED_PATHS = {"/Faktura/Nope": "unsupported handler"}
+        raw_entry = xsd_audit_module._entry_for_element(
+            XsdElement("/Faktura/Raw", "Raw", None, "1", "1"), evidence_sources=()
+        )
+        unsupported_entry = xsd_audit_module._entry_for_element(
+            XsdElement("/Faktura/Nope", "Nope", None, "1", "1"), evidence_sources=()
+        )
+        nested = xsd_audit_module._entry_for_element(
+            XsdElement("/Faktura/Raw/Dziecko", "Dziecko", None, "1", "1"), evidence_sources=()
+        )
+        assert raw_entry.status is CoverageStatus.RAW_EXTENSION
+        assert unsupported_entry.status is CoverageStatus.UNSUPPORTED
+        assert nested.status is CoverageStatus.RAW_EXTENSION
+    finally:
+        xsd_audit_module.RAW_EXTENSION_PATHS = raw_map
+        xsd_audit_module.UNSUPPORTED_PATHS = unsupported_map
+
+    # Noty dla poszczególnych sekcji dokumentu (kluczowe jest, by nota niosła
+    # informację o SEKCJI, a nie o samym statusie).
+    notes = {
+        xsd_audit_module._coverage_note(
+            path, status=CoverageStatus.PARTIALLY_SUPPORTED, evidence_sources=()
+        )
+        for path in (
+            "/Faktura",
+            "/Faktura/Fa/Adnotacje/Zwolnienie/P_19A",
+            "/Faktura/Fa/Platnosc/Termin",
+            "/Faktura/Fa/FaWiersz/P_7",
+            "/Faktura/Fa/Zamowienie/ZamowienieWiersz/P_7Z",
+            "/Faktura/Fa/P_15",
+        )
+    }
+    assert xsd_audit_module._coverage_note(
+        "/Faktura", status=CoverageStatus.PARTIALLY_SUPPORTED, evidence_sources=()
+    ) == "root invoice document"
+    assert "typed annotation section" in notes
+    assert "typed payment section" in notes
+    assert "typed line section" in notes
+    assert "element emitted by the serializer" in " ".join(notes)
+    # Nota domyślna pojawia się, gdy element nie należy do znanej sekcji.
+    assert xsd_audit_module._coverage_note(
+        "/Faktura/Naglowek", status=CoverageStatus.SUPPORTED, evidence_sources=()
+    ) == "typed SDK model and serializer coverage"
+    assert xsd_audit_module._coverage_note(
+        "/Faktura/Fa/P_15", status=CoverageStatus.SUPPORTED, evidence_sources=("x",)
+    ) == "validated by scenarios: x"
+    assert "not emitted" in xsd_audit_module._coverage_note(
+        "/Faktura/Fa/P_15", status=CoverageStatus.UNSUPPORTED, evidence_sources=()
+    )
+    assert xsd_audit_module._local_xml_name("{ns}Element") == "Element"
+    assert xsd_audit_module._local_xml_name("Element") == "Element"
+    assert xsd_audit_module._local_type_name(None) is None
+
+
+def test_dodatkowy_opis_can_point_at_a_line() -> None:
+    """`DodatkowyOpis/NrWiersza` wiąże informację z konkretną pozycją faktury."""
+    builder = BasicInvoiceBuilder(invoice_number="FV/DOD")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+    builder.additional_description("Licznik", "11/2023/KTW", row_number=1)
+    xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+    assert "<DodatkowyOpis><NrWiersza>1</NrWiersza><Klucz>Licznik</Klucz>" in xml
+
+
+def test_gross_amount_inconsistent_with_net_plus_vat_is_rejected() -> None:
+    """Brutto różne od netto + VAT daje `P_15 != P_13 + P_14` — KSeF to odrzuca."""
+    builder = BasicInvoiceBuilder(invoice_number="FV/GROSS-ERR")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line(
+        "Usługa",
+        quantity="1",
+        unit_net_price="100",
+        tax=VatClass.standard_23(),
+        gross_amount=Decimal("999"),
+    )
+    with pytest.raises(ValueError, match="(?i)brutto"):
+        builder.build()
+
+
+def test_gross_amount_consistent_with_net_plus_vat_is_accepted() -> None:
+    builder = BasicInvoiceBuilder(invoice_number="FV/GROSS-OK")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line(
+        "Usługa",
+        quantity="1",
+        unit_net_price="100",
+        tax=VatClass.standard_23(),
+        gross_amount=Decimal("123"),
+    )
+    xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+    assert "<P_13_1>100.00</P_13_1>" in xml
+    assert "<P_14_1>23.00</P_14_1>" in xml
+    assert "<P_15>123.00</P_15>" in xml
+
+
+def test_draft_gross_amount_inconsistent_with_net_plus_vat_is_rejected() -> None:
+    """Ścieżka szkiców musi odrzucać brutto różne od netto + VAT (P_15 != P_13 + P_14)."""
+    builder = FA3InvoiceBuilder(
+        invoice_number="FV/GROSS-DRAFT",
+        issue_date=date(2026, 1, 15),
+        seller=FA3Party(name="S", tax_id="1234567890", address="ul. A 1"),
+        buyer=FA3Party(name="B", tax_id="1111111111", address="ul. B 2"),
+    )
+    builder.add_line(
+        "Usługa",
+        quantity="1",
+        unit_net_price="100",
+        vat_rate="23",
+        gross_amount="999",
+    )
+    with pytest.raises(ValueError, match="(?i)brutto"):
+        builder.build()
+
+
+def test_numeric_pattern_from_schema_is_enforced() -> None:
+    """Zapis liczby musi odpowiadać wzorcowi schematu, nie tylko mieć 2 miejsca.
+
+    `Decimal("007.50")`, `"1E+3"` i `"1."` przechodziły przez kontrolę precyzji,
+    a KSeF odrzucał dokument (`SCHEMAV_CVC_PATTERN_VALID` / `CVC_DATATYPE_VALID`).
+    """
+    from ksef_client.documents.fa3.validation.engine import _check_text
+    from ksef_client.documents.fa3.validation.facets import ILOSCI, KWOTOWY, KWOTOWY2
+
+    for value in ("007.50", "1E+3", "1.", "+1.00", "1,50"):
+        assert _check_text(value, KWOTOWY, "p", "P_15"), value
+    for value in ("0", "0.5", "-0.5", "123.45", "-123.45", "1234567890123456.99"):
+        assert not _check_text(value, KWOTOWY, "p", "P_15"), value
+    # Zbyt długa część całkowita (schemat: 16 cyfr dla TKwotowy).
+    assert _check_text("12345678901234567.00", KWOTOWY, "p", "P_15")
+    assert _check_text("1.1234567", ILOSCI, "p", "P_8B")
+    assert not _check_text("1.12345678", KWOTOWY2, "p", "P_9A")
+
+
+def test_paired_contractual_rate_and_currency_must_be_given_together() -> None:
+    """Jedno pole z pary było cicho pomijane, więc wartość znikała z dokumentu."""
+    cases: tuple[dict[str, str], ...] = (
+        {"contractual_rate": "4.55"},
+        {"contractual_currency": "EUR"},
+    )
+    for kwargs in cases:
+        builder = BasicInvoiceBuilder(invoice_number="FV/KU")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+        )
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        builder.transaction_terms(**kwargs)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="(?i)umown"):
+            builder.build()
+
+
+def test_skonto_requires_both_terms_and_amount() -> None:
+    """`Skonto` ma dwa wymagane pola; jedno bez drugiego było cicho pomijane."""
+    builder = BasicInvoiceBuilder(invoice_number="FV/SK")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(
+        InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+    )
+    builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+    # `cash_discount()` wymaga obu argumentów, więc niepełną parę budujemy wprost.
+    builder.payment(PaymentTerms(cash_discount_amount="5.00"))
+    with pytest.raises(ValueError, match="(?i)skonto"):
+        builder.build()
+
+
+def test_attachment_table_type_and_shape_are_validated() -> None:
+    """`Kol/@Typ` oraz liczba kolumn/wierszy były niepilnowane."""
+    from ksef_client.documents.fa3.domain import (
+        Attachment,
+        AttachmentBlock,
+        AttachmentTable,
+    )
+
+    def invoice_with(table: AttachmentTable):
+        builder = BasicInvoiceBuilder(invoice_number="FV/TAB-V")
+        builder.seller(
+            InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2")
+        )
+        builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+        return replace(
+            builder.build(),
+            attachment=Attachment((AttachmentBlock(header="H", tables=(table,)),)),
+        )
+
+    invalid = [
+        AttachmentTable(headers=("A",), rows=(("1",),), column_types=("bogus",)),
+        AttachmentTable(headers=("A", "B"), rows=(("1", "2"),), column_types=("txt",)),
+        AttachmentTable(headers=(), rows=(("1",),)),
+        AttachmentTable(headers=("A",), rows=()),
+        AttachmentTable(headers=tuple(f"k{i}" for i in range(21)), rows=(("1",) * 21,)),
+        AttachmentTable(headers=("A",), rows=tuple(("1",) for _ in range(1001))),
+        AttachmentTable(headers=("A",), rows=(("1",) * 21,)),
+        AttachmentTable(headers=("A",), rows=(("1",),), footer=("1",) * 21),
+    ]
+    for table in invalid:
+        errors = invoice_with(table).validate().errors
+        assert errors, table
+    assert not invoice_with(
+        AttachmentTable(headers=("A",), rows=(("1",),), column_types=("txt",))
+    ).validate().errors
+
+
+def test_facet_describe_covers_minimum_length_and_minimum() -> None:
+    """`Facet.describe()` musi opisywać także dolne granice długości i wartości."""
+    from ksef_client.documents.fa3.validation.facets import Facet, FacetKind
+
+    assert "co najmniej 3 znaków" in Facet(
+        FacetKind.STRING, "X", minimum_length=3
+    ).describe()
+    assert "minimum 1" in Facet(FacetKind.DECIMAL, "X", minimum=Decimal("1")).describe()
+    assert "maksymalnie 16 cyfr części całkowitej" in Facet(
+        FacetKind.DECIMAL, "X", integer_digits=16
+    ).describe()

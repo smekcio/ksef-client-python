@@ -263,6 +263,30 @@ class FA3Line:
                         severity="warning",
                     )
                 )
+
+        # Spójność arytmetyczna wiersza: `P_11 = P_13_x + P_14_x`. Dokument, w którym
+        # brutto nie zgadza się z netto + VAT, jest wewnętrznie sprzeczny i KSeF go
+        # odrzuca (na 26 oficjalnych przykładach MF tożsamość zachodzi we wszystkich,
+        # poza jednym zaokrągleniem o grosz). Wcześniej `gross_amount` był tylko
+        # ostrzeżeniem, więc dokument wychodził z `P_13 + P_14 != P_15` bez błędu.
+        gross_sum = money(self.effective_net_amount + self.effective_vat_amount)
+        # Tolerancja jednego grosza: różnice zaokrągleń między pozycją a
+        # podsumowaniem występują też w oficjalnych przykładach MF, więc nie
+        # mogą blokować poprawnej faktury.
+        if (
+            self.gross_amount is not None
+            and abs(money(self.gross_amount) - gross_sum) > MONEY_QUANT
+        ):
+            errors.append(
+                FA3ValidationIssue(
+                    f"Pozycja: wartość brutto {money(self.gross_amount)} nie zgadza się "
+                    f"z netto + VAT ({self.effective_net_amount} + "
+                    f"{self.effective_vat_amount} = {gross_sum}). Popraw brutto albo usuń "
+                    "nadpisanie, bo KSeF odrzuci dokument, w którym P_15 nie równa się "
+                    "sumie P_13_x i P_14_x.",
+                    column="Wartość brutto",
+                )
+            )
         return errors, warnings
 
     def to_dict(self) -> dict[str, Any]:
@@ -701,9 +725,7 @@ class FA3Draft:
     ) -> bytes:
         from .xml import draft_to_xml
 
-        return draft_to_xml(
-            self, validate=validate, facets=facets, xsd_validate=xsd_validate
-        )
+        return draft_to_xml(self, validate=validate, facets=facets, xsd_validate=xsd_validate)
 
 
 def _parse_iso_date(value: Any) -> date:

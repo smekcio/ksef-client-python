@@ -35,6 +35,21 @@
   charge of `0.005` no longer prints as `0.00` while its sum prints as `0.01`
 * **fa3:** reject XML 1.0 control characters and empty values for `minLength=1` fields instead of
   returning unparseable or schema-invalid XML
+* **fa3:** reject a `gross_amount` override that disagrees with net + VAT (tolerance 1 grosz),
+  in both the typed and the draft path — previously it emitted `P_15 != P_13 + P_14`, which KSeF
+  rejects, with `validate()` reporting success
+* **fa3:** enforce the schema number pattern (`totalDigits`, no leading zeros, no exponent) on
+  amounts, quantities and percentages; `P_15="007.50"` or `"1E+3"` no longer passes validation
+* **fa3:** validate attachment tables (column count/rows limits, `Kol/@Typ` dictionary, and a
+  `column_types` list shorter than `headers`, which silently dropped columns)
+* **fa3:** reject half-filled pairs instead of dropping them silently — `KursUmowny`/`WalutaUmowna`
+  and the two parts of `Skonto`
+* **fa3:** emit `DodatkowyOpis/NrWiersza`, so an additional description can be tied to a specific
+  invoice line
+* **fa3:** `xsd_audit` now resolves named complex types across all four schema files (402 paths
+  instead of 298 — a quarter of the schema, including mandatory elements, was invisible) and derives
+  coverage status from the tags the serializer actually emits instead of a prefix-matched map that
+  made `UNSUPPORTED` unreachable
 * **collective-identifiers:** validate context invoice limits, common seller, finite payment amounts,
   precise UTC ranges, and resumable CLI pagination
 * **verification-link:** sign QR II certificate URLs with the raw path and KSeF-compliant RSA-PSS parameters
