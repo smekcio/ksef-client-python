@@ -729,7 +729,12 @@ class ClientsTests(unittest.TestCase):
 
         testdata = TestDataClient(self.http)
         with (
-            patch.object(testdata, "_request_model", Mock(return_value=object())) as request_model,
+            patch.object(
+                testdata, "_request_model", Mock(return_value=object())
+            ) as request_model,
+            patch.object(
+                testdata, "_request_optional_model", Mock(return_value=None)
+            ) as request_optional_model,
             patch.object(testdata, "_request_json", Mock()) as request_json,
         ):
             testdata.create_subject(payload)
@@ -751,7 +756,7 @@ class ClientsTests(unittest.TestCase):
             testdata.restore_production_rate_limits(access_token="token")
             testdata.update_certificate("ABCDEF0123456789", payload, access_token="token")
             self.assertEqual(request_json.call_count, 11)
-            self.assertEqual(request_model.call_count, 7)
+            self.assertEqual(request_optional_model.call_count, 7)
             self.assertEqual(
                 request_json.call_args_list[-1].args[1],
                 "/testdata/certificates/ABCDEF0123456789",
@@ -1199,6 +1204,9 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 testdata, "_request_model", AsyncMock(return_value=object())
             ) as request_model,
+            patch.object(
+                testdata, "_request_optional_model", AsyncMock(return_value=None)
+            ) as request_optional_model,
             patch.object(testdata, "_request_json", AsyncMock()) as request_json,
         ):
             await testdata.create_subject(payload)
@@ -1220,7 +1228,7 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             await testdata.restore_production_rate_limits(access_token="token")
             await testdata.update_certificate("ABCDEF0123456789", payload, access_token="token")
             self.assertEqual(request_json.await_count, 11)
-            self.assertEqual(request_model.await_count, 7)
+            self.assertEqual(request_optional_model.await_count, 7)
         with patch.object(testdata, "_request_json", AsyncMock()) as request_json:
             with self.assertRaises(ValueError):
                 await testdata.update_certificate("not-a-serial", payload, access_token="token")
