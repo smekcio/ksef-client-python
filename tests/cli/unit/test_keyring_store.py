@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 import threading
 import time
 import types
 import warnings
+from pathlib import Path
 
 import pytest
 
@@ -202,6 +204,78 @@ def test_keyring_store_encrypted_fallback_invalid_token(monkeypatch, tmp_path) -
         encoding="utf-8",
     )
     assert keyring_store.get_tokens("demo") is None
+
+
+def test_keyring_store_fallback_lock_heals_after_a_killed_process(
+    monkeypatch, tmp_path
+) -> None:
+    """Ta sama klasa błędu co w blokadzie cache: osierocona blokada nie może trwać.
+
+    Proces zabity w trakcie nie sprząta `tokens.json.lock`, więc zapis i usunięcie
+    tokenów kończyły się błędem, dopóki człowiek nie usunął pliku ręcznie.
+    """
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", False)
+    monkeypatch.setattr(keyring_store, "_keyring", None)
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+    monkeypatch.setenv(keyring_store._TOKEN_STORE_KEY_ENV, "test-passphrase")
+    monkeypatch.delenv(keyring_store._ALLOW_INSECURE_FALLBACK_ENV, raising=False)
+    lock_path = tmp_path / f"tokens.json{keyring_store._FALLBACK_LOCK_SUFFIX}"
+    lock_path.write_text("999999 1.0", encoding="utf-8")
+    stale = time.time() - keyring_store._FALLBACK_LOCK_STALE_SECONDS - 5
+    os.utime(lock_path, (stale, stale))
+
+    keyring_store.save_tokens("demo", "acc", "ref")
+
+    assert keyring_store.get_tokens("demo") == ("acc", "ref")
+    assert not lock_path.exists()
+
+
+def test_keyring_store_fallback_lock_steals_are_bounded(monkeypatch, tmp_path) -> None:
+    """Gdy starej blokady nie da się usunąć, pętla kończy się błędem, nie kręci."""
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", False)
+    monkeypatch.setattr(keyring_store, "_keyring", None)
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+    monkeypatch.setenv(keyring_store._TOKEN_STORE_KEY_ENV, "test-passphrase")
+    monkeypatch.delenv(keyring_store._ALLOW_INSECURE_FALLBACK_ENV, raising=False)
+    lock_path = tmp_path / f"tokens.json{keyring_store._FALLBACK_LOCK_SUFFIX}"
+    lock_path.write_text("999999 1.0", encoding="utf-8")
+    stale = time.time() - keyring_store._FALLBACK_LOCK_STALE_SECONDS - 5
+    os.utime(lock_path, (stale, stale))
+    monkeypatch.setattr(keyring_store, "_FALLBACK_LOCK_TIMEOUT_SECONDS", 0.0)
+    attempts: list[int] = []
+
+    def _busy(self: Path, **kwargs: object) -> None:
+        _ = (self, kwargs)
+        attempts.append(1)
+        if len(attempts) > keyring_store._FALLBACK_LOCK_MAX_STEALS:
+            raise AssertionError("pętla przejmowania blokady nie jest ograniczona")
+        raise OSError("busy")
+
+    monkeypatch.setattr(Path, "unlink", _busy)
+
+    # `save_tokens` opakowuje OSError z magazynu w CliError (kontrakt CLI).
+    with pytest.raises(CliError, match="Cannot persist tokens in fallback file store"):
+        keyring_store.save_tokens("demo", "acc", "ref")
+
+    assert len(attempts) <= keyring_store._FALLBACK_LOCK_MAX_STEALS
+
+
+def test_keyring_store_fallback_lock_is_not_stale_when_stat_fails(
+    monkeypatch, tmp_path
+) -> None:
+    """Gdy nie da się odczytać wieku blokady fallbacku, nie przejmujemy jej na ślepo."""
+    lock_path = tmp_path / f"tokens.json{keyring_store._FALLBACK_LOCK_SUFFIX}"
+    lock_path.write_text("1 1.0", encoding="utf-8")
+    original_stat = Path.stat
+
+    def _stat(self: Path, *, follow_symlinks: bool = True):
+        if self == lock_path:
+            raise OSError("locked")
+        return original_stat(self, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", _stat)
+
+    assert keyring_store._fallback_lock_is_stale(lock_path) is False
 
 
 def test_keyring_store_file_fallback_clear_reports_save_errors(monkeypatch, tmp_path) -> None:

@@ -52,6 +52,12 @@ _FALLBACK_FILE_NAME = "tokens.json"
 _FALLBACK_LOCK_SUFFIX = ".lock"
 _FALLBACK_LOCK_TIMEOUT_SECONDS = 2.0
 _FALLBACK_LOCK_POLL_INTERVAL_SECONDS = 0.05
+#: Blokada starsza niż tyle sekund pochodzi po procesie, który padł bez
+#: sprzątania, i jest przejmowana (sekcja krytyczna to zapis małego JSON-a).
+_FALLBACK_LOCK_STALE_SECONDS = 30.0
+#: Ograniczenie liczby przejęć — przy nieudanym `unlink` pętla nie może kręcić się
+#: w miejscu.
+_FALLBACK_LOCK_MAX_STEALS = 3
 _ALLOW_INSECURE_FALLBACK_ENV = "KSEF_CLI_ALLOW_INSECURE_TOKEN_STORE"
 _TOKEN_STORE_KEY_ENV = "KSEF_CLI_TOKEN_STORE_KEY"
 _ENCRYPTION_MODE = "fernet-v1"
@@ -80,6 +86,15 @@ def _fallback_tokens_file() -> Path:
 def _fallback_tokens_lock_file() -> Path:
     path = _fallback_tokens_file()
     return path.with_name(f"{path.name}{_FALLBACK_LOCK_SUFFIX}")
+
+
+def _fallback_lock_is_stale(lock_path: Path) -> bool:
+    """Czy plik blokady pochodzi po procesie, który padł bez sprzątania."""
+    try:
+        age = time.time() - lock_path.stat().st_mtime
+    except OSError:
+        return False
+    return age >= _FALLBACK_LOCK_STALE_SECONDS
 
 
 def _allow_insecure_fallback() -> bool:
@@ -198,18 +213,35 @@ def _save_fallback_tokens(payload: dict[str, dict[str, Any]]) -> None:
 
 @contextmanager
 def _fallback_tokens_lock() -> Iterator[None]:
+    """Blokada zapisu fallbacku, która leczy się po zabitym procesie.
+
+    Proces zabity w trakcie nie sprząta pliku blokady, więc blokada starsza niż
+    `_FALLBACK_LOCK_STALE_SECONDS` jest przejmowana — inaczej każde zapisanie i
+    każde usunięcie tokenów kończyłoby się błędem, dopóki człowiek nie usunąłby
+    pliku ręcznie (ten sam defekt, który naprawiono w blokadzie cache metadanych).
+    Liczba przejęć jest ograniczona, bo przy nieudanym `unlink` pętla kręciłaby
+    się w miejscu.
+    """
     lock_path = _fallback_tokens_lock_file()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle: int | None = None
     started = time.monotonic()
+    steals = 0
     while handle is None:
         try:
             handle = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
         except FileExistsError as exc:
+            if _fallback_lock_is_stale(lock_path) and steals < _FALLBACK_LOCK_MAX_STEALS:
+                steals += 1
+                with suppress(OSError):
+                    lock_path.unlink()
+                continue
             if time.monotonic() - started >= _FALLBACK_LOCK_TIMEOUT_SECONDS:
                 raise OSError("Timed out waiting for fallback token store lock.") from exc
             time.sleep(_FALLBACK_LOCK_POLL_INTERVAL_SECONDS)
     try:
+        with suppress(OSError):
+            os.write(handle, f"{os.getpid()} {time.time():.3f}".encode("ascii"))
         yield
     finally:
         with suppress(OSError):

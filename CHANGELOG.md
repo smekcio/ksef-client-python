@@ -36,6 +36,8 @@
   `cache.json.lock` behind and every later call failed after a 5 s wait until someone deleted the
   file by hand; a lock older than 30 s is now taken over (at most a few attempts, then the ordinary
   timeout applies), and lock/directory errors are reported as `CliError` instead of a raw `OSError`
+* **cli:** the fallback token store lock (`tokens.json.lock`) heals the same way — a process killed
+  mid-run used to block every token save and `auth logout` until the lock file was removed by hand
 * **cli:** the checkpoint `base_url` guard honours `--base-url` and `KSEF_BASE_URL`. A session
   opened with an address override could not be sent or closed at all (the guard compared only with
   the profile), and the `send`/`close`/`status`/`import`/`batch upload`/`batch close` commands did
