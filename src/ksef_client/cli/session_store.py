@@ -426,11 +426,20 @@ def export_checkpoint(profile: str, session_id: str, out_path: Path) -> Path:
 
 
 def _normalize_base_url(value: str) -> str:
-    return value.strip().rstrip("/").lower()
+    """Adres do porównania: bez ukośnika na końcu, bez portu domyślnego, małymi literami.
+
+    `https://host:443` i `https://host` to ten sam adres — bez zdjęcia portu
+    domyślnego legalny checkpoint bywał fałszywie odrzucany.
+    """
+    normalized = value.strip().rstrip("/").lower()
+    for scheme, default_port in (("https://", ":443"), ("http://", ":80")):
+        if normalized.startswith(scheme) and normalized.endswith(default_port):
+            return normalized[: -len(default_port)]
+    return normalized
 
 
 def require_matching_base_url(checkpoint: SessionCheckpoint, expected_base_url: str) -> None:
-    """Sprawdza, że checkpoint nie wskazuje innego hosta niż profil.
+    """Sprawdza, że checkpoint nie wskazuje innego adresu niż efektywny adres komendy.
 
     Checkpoint bywa plikiem z zewnątrz (`session import`), a jego `base_url`
     decyduje, DOKĄD trafia token dostępowy profilu (`session online send`,
@@ -440,10 +449,11 @@ def require_matching_base_url(checkpoint: SessionCheckpoint, expected_base_url: 
     if _normalize_base_url(checkpoint.base_url) == _normalize_base_url(expected_base_url):
         return
     raise CliError(
-        "Checkpoint base_url does not match the selected profile.",
+        "Checkpoint base_url does not match the effective base URL.",
         ExitCode.VALIDATION_ERROR,
-        f"Checkpoint points at '{checkpoint.base_url}', profile at '{expected_base_url}'. "
-        "Re-import the checkpoint from the matching environment or select that profile.",
+        f"Checkpoint points at '{checkpoint.base_url}', this command uses "
+        f"'{expected_base_url}'. Re-import the checkpoint from the matching environment, "
+        "select that profile or pass the matching --base-url.",
     )
 
 

@@ -25,30 +25,53 @@ _SURNAME_OID = x509.ObjectIdentifier("2.5.4.4")
 _GIVEN_NAME_OID = x509.ObjectIdentifier("2.5.4.42")
 
 
+def _subject_value(info: dict[str, Any], *names: str) -> Any:
+    """Pierwsza niepusta wartość spośród podanych nazw pól.
+
+    Model SDK (`CertificateEnrollmentDataResponse`) używa nazw w stylu
+    snake_case (`given_name`, `surname`, `organization_name`), a dokumentacja MF
+    i przykłady — camelCase. Wcześniej akceptowany był wyłącznie camelCase, więc
+    wołający, który przekazał dokładnie pole z modelu (`given_name`), dostawał CSR
+    BEZ `givenName` i bez żadnego sygnału — a KSeF odrzuca taki wniosek (25003).
+    """
+    for name in names:
+        value = info.get(name)
+        if value:
+            return value
+    return None
+
+
 def _build_subject(info: dict[str, Any]) -> x509.Name:
     attributes = []
-    if info.get("commonName"):
-        attributes.append(x509.NameAttribute(NameOID.COMMON_NAME, info["commonName"]))
-    if info.get("givenName"):
-        # `CertificateEnrollmentDataResponse.givenName` — pominięcie tego
-        # atrybutu dawało CSR niezgodny z danymi wektora uwierzytelniającego
-        # (KSeF odrzuca wniosek), a funkcja nie zgłaszała nic.
-        attributes.append(x509.NameAttribute(_GIVEN_NAME_OID, info["givenName"]))
-    if info.get("surname"):
-        attributes.append(x509.NameAttribute(_SURNAME_OID, info["surname"]))
-    if info.get("organizationName"):
-        attributes.append(x509.NameAttribute(NameOID.ORGANIZATION_NAME, info["organizationName"]))
-    if info.get("countryName"):
-        attributes.append(x509.NameAttribute(NameOID.COUNTRY_NAME, info["countryName"]))
-    if info.get("organizationIdentifier"):
+    common_name = _subject_value(info, "commonName", "common_name")
+    if common_name:
+        attributes.append(x509.NameAttribute(NameOID.COMMON_NAME, common_name))
+    given_name = _subject_value(info, "givenName", "given_name")
+    if given_name:
+        attributes.append(x509.NameAttribute(_GIVEN_NAME_OID, given_name))
+    surname = _subject_value(info, "surname", "lastName", "last_name")
+    if surname:
+        attributes.append(x509.NameAttribute(_SURNAME_OID, surname))
+    organization_name = _subject_value(info, "organizationName", "organization_name")
+    if organization_name:
+        attributes.append(x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization_name))
+    country_name = _subject_value(info, "countryName", "country_name")
+    if country_name:
+        attributes.append(x509.NameAttribute(NameOID.COUNTRY_NAME, country_name))
+    organization_identifier = _subject_value(
+        info, "organizationIdentifier", "organization_identifier"
+    )
+    if organization_identifier:
         attributes.append(
-            x509.NameAttribute(x509.ObjectIdentifier("2.5.4.97"), info["organizationIdentifier"])
+            x509.NameAttribute(x509.ObjectIdentifier("2.5.4.97"), organization_identifier)
         )
-    if info.get("serialNumber"):
-        attributes.append(x509.NameAttribute(NameOID.SERIAL_NUMBER, info["serialNumber"]))
-    if info.get("uniqueIdentifier"):
+    serial_number = _subject_value(info, "serialNumber", "serial_number")
+    if serial_number:
+        attributes.append(x509.NameAttribute(NameOID.SERIAL_NUMBER, serial_number))
+    unique_identifier = _subject_value(info, "uniqueIdentifier", "unique_identifier")
+    if unique_identifier:
         attributes.append(
-            x509.NameAttribute(NameOID.X500_UNIQUE_IDENTIFIER, info["uniqueIdentifier"])
+            x509.NameAttribute(NameOID.X500_UNIQUE_IDENTIFIER, unique_identifier)
         )
     return x509.Name(attributes)
 

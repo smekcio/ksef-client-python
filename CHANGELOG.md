@@ -54,6 +54,12 @@
   rows are skipped. Order/settlement documents used to be reported as empty (`total_netto=0.00`,
   `item_count=0`) with no signal — but the order value must not masquerade as the invoice amount
   (official `FA_3_Przykład_10.xml`: `WartoscZamowienia` 375150 vs `P_15` 20000)
+* **services:** the CSR builder accepts the SDK model's own field names (`given_name`, `last_name`,
+  `common_name`, …) next to the camelCase ones. A caller passing `given_name` — the exact field of
+  `CertificateEnrollmentDataResponse` — silently got a CSR without `givenName` (2.5.4.42), which KSeF
+  rejects with error 25003
+* **cli:** the checkpoint `base_url` comparison ignores a default port (`https://host:443` ==
+  `https://host`) and the error names the effective command address, not the profile
 * **cli:** an imported session checkpoint can no longer decide where the profile's access token goes.
   `session import` compared only the profile *name*, so a crafted checkpoint file with a foreign
   `base_url` sent the KSeF token (and the invoice body) to that host on `session online send`,

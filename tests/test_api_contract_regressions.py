@@ -1651,6 +1651,45 @@ class TestCsrSubjectAttributes:
             assert [attribute.value for attribute in given] == ["Jan"]
             assert [attribute.value for attribute in surname] == ["Kowalski"]
 
+    def test_csr_accepts_the_snake_case_field_names_from_the_sdk_model(self):
+        """Nazwy pól z modelu SDK (`given_name`) też muszą trafić do DN.
+
+        `CertificateEnrollmentDataResponse` używa snake_case, a `_build_subject`
+        akceptował wyłącznie camelCase — wołający przekazujący pole z modelu
+        dostawał CSR bez `givenName` i bez żadnego sygnału, a KSeF odrzuca taki
+        wniosek (kod 25003).
+        """
+        import base64
+
+        from cryptography import x509
+
+        from ksef_client.services.csr import generate_csr_rsa
+
+        info = {
+            "common_name": "Jan Kowalski",
+            "country_name": "PL",
+            "given_name": "Jan",
+            "last_name": "Kowalski",
+            "serial_number": "TINPL-88102341294",
+            "unique_identifier": "UID-1",
+            "organization_name": "Firma",
+            "organization_identifier": "VATPL-1111111111",
+        }
+        csr = x509.load_der_x509_csr(base64.b64decode(generate_csr_rsa(info).csr_base64))
+        subject = csr.subject
+        assert [
+            attribute.value
+            for attribute in subject.get_attributes_for_oid(x509.ObjectIdentifier("2.5.4.42"))
+        ] == ["Jan"]
+        assert [
+            attribute.value
+            for attribute in subject.get_attributes_for_oid(x509.ObjectIdentifier("2.5.4.4"))
+        ] == ["Kowalski"]
+        assert [
+            attribute.value
+            for attribute in subject.get_attributes_for_oid(x509.ObjectIdentifier("2.5.4.97"))
+        ] == ["VATPL-1111111111"]
+
 
 class TestExportArchiveLimits:
     """Paczka eksportu może mieć 10 000 faktur + `_metadata.json` (nie liczy się)."""

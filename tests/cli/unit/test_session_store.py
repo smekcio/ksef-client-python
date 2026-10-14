@@ -422,6 +422,8 @@ def test_require_matching_base_url_normalises_the_comparison(monkeypatch, tmp_pa
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
     checkpoint = _online_checkpoint()
     session_store.require_matching_base_url(checkpoint, "HTTPS://API-DEMO.KSEF.MF.GOV.PL/")
+    # Domyślny port to ten sam adres — nie może fałszywie odrzucać legalnego checkpointu.
+    session_store.require_matching_base_url(checkpoint, "https://api-demo.ksef.mf.gov.pl:443")
 
     with pytest.raises(CliError, match="base_url does not match"):
         session_store.require_matching_base_url(checkpoint, "https://api.ksef.mf.gov.pl")
