@@ -34,8 +34,8 @@
   internal network) and returned its body as the result
 * **cli:** the token metadata cache lock heals itself. A process killed mid-run left
   `cache.json.lock` behind and every later call failed after a 5 s wait until someone deleted the
-  file by hand; a lock older than 30 s is now taken over, and lock/directory errors are reported as
-  `CliError` instead of a raw `OSError`
+  file by hand; a lock older than 30 s is now taken over (at most a few attempts, then the ordinary
+  timeout applies), and lock/directory errors are reported as `CliError` instead of a raw `OSError`
 * **cli:** the checkpoint `base_url` guard honours `--base-url` and `KSEF_BASE_URL`. A session
   opened with an address override could not be sent or closed at all (the guard compared only with
   the profile), and the `send`/`close`/`status`/`import`/`batch upload`/`batch close` commands did
@@ -46,9 +46,12 @@
 * **packaging:** `requirements.txt` lists `typing-extensions`, which `documents/fa3` imports
   unconditionally — installing from the documented requirements file ended with
   `ModuleNotFoundError: No module named 'typing_extensions'`
-* **utils:** `fast_extract_ksef_metadata` counts `ZamowienieWiersz` rows (`P_11NettoZ` net,
-  `P_11NettoZ + P_11VatZ` gross) and skips `StanPrzedZ` rows. Order/settlement documents used to be
-  reported as empty (`total_netto=0.00`, `item_count=0`) with no signal
+* **utils:** `fast_extract_ksef_metadata` reports order rows separately: invoice rows (`FaWiersz`)
+  keep `total_netto`/`total_brutto`/`item_count`, while `ZamowienieWiersz` rows land in
+  `order_netto`/`order_brutto`/`order_item_count` (gross = `P_11NettoZ + P_11VatZ`) and `StanPrzedZ`
+  rows are skipped. Order/settlement documents used to be reported as empty (`total_netto=0.00`,
+  `item_count=0`) with no signal — but the order value must not masquerade as the invoice amount
+  (official `FA_3_Przykład_10.xml`: `WartoscZamowienia` 375150 vs `P_15` 20000)
 * **cli:** an imported session checkpoint can no longer decide where the profile's access token goes.
   `session import` compared only the profile *name*, so a crafted checkpoint file with a foreign
   `base_url` sent the KSeF token (and the invoice body) to that host on `session online send`,
