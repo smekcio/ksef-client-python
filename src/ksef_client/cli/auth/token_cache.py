@@ -20,6 +20,9 @@ _CACHE_LOCK_POLL_INTERVAL_SECONDS = 0.05
 #: trzymał, został zabity) i jest przejmowana. Sekcja krytyczna to odczyt i zapis
 #: małego JSON-a, więc próg jest z zapasem większy od realnego czasu trzymania.
 _CACHE_LOCK_STALE_SECONDS = 30.0
+#: Ile razy wolno przejąć osieroconą blokadę, zanim uznamy, że nie da się jej
+#: usunąć (np. brak praw) — bez tego pętla przejmowania kręciłaby się w miejscu.
+_CACHE_LOCK_MAX_STEALS = 3
 
 
 def _cache_lock_file() -> Path:
@@ -61,12 +64,16 @@ def _cache_lock() -> Iterator[None]:
 
     started = time.monotonic()
     handle: int | None = None
+    steals = 0
     while handle is None:
         try:
             handle = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
         except FileExistsError as exc:
-            if _lock_is_stale(lock_path):
+            if _lock_is_stale(lock_path) and steals < _CACHE_LOCK_MAX_STEALS:
                 # Poprzedni właściciel padł bez sprzątania — przejmujemy blokadę.
+                # Liczba prób jest ograniczona, bo gdy `unlink` się nie uda
+                # (np. brak praw), ta gałąź kręciłaby się w miejscu bez końca.
+                steals += 1
                 with suppress(OSError):
                     lock_path.unlink()
                 continue

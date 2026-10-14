@@ -150,6 +150,40 @@ def test_token_cache_steals_an_orphaned_lock(monkeypatch, tmp_path: Path) -> Non
     assert not lock_path.exists()
 
 
+def test_token_cache_lock_steal_attempts_are_bounded(monkeypatch, tmp_path: Path) -> None:
+    """Gdy starej blokady nie da się usunąć, pętla kończy się błędem, a nie kręci.
+
+    Wcześniej gałąź „stale” robiła `continue` bez sprawdzania timeoutu i bez
+    `sleep`, więc przy `unlink` blokowanym przez system (np. brak praw) proces
+    kręcił się w miejscu w nieskończoność.
+    """
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(token_cache, "cache_file", lambda: cache_path)
+    lock_path = cache_path.with_name("cache.json.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("999999 1.0", encoding="utf-8")
+    stale_time = time.time() - token_cache._CACHE_LOCK_STALE_SECONDS - 5
+    os.utime(lock_path, (stale_time, stale_time))
+    monkeypatch.setattr(token_cache, "_CACHE_LOCK_TIMEOUT_SECONDS", 0.0)
+    attempts: list[int] = []
+
+    def _busy(self: Path, **kwargs: object) -> None:
+        _ = (self, kwargs)
+        attempts.append(1)
+        if len(attempts) > token_cache._CACHE_LOCK_MAX_STEALS:
+            # Stara implementacja kręciła się tu w miejscu — zamieniamy zawieszenie
+            # na szybki błąd, żeby regresja była widoczna od razu.
+            raise AssertionError("pętla przejmowania blokady nie jest ograniczona")
+        raise OSError("busy")
+
+    monkeypatch.setattr(Path, "unlink", _busy)
+
+    with pytest.raises(CliError, match="Timed out waiting"):
+        token_cache.get_cached_metadata("demo")
+
+    assert len(attempts) <= token_cache._CACHE_LOCK_MAX_STEALS
+
+
 def test_token_cache_lock_is_not_stale_when_stat_fails(monkeypatch, tmp_path: Path) -> None:
     """Gdy nie da się odczytać wieku blokady, nie przejmujemy jej na ślepo."""
     cache_path = tmp_path / "cache.json"
