@@ -53,13 +53,22 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
 
     :param xml_content: KSeF XML invoice content (str, bytes, or BufferedIOBase stream)
     :return: Dictionary containing 'seller_nip', 'buyer_nip', 'nips', 'total_netto',
-        'total_brutto', 'item_count' and 'stan_przed_item_count'.
+        'total_brutto', 'item_count', 'stan_przed_item_count' and the order-row
+        counterparts 'order_netto', 'order_brutto', 'order_item_count'.
 
-    ``total_netto`` sumuje wartości ``P_11``/``P_11NettoZ`` (netto), a ``total_brutto``
-    wartości ``P_11A`` (brutto) albo — dla wiersza zamówienia — ``P_11NettoZ + P_11VatZ``.
-    Dokumenty z art. 106e ust. 7 i 8 nie mają ``P_11``, więc wcześniejsza wersja
-    zwracała dla nich ``total_netto = 0.00`` i ``item_count = 0`` bez żadnego sygnału;
-    tak samo działo się z każdym dokumentem, którego pozycje to ``ZamowienieWiersz``.
+    ``total_netto``/``total_brutto``/``item_count`` opisują **pozycje faktury**
+    (``FaWiersz``): netto z ``P_11``, brutto z ``P_11A``. Dokumenty z art. 106e
+    ust. 7 i 8 nie mają ``P_11``, więc wcześniejsza wersja zwracała dla nich
+    ``total_netto = 0.00`` i ``item_count = 0`` bez żadnego sygnału.
+
+    Wiersze zamówienia (``ZamowienieWiersz``) są liczone OSOBNO w ``order_*``,
+    bo niosą wartość zamówienia/umowy, a nie kwoty faktury — w dokumencie
+    zaliczkowym (``ZAL``/``KOR_ZAL``) suma tych wierszy bywa zupełnie inna niż
+    ``P_13_x``/``P_15`` tej samej faktury (np. ``FA_3_Przykład_10.xml``:
+    ``WartoscZamowienia`` 375150 wobec ``P_15`` 20000). Wcześniej te dokumenty
+    zwracały jawne zero; teraz zwracają zero w ``total_*`` i prawdziwą wartość
+    zamówienia w ``order_*``, więc nic nie udaje kwoty faktury.
+
     Wiersze oznaczone ``StanPrzed``/``StanPrzedZ`` (stan przed korektą) są liczone
     osobno w ``stan_przed_item_count`` i nie wchodzą do sum — inaczej korekta
     (KOR/KOR_ROZ) podwajała wartości.
@@ -79,6 +88,9 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
     total_brutto = Decimal("0.00")
     item_count = 0
     stan_przed_item_count = 0
+    order_netto = Decimal("0.00")
+    order_brutto = Decimal("0.00")
+    order_item_count = 0
 
     stack: list[str] = []
     row_tag: str | None = None
@@ -134,13 +146,20 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
             # `ZamowienieWiersz` nie ma jawnej kwoty brutto (`P_11A`), więc brutto
             # to netto + podatek. Dla `FaWiersz` brutto bierzemy wyłącznie z
             # `P_11A` — bez tego „brutto" byłoby równe netto i myliłoby odbiorcę.
-            if row_gross is None and row_tag == "ZamowienieWiersz":
+            is_order_row = row_tag == "ZamowienieWiersz"
+            if row_gross is None and is_order_row:
                 row_gross = _sum_optional(row_net, row_vat)
             has_values = row_net is not None or row_gross is not None
             if has_values:
-                item_count += 1
+                if is_order_row:
+                    order_item_count += 1
+                else:
+                    item_count += 1
                 if row_before_correction:
                     stan_przed_item_count += 1
+                elif is_order_row:
+                    order_netto += row_net or Decimal("0.00")
+                    order_brutto += row_gross or Decimal("0.00")
                 else:
                     total_netto += row_net or Decimal("0.00")
                     total_brutto += row_gross or Decimal("0.00")
@@ -160,4 +179,7 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
         "total_brutto": total_brutto,
         "item_count": item_count,
         "stan_przed_item_count": stan_przed_item_count,
+        "order_netto": order_netto,
+        "order_brutto": order_brutto,
+        "order_item_count": order_item_count,
     }

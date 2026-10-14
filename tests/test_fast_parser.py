@@ -108,17 +108,23 @@ KSEF_ORDER_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 def test_fast_extract_ksef_metadata_handles_order_rows():
-    """`ZamowienieWiersz` nie ma `P_11`/`P_11A` — kwoty są w `P_11NettoZ`/`P_11VatZ`.
+    """`ZamowienieWiersz` liczone osobno (`order_*`), nie jako kwoty faktury.
 
-    Wcześniej każdy dokument, którego pozycje to wiersze zamówienia, dawał
-    `total_netto=0.00` i `item_count=0` bez żadnego sygnału (m.in. oficjalne
-    `FA_3_Przykład_10..13.xml`).
+    Wiersze zamówienia niosą wartość zamówienia/umowy, a nie kwoty faktury — w
+    dokumencie zaliczkowym suma tych wierszy bywa zupełnie inna niż `P_13_x`/`P_15`
+    (oficjalny `FA_3_Przykład_10.xml`: `WartoscZamowienia` 375150 wobec `P_15`
+    20000). Wcześniej parser ignorował te wiersze (jawne zero), a pierwsza wersja
+    poprawki wpisywała wartość zamówienia w `total_netto`, czyli liczbę
+    wyglądającą wiarygodnie, ale obcą dla faktury.
     """
     res = fast_extract_ksef_metadata(KSEF_ORDER_SAMPLE)
-    assert res["total_netto"] == Decimal("305000.00")
+    assert res["total_netto"] == Decimal("0.00")
+    assert res["total_brutto"] == Decimal("0.00")
+    assert res["item_count"] == 0
+    assert res["order_netto"] == Decimal("305000.00")
     # Brak jawnego brutto w schemacie, więc brutto = netto + podatek.
-    assert res["total_brutto"] == Decimal("375150.00")
-    assert res["item_count"] == 2
+    assert res["order_brutto"] == Decimal("375150.00")
+    assert res["order_item_count"] == 2
     assert res["stan_przed_item_count"] == 1
 
 
@@ -143,10 +149,13 @@ def test_fast_extract_ksef_metadata_order_row_without_amounts_is_skipped():
         '<Faktura><Fa><ZamowienieWiersz><P_8AZ>szt.</P_8AZ></ZamowienieWiersz>'
         "<ZamowienieWiersz><P_11NettoZ>10.00</P_11NettoZ></ZamowienieWiersz></Fa></Faktura>"
     )
-    assert res["item_count"] == 1
-    assert res["total_netto"] == Decimal("10.00")
+    assert res["order_item_count"] == 1
+    assert res["order_netto"] == Decimal("10.00")
     # Bez `P_11VatZ` brutto = netto (nie ma z czego doliczyć podatku).
-    assert res["total_brutto"] == Decimal("10.00")
+    assert res["order_brutto"] == Decimal("10.00")
+    # Wartość zamówienia nie udaje kwoty faktury.
+    assert res["total_netto"] == Decimal("0.00")
+    assert res["item_count"] == 0
 
 
 def test_fast_extract_ksef_metadata_handles_gross_only_lines():
