@@ -7,6 +7,11 @@ from ksef_client.utils.naming import to_snake_case
 
 # Podpowiedzi dla kodów błędów wymagających konkretnego działania użytkownika.
 _EXCEPTION_CODE_HINTS: dict[int, str] = {
+    21001: (
+        "KSeF nie odczytał treści żądania (nieczytelna treść). Sprawdź, czy dokument jest "
+        "poprawnym XML/JSON-em i czy nagłówek Content-Type odpowiada treści żądania "
+        "(kod udokumentowany w KSeF API 2.9.0)."
+    ),
     21155: (
         "Sesja osiągnęła limit liczby faktur. Zamknij sesję i wyślij pozostałe "
         "faktury w nowej sesji."

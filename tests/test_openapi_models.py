@@ -34,6 +34,41 @@ class OpenApiModelsTests(unittest.TestCase):
         self.assertEqual(item.authentication_method.value, method_value)
         self.assertEqual(item.to_dict()["authenticationMethod"], method_value)
 
+    def test_personal_permissions_owner_scope_from_api_2_9_0(self):
+        """Kontrakt 2.9.0 dodaje `ownerPermissions` (`OwnerPermissionScope`) do odpowiedzi."""
+        payload = {
+            "hasMore": False,
+            "permissions": [],
+            "ownerPermissions": ["CredentialsManage", "InvoiceRead"],
+        }
+        parsed = m.QueryPersonalPermissionsResponse.from_dict(payload)
+
+        self.assertFalse(parsed.has_more)
+        owner_permissions = parsed.owner_permissions
+        assert owner_permissions is not None
+        self.assertEqual(
+            [scope.value for scope in owner_permissions],
+            ["CredentialsManage", "InvoiceRead"],
+        )
+        self.assertIs(owner_permissions[0], m.OwnerPermissionScope.CREDENTIALSMANAGE)
+        self.assertEqual(parsed.to_dict()["ownerPermissions"], ["CredentialsManage", "InvoiceRead"])
+
+        # Pole jest opcjonalne (`nullable: true` w kontrakcie) — starsze odpowiedzi
+        # i konteksty bez uprawnień właścicielskich nie mogą wywracać parsowania.
+        without = m.QueryPersonalPermissionsResponse.from_dict({"hasMore": True, "permissions": []})
+        self.assertIsNone(without.owner_permissions)
+        self.assertNotIn("ownerPermissions", without.to_dict())
+
+    def test_owner_permission_scope_accepts_unknown_values(self):
+        """Nowa wartość po stronie MF nie może wywrócić parsowania odpowiedzi."""
+        parsed = m.QueryPersonalPermissionsResponse.from_dict(
+            {"hasMore": False, "permissions": [], "ownerPermissions": ["FutureScope"]}
+        )
+
+        owner_permissions = parsed.owner_permissions
+        assert owner_permissions is not None
+        self.assertEqual(owner_permissions[0].value, "FutureScope")
+
     def test_unknown_enum_value_roundtrips_without_error(self):
         payload = {
             "certificate": "pem-1",

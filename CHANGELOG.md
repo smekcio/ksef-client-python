@@ -4,6 +4,15 @@
 
 ### Features
 
+* **api:** align with KSeF API 2.9.0 — the OpenAPI snapshot, generated models and the documented
+  compatibility level move from 2.8.1 to 2.9.0. New surface: `OwnerPermissionScope` and the optional
+  `ownerPermissions` field in the response of `POST /permissions/query/personal/grants` (owner
+  permissions of the context). The documented error `21001` („Nieczytelna treść”) now has a CLI hint.
+  No endpoints were added, removed or renamed, so nothing else changes for existing integrations
+* **test:** a contract-limits guard (`tests/test_api_contract_limits.py`) compares the SDK constants
+  and CLI option bounds with `specs/ksef-openapi.snapshot.json`: `pageSize` minima and per-endpoint
+  maxima, `min/max` invoices in a collective identifier, identifiers per invoice and per query,
+  description length, batch part count and size, and the 100-day query range
 * **utils:** add `ksef_client.utils.datetime_parsing` — one place that parses the timestamps the KSeF
   API returns (`2025-10-11T12:23:56.0154302+00:00`), normalising any fractional part to exactly 6
   digits. `datetime.fromisoformat` on Python 3.10 accepts only 3 or 6 digits, so every 7-digit

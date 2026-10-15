@@ -500,6 +500,16 @@ class KsefCertificateType(OpenApiEnum):
     AUTHENTICATION = "Authentication"
     OFFLINE = "Offline"
 
+class OwnerPermissionScope(OpenApiEnum):
+    CREDENTIALSMANAGE = "CredentialsManage"
+    CREDENTIALSREAD = "CredentialsRead"
+    INVOICEWRITE = "InvoiceWrite"
+    INVOICEREAD = "InvoiceRead"
+    INTROSPECTION = "Introspection"
+    SUBUNITMANAGE = "SubunitManage"
+    ENFORCEMENTOPERATIONS = "EnforcementOperations"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
+
 class PermissionState(OpenApiEnum):
     ACTIVE = "Active"
     INACTIVE = "Inactive"
@@ -1779,6 +1789,7 @@ class QueryPersonPermissionsResponse(OpenApiModel):
 class QueryPersonalPermissionsResponse(OpenApiModel):
     has_more: bool = field(metadata={"json_key": "hasMore"})
     permissions: list[PersonalPermission]
+    owner_permissions: Optional[list[OwnerPermissionScope]] = field(default=None, metadata={"json_key": "ownerPermissions"})
 
 @dataclass(frozen=True)
 class QuerySubordinateEntityRolesResponse(OpenApiModel):
