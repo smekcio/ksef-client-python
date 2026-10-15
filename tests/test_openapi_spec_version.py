@@ -1,14 +1,36 @@
 import json
+import re
+from pathlib import Path
 
 from tools.openapi_spec import extract_api_version
 
+README_PATH = Path("README.md")
+
+
+def _readme_api_version() -> str:
+    """Wersja API z README — jedno źródło prawdy dla „jaka wersja kontraktu jest w repo”.
+
+    Test nie może zaszywać numeru na sztywno: przy synchronizacji snapshotu
+    (np. 2.8.1 → 2.9.0) trzeba go było pamiętać i PR zostawał czerwony, mimo że
+    snapshot i modele były spójne (dowód z przeglądu: re-sync dawał
+    `assert '2.9.0' == '2.8.1'`).
+    """
+    text = README_PATH.read_text(encoding="utf-8")
+    match = re.search(r"KSeF API\s*`v([0-9][^`]*)`", text)
+    assert match is not None, "README nie deklaruje wersji API"
+    return match.group(1)
+
 
 def test_extract_api_version_from_real_snapshot() -> None:
-    from pathlib import Path
-
     text = Path("specs/ksef-openapi.snapshot.json").read_text(encoding="utf-8")
 
-    assert extract_api_version(text) == "2.8.1"
+    version = extract_api_version(text)
+    assert version is not None
+    assert version == _readme_api_version()
+
+
+def test_readme_api_version_is_a_semver_like_string() -> None:
+    assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.\-]+)?", _readme_api_version())
 
 
 def test_extract_api_version_returns_none_instead_of_raising() -> None:

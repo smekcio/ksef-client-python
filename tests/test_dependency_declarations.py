@@ -66,6 +66,53 @@ def _declared_names(*, include_dev: bool) -> set[str]:
     return declared
 
 
+def _core_dependency_names() -> set[str]:
+    """Tylko `[project].dependencies` — bez extras i bez plików requirements."""
+    text = PYPROJECT.read_text(encoding="utf-8")
+    match = re.search(r"^dependencies\s*=\s*\[(.*?)\]", text, re.DOTALL | re.MULTILINE)
+    assert match is not None, "pyproject.toml nie deklaruje [project].dependencies"
+    return {
+        _normalize(name)
+        for name in re.findall(r'"([A-Za-z0-9._-]+)', match.group(1))
+    }
+
+
+def test_optional_dependency_is_not_imported_unconditionally() -> None:
+    """Zależność z extras nie może być importowana bezwarunkowo w `src/`.
+
+    `test_every_external_import_is_declared` sprawdza tylko, że pakiet jest
+    gdziekolwiek zadeklarowany — także w `optional-dependencies` — więc
+    bezwarunkowy `import lxml.etree` w module rdzeniowym przechodził, choć
+    `import ksef_client` bez tego extras kończył się `ModuleNotFoundError`
+    (dowód z przeglądu: oba strażniki dawały `10 passed`, a import padał).
+    """
+    from tests.test_packaging_dependencies import _module_level_third_party_imports
+
+    core = _core_dependency_names()
+    stdlib = set(sys.stdlib_module_names)
+    offenders: dict[str, set[str]] = {}
+    for path in SRC.rglob("*.py"):
+        if "cli" in path.relative_to(SRC).parts:
+            # Podsystem CLI jest świadomie opcjonalny (extras `cli`) i ma własną
+            # bramkę w `cli/bootstrap.py`: bez typer/rich/keyring `ksef` wypisuje
+            # podpowiedź instalacji i kończy się kodem 6, bez tracebacku.
+            continue
+        names = _module_level_third_party_imports(path.read_text(encoding="utf-8"), path)
+        external = {
+            _normalize(name)
+            for name in names
+            if name not in stdlib and name not in {"ksef_client", "tests", "tools"}
+        }
+        undeclared = external - core
+        if undeclared:
+            offenders[str(path.relative_to(REPO))] = undeclared
+
+    assert not offenders, (
+        "Bezwarunkowe importy zależności opcjonalnych (extras) — na czystej "
+        f"instalacji `pip install ksef-client` skończą się ModuleNotFoundError: {offenders}"
+    )
+
+
 def _imported_top_level_modules() -> set[str]:
     modules: set[str] = set()
     for path in SRC.rglob("*.py"):

@@ -148,13 +148,14 @@ def _module_level_third_party_imports(source: str, path: Path) -> set[str]:
                     )
                 continue
             if isinstance(child, ast.Import):
-                for alias in child.names:
-                    found.add(alias.name.split(".")[0])
+                if not (guarded or type_checking):
+                    for alias in child.names:
+                        found.add(alias.name.split(".")[0])
                 continue
             if isinstance(child, ast.ImportFrom):
                 if child.level and child.level > 0:
                     continue  # import względny
-                if child.module:
+                if child.module and not (guarded or type_checking):
                     found.add(child.module.split(".")[0])
                 continue
 
