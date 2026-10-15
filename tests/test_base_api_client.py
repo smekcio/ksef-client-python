@@ -10,6 +10,7 @@ from ksef_client.clients.base import (
     _validate_model_list_payload,
     _validate_model_payload,
 )
+from ksef_client.exceptions import KsefHttpError
 from ksef_client.http import HttpResponse
 
 
@@ -81,6 +82,24 @@ class BaseApiClientTests(unittest.TestCase):
         response = HttpResponse(204, httpx.Headers(), b"")
         client = BaseApiClient(DummyHttp(response))
         self.assertIsNone(client._request_json("GET", "/path"))
+
+    def test_request_json_reports_non_json_body_with_context(self):
+        response = HttpResponse(
+            200,
+            httpx.Headers({"Content-Type": "text/html; charset=utf-8"}),
+            b"<!DOCTYPE html><html><body>Captive portal</body></html>",
+        )
+        client = BaseApiClient(DummyHttp(response))
+
+        with self.assertRaises(KsefHttpError) as ctx:
+            client._request_json("GET", "/invoices/query/metadata")
+
+        message = str(ctx.exception)
+        self.assertIn("HTTP 200", message)
+        self.assertIn("/invoices/query/metadata", message)
+        self.assertIn("text/html", message)
+        self.assertIn("Captive portal", message)
+        self.assertEqual(ctx.exception.response_body, response.content)
 
     def test_request_bytes_and_raw(self):
         response = HttpResponse(200, httpx.Headers(), b"data")
@@ -173,6 +192,22 @@ class AsyncBaseApiClientTests(unittest.IsolatedAsyncioTestCase):
         response = HttpResponse(204, httpx.Headers(), b"")
         client = AsyncBaseApiClient(DummyAsyncHttp(response))
         self.assertIsNone(await client._request_json("GET", "/path"))
+
+    async def test_async_request_json_reports_non_json_body_with_context(self):
+        response = HttpResponse(
+            200,
+            httpx.Headers({"Content-Type": "text/html; charset=utf-8"}),
+            b"<!DOCTYPE html><html><body>Captive portal</body></html>",
+        )
+        client = AsyncBaseApiClient(DummyAsyncHttp(response))
+
+        with self.assertRaises(KsefHttpError) as ctx:
+            await client._request_json("GET", "/invoices/query/metadata")
+
+        message = str(ctx.exception)
+        self.assertIn("HTTP 200", message)
+        self.assertIn("/invoices/query/metadata", message)
+        self.assertIn("text/html", message)
 
     async def test_async_request_model_helpers(self):
         response = HttpResponse(
