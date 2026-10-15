@@ -28,6 +28,30 @@
 
 ### Bug Fixes
 
+* **fa3:** a settlement invoice (`ROZ`/`KOR_ROZ`) is calculated like the official `FA_3_Przykład_14.xml`:
+  `P_15` is the amount still to pay (`amount_due − charges + deductions`) and `P_13_x`/`P_14_x` are the
+  line values scaled by `P_15 / order value` (the rounding remainder goes to the largest bucket, so
+  `P_15 = ΣP_13_x + ΣP_14_x` holds to the cent). The SDK used to *require* pre-scaled lines and rejected
+  the official shape
+* **fa3:** the facet table carries the remaining schema constraints (`BDO`/`StopkaFaktury` `minLength=1`,
+  `TNaturalny` `totalDigits=14`) and the engine now enforces `total_digits` at all (it was declared but
+  never checked, so amount types with `totalDigits=18/22` accepted over-long numbers)
+* **fa3:** `NoweSrodkiTransportu` without a row was XSD-invalid while `validate()` stayed silent; rows
+  without the flag were dropped; `NewTransportMeans.kind` is validated (`land`/`water`/`air`, with working
+  hours required for water/air) instead of silently falling back to the land branch
+* **fa3:** `PaymentTerms.due_dates` is merged with `due_terms` instead of being ignored when `due_terms`
+  is non-empty, and `paid_date` together with `partial_payments` is reported
+* **cli:** profile names are validated (they become `sessions/<profile>/` path segments), `profile delete`
+  removes stored tokens and checkpoints (with `--keep-credentials` to opt out), and `session export`
+  refuses to overwrite a file without `--overwrite`
+* **cli:** the cache lock is never taken over from a live owner (`os.kill(pid, 0)` on POSIX) — an aged
+  `mtime` alone used to be enough to break mutual exclusion; `session import` accepts only known KSeF
+  hosts unless `--allow-foreign-host` is given
+* **utils:** `split_bytes` enforces the contractual limit of 50 package parts (KSeF rejects more with
+  error 21161) and `VerificationLinkService` percent-encodes path segments, so a `/` in an identifier can
+  no longer change the link structure (or the string signed for KOD II)
+* **tools:** `sync_generated.py --check` no longer overwrites the tracked OpenAPI snapshot — the check
+  used to create the very drift it reported
 * **http:** a presigned URL (`skip_auth`) never follows a redirect, whatever `follow_redirects`
   says. The security validation covers only the initial address and no `Authorization` header is
   sent, so following a redirect performed a request to a server-chosen address (including the
