@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
@@ -9,6 +9,7 @@ from ksef_client import models
 from ksef_client.config import KsefClientOptions
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 from ksef_client.http import (
+    MAX_RETRY_AFTER_SECONDS,
     AsyncBaseHttpClient,
     BaseHttpClient,
     HttpResponse,
@@ -51,6 +52,14 @@ class HttpTests(unittest.TestCase):
         with patch.object(client._client, "close") as close_mock:
             client.close()
             close_mock.assert_called_once()
+
+    def test_request_rejects_json_and_data_together(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        with patch.object(client._client, "request", Mock()) as request_mock:
+            with self.assertRaisesRegex(ValueError, "either json or data"):
+                client.request("POST", "/path", json={"a": 1}, data=b"RAW")
+            request_mock.assert_not_called()
 
     def test_system_warning_handler_receives_response_header(self):
         warnings: list[str] = []
@@ -389,6 +398,32 @@ class HttpTests(unittest.TestCase):
         assert parsed_http_date is not None
         self.assertGreater(parsed_http_date, 0)
 
+    def test_parse_retry_after_is_capped_and_never_negative(self):
+        self.assertEqual(_parse_retry_after("31536000"), MAX_RETRY_AFTER_SECONDS)
+        self.assertEqual(_parse_retry_after("-5"), 0)
+        self.assertEqual(
+            _parse_retry_after("Wed, 01 Jan 2099 00:00:00 GMT"),
+            MAX_RETRY_AFTER_SECONDS,
+        )
+        with patch(
+            "ksef_client.http.parsedate_to_datetime",
+            return_value=datetime(2000, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+        ):
+            self.assertEqual(_parse_retry_after("Sat, 01 Jan 2000 00:00:00 GMT"), 0)
+
+    def test_rate_limit_error_caps_retry_after_but_keeps_the_raw_header(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        response = httpx.Response(
+            429,
+            headers={"Retry-After": "31536000"},
+            json={"error": "limit"},
+        )
+        with self.assertRaises(KsefRateLimitError) as ctx:
+            client._raise_for_status(response)
+        self.assertEqual(ctx.exception.retry_after, MAX_RETRY_AFTER_SECONDS)
+        self.assertEqual(ctx.exception.retry_after_raw, "31536000")
+
     def test_parse_api_problem_variants(self):
         self.assertIsNone(_parse_api_problem(400, []))
 
@@ -534,6 +569,14 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(client._client, "aclose", AsyncMock()) as aclose_mock:
             await client.aclose()
             aclose_mock.assert_called_once()
+
+    async def test_async_request_rejects_json_and_data_together(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = AsyncBaseHttpClient(options)
+        with patch.object(client._client, "request", AsyncMock()) as request_mock:
+            with self.assertRaisesRegex(ValueError, "either json or data"):
+                await client.request("POST", "/path", json={"a": 1}, data=b"RAW")
+            request_mock.assert_not_called()
 
     async def test_async_httpx_client_init_proxy_and_redirects(self):
         with patch("ksef_client.http.httpx.AsyncClient") as mocked:

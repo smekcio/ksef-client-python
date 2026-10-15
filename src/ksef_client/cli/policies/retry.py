@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
+from ksef_client.http import MAX_RETRY_AFTER_SECONDS
+
 
 @dataclass(frozen=True)
 class RetryPolicy:
@@ -25,6 +27,13 @@ def should_retry(status_code: int) -> bool:
 
 
 def parse_retry_after(retry_after: str | None) -> float | None:
+    """Zwraca liczbę sekund z nagłówka `Retry-After`, ograniczoną z obu stron.
+
+    Wartość pochodzi od serwera, więc bez sufitu `Retry-After: 31536000`
+    usypiało CLI na rok (a `ksef export` sumował 730 dni przerw). Sufit jest
+    wspólny z warstwą HTTP (`MAX_RETRY_AFTER_SECONDS`), żeby obie ścieżki
+    czekały tyle samo.
+    """
     if retry_after is None:
         return None
     value = retry_after.strip()
@@ -32,7 +41,7 @@ def parse_retry_after(retry_after: str | None) -> float | None:
         return None
 
     if value.isdigit():
-        return max(0.0, float(value))
+        return min(max(0.0, float(value)), float(MAX_RETRY_AFTER_SECONDS))
 
     try:
         parsed = parsedate_to_datetime(value)
@@ -41,7 +50,8 @@ def parse_retry_after(retry_after: str | None) -> float | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
-    return max(0.0, (parsed.astimezone(timezone.utc) - now).total_seconds())
+    delta_seconds = (parsed.astimezone(timezone.utc) - now).total_seconds()
+    return min(max(0.0, delta_seconds), float(MAX_RETRY_AFTER_SECONDS))
 
 
 def compute_retry_delay_seconds(

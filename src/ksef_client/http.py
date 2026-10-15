@@ -131,6 +131,27 @@ def _handle_system_warning(options: KsefClientOptions, response: httpx.Response)
     options.system_warning_handler(warning)
 
 
+#: Górne ograniczenie `Retry-After` (sekundy).
+#:
+#: Serwer może zażądać pauzy o dowolnej długości (także `Retry-After: 86400`),
+#: a SDK czekałby wtedy dobę — proces wisiałby bez żadnego sygnału dla wołającego.
+#: Wartość powyżej limitu jest traktowana jako „odczekaj maksimum", a nie
+#: ignorowana, bo dalsze żądania i tak nie mają sensu.
+MAX_RETRY_AFTER_SECONDS = 300
+
+
+def _reject_json_and_data_together(
+    json: dict[str, Any] | None, data: bytes | None
+) -> None:
+    """`json` i `data` wykluczają się — `httpx` cicho wybrałby jedno z nich.
+
+    Wcześniej żądanie z oboma parametrami wysyłało treść `json` (albo `data`,
+    zależnie od wersji), więc wołający nie wiedział, co poszło do KSeF.
+    """
+    if json is not None and data is not None:
+        raise ValueError("Pass either json or data, not both")
+
+
 def _parse_retry_after(value: str | None) -> int | None:
     if value is None:
         return None
@@ -138,7 +159,7 @@ def _parse_retry_after(value: str | None) -> int | None:
     if not normalized_value:
         return None
     try:
-        return int(normalized_value)
+        return max(0, min(int(normalized_value), MAX_RETRY_AFTER_SECONDS))
     except ValueError:
         try:
             retry_after_dt = parsedate_to_datetime(normalized_value)
@@ -147,7 +168,7 @@ def _parse_retry_after(value: str | None) -> int | None:
         if retry_after_dt.tzinfo is None:
             retry_after_dt = retry_after_dt.replace(tzinfo=timezone.utc)
         delta_seconds = (retry_after_dt - datetime.now(timezone.utc)).total_seconds()
-        return max(0, math.ceil(delta_seconds))
+        return max(0, min(math.ceil(delta_seconds), MAX_RETRY_AFTER_SECONDS))
 
 
 def _coerce_problem_status(value: Any, fallback_status: int) -> int:
@@ -606,6 +627,7 @@ class BaseHttpClient:
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
     ) -> HttpResponse:
+        _reject_json_and_data_together(json, data)
         url = path
         if not _is_absolute_http_url(url):
             url = self._options.normalized_base_url().rstrip("/") + "/" + path.lstrip("/")
@@ -737,6 +759,7 @@ class AsyncBaseHttpClient:
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
     ) -> HttpResponse:
+        _reject_json_and_data_together(json, data)
         url = path
         if not _is_absolute_http_url(url):
             url = self._options.normalized_base_url().rstrip("/") + "/" + path.lstrip("/")
