@@ -1857,6 +1857,59 @@ class TestPaymentDueDatesAreMerged:
         assert any("paid_date" in issue.message for issue in issues)
 
 
+class TestBatchPartCountLimit:
+    """Kontrakt: „Maksymalna liczba części to 50" — SDK musi to egzekwować lokalnie."""
+
+    def test_split_bytes_rejects_more_than_fifty_parts(self):
+        from ksef_client.utils import MAX_BATCH_PARTS, split_bytes
+
+        assert MAX_BATCH_PARTS == 50
+        parts = split_bytes(b"x" * 5_000_000, max_part_size=100_000)
+        assert len(parts) == 50
+
+        with pytest.raises(ValueError, match="more than 50 parts"):
+            split_bytes(b"x" * 5_000_001, max_part_size=100_000)
+
+    def test_split_bytes_validates_arguments(self):
+        from ksef_client.utils import split_bytes
+
+        with pytest.raises(ValueError, match="max_part_size must be positive"):
+            split_bytes(b"x", max_part_size=0)
+        with pytest.raises(ValueError, match="max_parts must be positive"):
+            split_bytes(b"x" * 10, max_part_size=1, max_parts=0)
+
+
+class TestVerificationLinkSegments:
+    """Segmenty linku nie mogą zmieniać jego struktury.
+
+    Wartości trafiały do ścieżki dosłownie, więc `/` w `context_identifier_value`
+    dokładał segment (i zmieniał napis podpisywany dla KOD II), a kod QR nadal
+    powstawał — czyli prowadził do innego zasobu.
+    """
+
+    def _options(self):
+        from ksef_client.config import KsefClientOptions
+
+        return KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl/v2")
+
+    def test_slash_in_identifier_is_percent_encoded(self):
+        from ksef_client.services.verification_link import VerificationLinkService
+
+        service = VerificationLinkService(self._options())
+        url = service.build_invoice_verification_url("1111111111/evil", "01-02-2026", "YWJj")
+        assert "/evil" not in url
+        assert "1111111111%2Fevil" in url
+
+    def test_blank_segment_is_rejected(self):
+        from ksef_client.services.verification_link import VerificationLinkService
+
+        service = VerificationLinkService(self._options())
+        with pytest.raises(ValueError, match="nip"):
+            service.build_invoice_verification_url("  ", "01-02-2026", "YWJj")
+        with pytest.raises(ValueError, match="nip is required"):
+            service.build_invoice_verification_url("", "01-02-2026", "YWJj")
+
+
 class TestExportArchiveLimits:
     """Paczka eksportu może mieć 10 000 faktur + `_metadata.json` (nie liczy się)."""
 

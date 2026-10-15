@@ -113,9 +113,24 @@ def require_query_date_range(date_from: str, date_to: str) -> tuple[str, str]:
     parsed_to = _parse_query_datetime(date_to, field_name="dateCreatedTo")
     if parsed_from > parsed_to:
         raise ValueError("dateCreatedFrom must be earlier than or equal to dateCreatedTo")
-    if parsed_to - parsed_from > timedelta(days=MAX_QUERY_RANGE_DAYS):
+    span = parsed_to - parsed_from
+    if span > timedelta(days=MAX_QUERY_RANGE_DAYS):
+        # Data bez godziny jest rozszerzana do końca dnia (`T23:59:59.999999Z`), więc
+        # para dat oddalona dokładnie o 100 dni daje przedział dłuższy od limitu.
+        # Nie luzujemy kontroli (KSeF porównuje znaczniki czasu i odrzuciłby taki
+        # zakres), ale mówimy wprost, co zrobić.
+        day_only = (
+            _DATE_ONLY_RE.match(date_from) is not None
+            or _DATE_ONLY_RE.match(date_to) is not None
+        )
+        hint = (
+            " Podaj datę końcową o jeden dzień wcześniejszą — data bez godziny jest "
+            "rozszerzana do końca dnia (T23:59:59.999999Z)."
+            if day_only
+            else ""
+        )
         raise ValueError(
-            f"Collective identifier query range cannot exceed {MAX_QUERY_RANGE_DAYS} days"
+            f"Collective identifier query range cannot exceed {MAX_QUERY_RANGE_DAYS} days.{hint}"
         )
     return date_from, date_to
 

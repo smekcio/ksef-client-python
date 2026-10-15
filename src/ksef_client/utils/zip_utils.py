@@ -15,6 +15,8 @@ from pathlib import PurePosixPath
 #: którą KSeF odrzucał komunikatem „Rozmiar części 1 przekroczył dozwolony
 #: rozmiar 100MB".
 MAX_BATCH_PART_SIZE_BYTES = 100_000_000
+#: Kontrakt: „Maksymalna liczba części to 50" (`BatchFileInfo.fileParts`).
+MAX_BATCH_PARTS = 50
 #: Maksymalna liczba faktur w paczce eksportu (kontrakt: „Limit liczby faktur: 10 000 sztuk").
 EXPORT_MAX_INVOICES = 10_000
 #: Limit wpisów archiwum paczki eksportu.
@@ -82,13 +84,34 @@ def _safe_archive_entries(
     return entries
 
 
-def split_bytes(data: bytes, max_part_size: int = MAX_BATCH_PART_SIZE_BYTES) -> list[bytes]:
+def split_bytes(
+    data: bytes,
+    max_part_size: int = MAX_BATCH_PART_SIZE_BYTES,
+    *,
+    max_parts: int = MAX_BATCH_PARTS,
+) -> list[bytes]:
+    """Dzieli paczkę na części, pilnując kontraktowego limitu liczby części.
+
+    Kontrakt (`BatchFileInfo.fileParts`) mówi: „Maksymalna liczba części to 50.
+    Maksymalny dozwolony rozmiar części przed zaszyfrowaniem to 100MB". Wcześniej
+    SDK dzielił dane bez tego ograniczenia, więc zbyt duża paczka była wysyłana i
+    odrzucana dopiero przez KSeF (błąd 21161) — teraz kończy się czytelnym
+    `ValueError` przed wysłaniem.
+    """
     if max_part_size <= 0:
         raise ValueError("max_part_size must be positive")
+    if max_parts <= 0:
+        raise ValueError("max_parts must be positive")
     if len(data) <= max_part_size:
         return [data]
-    parts = []
+    parts: list[bytes] = []
     for offset in range(0, len(data), max_part_size):
+        if len(parts) >= max_parts:
+            raise ValueError(
+                f"batch package needs more than {max_parts} parts "
+                f"(max_part_size={max_part_size}); the KSeF contract allows at most "
+                f"{MAX_BATCH_PARTS} parts of {MAX_BATCH_PART_SIZE_BYTES} bytes"
+            )
         parts.append(data[offset : offset + max_part_size])
     return parts
 

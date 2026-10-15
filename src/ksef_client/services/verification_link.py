@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
+from urllib.parse import quote
 
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
@@ -74,7 +75,8 @@ class VerificationLinkService:
         hash_bytes = _decode_base64_or_url(invoice_hash)
         hash_url = b64url_encode(hash_bytes)
         base_url = self.options.resolve_qr_base_url().rstrip("/")
-        return f"{base_url}/invoice/{nip}/{date_str}/{hash_url}"
+        nip_segment = _link_segment(nip, field_name="nip")
+        return f"{base_url}/invoice/{nip_segment}/{date_str}/{hash_url}"
 
     def build_certificate_verification_url(
         self,
@@ -97,9 +99,9 @@ class VerificationLinkService:
                 base_url,
                 "certificate",
                 _normalize_context_identifier_type(context_identifier_type),
-                context_identifier_value,
-                seller_nip,
-                certificate_serial,
+                _link_segment(context_identifier_value, field_name="context_identifier_value"),
+                _link_segment(seller_nip, field_name="seller_nip"),
+                _link_segment(certificate_serial, field_name="certificate_serial"),
                 hash_url,
             ]
         )
@@ -114,6 +116,21 @@ class VerificationLinkService:
         )
         signature_url = b64url_encode(signature)
         return f"{path}/{signature_url}"
+
+
+def _link_segment(value: str, *, field_name: str) -> str:
+    """Zamienia wartość na bezpieczny segment ścieżki linku weryfikacyjnego.
+
+    Wartości (`nip`, `context_identifier_value`, `certificate_serial`) trafiały do
+    ścieżki dosłownie, więc wartość z `/` zmieniała **strukturę** linku (i napisu
+    podpisywanego dla KOD II), a kod QR nadal powstawał — czyli prowadził do
+    innego zasobu, niż zamierzył wołający.
+    """
+    if not value:
+        raise ValueError(f"{field_name} is required")
+    if value != value.strip():
+        raise ValueError(f"{field_name} cannot contain leading or trailing whitespace")
+    return quote(value, safe="")
 
 
 def _decode_base64_or_url(value: str) -> bytes:
