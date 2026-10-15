@@ -310,6 +310,45 @@ class OpenApiModelsTests(unittest.TestCase):
         self.assertTrue(parsed.headers["X-Enabled"])
         self.assertEqual(parsed.to_dict()["headers"], payload["headers"])
 
+    def test_token_fields_stay_out_of_repr(self):
+        tokens = m.AuthenticationTokensResponse.from_dict(
+            {
+                "accessToken": {"token": "SECRET-ACCESS", "validUntil": "2026-01-01T00:00:00Z"},
+                "refreshToken": {"token": "SECRET-REFRESH", "validUntil": "2026-02-01T00:00:00Z"},
+            }
+        )
+        rendered = repr(tokens)
+        self.assertNotIn("SECRET-ACCESS", rendered)
+        self.assertNotIn("SECRET-REFRESH", rendered)
+        # Pola zostają dostępne i serializowane bez zmian.
+        self.assertEqual(tokens.access_token.token, "SECRET-ACCESS")
+        self.assertEqual(tokens.to_dict()["refreshToken"]["token"], "SECRET-REFRESH")
+
+        generated = m.GenerateTokenResponse.from_dict(
+            {"referenceNumber": "ref-1", "token": "SECRET-GENERATED"}
+        )
+        self.assertNotIn("SECRET-GENERATED", repr(generated))
+        self.assertEqual(generated.token, "SECRET-GENERATED")
+        self.assertEqual(generated.to_dict()["token"], "SECRET-GENERATED")
+
+        refreshed = m.AuthenticationTokenRefreshResponse.from_dict(
+            {
+                "accessToken": {
+                    "token": "SECRET-REFRESHED",
+                    "validUntil": "2026-01-01T00:00:00Z",
+                }
+            }
+        )
+        self.assertNotIn("SECRET-REFRESHED", repr(refreshed))
+        self.assertEqual(refreshed.access_token.token, "SECRET-REFRESHED")
+
+        token = m.TokenInfo.from_dict(
+            {"token": "SECRET-PLAIN", "validUntil": "2026-01-01T00:00:00Z"}
+        )
+        self.assertNotIn("SECRET-PLAIN", repr(token))
+        self.assertEqual(token.token, "SECRET-PLAIN")
+        self.assertEqual(token.to_dict(omit_none=False)["token"], "SECRET-PLAIN")
+
     def test_convert_value_handles_unsubscripted_list_hint(self):
         self.assertEqual(m._convert_value(list, ["a", "b"]), ["a", "b"])
 

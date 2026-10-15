@@ -832,12 +832,12 @@ class AuthenticationOperationStatusResponse(OpenApiModel):
 
 @dataclass(frozen=True)
 class AuthenticationTokenRefreshResponse(OpenApiModel):
-    access_token: TokenInfo = field(metadata={"json_key": "accessToken"})
+    access_token: TokenInfo = field(repr=False, metadata={"json_key": "accessToken"})
 
 @dataclass(frozen=True)
 class AuthenticationTokensResponse(OpenApiModel):
-    access_token: TokenInfo = field(metadata={"json_key": "accessToken"})
-    refresh_token: TokenInfo = field(metadata={"json_key": "refreshToken"})
+    access_token: TokenInfo = field(repr=False, metadata={"json_key": "accessToken"})
+    refresh_token: TokenInfo = field(repr=False, metadata={"json_key": "refreshToken"})
 
 @dataclass(frozen=True)
 class AuthorizationPolicy(OpenApiModel):
@@ -1307,7 +1307,7 @@ class GenerateTokenRequest(OpenApiModel):
 @dataclass(frozen=True)
 class GenerateTokenResponse(OpenApiModel):
     reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
-    token: str
+    token: str = field(repr=False)
 
 @dataclass(frozen=True)
 class GoneProblemDetails(OpenApiModel):
@@ -2039,7 +2039,7 @@ class TokenContextIdentifierTypeIdentifier(OpenApiModel):
 
 @dataclass(frozen=True)
 class TokenInfo(OpenApiModel):
-    token: str
+    token: str = field(repr=False)
     valid_until: str = field(metadata={"json_key": "validUntil"})
 
 @dataclass(frozen=True)

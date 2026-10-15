@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -55,6 +58,34 @@ def _minimal_openapi() -> dict[str, object]:
             }
         },
     }
+
+
+#: Payloady z audytu: każdy z nich domyka literał i wstawia własny kod do
+#: generowanego `openapi_models.py`, który wykonuje się przy imporcie artefaktu.
+HOSTILE_ENUM_VALUE = 'x"\nimport sys; sys.stdout.write("PWN-A-ENUM\\n")\nY="'
+HOSTILE_SCHEMA_NAME = (
+    'Evil(OpenApiModel): pass\nimport sys; sys.stdout.write("PWN-B-CLASS\\n")\nclass Q'
+)
+HOSTILE_PROPERTY_NAME = (
+    'p"}), __import__("sys").stdout.write("PWN-C-PROPNAME\\n")'
+    ' or field(default=None, metadata={"json_key": "y'
+)
+
+
+def _schemas_openapi(schemas: dict[str, object]) -> dict[str, object]:
+    return {"openapi": "3.0.0", "components": {"schemas": schemas}}
+
+
+def _import_generated_module(path: Path, module_name: str) -> types.ModuleType:
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(module_name, None)
+    return module
 
 
 def test_load_openapi_json_reads_local_input_without_fetch(monkeypatch, tmp_path: Path) -> None:
@@ -220,6 +251,181 @@ def test_generate_models_without_fallback_raises_when_remote_is_unavailable(
 
     with pytest.raises(openapi_spec.OpenApiSpecError):
         generator.generate_models(None, output_path, allow_fallback=False)
+
+
+def test_generate_models_escapes_hostile_enum_value(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Wartość enuma jest danymi: ląduje w literale, nie w kodzie do wykonania."""
+    spec_path = tmp_path / "openapi.json"
+    output_path = tmp_path / "openapi_models.py"
+    spec_path.write_text(
+        json.dumps(_schemas_openapi({"EvilEnum": {"enum": [HOSTILE_ENUM_VALUE]}})),
+        encoding="utf-8",
+    )
+
+    generator.generate_models(spec_path, output_path)
+
+    rendered = output_path.read_text(encoding="utf-8")
+    assert HOSTILE_ENUM_VALUE not in rendered
+    assert "PWN-A-ENUM" in rendered
+
+    module = _import_generated_module(output_path, "_hostile_enum_models")
+
+    assert "PWN-A-ENUM" not in capsys.readouterr().out
+    assert next(iter(module.EvilEnum)).value == HOSTILE_ENUM_VALUE
+
+
+def test_generate_models_rejects_hostile_schema_name(tmp_path: Path) -> None:
+    spec_path = tmp_path / "openapi.json"
+    output_path = tmp_path / "openapi_models.py"
+    spec_path.write_text(
+        json.dumps(_schemas_openapi({HOSTILE_SCHEMA_NAME: {"enum": ["ok"]}})),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(openapi_spec.OpenApiSpecError) as exc:
+        generator.generate_models(spec_path, output_path)
+
+    message = str(exc.value)
+    assert "Schema name" in message
+    assert "is not a valid Python identifier" in message
+    assert "PWN-B-CLASS" in message
+    assert HOSTILE_SCHEMA_NAME not in message
+    assert not output_path.exists()
+
+
+def test_generate_models_rejects_hostile_property_name(tmp_path: Path) -> None:
+    spec_path = tmp_path / "openapi.json"
+    output_path = tmp_path / "openapi_models.py"
+    spec_path.write_text(
+        json.dumps(
+            _schemas_openapi(
+                {
+                    "EvilObject": {
+                        "type": "object",
+                        "properties": {HOSTILE_PROPERTY_NAME: {"type": "string"}},
+                    }
+                }
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(openapi_spec.OpenApiSpecError) as exc:
+        generator.generate_models(spec_path, output_path)
+
+    message = str(exc.value)
+    assert "Property name" in message
+    assert "schema EvilObject" in message
+    assert "PWN-C-PROPNAME" in message
+    assert HOSTILE_PROPERTY_NAME not in message
+    assert not output_path.exists()
+
+
+def test_generate_models_rejects_field_name_broken_by_sanitization(tmp_path: Path) -> None:
+    """`_0` jest poprawnym identyfikatorem, ale sanitacja ścina z niego `0`."""
+    spec_path = tmp_path / "openapi.json"
+    output_path = tmp_path / "openapi_models.py"
+    spec_path.write_text(
+        json.dumps(
+            _schemas_openapi(
+                {
+                    "EvilObject": {
+                        "type": "object",
+                        "properties": {"_0": {"type": "string"}},
+                    }
+                }
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(openapi_spec.OpenApiSpecError) as exc:
+        generator.generate_models(spec_path, output_path)
+
+    message = str(exc.value)
+    assert "Field name '0'" in message
+    assert "property '_0'" in message
+    assert not output_path.exists()
+
+
+def test_generate_models_rejects_keyword_schema_name(tmp_path: Path) -> None:
+    spec_path = tmp_path / "openapi.json"
+    spec_path.write_text(
+        json.dumps(_schemas_openapi({"class": {"enum": ["ok"]}})),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(openapi_spec.OpenApiSpecError) as exc:
+        generator.generate_models(spec_path, tmp_path / "openapi_models.py")
+
+    assert "reserved Python keyword" in str(exc.value)
+
+
+def test_generate_models_rejects_invalid_ref_names(tmp_path: Path) -> None:
+    spec_path = tmp_path / "openapi.json"
+    output_path = tmp_path / "openapi_models.py"
+
+    def _spec_with_ref(ref: object) -> dict[str, object]:
+        return _schemas_openapi(
+            {
+                "Example": {
+                    "type": "object",
+                    "properties": {"value": {"$ref": ref}},
+                }
+            }
+        )
+
+    spec_path.write_text(
+        json.dumps(_spec_with_ref("#/components/schemas/Evil\nimport sys")),
+        encoding="utf-8",
+    )
+    with pytest.raises(openapi_spec.OpenApiSpecError) as exc:
+        generator.generate_models(spec_path, output_path)
+    assert "Referenced schema name" in str(exc.value)
+    assert not output_path.exists()
+
+    spec_path.write_text(json.dumps(_spec_with_ref(123)), encoding="utf-8")
+    with pytest.raises(openapi_spec.OpenApiSpecError) as exc:
+        generator.generate_models(spec_path, output_path)
+    assert "expected a string" in str(exc.value)
+    assert not output_path.exists()
+
+
+def test_generate_models_marks_sensitive_fields_as_not_repr(tmp_path: Path) -> None:
+    spec_path = tmp_path / "openapi.json"
+    output_path = tmp_path / "openapi_models.py"
+    spec_path.write_text(
+        json.dumps(
+            _schemas_openapi(
+                {
+                    "Credentials": {
+                        "type": "object",
+                        "required": ["token"],
+                        "properties": {
+                            "token": {"type": "string"},
+                            "accessToken": {"type": "string"},
+                            "name": {"type": "string"},
+                        },
+                    }
+                }
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    generator.generate_models(spec_path, output_path)
+
+    rendered = output_path.read_text(encoding="utf-8")
+    assert "token: str = field(repr=False)" in rendered
+    assert (
+        'access_token: Optional[str] = field(default=None, repr=False, '
+        'metadata={"json_key": "accessToken"})' in rendered
+    )
+    # Pola bez sekretów zachowują dotychczasową, krótszą postać.
+    assert "name: Optional[str] = None" in rendered
 
 
 def test_coverage_tool_detects_typed_request_helpers(tmp_path: Path) -> None:

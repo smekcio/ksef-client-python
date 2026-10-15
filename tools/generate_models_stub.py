@@ -92,6 +92,18 @@ def _is_field_call(node: ast.expr) -> bool:
     )
 
 
+def _has_field_default(node: ast.expr) -> bool:
+    """Czy `field(...)` niesie wartość domyślną (`default`/`default_factory`).
+
+    `field(repr=False)` bez domyślnej wartości zostawia pole wymaganym, więc stub
+    nie może dopisać `= ...` — mypy przestałby wymagać argumentu, którego
+    dataclass w czasie działania wymaga.
+    """
+    if not isinstance(node, ast.Call):
+        return False
+    return any(keyword.arg in {"default", "default_factory"} for keyword in node.keywords)
+
+
 def _render_class(node: ast.ClassDef) -> list[str]:
     transformed = _transform_node(node)
     lines: list[str] = []
@@ -112,6 +124,10 @@ def _render_class(node: ast.ClassDef) -> list[str]:
         if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
             annotation = ast.unparse(item.annotation)
             if item.value is None:
+                body_lines.append(f"{item.target.id}: {annotation}")
+            elif _is_field_call(item.value) and not _has_field_default(item.value):
+                # Pole wymagane (`field(repr=False)`, `field(metadata=...)`) zostaje
+                # bez domyślnej wartości również w stubie.
                 body_lines.append(f"{item.target.id}: {annotation}")
             else:
                 default = "..." if _is_field_call(item.value) else ast.unparse(item.value)

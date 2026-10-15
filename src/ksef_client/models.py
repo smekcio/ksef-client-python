@@ -126,7 +126,9 @@ class StatusInfo:
 
 @dataclass(frozen=True)
 class TokenInfo:
-    token: str
+    #: Token dostępowy/odświeżający — poza `repr()`, bo modele trafiają do logów
+    #: i komunikatów błędów. Serializacja (`to_dict`) obejmuje pole bez zmian.
+    token: str = field(repr=False)
     valid_until: str | None
 
     @staticmethod
@@ -261,8 +263,9 @@ class AuthenticationOperationStatusResponse:
 
 @dataclass(frozen=True)
 class AuthenticationTokensResponse:
-    access_token: TokenInfo
-    refresh_token: TokenInfo
+    #: Tokeny sesji — poza `repr()`, żeby nie wyciekały do logów i wyjątków.
+    access_token: TokenInfo = field(repr=False)
+    refresh_token: TokenInfo = field(repr=False)
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> AuthenticationTokensResponse:
@@ -280,7 +283,8 @@ class AuthenticationTokensResponse:
 
 @dataclass(frozen=True)
 class AuthenticationTokenRefreshResponse:
-    access_token: TokenInfo
+    #: Odświeżony token dostępu — poza `repr()` (patrz `TokenInfo.token`).
+    access_token: TokenInfo = field(repr=False)
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> AuthenticationTokenRefreshResponse:
@@ -297,6 +301,10 @@ class LighthouseKsefStatus(str, _Enum):
     MAINTENANCE = "MAINTENANCE"
     FAILURE = "FAILURE"
     TOTAL_FAILURE = "TOTAL_FAILURE"
+    #: Status nierozpoznany albo nieobecny w odpowiedzi. Wartość istnieje po to,
+    #: by brak danych nie był raportowany jako `AVAILABLE` (fail-open): CLI
+    #: pokazuje wtedy „UNKNOWN”, a nie fałszywe „wszystko działa”.
+    UNKNOWN = "UNKNOWN"
 
 
 class LighthouseMessageCategory(str, _Enum):
@@ -391,7 +399,7 @@ class LighthouseStatusResponse:
                 _parse_enum(
                     data.get("status"),
                     LighthouseKsefStatus,
-                    LighthouseKsefStatus.AVAILABLE,
+                    LighthouseKsefStatus.UNKNOWN,
                 )
             ),
             messages=messages,

@@ -125,6 +125,45 @@ class ModelsTests(unittest.TestCase):
         self.assertEqual(parsed.reference_number, "ref")
         self.assertEqual(parsed.authentication_token.token, "tok")
 
+    def test_token_wrappers_keep_tokens_out_of_repr(self):
+        token = models.TokenInfo.from_dict(
+            {"token": "SECRET-TOKEN", "validUntil": "2024-01-01"}
+        )
+        self.assertNotIn("SECRET-TOKEN", repr(token))
+        self.assertEqual(token.token, "SECRET-TOKEN")
+        self.assertEqual(
+            token.to_dict(omit_none=False),
+            {"token": "SECRET-TOKEN", "validUntil": "2024-01-01"},
+        )
+
+        init_response = models.AuthenticationInitResponse.from_dict(
+            {"referenceNumber": "ref", "authenticationToken": {"token": "SECRET-INIT"}}
+        )
+        self.assertNotIn("SECRET-INIT", repr(init_response))
+        self.assertEqual(init_response.authentication_token.token, "SECRET-INIT")
+        self.assertEqual(
+            init_response.to_dict()["authenticationToken"]["token"],
+            "SECRET-INIT",
+        )
+
+        tokens_response = models.AuthenticationTokensResponse.from_dict(
+            {
+                "accessToken": {"token": "SECRET-ACCESS"},
+                "refreshToken": {"token": "SECRET-REFRESH"},
+            }
+        )
+        rendered = repr(tokens_response)
+        self.assertNotIn("SECRET-ACCESS", rendered)
+        self.assertNotIn("SECRET-REFRESH", rendered)
+        self.assertEqual(tokens_response.access_token.token, "SECRET-ACCESS")
+        self.assertEqual(tokens_response.to_dict()["refreshToken"]["token"], "SECRET-REFRESH")
+
+        token_refresh = models.AuthenticationTokenRefreshResponse.from_dict(
+            {"accessToken": {"token": "SECRET-REFRESHED"}}
+        )
+        self.assertNotIn("SECRET-REFRESHED", repr(token_refresh))
+        self.assertEqual(token_refresh.access_token.token, "SECRET-REFRESHED")
+
     def test_auth_tokens_from_dict(self):
         data = {
             "accessToken": {"token": "acc", "validUntil": "2024-01-01"},
@@ -537,9 +576,34 @@ class ModelsTests(unittest.TestCase):
         self.assertEqual(message.type, models.LighthouseMessageType.FAILURE_START)
 
         status = models.LighthouseStatusResponse.from_dict({"status": "UNKNOWN"})
-        self.assertEqual(status.status, models.LighthouseKsefStatus.AVAILABLE)
+        self.assertEqual(status.status, models.LighthouseKsefStatus.UNKNOWN)
         self.assertIsNone(status.messages)
         self.assertNotIn("messages", status.to_dict())
+
+
+class LighthouseStatusFailSafeTests(unittest.TestCase):
+    """Brak/nieznany status latarni nie może być raportowany jako `AVAILABLE`."""
+
+    def test_missing_or_unknown_status_is_not_available(self):
+        for payload in (
+            {},
+            {"status": None},
+            {"status": ""},
+            {"status": "PARTIAL_FAILURE"},
+            {"status": 200},
+        ):
+            status = models.LighthouseStatusResponse.from_dict(payload)
+            self.assertIs(
+                status.status,
+                models.LighthouseKsefStatus.UNKNOWN,
+                msg=f"payload={payload!r}",
+            )
+            self.assertEqual(status.to_dict()["status"], "UNKNOWN")
+
+    def test_known_statuses_are_preserved(self):
+        for value in ("AVAILABLE", "MAINTENANCE", "FAILURE", "TOTAL_FAILURE"):
+            status = models.LighthouseStatusResponse.from_dict({"status": value})
+            self.assertEqual(status.status.value, value)
 
 
 if __name__ == "__main__":

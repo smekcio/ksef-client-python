@@ -7,7 +7,8 @@
 Endpoint: `GET /status` (API Latarni)
 
 Zwraca `LighthouseStatusResponse`:
-- `status`: `AVAILABLE`, `MAINTENANCE`, `FAILURE`, `TOTAL_FAILURE`
+- `status`: `AVAILABLE`, `MAINTENANCE`, `FAILURE`, `TOTAL_FAILURE`, a dla wartości nierozpoznanej
+  albo nieobecnej w odpowiedzi `UNKNOWN` — biblioteka nie raportuje braku danych jako `AVAILABLE`
 - `messages`: komunikaty powiązane z aktualnym statusem (lub brak dla pełnej dostępności)
 
 ## `get_messages()`
