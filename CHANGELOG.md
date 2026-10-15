@@ -28,6 +28,14 @@
 
 ### Bug Fixes
 
+* **cli:** `session show` redacts the session key and IV (`symmetric_key_base64`, `iv_base64`)
+  by default — the full checkpoint used to be printed to stdout, including JSON mode, so key
+  material ended up in terminals, CI logs and screenshots. `--show-secrets` returns the full
+  record for a caller that needs it
+* **cli:** `health check` exits with code `5` (`API_ERROR`) and `ok: false` when `overall` is
+  `FAIL`, instead of reporting success with exit code `0` (a `--dry-run` without the required
+  certificates looked like a healthy environment). `WARN` still exits with `0`, and the error
+  message lists the failing checks
 * **cli:** `ksef lighthouse` reports an unknown profile `base_url` as `CONFIG_ERROR` instead of
   silently showing the TEST environment's statuses. `--base-url`/`KSEF_LIGHTHOUSE_BASE_URL` still
   takes precedence over the profile, and the DEMO→TEST mapping is unchanged

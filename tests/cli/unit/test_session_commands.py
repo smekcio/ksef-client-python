@@ -14,6 +14,28 @@ def _payload(stdout: str) -> dict:
     return json.loads(stdout.strip())
 
 
+def test_session_show_passes_the_show_secrets_flag(runner, monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_show(**kwargs):
+        seen.update(kwargs)
+        return {"id": kwargs["session_id"]}
+
+    monkeypatch.setattr(session_cmd, "show_saved_session", _fake_show)
+
+    result = runner.invoke(
+        app,
+        ["--json", "session", "show", "--id", "resume-1", "--show-secrets"],
+    )
+    assert result.exit_code == 0
+    assert seen["show_secrets"] is True
+
+    seen.clear()
+    result = runner.invoke(app, ["--json", "session", "show", "--id", "resume-1"])
+    assert result.exit_code == 0
+    assert seen["show_secrets"] is False
+
+
 def test_session_export_command_passes_the_overwrite_flag(runner, monkeypatch) -> None:
     seen: dict[str, object] = {}
 

@@ -39,6 +39,38 @@ def _append_token_store_check(result: dict[str, object]) -> None:
     )
 
 
+def _failed_check_messages(result: dict[str, object]) -> list[str]:
+    checks = result.get("checks")
+    if not isinstance(checks, list):
+        return []
+    failed: list[str] = []
+    for item in checks:
+        if isinstance(item, dict) and item.get("status") == "FAIL":
+            name = item.get("name") or "unknown"
+            message = item.get("message") or "no details"
+            failed.append(f"{name}: {message}")
+    return failed
+
+
+def _raise_for_failed_checks(result: dict[str, object]) -> None:
+    """`overall=FAIL` nie może kończyć się kodem wyjścia 0.
+
+    `health check --dry-run` raportowało `overall: FAIL` i `ok: true` z kodem 0,
+    więc skrypt nie odróżniał środowiska gotowego od zepsutego. Kod 5
+    (`API_ERROR`) to ten sam, którego używa `--check-certs`; `WARN` nadal
+    przechodzi z kodem 0, bo nie blokuje pracy.
+    """
+    if result.get("overall") != "FAIL":
+        return
+    failed = _failed_check_messages(result)
+    details = "; ".join(failed) if failed else "no failing check reported a reason"
+    raise CliError(
+        f"Health check failed: {details}",
+        ExitCode.API_ERROR,
+        "Fix the failing checks and run the command again; --json lists every check.",
+    )
+
+
 def _render_error(ctx: typer.Context, command: str, exc: Exception) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
@@ -118,6 +150,7 @@ def health_check(
             check_certs=check_certs,
         )
         _append_token_store_check(result)
+        _raise_for_failed_checks(result)
     except Exception as exc:
         _render_error(ctx, "health.check", exc)
     renderer.success(command="health.check", profile=profile, data=result)

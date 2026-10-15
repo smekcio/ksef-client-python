@@ -257,6 +257,26 @@ def test_session_ops_require_checkpoint_type_and_simple_commands(monkeypatch) ->
     assert status["id"] == "resume-online"
 
 
+def test_show_saved_session_redacts_key_and_iv_unless_asked(monkeypatch) -> None:
+    """`session show` nie wypisuje klucza sesji bez `--show-secrets`."""
+    checkpoint = _online_checkpoint()
+    monkeypatch.setattr(session_ops, "load_checkpoint", lambda profile, session_id: checkpoint)
+
+    hidden = session_ops.show_saved_session(profile="demo", session_id="resume-online")
+    state = hidden["checkpoint"]["session_state"]
+    assert state["symmetric_key_base64"] == "<redacted>"
+    assert state["iv_base64"] == "<redacted>"
+    assert "AQEBAQ" not in str(hidden)
+    assert state["reference_number"] == "SES-ONLINE-1"
+
+    revealed = session_ops.show_saved_session(
+        profile="demo", session_id="resume-online", show_secrets=True
+    )
+    revealed_state = revealed["checkpoint"]["session_state"]
+    assert revealed_state["symmetric_key_base64"] == checkpoint.session_state.symmetric_key_base64
+    assert revealed_state["iv_base64"] == checkpoint.session_state.iv_base64
+
+
 def test_open_online_session_closes_handle_when_save_fails(monkeypatch) -> None:
     closed: list[str | None] = []
 

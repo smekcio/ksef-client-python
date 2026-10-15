@@ -187,9 +187,44 @@ def list_saved_sessions(*, profile: str) -> dict[str, Any]:
     return result
 
 
-def show_saved_session(*, profile: str, session_id: str) -> dict[str, Any]:
+#: Pola stanu sesji, które nie mogą trafić na stdout bez wyraźnej prośby
+#: (`session show --show-secrets`): materiał klucza AES i wektor inicjalizujący.
+_SESSION_SECRET_KEYS = frozenset({"symmetric_key_base64", "iv_base64"})
+_SESSION_SECRET_PLACEHOLDER = "<redacted>"
+
+
+def _redact_session_secrets(value: Any) -> Any:
+    """Zastępuje materiał klucza sesji w (zagnieżdżonej) strukturze checkpointu."""
+    if isinstance(value, dict):
+        return {
+            key: (
+                _SESSION_SECRET_PLACEHOLDER
+                if key in _SESSION_SECRET_KEYS
+                else _redact_session_secrets(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_session_secrets(item) for item in value]
+    return value
+
+
+def show_saved_session(
+    *, profile: str, session_id: str, show_secrets: bool = False
+) -> dict[str, Any]:
+    """Skrót i checkpoint sesji; klucz AES oraz IV są domyślnie redagowane.
+
+    `session show` drukuje cały checkpoint (także w `--json`), a klucz sesji nie
+    musi trafiać do terminala, logów CI ani zrzutów ekranu. `show_secrets=True`
+    (flaga `--show-secrets`) oddaje pełny zapis świadomemu wywołującemu.
+    """
     checkpoint = load_checkpoint(profile, session_id)
-    return _checkpoint_summary(checkpoint) | {"checkpoint": checkpoint.to_dict()}
+    payload: dict[str, Any] = checkpoint.to_dict()
+    if not show_secrets:
+        redacted = _redact_session_secrets(payload)
+        assert isinstance(redacted, dict)
+        payload = redacted
+    return _checkpoint_summary(checkpoint) | {"checkpoint": payload}
 
 
 def export_saved_session(

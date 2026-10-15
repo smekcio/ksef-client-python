@@ -38,6 +38,56 @@ def test_health_check_json_success(runner, monkeypatch) -> None:
     assert payload["command"] == "health.check"
 
 
+def test_health_check_failed_overall_exits_with_api_error(runner, monkeypatch) -> None:
+    monkeypatch.setattr(
+        health_cmd,
+        "run_health_check",
+        lambda **kwargs: {
+            "overall": "FAIL",
+            "checks": [
+                {
+                    "name": "certificates",
+                    "status": "FAIL",
+                    "message": "Missing: SymmetricKeyEncryption",
+                },
+                {"name": "auth", "status": "WARN", "message": "No stored token"},
+            ],
+        },
+    )
+
+    result = runner.invoke(app, ["--json", "health", "check", "--dry-run"])
+
+    assert result.exit_code == int(ExitCode.API_ERROR)
+    payload = _json_output(result.stdout)
+    assert payload["ok"] is False
+    assert payload["errors"][0]["code"] == "API_ERROR"
+    assert "certificates: Missing: SymmetricKeyEncryption" in payload["errors"][0]["message"]
+
+
+def test_health_check_failed_overall_without_readable_checks(runner, monkeypatch) -> None:
+    monkeypatch.setattr(
+        health_cmd, "run_health_check", lambda **kwargs: {"overall": "FAIL", "checks": "boom"}
+    )
+
+    result = runner.invoke(app, ["--json", "health", "check"])
+
+    assert result.exit_code == int(ExitCode.API_ERROR)
+    payload = _json_output(result.stdout)
+    assert "no failing check reported a reason" in payload["errors"][0]["message"]
+
+
+def test_failed_check_messages_tolerates_non_list_checks() -> None:
+    """`checks` spoza listy nie może wywrócić raportowania (samo `_append_token_store_check`
+    zamienia taki kształt na listę, ale helper jest wołany także z surowym wynikiem)."""
+    assert health_cmd._failed_check_messages({"overall": "FAIL", "checks": "boom"}) == []
+    assert health_cmd._failed_check_messages(
+        {
+            "overall": "FAIL",
+            "checks": [{"name": "auth", "status": "WARN"}, "not-a-dict"],
+        }
+    ) == []
+
+
 def test_health_check_error_exit(runner, monkeypatch) -> None:
     monkeypatch.setattr(
         health_cmd,

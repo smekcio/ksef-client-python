@@ -363,6 +363,15 @@ Options:
   --base-url TEXT
 ```
 
+Uwagi:
+- `overall: FAIL` (ktokolwiek z checkow ma status `FAIL`) konczy sie kodem wyjscia `5`
+  (`API_ERROR`) i `ok: false` — skrypt moze odroznic srodowisko gotowe od zepsutego.
+  Wczesniej `--dry-run` raportowalo `FAIL` z kodem `0`.
+- `overall: WARN` (np. brak tokenu, plaintext-fallback) nadal konczy sie kodem `0` — ostrzezenie
+  nie blokuje pracy.
+- `--check-auth` bez zapisanego tokenu daje `4` (`AUTH_ERROR`), `--check-certs` bez wymaganych
+  certyfikatow — `5` (`API_ERROR`).
+
 ## `ksef lighthouse status`
 
 ```text
@@ -594,10 +603,18 @@ Zwraca checkpointy zapisane dla aktywnego profilu.
 ## `ksef session show`
 
 ```text
-Usage: ksef session show --id TEXT
+Usage: ksef session show [OPTIONS]
+
+Options:
+  --id TEXT                 [required]
+  --show-secrets
 ```
 
-Pokazuje skrot i pelny JSON checkpointu.
+Pokazuje skrot i pelny JSON checkpointu. Material klucza sesji
+(`session_state.symmetric_key_base64` oraz `session_state.iv_base64`) jest domyslnie
+redagowany do `<redacted>` — te wartosci nie musza trafiac do terminala, logow CI ani zrzutow
+ekranu. `--show-secrets` oddaje pelny zapis (klucz i IV sa tez w pliku checkpointu, patrz
+`session export`).
 
 ## `ksef session status`
 
@@ -853,7 +870,7 @@ Uwagi:
 - `2` blad walidacji
 - `3` blad auth/token
 - `4` retry exhausted / rate-limit
-- `5` blad API KSeF
+- `5` blad API KSeF (takze `health check` z wynikiem `FAIL`)
 - `6` blad konfiguracji/srodowiska
 - `7` `CIRCUIT_OPEN` — **zarezerwowany, nieużywany**: żadna komenda CLI go nie podnosi
   (polityka z `cli/policies/circuit_breaker.py` nie jest podłączona do kodów wyjścia,

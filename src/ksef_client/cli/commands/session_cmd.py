@@ -99,13 +99,22 @@ def session_list(ctx: typer.Context) -> None:
 def session_show(
     ctx: typer.Context,
     session_id: str = typer.Option(..., "--id", help="Saved session checkpoint id."),
+    show_secrets: bool = typer.Option(
+        False,
+        "--show-secrets",
+        help="Print the session key and IV instead of redacting them.",
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
     profile = profile_label(cli_ctx)
     try:
         profile = require_profile(cli_ctx)
-        result = show_saved_session(profile=profile, session_id=session_id)
+        result = show_saved_session(
+            profile=profile,
+            session_id=session_id,
+            show_secrets=show_secrets,
+        )
     except Exception as exc:
         _render_error(ctx, "session.show", exc)
     renderer.success(command="session.show", profile=profile, data=result)
