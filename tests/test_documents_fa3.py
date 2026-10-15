@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 import runpy
@@ -821,6 +822,52 @@ def test_payment_method_without_a_due_date_is_still_emitted() -> None:
     assert "<FormaPlatnosci>1</FormaPlatnosci>" in xml
 
 
+def test_payment_method_mobile_alias_is_mapped_to_code_seven() -> None:
+    """Alias „mobilna" z `_payment_code` musi trafić do dokumentu jako kod 7.
+
+    Pozostałe aliasy mają testy (``gotówka`` → ``1``), ale ``mobilna`` nie
+    występowało w żadnym teście — usunięcie tego wpisu z mapy przechodziło na
+    zielono, a do ``FormaPlatnosci`` trafiał tekst zamiast kodu słownika
+    ``TFormaPlatnosci`` (dokument odrzucałby KSeF).
+    """
+    draft = _draft("FV/MOBILNA/1", payment_due_date=date(2026, 1, 31), payment_method="mobilna")
+    assert "<FormaPlatnosci>7</FormaPlatnosci>" in draft.to_xml(xsd_validate=True).decode("utf-8")
+
+    typed = replace(_payment_invoice(), payment_terms=PaymentTerms(method="mobilna"))
+    assert "<FormaPlatnosci>7</FormaPlatnosci>" in typed.to_xml(xsd_validate=True).decode("utf-8")
+
+
+def test_basic_xml_validation_reports_the_missing_element() -> None:
+    """Walidacja kształtu musi wskazywać KONKRETNY brakujący element.
+
+    Dotychczasowy test wołał `_basic_xml_validation(ET.Element("Faktura"))`, co
+    rzuca również przy liście wymaganych elementów skróconej do samego
+    ``Naglowek`` — brakowało wszystkich czterech, więc mutacja tej listy (np.
+    usunięcie ``Podmiot2``) przechodziła niezauważona.
+    """
+    root = ET.Element(_q("Faktura"))
+    ET.SubElement(root, _q("Naglowek"))
+
+    with pytest.raises(FA3XmlValidationError) as missing_parties:
+        _basic_xml_validation(root)
+    assert _missing_elements(missing_parties.value) == "Podmiot1, Podmiot2, Fa"
+
+    ET.SubElement(root, _q("Podmiot1"))
+    ET.SubElement(root, _q("Podmiot2"))
+
+    with pytest.raises(FA3XmlValidationError) as missing_fa:
+        _basic_xml_validation(root)
+    assert _missing_elements(missing_fa.value) == "Fa"
+
+    ET.SubElement(root, _q("Fa"))
+    _basic_xml_validation(root)
+
+
+def _missing_elements(error: FA3XmlValidationError) -> str:
+    """Lista brakujących elementów z komunikatu (bez treści komunikatu)."""
+    return str(error).rsplit(": ", 1)[-1]
+
+
 def test_xsd_validation_accepts_basic_generated_invoice_and_rejects_invalid_xml() -> None:
     draft = _draft("FV/XSD/1")
 
@@ -890,8 +937,10 @@ def test_xsd_audit_statuses_follow_the_serializer() -> None:
     # Bez dowodu z testów nie ma `SUPPORTED` — tylko `PARTIALLY_SUPPORTED`.
     assert CoverageStatus.SUPPORTED not in statuses
     # Serializer wypisuje wszystkie elementy schematu FA(3), więc na realnym
-    # schemacie `UNSUPPORTED` nie występuje — ale musi być OSIĄGALNE dla
-    # elementu, którego serializer nie zna (inaczej status jest fikcją).
+    # schemacie `UNSUPPORTED` nie występuje — jest to fakt o SDK (patrz
+    # `test_xsd_audit_emitted_tags_come_from_real_emission_sites`), a nie skutek
+    # rozpoznawania znaczników. Status musi być OSIĄGALNY dla elementu, którego
+    # serializer nie zna, inaczej byłby fikcją.
     assert not report.by_status(CoverageStatus.UNSUPPORTED)
     entry = xsd_audit_module._entry_for_element(
         XsdElement("/Faktura/Fa/TotallyUnknownField", "TotallyUnknownField", None, "1", "1"),
@@ -900,17 +949,104 @@ def test_xsd_audit_statuses_follow_the_serializer() -> None:
     assert entry.status is CoverageStatus.UNSUPPORTED
 
     with_evidence = audit_fa3_xsd_coverage(_audit_evidence_xml_cases())
-    assert with_evidence.by_status(CoverageStatus.SUPPORTED)
+    with_evidence_by_path = {item.path: item for item in with_evidence.coverage}
+    # Dowód z testów podnosi status do `SUPPORTED`, a brak dowodu zostawia
+    # `PARTIALLY_SUPPORTED` — raport nie jest więc jednorodny.
+    assert with_evidence_by_path["/Faktura/Fa/FaWiersz/P_7"].status is CoverageStatus.SUPPORTED
+    assert (
+        with_evidence_by_path["/Faktura/Podmiot3/DaneIdentyfikacyjne/IDWew"].status
+        is CoverageStatus.PARTIALLY_SUPPORTED
+    )
+    assert len(with_evidence.by_status(CoverageStatus.SUPPORTED)) > 300
+
+
+def test_xsd_audit_emitted_tags_come_from_real_emission_sites() -> None:
+    """Zbiór znaczników to dokładnie nazwy elementów, które serializer wypisuje.
+
+    Poprzednia ekstrakcja dopasowywała dowolny literał z wielkiej litery, więc do
+    zbioru trafiały napisy, które znacznikami nie są — m.in. nazwa atrybutu
+    ``Typ`` z ``column.set("Typ", column_type)`` w tabeli załącznika. Taki
+    fałszywy znacznik maskowałby realną lukę w pokryciu schematu.
+    """
+    emitted = xsd_audit_module._emitted_tags()
+    schema_names = {element.name for element in parse_fa3_xsd_elements()}
+
+    assert schema_names <= emitted
+    assert not emitted - schema_names, "zbiór znaczników zawiera napisy spoza schematu"
+    assert "Typ" not in emitted
+
+    # Każdy znacznik ma właściciela w `xml.py`, więc raport może wskazać handler.
+    sites = xsd_audit_module._emission_sites()
+    assert all(any(owners) for owners in sites.values())
+    assert sites["WarunkiTransakcji"] == ("_domain_transaction_terms",)
+    assert "_domain_transport" in sites["Transport"]
+    # Znaczniki z tabeli modułowej (`_TAX_SUMMARY_ORDER`) przypisujemy funkcji,
+    # która tę tabelę wykorzystuje, a nie „poziomowi modułu".
+    assert sites["P_13_1"][0] == "_tax_summary"
+
+    # Stała tekstowa z modułu nie jest tabelą znaczników, choć wygląda jak nazwa
+    # elementu — inaczej do zbioru wróciłyby napisy spoza miejsc emisji.
+    assert xsd_audit_module._module_tag_constants(ast.parse('KOD = "KodWaluty"')) == {}
+    assert xsd_audit_module._module_tag_constants(ast.parse('KODY = ("23", "8")')) == {}
+    assert xsd_audit_module._module_tag_constants(ast.parse('TABELA = ("P_16", "P_17")')) == {
+        "TABELA": ("P_16", "P_17")
+    }
+
+
+def test_xsd_audit_reports_drift_when_the_serializer_loses_a_tag() -> None:
+    """Utrata znacznika w serializerze musi dać `UNSUPPORTED`, nie „jakoś pokryte".
+
+    Symulujemy dryf schematu (albo regresję w `xml.py`): mapa miejsc emisji bez
+    ``P_22BT``, czyli bez stawki akcyzy nowego środka transportu. Wcześniejszy
+    audyt nie umiał pokazać takiej luki, bo status brał z mapy dopasowywanej
+    prefiksem ``/Faktura``.
+    """
+    sites = xsd_audit_module._EMISSION_SITES
+    try:
+        xsd_audit_module._EMISSION_SITES = {
+            tag: owners for tag, owners in xsd_audit_module._scan_emissions(
+                xsd_audit_module._xml_module_tree()
+            ).items() if tag != "P_22BT"
+        }
+        report = audit_fa3_xsd_coverage()
+    finally:
+        xsd_audit_module._EMISSION_SITES = sites
+
+    by_path = {entry.path: entry for entry in report.coverage}
+    transport_tax = "/Faktura/Fa/Adnotacje/NoweSrodkiTransportu/NowySrodekTransportu/P_22BT"
+    assert by_path[transport_tax].status is CoverageStatus.UNSUPPORTED
+    assert [entry.path for entry in report.by_status(CoverageStatus.UNSUPPORTED)] == [
+        transport_tax
+    ]
 
 
 def test_xsd_audit_maps_handlers_and_domain_fields() -> None:
     report = audit_fa3_xsd_coverage()
     by_path = {entry.path: entry for entry in report.coverage}
     assert by_path["/Faktura/Fa/FaWiersz/P_7"].handler == "_domain_line"
-    assert by_path["/Faktura/Zalacznik/BlokDanych"].handler == "_attachment"
-    assert by_path["/Faktura/Fa/P_7" if False else "/Faktura/Fa/FaWiersz/P_7"].domain_field == (
-        "invoice.Fa.FaWiersz.P_7"
+    assert by_path["/Faktura/Zalacznik/BlokDanych"].handler == "_attachment_block"
+    assert by_path["/Faktura/Fa/FaWiersz/P_7"].domain_field == "invoice.Fa.FaWiersz.P_7"
+
+    # Sekcje, które wcześniej wpadały do `_domain_invoice` przez dopasowanie
+    # prefiksu ścieżki, mają w `xml.py` własne funkcje tworzące elementy.
+    assert by_path["/Faktura/Fa/WarunkiTransakcji"].handler == "_domain_transaction_terms"
+    assert by_path["/Faktura/Fa/WarunkiTransakcji/WalutaUmowna"].handler == (
+        "_domain_transaction_terms"
     )
+    assert by_path["/Faktura/Fa/WarunkiTransakcji/Transport"].handler == "_domain_transport"
+    assert by_path["/Faktura/Fa/WarunkiTransakcji/Transport/RodzajTransportu"].handler == (
+        "_domain_transport"
+    )
+    assert by_path["/Faktura/Fa/P_15"].handler == "_tax_summary"
+    assert by_path["/Faktura/Fa/Podmiot1K/Adres/AdresL1"].handler == "_address"
+
+    # Raport nie zmyśla nazw: każdy handler to funkcja z `xml.py`.
+    functions = {
+        node.name
+        for node in ast.walk(xsd_audit_module._xml_module_tree())
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert {entry.handler for entry in report.coverage} <= functions
 
 
 def test_xsd_enum_values_match_public_fa3_enums() -> None:
@@ -4574,7 +4710,12 @@ def test_draft_bucket_rejects_unsupported_numeric_rate() -> None:
 
 
 def test_xsd_audit_covers_raw_extension_unsupported_and_notes() -> None:
-    """Gałęzie audytu: mapa raw/unsupported, dopasowanie ścieżek i noty."""
+    """Gałęzie audytu: mapa raw/unsupported, dobór handlera, dopasowanie i noty.
+
+    `RAW_EXTENSION_PATHS` i `UNSUPPORTED_PATHS` są puste, bo SDK nie ma takich
+    ścieżek (patrz docstring `xsd_map`), więc obie gałęzie — i zapasowy handler —
+    są ćwiczone przez monkeypatch tych nazw.
+    """
     raw_map = xsd_audit_module.RAW_EXTENSION_PATHS
     unsupported_map = xsd_audit_module.UNSUPPORTED_PATHS
     try:
@@ -4595,6 +4736,22 @@ def test_xsd_audit_covers_raw_extension_unsupported_and_notes() -> None:
     finally:
         xsd_audit_module.RAW_EXTENSION_PATHS = raw_map
         xsd_audit_module.UNSUPPORTED_PATHS = unsupported_map
+
+    # Handler dla znacznika, którego nie ma w typowanym serializatorze (albo nie
+    # ma go wcale), musi mieć sensowny zapas: najpierw funkcja spoza typowanej
+    # ścieżki, a dopiero potem `_domain_invoice`. Mapa miejsc emisji jest
+    # podstawiana, bo na realnym `xml.py` takich znaczników nie ma.
+    sites_map = xsd_audit_module._EMISSION_SITES
+    try:
+        xsd_audit_module._EMISSION_SITES = {
+            "TylkoDraft": ("_party",),
+            "BezWlasciciela": ("",),
+        }
+        assert xsd_audit_module._handler_name("/Faktura/TylkoDraft") == "_party"
+        assert xsd_audit_module._handler_name("/Faktura/BezWlasciciela") == "_domain_invoice"
+        assert xsd_audit_module._handler_name("/Faktura/Nieznany/Tag") == "_domain_invoice"
+    finally:
+        xsd_audit_module._EMISSION_SITES = sites_map
 
     # Noty dla poszczególnych sekcji dokumentu (kluczowe jest, by nota niosła
     # informację o SEKCJI, a nie o samym statusie).
