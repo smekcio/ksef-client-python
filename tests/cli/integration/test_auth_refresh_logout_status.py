@@ -4,7 +4,7 @@ import json
 
 from ksef_client import models as m
 from ksef_client.cli import app
-from ksef_client.cli.auth import manager
+from ksef_client.cli.auth import keyring_store, manager
 from ksef_client.cli.auth.keyring_store import clear_tokens
 from ksef_client.cli.commands import auth_cmd
 from ksef_client.cli.errors import CliError
@@ -16,6 +16,42 @@ from ksef_client.exceptions import KsefApiError
 def test_auth_status_and_logout_success(runner) -> None:
     assert runner.invoke(app, ["auth", "status"]).exit_code == 0
     assert runner.invoke(app, ["auth", "logout"]).exit_code == 0
+
+
+def test_auth_logout_does_not_claim_success_when_the_keyring_blocks_verification(
+    runner, monkeypatch, tmp_path
+) -> None:
+    """`auth logout` nie może raportować `logged_out` bez potwierdzenia usunięcia.
+
+    Keyring, który rzuca zarówno na `delete_password`, jak i na `get_password`,
+    nie pozwala stwierdzić, czy ważny refresh token nadal tam jest — wcześniej
+    CLI kończyło takie wylogowanie kodem 0 i `data={"logged_out": true}`.
+    """
+
+    class _BrokenKeyring:
+        def set_password(self, service: str, key: str, value: str) -> None:
+            _ = (service, key, value)
+            raise keyring_store.KeyringErrorType("brak backendu")
+
+        def get_password(self, service: str, key: str) -> str | None:
+            _ = (service, key)
+            raise keyring_store.KeyringErrorType("brak backendu")
+
+        def delete_password(self, service: str, key: str) -> None:
+            _ = (service, key)
+            raise keyring_store.KeyringErrorType("brak backendu")
+
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", True)
+    monkeypatch.setattr(keyring_store, "_keyring", _BrokenKeyring())
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+
+    result = runner.invoke(app, ["--json", "auth", "logout"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["errors"][0]["code"] == "CONFIG_ERROR"
+    assert payload["data"] is None
 
 
 def test_auth_revoke_self_token_success(runner, monkeypatch) -> None:

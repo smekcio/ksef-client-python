@@ -90,7 +90,9 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
+        # `ValueError` obejmuje `json.JSONDecodeError` oraz `UnicodeDecodeError`:
+        # plik z binarną albo obciętą treścią nie może wywracać całego `session list`.
         raise CliError(
             f"Cannot read session checkpoint: {path}",
             ExitCode.CONFIG_ERROR,
@@ -346,18 +348,30 @@ class BatchSessionCheckpoint:
 SessionCheckpoint = OnlineSessionCheckpoint | BatchSessionCheckpoint
 
 
-def checkpoint_from_dict(payload: dict[str, Any]) -> SessionCheckpoint:
+def checkpoint_from_dict(
+    payload: dict[str, Any], *, source: Path | None = None
+) -> SessionCheckpoint:
+    """Buduje checkpoint z JSON-a; każdy błąd kształtu to `CliError(CONFIG_ERROR)`.
+
+    `source` (jeśli podane) trafia do komunikatu, żeby użytkownik wiedział, KTÓRY
+    plik jest uszkodzony. Wcześniej łapany był wyłącznie `ValueError`, więc checkpoint
+    z np. `"form_code": {}` kończył się `TypeError`-em z `FormCode.__init__`
+    i wywracał całe `session list` kodem `UNEXPECTED`/6, zamiast trafić na listę
+    plików nienarparsowalnych (`unreadable`).
+    """
     kind = payload.get("kind")
     try:
         if kind == "online":
             return OnlineSessionCheckpoint.from_dict(payload)
         if kind == "batch":
             return BatchSessionCheckpoint.from_dict(payload)
-    except ValueError as exc:
+    except (CliError, TypeError, KeyError, ValueError, AttributeError) as exc:
+        # `json.JSONDecodeError` dziedziczy po `ValueError`, więc jest tu objęty.
+        location = f" in '{source}'" if source is not None else ""
         raise CliError(
-            "Invalid session checkpoint payload.",
+            f"Invalid session checkpoint payload{location}.",
             ExitCode.CONFIG_ERROR,
-            str(exc),
+            str(exc) or type(exc).__name__,
         ) from exc
     raise CliError(
         "Invalid session checkpoint payload.",
@@ -386,7 +400,7 @@ def load_checkpoint(profile: str, session_id: str) -> SessionCheckpoint:
             ExitCode.CONFIG_ERROR,
             "Create it first with `ksef session ... open` or `ksef send ... --save-session`.",
         )
-    return checkpoint_from_dict(_read_json(path))
+    return checkpoint_from_dict(_read_json(path), source=path)
 
 
 def list_checkpoints(profile: str, *, include_broken: bool = False) -> list[SessionCheckpoint]:
@@ -402,7 +416,7 @@ def list_checkpoints(profile: str, *, include_broken: bool = False) -> list[Sess
     checkpoints: list[SessionCheckpoint] = []
     for path in sorted(directory.glob("*.json")):
         try:
-            checkpoints.append(checkpoint_from_dict(_read_json(path)))
+            checkpoints.append(checkpoint_from_dict(_read_json(path), source=path))
         except CliError as exc:
             if include_broken:
                 raise CliError(
@@ -422,7 +436,7 @@ def list_unreadable_checkpoints(profile: str) -> list[str]:
     broken: list[str] = []
     for path in sorted(directory.glob("*.json")):
         try:
-            checkpoint_from_dict(_read_json(path))
+            checkpoint_from_dict(_read_json(path), source=path)
         except CliError:
             broken.append(path.name)
     return broken
@@ -585,7 +599,7 @@ def import_checkpoint(
             ExitCode.IO_ERROR,
             "Use --in with an existing JSON checkpoint file.",
         )
-    checkpoint = checkpoint_from_dict(_read_json(source_path))
+    checkpoint = checkpoint_from_dict(_read_json(source_path), source=source_path)
     if checkpoint.profile != profile:
         raise CliError(
             "Checkpoint profile does not match selected profile.",

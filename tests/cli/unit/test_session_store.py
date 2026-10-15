@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 import ksef_client.cli.session_store as session_store
 from ksef_client import models as m
 from ksef_client.cli.errors import CliError
+from ksef_client.cli.exit_codes import ExitCode
 from ksef_client.cli.session_store import (
     BatchPayloadSource,
     BatchSessionCheckpoint,
@@ -499,6 +501,48 @@ def test_write_json_atomic_reports_a_directory_failure(monkeypatch, tmp_path: Pa
 
     with pytest.raises(CliError, match="Cannot create the checkpoint directory"):
         save_checkpoint(_online_checkpoint())
+
+
+def test_list_checkpoints_survives_a_checkpoint_with_a_broken_form_code(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Jeden checkpoint z `"form_code": {}` nie może wywracać całego listowania.
+
+    `checkpoint_from_dict` łapał wyłącznie `ValueError`, a `FormCode.from_dict({})`
+    rzuca `TypeError` z konstruktora — `session list` kończyło się wtedy kodem
+    `UNEXPECTED`/6 zamiast pokazać plik jako nienarparsowalny.
+    """
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    save_checkpoint(_online_checkpoint())
+    broken_path = session_store._profile_dir("demo") / "broken-form-code.json"
+    payload = _online_checkpoint().to_dict()
+    payload["session_state"]["form_code"] = {}
+    broken_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # Dobry checkpoint nadal jest listowany, a uszkodzony trafia na listę „unreadable".
+    assert [item.id for item in list_checkpoints("demo")] == ["online-demo"]
+    assert session_store.list_unreadable_checkpoints("demo") == ["broken-form-code.json"]
+
+    with pytest.raises(CliError) as exc:
+        load_checkpoint("demo", "broken-form-code")
+    assert exc.value.code == ExitCode.CONFIG_ERROR
+    assert "broken-form-code.json" in exc.value.message
+    assert "FormCode" in (exc.value.hint or "")
+
+    # Bezpośrednie wywołanie z `source` też wskazuje plik w komunikacie.
+    with pytest.raises(CliError, match="broken-form-code.json"):
+        session_store.checkpoint_from_dict(payload, source=broken_path)
+
+
+def test_read_json_reports_a_file_that_is_not_utf8(tmp_path: Path) -> None:
+    """Checkpoint z binarną treścią to `CONFIG_ERROR`, nie surowy `UnicodeDecodeError`."""
+    path = tmp_path / "binary.json"
+    path.write_bytes(b"\xff\xfe\x00\x00nie-json")
+
+    with pytest.raises(CliError) as exc:
+        session_store._read_json(path)
+
+    assert exc.value.code == ExitCode.CONFIG_ERROR
 
 
 def test_list_checkpoints_reports_broken_files_on_demand(monkeypatch, tmp_path: Path) -> None:

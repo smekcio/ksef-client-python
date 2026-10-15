@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
-from ksef_client.http import MAX_RETRY_AFTER_SECONDS
+from ksef_client.http import MAX_RETRY_AFTER_SECONDS, RETRYABLE_STATUS_CODES
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,13 @@ class RetryPolicy:
 
 
 def should_retry(status_code: int) -> bool:
-    return status_code in {429, 502, 503, 504}
+    """Czy po tym statusie ponowienie ma sens.
+
+    Zbiór kodów pochodzi z warstwy HTTP (`RETRYABLE_STATUS_CODES`), żeby CLI i SDK
+    nie rozjechały się w tym, które odpowiedzi są ponawialne — dla tych samych kodów
+    warstwa HTTP czyta też nagłówek ``Retry-After``.
+    """
+    return status_code in RETRYABLE_STATUS_CODES
 
 
 def parse_retry_after(retry_after: str | None) -> float | None:

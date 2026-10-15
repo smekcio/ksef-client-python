@@ -237,8 +237,13 @@ class BatchUploadHelper:
 
 
 class AsyncBatchUploadHelper:
-    def __init__(self, http_client: _AsyncRequestHttpClient) -> None:
+    def __init__(self, http_client: _AsyncRequestHttpClient, *, parallelism: int = 1) -> None:
         self._http = http_client
+        #: Limit równoległych `PUT`-ów. `AsyncBatchSessionHandle.upload_parts` nie
+        #: przyjmuje `parallelism` (patrz `services/sessions.py`), więc workflow
+        #: tworzy helper z właściwym limitem — inaczej async wysyłał wszystkie
+        #: części naraz, ignorując parametr (`_ = parallelism`).
+        self._parallelism = max(1, parallelism)
 
     async def upload_parts(
         self,
@@ -258,15 +263,20 @@ class AsyncBatchUploadHelper:
             if req.ordinal_number not in skip_set
         ]
 
+        # Semafor ogranicza liczbę równoległych `PUT`-ów tak samo jak `parallelism`
+        # w wersji sync (`BatchUploadHelper`, `ThreadPoolExecutor(max_workers=...)`).
+        semaphore = asyncio.Semaphore(self._parallelism)
+
         async def _send(req: PartUploadRequest, content: bytes) -> None:
-            await self._http.request(
-                req.method,
-                req.url,
-                headers=req.headers or {},
-                data=content,
-                skip_auth=True,
-                expected_status={200, 201},
-            )
+            async with semaphore:
+                await self._http.request(
+                    req.method,
+                    req.url,
+                    headers=req.headers or {},
+                    data=content,
+                    skip_auth=True,
+                    expected_status={200, 201},
+                )
 
         async def _send_with_ordinal(req: PartUploadRequest, content: bytes) -> int:
             await _send(req, content)
@@ -843,6 +853,7 @@ class AsyncBatchSessionWorkflow:
         self, sessions_client: _AsyncSessionsClient, http_client: _AsyncRequestHttpClient
     ) -> None:
         self._sessions = sessions_client
+        self._http_client = http_client
         self._upload_helper = AsyncBatchUploadHelper(http_client)
 
     def _resolve_archive_bytes(
@@ -937,7 +948,6 @@ class AsyncBatchSessionWorkflow:
         upo_v43: bool = False,
         parallelism: int = 1,
     ) -> str:
-        _ = parallelism
         session = await self.open_session(
             form_code=form_code,
             zip_bytes=zip_bytes,
@@ -948,6 +958,14 @@ class AsyncBatchSessionWorkflow:
             access_token=access_token,
             offline_mode=offline_mode,
             upo_v43=upo_v43,
+        )
+        # `AsyncBatchSessionHandle.upload_parts` nie przekazuje `parallelism` do
+        # uploadera (`_AsyncBatchUploader` w `services/sessions.py`), więc podstawiamy
+        # helper z żądanym limitem — wcześniej parametr był ignorowany (`_ = parallelism`),
+        # a async wysyłał wszystkie części naraz.
+        session = replace(
+            session,
+            _uploader=AsyncBatchUploadHelper(self._http_client, parallelism=parallelism),
         )
         await session.upload_parts()
         await session.close(access_token=access_token)
@@ -1000,6 +1018,11 @@ class AsyncExportDownloadHelper:
 class PackageProcessingResult:
     metadata_summaries: list[dict[str, Any]]
     invoice_xml_files: dict[str, str]
+    #: Surowa treść `_metadata.json` z paczki KSeF. CLI zapisuje ją **verbatim**,
+    #: bo rekonstrukcja z listy faktur gubiła pozostałe klucze najwyższego poziomu
+    #: (`isTruncated`, `permanentStorageHwmDate`, klucze przyszłych wersji API).
+    #: `None` oznacza, że paczka nie zawierała pliku metadanych.
+    metadata_raw: bytes | None = None
 
 
 def _require_encryption_info(encryption_data: EncryptionData) -> EncryptionInfo:
@@ -1053,6 +1076,7 @@ class ExportWorkflow:
 
         metadata_summaries: list[dict[str, Any]] = []
         invoice_xml_files: dict[str, str] = {}
+        metadata_raw: bytes | None = None
 
         for name, content in unzipped.items():
             if name.lower() == "_metadata.json":
@@ -1061,10 +1085,11 @@ class ExportWorkflow:
                 metadata = json.loads(content.decode("utf-8"))
                 invoices = metadata.get("invoices") or metadata.get("invoiceList") or []
                 metadata_summaries.extend(invoices)
+                metadata_raw = content
             elif name.lower().endswith(".xml"):
                 invoice_xml_files[name] = content.decode("utf-8")
 
-        return PackageProcessingResult(metadata_summaries, invoice_xml_files)
+        return PackageProcessingResult(metadata_summaries, invoice_xml_files, metadata_raw)
 
 
 class AsyncExportWorkflow:
@@ -1114,6 +1139,7 @@ class AsyncExportWorkflow:
 
         metadata_summaries: list[dict[str, Any]] = []
         invoice_xml_files: dict[str, str] = {}
+        metadata_raw: bytes | None = None
 
         for name, content in unzipped.items():
             if name.lower() == "_metadata.json":
@@ -1122,10 +1148,11 @@ class AsyncExportWorkflow:
                 metadata = json.loads(content.decode("utf-8"))
                 invoices = metadata.get("invoices") or metadata.get("invoiceList") or []
                 metadata_summaries.extend(invoices)
+                metadata_raw = content
             elif name.lower().endswith(".xml"):
                 invoice_xml_files[name] = content.decode("utf-8")
 
-        return PackageProcessingResult(metadata_summaries, invoice_xml_files)
+        return PackageProcessingResult(metadata_summaries, invoice_xml_files, metadata_raw)
 
 
 def _pair_requests_with_parts(

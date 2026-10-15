@@ -972,4 +972,8 @@ Uwagi:
 
 Uwagi:
 - w zdarzeniach informacyjnych (`command=info`) pole `profile` moze byc `null`,
+- `--json` moze wypisac **wiecej niz jeden dokument** (jeden na linie): ostrzezenia
+  (`command=info`, np. o sekrecie podanym w opcji) poprzedzaja dokument wyniku.
+  Konsument powinien czytac stdout linia po linii i brac ostatni dokument jako
+  wynik, a dokumenty z `command=info` traktowac jako ostrzezenia,
 - w bledzie: `ok=false`, a `errors` zawiera `code`, `message`, opcjonalnie `hint`.

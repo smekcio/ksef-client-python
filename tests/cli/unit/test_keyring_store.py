@@ -505,8 +505,70 @@ def test_keyring_store_keyring_backend_errors(monkeypatch) -> None:
     # get path should swallow backend errors and return None
     assert keyring_store.get_tokens("demo") is None
 
-    # clear path should swallow backend errors
+    # Gdy keyring rzuca i na `delete_password`, i na `get_password`, nie da się
+    # potwierdzić usunięcia wpisu — wylogowanie musi zgłosić błąd (fail-closed),
+    # a nie zwrócić sukcesu z tokenem, który może nadal żyć w magazynie.
+    with pytest.raises(CliError) as clear_exc:
+        keyring_store.clear_tokens("demo")
+    assert clear_exc.value.code == ExitCode.CONFIG_ERROR
+    assert "system keyring" in clear_exc.value.message
+
+
+def test_keyring_store_clear_fails_closed_when_the_entry_cannot_be_verified(
+    monkeypatch,
+) -> None:
+    """`auth logout` nie może kłamać, gdy weryfikacja usunięcia też się nie udaje.
+
+    Wcześniej `still_present` startowało od `False`, więc wyjątek z `get_password`
+    degradujący weryfikację do „wpisu nie ma" dawał `logged_out: True`, choć ważny
+    refresh token mógł zostać w magazynie systemowym.
+    """
+
+    class _Backend:
+        def set_password(self, service: str, key: str, value: str) -> None:
+            _ = (service, key, value)
+
+        def get_password(self, service: str, key: str) -> str | None:
+            _ = (service, key)
+            raise keyring_store.KeyringErrorType("backend refuses to read")
+
+        def delete_password(self, service: str, key: str) -> None:
+            _ = (service, key)
+            raise keyring_store.KeyringErrorType("backend refuses to delete")
+
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", True)
+    monkeypatch.setattr(keyring_store, "_keyring", _Backend())
+
+    with pytest.raises(CliError) as exc:
+        keyring_store.clear_tokens("demo")
+
+    assert exc.value.code == ExitCode.CONFIG_ERROR
+    assert "system keyring" in exc.value.message
+
+
+def test_keyring_store_clear_accepts_a_missing_entry(monkeypatch, tmp_path) -> None:
+    """Brak wpisu w keyringu to nie błąd — usunięcie jest wtedy idempotentne."""
+
+    class _Backend:
+        def set_password(self, service: str, key: str, value: str) -> None:
+            _ = (service, key, value)
+
+        def get_password(self, service: str, key: str) -> str | None:
+            _ = (service, key)
+            return None
+
+        def delete_password(self, service: str, key: str) -> None:
+            _ = (service, key)
+            raise keyring_store.KeyringErrorType("no such entry")
+
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", True)
+    monkeypatch.setattr(keyring_store, "_keyring", _Backend())
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+
+    # `delete_password` rzuca, ale `get_password` potwierdza brak wpisu — sukces.
     keyring_store.clear_tokens("demo")
+
+    assert not (tmp_path / "tokens.json").exists()
 
 
 def test_keyring_store_keyring_error_uses_encrypted_fallback(monkeypatch, tmp_path) -> None:

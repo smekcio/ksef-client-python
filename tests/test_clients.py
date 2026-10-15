@@ -41,6 +41,7 @@ from ksef_client.clients.security import (
 from ksef_client.clients.sessions import AsyncSessionsClient, SessionsClient
 from ksef_client.clients.testdata import AsyncTestDataClient, TestDataClient
 from ksef_client.clients.tokens import AsyncTokensClient, TokensClient
+from ksef_client.exceptions import KsefHttpError
 from ksef_client.http import HttpResponse
 
 
@@ -880,7 +881,8 @@ class ClientsTests(unittest.TestCase):
             )
 
         with patch.object(client, "_request_json", Mock(side_effect=[None, {"unexpected": True}])):
-            self.assertEqual(client.get_status().status.value, "AVAILABLE")
+            # Brak statusu w odpowiedzi nie może być raportowany jako `AVAILABLE`.
+            self.assertEqual(client.get_status().status.value, "UNKNOWN")
             self.assertEqual(client.get_messages(), [])
 
         with self.assertRaises(ValueError):
@@ -1409,11 +1411,108 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             client, "_request_json", AsyncMock(side_effect=[None, {"unexpected": True}])
         ):
-            self.assertEqual((await client.get_status()).status.value, "AVAILABLE")
+            # Brak statusu w odpowiedzi nie może być raportowany jako `AVAILABLE`.
+            self.assertEqual((await client.get_status()).status.value, "UNKNOWN")
             self.assertEqual(await client.get_messages(), [])
 
         with self.assertRaises(ValueError):
             await AsyncLighthouseClient(self.http, "").get_messages()
+
+
+class LocalTimestampOffsetTests(unittest.TestCase):
+    """Znacznik bez strefy z 7-cyfrowym ułamkiem musi dostać offset warszawski.
+
+    Wcześniejsze testy sprawdzały tylko, że taka wartość się parsuje (`is not None`),
+    albo używały znaczników bez ułamka — więc utrata offsetu dla pary „bez strefy
+    + 7 cyfr" nie była wykrywana (na Pythonie 3.12 `datetime.fromisoformat` przyjmuje
+    7 cyfr, więc cofnięcie naprawy w `clients/invoices.py` jest tam niewidoczne).
+    """
+
+    def test_seven_digit_fraction_without_offset_gets_warsaw_offset(self):
+        winter = _normalize_datetime_without_offset("2026-01-01T10:00:00.1234567")
+        summer = _normalize_datetime_without_offset("2026-07-01T10:00:00.1234567")
+
+        self.assertTrue(winter.endswith("+01:00"), winter)
+        self.assertTrue(summer.endswith("+02:00"), summer)
+
+    def test_seven_digit_fraction_with_offset_is_left_untouched(self):
+        value = "2025-10-11T12:23:56.0154302+00:00"
+        self.assertEqual(_normalize_datetime_without_offset(value), value)
+
+    def test_seven_digit_bounds_pass_the_range_guard(self):
+        payload = _normalize_invoice_date_range_payload(
+            {
+                "dateRange": {
+                    "from": "2025-10-11T12:23:56.0154302+00:00",
+                    "to": "2025-12-01T12:23:56.0154302+00:00",
+                }
+            }
+        )
+        self.assertTrue(payload["dateRange"]["from"].startswith("2025-10-11"))
+
+
+def _init_response(content: bytes, content_type: str) -> HttpResponse:
+    return HttpResponse(202, httpx.Headers({"Content-Type": content_type}), content)
+
+
+class XadesInitResponseErrorTests(unittest.TestCase):
+    """202 z ciałem nie-JSON musi dać `KsefHttpError` z kontekstem żądania.
+
+    `submit_xades_auth_request` parsował odpowiedź ręcznym `json.loads`, więc przy 202
+    z HTML-em (proxy, captive portal) użytkownik dostawał surowy `JSONDecodeError`
+    bez informacji, którego endpointu dotyczy i co przyszło zamiast JSON-a.
+    """
+
+    def test_html_body_reports_the_endpoint_and_content_type(self):
+        http = DummyHttp(_init_response(b"<html>portal</html>", "text/html"))
+        with self.assertRaises(KsefHttpError) as ctx:
+            AuthClient(http).submit_xades_auth_request("<xml/>")
+
+        message = str(ctx.exception)
+        self.assertIn("/auth/xades-signature", message)
+        self.assertIn("text/html", message)
+        self.assertEqual(ctx.exception.status_code, 202)
+
+    def test_json_body_still_parses(self):
+        http = DummyHttp(_init_response(b'{"referenceNumber": "REF-1"}', "application/json"))
+        result = AuthClient(http).submit_xades_auth_request("<xml/>")
+
+        assert result is not None
+        self.assertEqual(result.reference_number, "REF-1")
+
+    def test_empty_body_still_returns_none(self):
+        http = DummyHttp(_init_response(b"", "application/json"))
+        self.assertIsNone(AuthClient(http).submit_xades_auth_request("<xml/>"))
+
+    def test_json_array_is_rejected_with_context(self):
+        http = DummyHttp(_init_response(b"[]", "application/json"))
+        with self.assertRaisesRegex(TypeError, "Expected JSON object response"):
+            AuthClient(http).submit_xades_auth_request("<xml/>")
+
+
+class AsyncXadesInitResponseErrorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_html_body_reports_the_endpoint_and_content_type(self):
+        http = DummyAsyncHttp(_init_response(b"<html>portal</html>", "text/html"))
+        with self.assertRaises(KsefHttpError) as ctx:
+            await AsyncAuthClient(http).submit_xades_auth_request("<xml/>")
+
+        message = str(ctx.exception)
+        self.assertIn("/auth/xades-signature", message)
+        self.assertIn("text/html", message)
+        self.assertEqual(ctx.exception.status_code, 202)
+
+    async def test_async_json_body_still_parses(self):
+        http = DummyAsyncHttp(
+            _init_response(b'{"referenceNumber": "REF-2"}', "application/json")
+        )
+        result = await AsyncAuthClient(http).submit_xades_auth_request("<xml/>")
+
+        assert result is not None
+        self.assertEqual(result.reference_number, "REF-2")
+
+    async def test_async_empty_body_still_returns_none(self):
+        http = DummyAsyncHttp(_init_response(b"", "application/json"))
+        self.assertIsNone(await AsyncAuthClient(http).submit_xades_auth_request("<xml/>"))
 
 
 if __name__ == "__main__":

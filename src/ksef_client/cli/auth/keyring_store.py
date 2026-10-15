@@ -362,7 +362,11 @@ def clear_tokens(profile: str) -> None:
                 # udawać wylogowania: wcześniej pętla szła dalej (`continue`),
                 # a `logout` raportował „Stored tokens removed.", zostawiając
                 # ważny refresh token w magazynie poświadczeń.
-                still_present = False
+                #
+                # `still_present=True` jest wartością domyślną (fail-closed): gdy
+                # backend rzuca również na `get_password`, NIE MOŻEMY potwierdzić
+                # usunięcia wpisu, a wtedy raportowanie sukcesu byłoby kłamstwem.
+                still_present = True
                 with suppress(KeyringError, Exception):
                     still_present = bool(
                         keyring_backend.get_password(_SERVICE_NAME, _token_key(profile, key))

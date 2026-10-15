@@ -16,6 +16,8 @@ def test_export_run_help(runner) -> None:
     result = runner.invoke(app, ["export", "run", "--help"])
     assert result.exit_code == 0
     assert "--sort-order" not in result.stdout
+    # Bez tego użytkownik nie wie, jak nadpisać pliki z poprzedniego eksportu.
+    assert "--overwrite" in result.stdout.replace("\n", "")
 
 
 def test_export_run_success(runner, monkeypatch, tmp_path) -> None:
@@ -92,6 +94,39 @@ def test_export_run_validation_error_exit(runner, monkeypatch, tmp_path) -> None
     )
     result = runner.invoke(app, ["export", "run", "--out", str(tmp_path)])
     assert result.exit_code == int(ExitCode.VALIDATION_ERROR)
+
+
+def test_export_run_io_error_exit(runner, monkeypatch, tmp_path) -> None:
+    """`--out` wskazujący plik dawał `UNEXPECTED`/6; kontrakt to `IO_ERROR`/8."""
+    monkeypatch.setattr(
+        export_cmd,
+        "run_export",
+        lambda **kwargs: (_ for _ in ()).throw(
+            CliError("Output path is not a directory", ExitCode.IO_ERROR, "fix --out")
+        ),
+    )
+    result = runner.invoke(app, ["--json", "export", "run", "--out", str(tmp_path)])
+    assert result.exit_code == int(ExitCode.IO_ERROR)
+    assert _json_output(result.stdout)["errors"][0]["code"] == "IO_ERROR"
+
+
+def test_export_run_passes_the_overwrite_flag(runner, monkeypatch, tmp_path) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_run(**kwargs):
+        seen.update(kwargs)
+        return {"reference_number": "EXP-OVERWRITE"}
+
+    monkeypatch.setattr(export_cmd, "run_export", _fake_run)
+
+    result = runner.invoke(app, ["export", "run", "--out", str(tmp_path)])
+    assert result.exit_code == 0
+    assert seen["overwrite"] is False
+
+    seen.clear()
+    result = runner.invoke(app, ["export", "run", "--out", str(tmp_path), "--overwrite"])
+    assert result.exit_code == 0
+    assert seen["overwrite"] is True
 
 
 def test_export_run_rejects_removed_sort_order_option(runner, tmp_path) -> None:

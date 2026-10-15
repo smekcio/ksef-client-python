@@ -57,6 +57,16 @@ def _merge_headers(base: dict[str, str], extra: dict[str, str] | None) -> dict[s
     return merged
 
 
+def _without_authorization(headers: dict[str, str]) -> dict[str, str]:
+    """Usuwa ``Authorization`` (bez względu na wielkość liter) z nagłówków żądania.
+
+    Przy ``skip_auth=True`` żądanie idzie pod adres pre-signed URL, często na obcy host
+    (magazyn plików). Token KSeF podany globalnie w ``custom_headers`` albo w ``headers``
+    pojedynczego żądania nie może tam trafić — wcześniej leciał mimo ``skip_auth``.
+    """
+    return {name: value for name, value in headers.items() if name.lower() != "authorization"}
+
+
 def _is_absolute_http_url(url: str) -> bool:
     return url.startswith("http://") or url.startswith("https://")
 
@@ -166,6 +176,17 @@ def _handle_system_warning(options: KsefClientOptions, response: httpx.Response)
 #: ignorowana, bo dalsze żądania i tak nie mają sensu.
 MAX_RETRY_AFTER_SECONDS = 300
 
+#: Statusy, których ponowienie ma sens — te same, które ponawia CLI
+#: (`cli.policies.retry.should_retry`). Tylko dla nich czytamy ``Retry-After``.
+RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({429, 502, 503, 504})
+
+#: Status dla wyjątków bez odpowiedzi HTTP (błąd transportu, timeout).
+#:
+#: ``KsefHttpError`` wymaga kodu statusu, a żądanie nie dotarło do serwera, więc nie ma
+#: żadnego prawdziwego kodu. ``0`` nie koliduje z kodami HTTP (te zaczynają się od 100),
+#: więc wołający odróżni brak odpowiedzi od odpowiedzi 4xx/5xx.
+NO_HTTP_STATUS_CODE = 0
+
 
 def _reject_json_and_data_together(
     json: dict[str, Any] | None, data: bytes | None
@@ -196,6 +217,41 @@ def _parse_retry_after(value: str | None) -> int | None:
             retry_after_dt = retry_after_dt.replace(tzinfo=timezone.utc)
         delta_seconds = (retry_after_dt - datetime.now(timezone.utc)).total_seconds()
         return max(0, min(math.ceil(delta_seconds), MAX_RETRY_AFTER_SECONDS))
+
+
+def _retry_after_fields(response: httpx.Response) -> dict[str, Any]:
+    """Pola ``retry_after``/``retry_after_raw`` wyjątku dla statusów ponawialnych.
+
+    KSeF wysyła ``Retry-After`` nie tylko przy 429, ale i przy 502/503/504 (przerwa
+    serwisowa, przeciążenie), a CLI ponawia wszystkie te kody. Wcześniej nagłówek był
+    czytany wyłącznie dla 429, więc ponowienie po 503 czekało 0,25 s zamiast żądanych
+    przez serwer 30 s. Dla pozostałych statusów nie czytamy nagłówka, żeby nie
+    sugerować ponowienia tam, gdzie go nie ma.
+    """
+    if response.status_code not in RETRYABLE_STATUS_CODES:
+        return {}
+    raw_value = response.headers.get("Retry-After")
+    return {"retry_after": _parse_retry_after(raw_value), "retry_after_raw": raw_value}
+
+
+def _wrap_transport_error(
+    exc: httpx.TransportError | httpx.TooManyRedirects, *, method: str, url: str
+) -> KsefHttpError:
+    """Opakowuje błąd transportu ``httpx`` w wyjątek SDK.
+
+    ``ConnectError``, timeouty i ``RemoteProtocolError`` (oraz ``TooManyRedirects``,
+    który nie jest ``TransportError``) uciekały do użytkownika jako surowe wyjątki
+    ``httpx``, mimo że biblioteka obiecuje wyjątki ``Ksef*``. Oryginał zachowujemy
+    w ``__cause__``, a ``status_code`` to ``NO_HTTP_STATUS_CODE`` (brak odpowiedzi).
+    Do komunikatu trafia adres bez query — pre-signed URL nie może wyciec do logu.
+    """
+    return KsefHttpError(
+        status_code=NO_HTTP_STATUS_CODE,
+        message=(
+            f"Network error during {method} {_loggable_url(url)}: "
+            f"{type(exc).__name__}: {exc}"
+        ),
+    )
 
 
 def _coerce_problem_status(value: Any, fallback_status: int) -> int:
@@ -678,22 +734,31 @@ class BaseHttpClient:
 
         base_headers = _merge_headers(base_headers, self._options.custom_headers)
         final_headers = _merge_headers(base_headers, headers)
+        if skip_auth:
+            # Presigned URL idzie na obcy host — token KSeF (także ten z `custom_headers`
+            # albo z nagłówków pojedynczego żądania) nie może tam trafić.
+            final_headers = _without_authorization(final_headers)
 
-        response = self._client.request(
-            method=method,
-            url=url,
-            params=params,
-            headers=final_headers,
-            json=json,
-            content=data,
-            # Przy `skip_auth` walidacja bezpieczeństwa dotyczy WYŁĄCZNIE adresu
-            # początkowego, a nagłówka `Authorization` i tak nie ma — podążenie za
-            # przekierowaniem wykonałoby więc żądanie pod adres wskazany przez
-            # serwer (także do sieci wewnętrznej) i zwróciło jego treść jako
-            # wynik. Dlatego dla presigned URL przekierowań nie śledzimy
-            # niezależnie od `options.follow_redirects`.
-            follow_redirects=False if skip_auth else self._options.follow_redirects,
-        )
+        try:
+            response = self._client.request(
+                method=method,
+                url=url,
+                params=params,
+                headers=final_headers,
+                json=json,
+                content=data,
+                # Przy `skip_auth` walidacja bezpieczeństwa dotyczy WYŁĄCZNIE adresu
+                # początkowego, a nagłówka `Authorization` i tak nie ma — podążenie za
+                # przekierowaniem wykonałoby więc żądanie pod adres wskazany przez
+                # serwer (także do sieci wewnętrznej) i zwróciło jego treść jako
+                # wynik. Dlatego dla presigned URL przekierowań nie śledzimy
+                # niezależnie od `options.follow_redirects`.
+                follow_redirects=False if skip_auth else self._options.follow_redirects,
+            )
+        except (httpx.TransportError, httpx.TooManyRedirects) as exc:
+            # Błędy sieci i timeouty nie są wyjątkami SDK — opakowujemy je, żeby
+            # wołający miał jeden kontrakt błędów (`KsefHttpError`).
+            raise _wrap_transport_error(exc, method=method, url=url) from exc
         logger.debug(
             "HTTP %s %s -> %s", method, _loggable_url(url), response.status_code
         )
@@ -716,7 +781,7 @@ class BaseHttpClient:
         return HttpResponse(response.status_code, response.headers, response.content)
 
     def _raise_for_status(self, response: httpx.Response) -> None:
-        retry_after = response.headers.get("Retry-After")
+        retry_after_fields = _retry_after_fields(response)
         content_type = response.headers.get("Content-Type", "")
         body: Any = None
         if _is_json_content_type(content_type):
@@ -733,8 +798,7 @@ class BaseHttpClient:
                 message="Too Many Requests",
                 response_body=body,
                 problem=problem,
-                retry_after=_parse_retry_after(retry_after),
-                retry_after_raw=retry_after,
+                **retry_after_fields,
             )
 
         if body is not None:
@@ -744,6 +808,7 @@ class BaseHttpClient:
                 response_body=body,
                 problem=problem,
                 exception_response=problem if isinstance(problem, ExceptionResponse) else None,
+                **retry_after_fields,
             )
 
         raise KsefHttpError(
@@ -751,6 +816,7 @@ class BaseHttpClient:
             message=response.text,
             response_body=None,
             problem=None,
+            **retry_after_fields,
         )
 
 
@@ -810,18 +876,26 @@ class AsyncBaseHttpClient:
 
         base_headers = _merge_headers(base_headers, self._options.custom_headers)
         final_headers = _merge_headers(base_headers, headers)
+        if skip_auth:
+            # Patrz `BaseHttpClient.request`: presigned URL idzie na obcy host, więc
+            # token KSeF nie może trafić do nagłówków — także z `custom_headers`.
+            final_headers = _without_authorization(final_headers)
 
-        response = await self._client.request(
-            method=method,
-            url=url,
-            params=params,
-            headers=final_headers,
-            json=json,
-            content=data,
-            # Patrz `BaseHttpClient.request`: presigned URL nigdy nie podąża za
-            # przekierowaniem, bo walidacja dotyczy tylko adresu początkowego.
-            follow_redirects=False if skip_auth else self._options.follow_redirects,
-        )
+        try:
+            response = await self._client.request(
+                method=method,
+                url=url,
+                params=params,
+                headers=final_headers,
+                json=json,
+                content=data,
+                # Patrz `BaseHttpClient.request`: presigned URL nigdy nie podąża za
+                # przekierowaniem, bo walidacja dotyczy tylko adresu początkowego.
+                follow_redirects=False if skip_auth else self._options.follow_redirects,
+            )
+        except (httpx.TransportError, httpx.TooManyRedirects) as exc:
+            # Patrz `BaseHttpClient.request`: jeden kontrakt błędów także dla sieci.
+            raise _wrap_transport_error(exc, method=method, url=url) from exc
         logger.debug("HTTP %s %s -> %s", method, _loggable_url(url), response.status_code)
         _handle_system_warning(self._options, response)
 
@@ -842,7 +916,7 @@ class AsyncBaseHttpClient:
         return HttpResponse(response.status_code, response.headers, response.content)
 
     def _raise_for_status(self, response: httpx.Response) -> None:
-        retry_after = response.headers.get("Retry-After")
+        retry_after_fields = _retry_after_fields(response)
         content_type = response.headers.get("Content-Type", "")
         body: Any = None
         if _is_json_content_type(content_type):
@@ -859,8 +933,7 @@ class AsyncBaseHttpClient:
                 message="Too Many Requests",
                 response_body=body,
                 problem=problem,
-                retry_after=_parse_retry_after(retry_after),
-                retry_after_raw=retry_after,
+                **retry_after_fields,
             )
 
         if body is not None:
@@ -870,6 +943,7 @@ class AsyncBaseHttpClient:
                 response_body=body,
                 problem=problem,
                 exception_response=problem if isinstance(problem, ExceptionResponse) else None,
+                **retry_after_fields,
             )
 
         raise KsefHttpError(
@@ -877,4 +951,5 @@ class AsyncBaseHttpClient:
             message=response.text,
             response_body=None,
             problem=None,
+            **retry_after_fields,
         )

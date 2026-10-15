@@ -4,7 +4,7 @@ import codecs
 import json
 import re
 import time
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -13,7 +13,7 @@ from typing import Any, NoReturn, cast
 
 from ksef_client import models as m
 from ksef_client.clients.invoices import INVOICE_QUERY_MAX_RANGE_DAYS
-from ksef_client.exceptions import KsefHttpError, KsefRateLimitError
+from ksef_client.exceptions import KsefHttpError
 from ksef_client.services.crypto import EncryptionData, build_encryption_data, get_file_metadata
 from ksef_client.services.workflows import (
     BatchSessionWorkflow,
@@ -110,7 +110,9 @@ def _transient_retry_delay_seconds(
     poll_interval: float,
     exc: KsefHttpError,
 ) -> float:
-    retry_after = exc.retry_after_raw if isinstance(exc, KsefRateLimitError) else None
+    # `Retry-After` jest wypełniane przy każdym statusie ponawialnym (429/502/503/504),
+    # nie tylko na `KsefRateLimitError` — wcześniej ponowienie po 503 czekało
+    # `poll_interval` zamiast czasu żądanego przez serwer.
     policy = RetryPolicy(
         max_retries=max(1, attempt),
         base_delay_ms=max(1, int(poll_interval * 1000)),
@@ -121,7 +123,7 @@ def _transient_retry_delay_seconds(
         compute_retry_delay_seconds(
             attempt,
             policy,
-            retry_after=retry_after,
+            retry_after=exc.retry_after_raw,
             random_value=0.5,
         ),
     )
@@ -331,6 +333,60 @@ def _safe_child_path(root: Path, relative_path: str) -> Path:
             "Unsafe path from exported archive was blocked.",
         )
     return candidate
+
+
+def _require_distinct_export_file_names(file_names: Iterable[str]) -> None:
+    """Blokuje nazwy plików różniące się wyłącznie wielkością liter.
+
+    Na Windows (i domyślnie na macOS) `Faktura.xml` oraz `faktura.xml` to ten sam
+    plik, więc drugi zapis po cichu nadpisywał pierwszy: na dysku zostawał jeden
+    XML, a `xml_files_count` raportował dwa. Kolizję zgłaszamy **przed** zapisem,
+    bo po fakcie nie da się odtworzyć zgubionej faktury.
+    """
+    seen: dict[str, str] = {}
+    for file_name in file_names:
+        key = file_name.casefold()
+        previous = seen.get(key)
+        if previous is not None and previous != file_name:
+            raise CliError(
+                f"Export package contains colliding file names: '{previous}' and '{file_name}'.",
+                ExitCode.VALIDATION_ERROR,
+                "On this filesystem both names point at the same file; unpack the package "
+                "on a case-sensitive filesystem and rename the invoices.",
+            )
+        seen[key] = file_name
+
+
+def _require_free_export_targets(paths: Sequence[Path]) -> None:
+    """Bez `--overwrite` żaden plik docelowy nie może istnieć.
+
+    Sprawdzenie całej listy **przed** pierwszym zapisem nie zostawia częściowego
+    eksportu: wcześniej `_metadata.json` był nadpisywany bez ostrzeżenia, a XML-e
+    z poprzedniego przebiegu zostawały, więc plik metadanych przestawał opisywać
+    katalog (a przy kolizji nazw ginęła faktura).
+    """
+    for path in paths:
+        if path.exists():
+            raise CliError(
+                f"Output file already exists: {path}",
+                ExitCode.IO_ERROR,
+                "Use --overwrite to replace existing export files.",
+            )
+
+
+def _export_metadata_bytes(processed: Any) -> bytes:
+    """Bajty `_metadata.json` do zapisania: treść z paczki albo wariant awaryjny.
+
+    Paczka KSeF niesie plik metadanych, więc zapisujemy go **verbatim** — rekonstrukcja
+    z listy faktur (`{"invoices": [...]}`) gubiła klucze najwyższego poziomu, m.in.
+    `isTruncated` i `permanentStorageHwmDate`. Wariant awaryjny (paczka bez metadanych,
+    np. pusty eksport) zachowuje dotychczasowy kształt pliku.
+    """
+    raw = getattr(processed, "metadata_raw", None)
+    if isinstance(raw, bytes):
+        return raw
+    payload = {"invoices": list(processed.metadata_summaries)}
+    return json.dumps(payload, ensure_ascii=True, indent=2).encode("utf-8")
 
 
 def _to_output_payload(value: Any) -> Any:
@@ -1879,7 +1935,15 @@ def run_export(
     poll_interval: float,
     max_attempts: int,
     out: str,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
+    """Eksport paczki KSeF do katalogu `--out`.
+
+    Bez `overwrite` istniejący plik docelowy przerywa eksport kodem `IO_ERROR`
+    (wcześniej `_metadata.json` był nadpisywany po cichu, a XML-e z poprzedniego
+    przebiegu zostawały). Kolizje nazw różniących się wielkością liter są odrzucane
+    przed zapisem czegokolwiek.
+    """
     access_token = _require_access_token(profile)
     _validate_polling_options(poll_interval, max_attempts)
     from_iso, to_iso = _normalize_date_range(date_from, date_to)
@@ -1894,7 +1958,24 @@ def run_export(
             )
         restrict_hwm = None
     out_dir = Path(out).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
+    if out_dir.exists() and not out_dir.is_dir():
+        # `--out` wskazujący plik dawał surowy `FileExistsError` (`WinError 183`)
+        # z `mkdir`, więc CLI kończyło się `UNEXPECTED`/6 zamiast `IO_ERROR`/8.
+        raise CliError(
+            f"Output path is not a directory: {out_dir}",
+            ExitCode.IO_ERROR,
+            "Pass a directory as --out; the export writes _metadata.json and invoice files there.",
+        )
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # Spójnie z `_save_bytes`: każdy błąd systemu plików to `IO_ERROR`, nie
+        # nieoczekiwany kod wyjścia z surowym komunikatem systemowym.
+        raise CliError(
+            f"Cannot create export directory: {out_dir}",
+            ExitCode.IO_ERROR,
+            "Grant write access to the target directory or choose another --out.",
+        ) from exc
     compression_type = _require_cli_compression_type(compression)
 
     with _create_client_collecting_system_warnings(
@@ -1953,20 +2034,32 @@ def run_export(
 
         workflow = ExportWorkflow(client.invoices, client.http_client)
         processed = _download_and_process_export_package(workflow, package, encryption)
+        is_truncated = bool(getattr(package, "is_truncated", False))
+        permanent_storage_hwm_date = getattr(package, "permanent_storage_hwm_date", None) or ""
 
+    if is_truncated:
+        # Obcięty eksport (limit po stronie KSeF) wyglądał na kompletny — paczka
+        # nie może przejść bez śladu w wyniku, bo użytkownik nie ma z czego wznowić
+        # przyrostu (`permanent_storage_hwm_date`).
+        system_warnings.append(
+            "Export package is truncated (KSeF export limit): it does not contain all invoices "
+            f"for the requested range. Continue from permanent_storage_hwm_date="
+            f"{permanent_storage_hwm_date or 'unavailable'} using --date-type PermanentStorage."
+        )
+
+    _require_distinct_export_file_names(processed.invoice_xml_files)
     metadata_path = out_dir / "_metadata.json"
-    metadata_payload = {"invoices": processed.metadata_summaries}
-    metadata_path.write_text(
-        json.dumps(metadata_payload, ensure_ascii=True, indent=2),
-        encoding="utf-8",
-    )
-
-    files_saved = 0
-    for file_name, content in processed.invoice_xml_files.items():
-        file_path = _safe_child_path(out_dir, file_name)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content, encoding="utf-8")
-        files_saved += 1
+    invoice_targets = [
+        (_safe_child_path(out_dir, file_name), content.encode("utf-8"))
+        for file_name, content in processed.invoice_xml_files.items()
+    ]
+    if not overwrite:
+        _require_free_export_targets([metadata_path, *(path for path, _ in invoice_targets)])
+    # `_save_bytes` mapuje `OSError` na `IO_ERROR` i pilnuje kolizji nazw plików.
+    _save_bytes(metadata_path, _export_metadata_bytes(processed), overwrite=overwrite)
+    for file_path, file_bytes in invoice_targets:
+        _save_bytes(file_path, file_bytes, overwrite=overwrite)
+    files_saved = len(invoice_targets)
 
     code, description, _ = _extract_status_fields(export_status)
     result = {
@@ -1983,6 +2076,8 @@ def run_export(
         "to": to_iso,
         "date_type": date_type_enum.value,
         "restrict_to_permanent_storage_hwm_date": restrict_hwm,
+        "is_truncated": is_truncated,
+        "permanent_storage_hwm_date": permanent_storage_hwm_date,
     }
     if system_warnings:
         result["system_warnings"] = list(system_warnings)
