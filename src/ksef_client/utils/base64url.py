@@ -27,5 +27,17 @@ def b64url_encode(data: bytes) -> str:
 
 
 def b64url_decode(data: str) -> bytes:
+    """Dekoduje base64url **ściśle** (bez cichego odrzucania znaków).
+
+    ``base64.urlsafe_b64decode`` *odrzuca* znaki spoza alfabetu (``!``, ``=``
+    w środku, znaki sterujące) i zwraca krótszy — albo pusty — wynik zamiast
+    zgłosić błąd. Dla hasha faktury kończyło się to linkiem z niepełnym
+    segmentem, a nie czytelnym błędem, dlatego dekodujemy z ``validate=True``
+    (własne ``altchars`` dają alfabet base64url).
+    """
     padding = "=" * ((4 - len(data) % 4) % 4)
-    return base64.urlsafe_b64decode((data + padding).encode("ascii"))
+    try:
+        return base64.b64decode((data + padding).encode("ascii"), altchars=b"-_", validate=True)
+    except ValueError as exc:
+        # `binascii.Error` i `UnicodeEncodeError` są podklasami `ValueError`.
+        raise ValueError(f"Invalid base64url value: {data!r}") from exc

@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 #: Znaczniki, które kończą bieżący wiersz faktury.
 _ROW_TAGS = frozenset({"FaWiersz", "ZamowienieWiersz"})
 
+#: Podmioty, których NIP rozpoznajemy (sprzedawca i nabywca).
+_SUBJECT_TAGS = frozenset({"Podmiot1", "Podmiot2"})
+
 
 def _parse_amount(text: str) -> Decimal | None:
     sanitized_text = text.replace(",", ".")
@@ -72,6 +75,11 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
     Wiersze oznaczone ``StanPrzed``/``StanPrzedZ`` (stan przed korektą) są liczone
     osobno w ``stan_przed_item_count`` i nie wchodzą do sum — inaczej korekta
     (KOR/KOR_ROZ) podwajała wartości.
+
+    Otwartych przodków śledzimy licznikami (``open_subjects``), a nie przez
+    ``tag in stack``: przeszukiwanie listy jest liniowe względem głębokości, więc
+    dokument z 64 000 zagnieżdżeń i 64 000 ``<NIP>`` miał koszt O(n²) (8 s dla
+    594 KiB, 30 s dla 1,19 MiB).
     """
     source: Any
     if isinstance(xml_content, str):
@@ -93,6 +101,9 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
     order_item_count = 0
 
     stack: list[str] = []
+    # Liczniki otwartych `Podmiot1`/`Podmiot2` — odpowiednik `"Podmiot1" in stack`,
+    # ale w O(1). Brak klucza lub zero znaczy „nie jesteśmy w środku”.
+    open_subjects: dict[str, int] = {}
     row_tag: str | None = None
     row_net: Decimal | None = None
     row_vat: Decimal | None = None
@@ -112,6 +123,8 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
 
         if event == "start":
             stack.append(tag_name)
+            if tag_name in _SUBJECT_TAGS:
+                open_subjects[tag_name] = open_subjects.get(tag_name, 0) + 1
             if tag_name in _ROW_TAGS:
                 row_tag = tag_name
                 row_net = None
@@ -124,9 +137,9 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
 
         if tag_name == "NIP" and text:
             nips.append(text)
-            if "Podmiot1" in stack and seller_nip is None:
+            if open_subjects.get("Podmiot1") and seller_nip is None:
                 seller_nip = text
-            elif "Podmiot2" in stack and buyer_nip is None:
+            elif open_subjects.get("Podmiot2") and buyer_nip is None:
                 buyer_nip = text
         elif tag_name == "P_11" and text:
             row_net = _parse_amount(text)
@@ -166,6 +179,8 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
 
         if stack and stack[-1] == tag_name:
             stack.pop()
+            if tag_name in _SUBJECT_TAGS:
+                open_subjects[tag_name] -= 1
 
         elem.clear()
         if root is not None and elem is not root:

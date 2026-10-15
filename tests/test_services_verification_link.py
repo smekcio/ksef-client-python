@@ -13,8 +13,13 @@ from ksef_client.services.verification_link import (
     _decode_base64_or_url,
     _sign_path,
 )
-from ksef_client.utils.base64url import b64url_decode
+from ksef_client.utils.base64url import b64url_decode, b64url_encode
 from tests.helpers import generate_ec_cert, generate_ed25519_key_pem, generate_rsa_cert
+
+#: Poprawny hash faktury: SHA-256 (32 bajty) w zapisie base64url bez paddingu.
+#: Wcześniejsze testy używały ``"YQ=="`` (1 bajt), czyli wartości, której KSeF
+#: nie potrafi zweryfikować — link miał wtedy segment inny niż 43 znaki.
+INVOICE_HASH = b64url_encode(hashlib.sha256(b"invoice").digest())
 
 
 class VerificationLinkTests(unittest.TestCase):
@@ -26,7 +31,7 @@ class VerificationLinkTests(unittest.TestCase):
         return path_to_sign.encode("utf-8"), b64url_decode(signature_segment)
 
     def test_decode_base64_or_url(self):
-        payload = b"data"
+        payload = hashlib.sha256(b"payload").digest()
         b64 = base64.b64encode(payload).decode("ascii")
         b64url = base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
         self.assertEqual(_decode_base64_or_url(b64), payload)
@@ -61,10 +66,46 @@ class VerificationLinkTests(unittest.TestCase):
     def test_invoice_verification_url(self):
         options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
         service = VerificationLinkService(options)
-        url = service.build_invoice_verification_url("123", "01-01-2024", "YQ==")
+        url = service.build_invoice_verification_url("123", "01-01-2024", INVOICE_HASH)
         self.assertIn("/invoice/123/01-01-2024/", url)
-        url_date = service.build_invoice_verification_url("123", date(2024, 1, 1), "YQ==")
+        url_date = service.build_invoice_verification_url("123", date(2024, 1, 1), INVOICE_HASH)
         self.assertIn("/invoice/123/01-01-2024/", url_date)
+
+    def test_invoice_verification_url_accepts_standard_base64_digest(self):
+        """Standardowy Base64 (z paddingiem) daje ten sam 43-znakowy segment."""
+        options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
+        service = VerificationLinkService(options)
+        standard = base64.b64encode(hashlib.sha256(b"invoice").digest()).decode("ascii")
+        url = service.build_invoice_verification_url("123", "01-01-2024", standard)
+        self.assertTrue(url.endswith(INVOICE_HASH), url)
+        self.assertEqual(len(url.rsplit("/", 1)[-1]), 43)
+
+    def test_decode_base64_or_url_rejects_values_outside_sha256(self):
+        """Hash inny niż 32 bajty dawał link bez hasha albo z segmentem 64 znaków."""
+        for value in ("", "!!!", "a" * 64, "YQ=="):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                _decode_base64_or_url(value)
+
+    def test_invoice_verification_url_rejects_invalid_hash(self):
+        options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
+        service = VerificationLinkService(options)
+        for value in ("", "!!!", "a" * 64, "YQ=="):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                service.build_invoice_verification_url("123", "01-01-2024", value)
+
+    def test_certificate_verification_url_rejects_invalid_hash(self):
+        options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
+        service = VerificationLinkService(options)
+        ec_cert = generate_ec_cert()
+        with self.assertRaises(ValueError):
+            service.build_certificate_verification_url(
+                seller_nip="123",
+                context_identifier_type="nip",
+                context_identifier_value="123",
+                certificate_serial="1",
+                invoice_hash="",
+                private_key_pem=ec_cert.private_key_pem,
+            )
 
     def test_certificate_verification_url_rsa(self):
         options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
@@ -75,7 +116,7 @@ class VerificationLinkTests(unittest.TestCase):
             context_identifier_type="nip",
             context_identifier_value="123",
             certificate_serial="1",
-            invoice_hash="YQ==",
+            invoice_hash=INVOICE_HASH,
             signing_certificate_pem=rsa_cert.certificate_pem,
             private_key_pem=rsa_cert.private_key_pem,
             signature_format="p1363",
@@ -98,7 +139,7 @@ class VerificationLinkTests(unittest.TestCase):
             context_identifier_type="nip",
             context_identifier_value="123",
             certificate_serial="1",
-            invoice_hash="YQ==",
+            invoice_hash=INVOICE_HASH,
             signing_certificate_pem=rsa_cert.certificate_pem,
             private_key_pem=rsa_cert.private_key_pem,
             private_key_password=self.ENCRYPTED_KEY_PASSWORD,
@@ -122,7 +163,7 @@ class VerificationLinkTests(unittest.TestCase):
             context_identifier_type="nip",
             context_identifier_value="123",
             certificate_serial="1",
-            invoice_hash="YQ==",
+            invoice_hash=INVOICE_HASH,
             signing_certificate_pem=rsa_cert.certificate_pem,
             private_key_pem=rsa_cert.private_key_pem,
             private_key_password=self.ENCRYPTED_KEY_PASSWORD.encode("utf-8"),
@@ -222,7 +263,7 @@ class VerificationLinkTests(unittest.TestCase):
             context_identifier_type="nip",
             context_identifier_value="123",
             certificate_serial="1",
-            invoice_hash="YQ==",
+            invoice_hash=INVOICE_HASH,
             signing_certificate_pem=ec_cert.certificate_pem,
             private_key_pem=ec_cert.private_key_pem,
         )

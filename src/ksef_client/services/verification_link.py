@@ -17,6 +17,8 @@ from .crypto import load_private_key, sign_path_ecdsa, sign_path_rsa_pss
 _INVOICE_LINK_DATE = re.compile(r"[0-3][0-9]-[0-1][0-9]-[0-9]{4}")
 #: Ten sam dzień w zapisie ISO-8601 — wygodny dla wołających, konwertujemy go.
 _ISO_DATE = re.compile(r"([0-9]{4})-([0-1][0-9])-([0-3][0-9])")
+#: Hash faktury to SHA-256, czyli dokładnie 32 bajty (43 znaki base64url).
+_SHA256_DIGEST_LENGTH = 32
 
 
 def _normalize_context_identifier_type(value: str) -> str:
@@ -134,10 +136,32 @@ def _link_segment(value: str, *, field_name: str) -> str:
 
 
 def _decode_base64_or_url(value: str) -> bytes:
+    """Dekoduje hash faktury (Base64 lub Base64Url) i wymaga 32 bajtów SHA-256.
+
+    Wcześniej przechodził dowolny string: ``""`` i ``"!!!"`` dawały link bez
+    hasha (``.../invoice/1111111111/01-02-2026/``), a ``"a" * 64`` (hex) dawał
+    segment 64-znakowy zamiast 43-znakowego, czyli kod QR prowadził do zasobu,
+    którego qr.ksef.mf.gov.pl nie potrafi zweryfikować.
+    """
+    if not value:
+        raise ValueError("invoice_hash is required")
     try:
-        return b64decode(value)
+        hash_bytes = b64decode(value)
     except Exception:
-        return b64url_decode(value)
+        # Alfabet base64url (`-`/`_`) musi wywołać błąd w dekoderze standardowym,
+        # żeby fallback w ogóle się włączył; dekoder base64url jest ścisły.
+        try:
+            hash_bytes = b64url_decode(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"invoice_hash is not valid Base64 or Base64Url: {value!r}"
+            ) from exc
+    if len(hash_bytes) != _SHA256_DIGEST_LENGTH:
+        raise ValueError(
+            "invoice_hash must be a Base64/Base64Url encoded SHA-256 digest "
+            f"(32 bytes), got {len(hash_bytes)} bytes"
+        )
+    return hash_bytes
 
 
 def _sign_path(

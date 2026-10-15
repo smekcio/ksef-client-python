@@ -50,7 +50,7 @@ url = service.build_certificate_verification_url(
     context_identifier_type="Nip",
     context_identifier_value="1234567890",
     certificate_serial="1",
-    invoice_hash="YQ==",
+    invoice_hash="Utbj3k-g3MKZRmlfk5QMPn8m8w4eOfSxpJrZiDkRJ4Y",
     signing_certificate_pem=certificate_pem,
     private_key_pem=private_key_pem,
     private_key_password="tajne-haslo",

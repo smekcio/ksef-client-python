@@ -5,6 +5,7 @@ import io
 import tarfile
 import zipfile
 from pathlib import PurePosixPath
+from typing import IO
 
 #: Maksymalny rozmiar części paczki PRZED zaszyfrowaniem.
 #:
@@ -28,6 +29,19 @@ EXPORT_MAX_INVOICES = 10_000
 EXPORT_MAX_ARCHIVE_ENTRIES = EXPORT_MAX_INVOICES + 1
 _DETERMINISTIC_ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 _DETERMINISTIC_TAR_MTIME = 0
+#: Porcja odczytu wpisu archiwum.
+#:
+#: `entry.read()` bez rozmiaru materializował CAŁĄ treść wpisu, więc limity
+#: „ochrony przed zip bomb" nie ograniczały pamięci: metadane mogły deklarować
+#: 1 KiB, a strumień DEFLATE produkował 128 MiB (peak `tracemalloc` 269 MiB dla
+#: archiwum 130 KiB przy limitach 2048/4096/ratio=200). Odczyt porcjami ogranicza
+#: pojedyncze wywołanie `decompress()` — dla DEFLATE i ZIP_STORED.
+#:
+#: Uwaga: `zipfile` woła `decompress()` **bez** `max_length` dla BZIP2 i LZMA
+#: (stdlib, `zipfile/__init__.py:1064`), więc dla tych metod pojedyncza porcja
+#: danych skompresowanych nadal może rozmnożyć się ponad budżet — sam rozmiar
+#: porcji tego nie ogranicza (zmierzone: 32 MiB payloadu = 77 MiB peaku).
+_ARCHIVE_READ_CHUNK = 64 * 1024
 
 
 def build_zip(files: dict[str, bytes]) -> bytes:
@@ -177,15 +191,21 @@ def untar_gz_bytes_safe(
 
             if len(result) >= max_files:
                 raise ValueError("tar.gz contains too many files")
-            if member.size > max_file_uncompressed_size:
+
+            # Rozmiar z nagłówka tar jest danymi od atakującego, więc liczymy go
+            # tylko jako budżet wstępny — faktycznie odczytane bajty sprawdza
+            # `_read_entry_within_budget`.
+            declared_size = int(member.size or 0)
+            if declared_size > max_file_uncompressed_size:
                 raise ValueError("tar.gz contains an entry exceeding max_file_uncompressed_size")
 
-            total_uncompressed += int(member.size)
-            if total_uncompressed > max_total_uncompressed_size:
+            remaining_total = max_total_uncompressed_size - total_uncompressed
+            projected_total = total_uncompressed + declared_size
+            if projected_total > max_total_uncompressed_size:
                 raise ValueError("tar.gz exceeds max_total_uncompressed_size")
             if (
                 max_compression_ratio is not None
-                and total_uncompressed / compressed_size > max_compression_ratio
+                and projected_total / compressed_size > max_compression_ratio
             ):
                 raise ValueError("tar.gz exceeds max_compression_ratio")
 
@@ -197,7 +217,17 @@ def untar_gz_bytes_safe(
             extracted = tf.extractfile(member)
             if extracted is None:
                 raise ValueError("tar.gz entry could not be read")
-            result[safe_name] = extracted.read()
+            content = _read_entry_within_budget(
+                extracted,
+                max_entry_size=max_file_uncompressed_size,
+                max_remaining_size=remaining_total,
+                entry_limit_message=(
+                    "tar.gz contains an entry exceeding max_file_uncompressed_size"
+                ),
+                total_limit_message="tar.gz exceeds max_total_uncompressed_size",
+            )
+            total_uncompressed += len(content)
+            result[safe_name] = content
     return result
 
 
@@ -226,20 +256,20 @@ def unzip_bytes_safe(
             if len(result) >= max_files:
                 raise ValueError("zip contains too many files")
 
-            if info.file_size > max_file_uncompressed_size:
+            declared_size = int(info.file_size or 0)
+            if declared_size > max_file_uncompressed_size:
                 raise ValueError("zip contains an entry exceeding max_file_uncompressed_size")
 
-            total_uncompressed += int(info.file_size)
-            if total_uncompressed > max_total_uncompressed_size:
+            remaining_total = max_total_uncompressed_size - total_uncompressed
+            if declared_size > remaining_total:
                 raise ValueError("zip exceeds max_total_uncompressed_size")
 
             if max_compression_ratio is not None:
                 compressed = int(info.compress_size or 0)
-                uncompressed = int(info.file_size or 0)
-                if compressed == 0 and uncompressed > 0:
+                if compressed == 0 and declared_size > 0:
                     raise ValueError("zip entry has suspicious compression metadata")
-                if compressed > 0 and uncompressed > 0:
-                    ratio = uncompressed / compressed
+                if compressed > 0 and declared_size > 0:
+                    ratio = declared_size / compressed
                     if ratio > max_compression_ratio:
                         raise ValueError("zip entry exceeds max_compression_ratio")
 
@@ -249,10 +279,49 @@ def unzip_bytes_safe(
                 # wpisu o tej nazwie — wcześniejsze bajty przepadałyby po cichu,
                 # a licznik `max_files` liczyłby już zredukowany słownik.
                 raise ValueError(f"zip contains duplicate entry name: {safe_name}")
-            # Odczyt konkretnego wpisu (nie „po nazwie"), żeby nie zgubić treści.
+            # Odczyt konkretnego wpisu (nie „po nazwie"), żeby nie zgubić treści,
+            # i porcjami — metadane wpisu nie mogą decydować o alokacji pamięci.
             with zf.open(info) as entry:
-                result[safe_name] = entry.read()
+                content = _read_entry_within_budget(
+                    entry,
+                    max_entry_size=max_file_uncompressed_size,
+                    max_remaining_size=remaining_total,
+                    entry_limit_message=(
+                        "zip contains an entry exceeding max_file_uncompressed_size"
+                    ),
+                    total_limit_message="zip exceeds max_total_uncompressed_size",
+                )
+            total_uncompressed += len(content)
+            result[safe_name] = content
     return result
+
+
+def _read_entry_within_budget(
+    stream: IO[bytes],
+    *,
+    max_entry_size: int,
+    max_remaining_size: int,
+    entry_limit_message: str,
+    total_limit_message: str,
+) -> bytes:
+    """Czyta wpis porcjami, pilnując budżetu **faktycznie odczytanych** bajtów.
+
+    `file_size` (zip) i `size` (tar) są danymi od atakującego: mogą deklarować
+    1 KiB, gdy strumień dekompresji produkuje 128 MiB. Dlatego budżet sprawdzamy
+    po każdej porcji, a nie tylko na nagłówku wpisu.
+    """
+    chunks: list[bytes] = []
+    read_bytes = 0
+    while True:
+        chunk = stream.read(_ARCHIVE_READ_CHUNK)
+        if not chunk:
+            return b"".join(chunks)
+        read_bytes += len(chunk)
+        if read_bytes > max_entry_size:
+            raise ValueError(entry_limit_message)
+        if read_bytes > max_remaining_size:
+            raise ValueError(total_limit_message)
+        chunks.append(chunk)
 
 
 def _validate_archive_limits(
@@ -274,9 +343,21 @@ def _validate_archive_limits(
 
 def _sanitize_archive_entry_name(raw_name: str, *, archive_type: str) -> str:
     normalized = raw_name.replace("\\", "/")
+    for char in normalized:
+        if char < "\x20" or char == "\x7f":
+            # NUL ucinał nazwę w `zipfile`/`tarfile` (a w nagłówku PAX `path`
+            # dochodził do `stat` jako surowy „embedded null character in path"),
+            # a `\x01`/`\x7f` trafiały wprost do rozpakowywanych ścieżek.
+            raise ValueError(
+                f"{archive_type} entry path contains a control character (U+{ord(char):04X})"
+            )
     path = PurePosixPath(normalized)
     if path.is_absolute():
         raise ValueError(f"{archive_type} entry path must be relative")
+    if not path.parts:
+        # `""`, `"."` i `"./"` normalizują się do `"."`, czyli do katalogu
+        # bieżącego — wpis bez nazwy przechodził dalej jako `"."`.
+        raise ValueError(f"{archive_type} entry path must not be empty")
     if any(part in {"", ".", ".."} for part in path.parts):
         raise ValueError(f"{archive_type} entry path contains unsafe segments")
     if ":" in normalized:

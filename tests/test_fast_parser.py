@@ -1,5 +1,6 @@
 """Unit tests for fast_extract_ksef_metadata function."""
 
+import time
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 
@@ -180,3 +181,39 @@ def test_fast_extract_ksef_metadata_skips_before_correction_rows():
     assert res["total_netto"] == Decimal("312000")
     assert res["item_count"] == 4
     assert res["stan_przed_item_count"] == 2
+
+
+def test_fast_extract_ksef_metadata_deep_nesting_stays_linear():
+    """64 000 zagnieżdżeń i 64 000 `<NIP>` nie mogą dawać kosztu O(n²).
+
+    `"Podmiot1" in stack` było liniowe względem głębokości, więc audyt zmierzył
+    8,05 s dla 594 KiB i 30,09 s dla 1,19 MiB (×4 na podwojenie rozmiaru).
+    Liczniki otwartych przodków rozpoznają podmiot w O(1) i nie zmieniają
+    zachowania: NIP poza `Podmiot1`/`Podmiot2` nadal nie jest niczyim NIP-em,
+    a dokument o tej samej treści (bez zagnieżdżeń) daje identyczny wynik.
+    """
+    depth = 64_000
+    nested = (
+        "<Faktura>"
+        + "<a>" * depth
+        + "<NIP>1111111111</NIP>" * depth
+        + "</a>" * depth
+        + "<Podmiot1><NIP>5260250995</NIP></Podmiot1>"
+        + "</Faktura>"
+    )
+    flat = (
+        "<Faktura>"
+        + "<NIP>1111111111</NIP>" * depth
+        + "<Podmiot1><NIP>5260250995</NIP></Podmiot1>"
+        + "</Faktura>"
+    )
+
+    started = time.perf_counter()
+    res = fast_extract_ksef_metadata(nested)
+    elapsed = time.perf_counter() - started
+
+    assert res == fast_extract_ksef_metadata(flat)
+    assert res["seller_nip"] == "5260250995"
+    assert res["buyer_nip"] is None
+    assert res["nips"] == ["1111111111"] * depth + ["5260250995"]
+    assert elapsed < 2.0, f"parsowanie 64 000 zagnieżdżeń zajęło {elapsed:.2f} s"
