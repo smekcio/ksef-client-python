@@ -297,7 +297,14 @@ def generate_models(
     *,
     snapshot_path: Path = DEFAULT_KSEF_OPENAPI_FALLBACK_PATH,
     allow_fallback: bool = True,
+    write_snapshot: bool = True,
 ) -> None:
+    """Generuje modele z dokumentu OpenAPI.
+
+    ``write_snapshot=False`` pomija aktualizację śledzonego snapshotu — tryb
+    ``--check`` nie może zmieniać plików repozytorium, bo wtedy sama weryfikacja
+    brudzi drzewo i raportuje rozjazd, który dopiero co stworzyła.
+    """
     document = load_openapi_document(
         input_path=input_path,
         fallback_path=snapshot_path,
@@ -306,7 +313,7 @@ def generate_models(
     data = parse_openapi_json(document)
     rendered = render_models(data)
     output_path.write_text(rendered, encoding="utf-8", newline="\n")
-    if input_path is None and not document.used_fallback:
+    if write_snapshot and input_path is None and not document.used_fallback:
         write_openapi_snapshot(document.text, snapshot_path=snapshot_path)
 
 

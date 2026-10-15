@@ -66,6 +66,11 @@ def sync_generated(
             input_path,
             generated_openapi_path,
             allow_fallback=allow_fallback,
+            # `--check` nie może nadpisywać śledzonego snapshotu OpenAPI: wcześniej
+            # pobranie żywej specyfikacji aktualizowało
+            # `specs/ksef-openapi.snapshot.json` i samo tworzyło rozjazd, który
+            # potem raportowało (oraz brudziło drzewo robocze).
+            write_snapshot=not check,
         )
         generate_models_stub.generate_models_stub(
             generated_models_stub_path,
