@@ -1691,6 +1691,41 @@ class TestCsrSubjectAttributes:
         ] == ["VATPL-1111111111"]
 
 
+class TestSchemaConstraintsFromTheXsd:
+    """Ograniczenia elementów, których tabela faset wcześniej nie miała.
+
+    `BDO` to `xsd:restriction base="tns:TZnakowy"` (`minLength=1`), `StopkaFaktury`
+    to `etd:TTekstowy` (`minLength=1`), a `NrWierszaFa`/`NrWierszaZam` to
+    `tns:TNaturalny` z `totalDigits=14` — bez tych wpisów `validate()` i domyślne
+    `to_xml()` przepuszczały dokument, który XSD odrzuca.
+    """
+
+    def test_empty_bdo_and_footer_are_reported(self):
+        from xml.etree import ElementTree as ET
+
+        from ksef_client.documents.fa3.validation import validate_xml_facets
+
+        xml = (
+            '<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/"><Podmiot1>'
+            "<BDO></BDO></Podmiot1><Fa><StopkaFaktury></StopkaFaktury></Fa></Faktura>"
+        )
+        elements = {issue.element for issue in validate_xml_facets(ET.fromstring(xml))}
+        assert "BDO" in elements
+        assert "StopkaFaktury" in elements
+
+    def test_row_number_over_fourteen_digits_is_reported(self):
+        from xml.etree import ElementTree as ET
+
+        from ksef_client.documents.fa3.validation import validate_xml_facets
+
+        xml = (
+            '<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/"><Fa><FaWiersz>'
+            "<NrWierszaFa>123456789012345</NrWierszaFa></FaWiersz></Fa></Faktura>"
+        )
+        issues = validate_xml_facets(ET.fromstring(xml))
+        assert any(issue.element == "NrWierszaFa" for issue in issues)
+
+
 class TestExportArchiveLimits:
     """Paczka eksportu może mieć 10 000 faktur + `_metadata.json` (nie liczy się)."""
 

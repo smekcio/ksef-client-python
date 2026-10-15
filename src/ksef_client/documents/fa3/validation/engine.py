@@ -181,6 +181,20 @@ def _check_text(value: str, facet: Facet, path: str, element: str) -> list[Facet
                     f"a schemat dopuszcza {facet.integer_digits} ({facet.xsd_type})",
                 )
             )
+    if facet.total_digits is not None:
+        # `xsd:totalDigits` liczy wszystkie cyfry wartości (bez znaku i separatora),
+        # a wcześniej nie był sprawdzany w ogóle — `TNaturalny` (`totalDigits=14`)
+        # i typy kwotowe (`totalDigits=18/22`) przepuszczały zbyt długie liczby.
+        digits = sum(character.isdigit() for character in value.lstrip("-").replace(".", ""))
+        if digits > facet.total_digits:
+            issues.append(
+                FacetIssue(
+                    path,
+                    element,
+                    f"wartość {value!r} ma {digits} cyfr, a schemat dopuszcza "
+                    f"{facet.total_digits} ({facet.xsd_type})",
+                )
+            )
     if facet.kind is FacetKind.INTEGER and number != number.to_integral_value():
         issues.append(FacetIssue(path, element, f"wartość {value!r} musi być liczbą całkowitą"))
     if facet.decimals is not None:

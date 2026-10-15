@@ -221,9 +221,13 @@ KWOTOWY2 = Facet(
     integer_digits=14,
     whitespace=_WS_COLLAPSE,
 )
-#: `tns:TNaturalny` — liczba całkowita większa od zera.
+#: `tns:TNaturalny` — liczba całkowita większa od zera (`totalDigits=14` w schemacie).
 NATURALNY = Facet(
-    FacetKind.INTEGER, "TNaturalny", minimum=Decimal("1"), whitespace=_WS_COLLAPSE
+    FacetKind.INTEGER,
+    "TNaturalny",
+    minimum=Decimal("1"),
+    total_digits=14,
+    whitespace=_WS_COLLAPSE,
 )
 
 #: `tns:TData` — data ``YYYY-MM-DD`` z zakresem 2016-07-01..2050-01-01.
@@ -774,7 +778,10 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "DataGodzRozpTransportu": ElementFacet(DATA_CZAS),
     "DataGodzZakTransportu": ElementFacet(DATA_CZAS),
     # --- Stopka -----------------------------------------------------------
-    "StopkaFaktury": ElementFacet(Facet(FacetKind.STRING, "TTekstowy", max_length=3500)),
+    # `etd:TTekstowy` ma `minLength=1`, więc sama spacja nie jest poprawną stopką.
+    "StopkaFaktury": ElementFacet(
+        Facet(FacetKind.STRING, "TTekstowy", max_length=3500, minimum_length=1)
+    ),
     "KRS": ElementFacet(
         Facet(FacetKind.STRING, "TNrKRS", max_length=10, minimum_length=10),
         pattern=re.compile(r"\d{10}"),
@@ -785,7 +792,10 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
         pattern=re.compile(r"\d{9}|\d{14}"),
         pattern_hint="9 albo 14 cyfr",
     ),
-    "BDO": ElementFacet(Facet(FacetKind.STRING, None, max_length=9, whitespace=_WS_COLLAPSE)),
+    # `BDO` to `xsd:restriction base="tns:TZnakowy"` (minLength=1) z maxLength=9.
+    "BDO": ElementFacet(
+        Facet(FacetKind.STRING, None, max_length=9, minimum_length=1, whitespace=_WS_COLLAPSE)
+    ),
     # --- Załącznik --------------------------------------------------------
     "ZNaglowek": ElementFacet(TZN512),
     "ZKlucz": ElementFacet(TZN),
