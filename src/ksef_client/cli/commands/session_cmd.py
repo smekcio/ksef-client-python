@@ -143,13 +143,18 @@ def session_export(
     ctx: typer.Context,
     session_id: str = typer.Option(..., "--id", help="Saved session checkpoint id."),
     out: str = typer.Option(..., "--out", help="Destination JSON path or directory."),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Overwrite the destination file when it exists."
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
     profile = profile_label(cli_ctx)
     try:
         profile = require_profile(cli_ctx)
-        result = export_saved_session(profile=profile, session_id=session_id, out=out)
+        result = export_saved_session(
+            profile=profile, session_id=session_id, out=out, overwrite=overwrite
+        )
     except Exception as exc:
         _render_error(ctx, "session.export", exc)
     renderer.success(command="session.export", profile=profile, data=result)

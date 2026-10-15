@@ -14,6 +14,30 @@ def _payload(stdout: str) -> dict:
     return json.loads(stdout.strip())
 
 
+def test_session_export_command_passes_the_overwrite_flag(runner, monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_export(**kwargs):
+        seen.update(kwargs)
+        return {"path": "out.json"}
+
+    monkeypatch.setattr(session_cmd, "export_saved_session", _fake_export)
+
+    result = runner.invoke(
+        app,
+        ["--json", "session", "export", "--id", "resume-1", "--out", "out.json", "--overwrite"],
+    )
+    assert result.exit_code == 0
+    assert seen["overwrite"] is True
+
+    seen.clear()
+    result = runner.invoke(
+        app, ["--json", "session", "export", "--id", "resume-1", "--out", "out.json"]
+    )
+    assert result.exit_code == 0
+    assert seen["overwrite"] is False
+
+
 def test_session_list_command_uses_selected_profile(runner, monkeypatch) -> None:
     seen: dict[str, str] = {}
 

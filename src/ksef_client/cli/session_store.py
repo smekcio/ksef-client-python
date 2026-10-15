@@ -387,6 +387,31 @@ def list_checkpoints(profile: str) -> list[SessionCheckpoint]:
     return checkpoints
 
 
+def delete_all_checkpoints(profile: str) -> int:
+    """Usuwa wszystkie checkpointy profilu i zwraca liczbę usuniętych plików.
+
+    Używane przez `profile delete`: bez tego nowy profil o tej samej nazwie
+    dziedziczył sesje poprzednika (wraz z kluczem i IV sesji w checkpoincie).
+    """
+    directory = _profile_dir(profile)
+    if not directory.exists():
+        return 0
+    removed = 0
+    for path in sorted(directory.glob("*.json")):
+        try:
+            path.unlink()
+            removed += 1
+        except OSError as exc:
+            raise CliError(
+                "Cannot delete session checkpoint.",
+                ExitCode.CONFIG_ERROR,
+                "Check filesystem permissions and try again.",
+            ) from exc
+    with suppress(OSError):
+        directory.rmdir()
+    return removed
+
+
 def delete_checkpoint(profile: str, session_id: str) -> None:
     path = _checkpoint_path(profile, session_id)
     if not path.exists():
@@ -414,13 +439,26 @@ def update_checkpoint(
     return updated
 
 
-def export_checkpoint(profile: str, session_id: str, out_path: Path) -> Path:
+def export_checkpoint(
+    profile: str, session_id: str, out_path: Path, *, overwrite: bool = False
+) -> Path:
+    """Zapisuje checkpoint do pliku; bez `overwrite` nie nadpisuje istniejącego.
+
+    Checkpoint zawiera klucz i IV sesji, więc ciche nadpisanie cudzego pliku
+    (np. `--out` wskazujące na istniejący dokument) niszczyło dane bez ostrzeżenia.
+    """
     checkpoint = load_checkpoint(profile, session_id)
     target = out_path
     if target.exists() and target.is_dir():
         target = target / f"session-{checkpoint.id}.json"
     if str(out_path).replace("\\", "/").endswith("/"):
         target = Path(str(out_path).replace("\\", "/")) / f"session-{checkpoint.id}.json"
+    if target.exists() and not overwrite:
+        raise CliError(
+            f"File already exists: {target}",
+            ExitCode.IO_ERROR,
+            "Pass --overwrite to replace it.",
+        )
     _write_json_atomic(target, checkpoint.to_dict())
     return target
 
@@ -498,5 +536,6 @@ __all__ = [
     "update_checkpoint",
     "export_checkpoint",
     "import_checkpoint",
+    "delete_all_checkpoints",
     "require_matching_base_url",
 ]

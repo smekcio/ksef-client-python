@@ -6,6 +6,7 @@ import pytest
 
 from ksef_client.cli.config import loader, paths, profiles
 from ksef_client.cli.config.schema import CliConfig, ProfileConfig
+from ksef_client.cli.constants import DEFAULT_PROFILE
 from ksef_client.cli.errors import CliError
 from ksef_client.cli.exit_codes import ExitCode
 
@@ -270,6 +271,22 @@ def test_profiles_helpers_validation_and_updates() -> None:
     with pytest.raises(CliError) as missing:
         profiles.require_profile(config, name="missing")
     assert missing.value.code == ExitCode.CONFIG_ERROR
+
+
+def test_normalize_profile_name_rejects_path_segments() -> None:
+    """Nazwa profilu trafia do ścieżki `sessions/<profil>/`.
+
+    Bez walidacji profil o nazwie `..` albo `C:\\temp` zapisywał checkpointy poza
+    katalogiem sesji (a checkpoint zawiera klucz i IV sesji).
+    """
+    assert profiles.normalize_profile_name("  prod-2  ") == "prod-2"
+    assert profiles.normalize_profile_name("") == DEFAULT_PROFILE
+    assert profiles.normalize_profile_name(None) == DEFAULT_PROFILE
+
+    for bad in ("..", "../evil", "a/b", "a\\b", "C:\\temp", "demo/../..", "x" * 65, "demo*"):
+        with pytest.raises(CliError) as exc:
+            profiles.normalize_profile_name(bad)
+        assert exc.value.code == ExitCode.VALIDATION_ERROR, bad
 
 
 def test_profiles_upsert_and_active_fallback() -> None:

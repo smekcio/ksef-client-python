@@ -208,7 +208,7 @@ def test_session_ops_require_checkpoint_type_and_simple_commands(monkeypatch) ->
     monkeypatch.setattr(
         session_ops,
         "export_checkpoint",
-        lambda profile, session_id, out: out / "saved.json",
+        lambda profile, session_id, out, overwrite=False: out / "saved.json",
     )
     exported = session_ops.export_saved_session(
         profile="demo",

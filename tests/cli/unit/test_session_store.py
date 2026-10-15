@@ -427,3 +427,54 @@ def test_require_matching_base_url_normalises_the_comparison(monkeypatch, tmp_pa
 
     with pytest.raises(CliError, match="base_url does not match"):
         session_store.require_matching_base_url(checkpoint, "https://api.ksef.mf.gov.pl")
+
+
+def test_export_checkpoint_refuses_to_overwrite_without_the_flag(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Checkpoint zawiera klucz i IV sesji — nie nadpisujemy pliku po cichu."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    checkpoint = _online_checkpoint()
+    save_checkpoint(checkpoint)
+    target = tmp_path / "export.json"
+    target.write_text("cudza treść", encoding="utf-8")
+
+    with pytest.raises(CliError, match="already exists"):
+        export_checkpoint("demo", checkpoint.id, target)
+    assert target.read_text(encoding="utf-8") == "cudza treść"
+
+    export_checkpoint("demo", checkpoint.id, target, overwrite=True)
+    assert "SES-ONLINE-1" in target.read_text(encoding="utf-8")
+
+
+def test_delete_all_checkpoints_reports_a_locked_file(monkeypatch, tmp_path: Path) -> None:
+    """Nieudane usunięcie pliku musi być błędem, nie cichym pominięciem."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    checkpoint = _online_checkpoint()
+    save_checkpoint(checkpoint)
+
+    def _busy(self: Path, **kwargs: object) -> None:
+        _ = (self, kwargs)
+        raise OSError("locked")
+
+    monkeypatch.setattr(Path, "unlink", _busy)
+
+    with pytest.raises(CliError, match="Cannot delete session checkpoint"):
+        session_store.delete_all_checkpoints("demo")
+
+
+def test_delete_all_checkpoints_removes_the_profile_directory(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """`profile delete` musi posprzątać sesje, żeby nowy profil ich nie dziedziczył."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    checkpoint = _online_checkpoint()
+    save_checkpoint(checkpoint)
+    directory = session_store._profile_dir("demo")
+    assert directory.exists()
+
+    removed = session_store.delete_all_checkpoints("demo")
+
+    assert removed == 1
+    assert not directory.exists()
+    assert session_store.delete_all_checkpoints("demo") == 0

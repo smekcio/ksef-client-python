@@ -182,8 +182,14 @@ def show_saved_session(*, profile: str, session_id: str) -> dict[str, Any]:
     return _checkpoint_summary(checkpoint) | {"checkpoint": checkpoint.to_dict()}
 
 
-def export_saved_session(*, profile: str, session_id: str, out: str) -> dict[str, Any]:
-    target = export_checkpoint(profile, session_id, Path(out))
+def export_saved_session(
+    *,
+    profile: str,
+    session_id: str,
+    out: str,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    target = export_checkpoint(profile, session_id, Path(out), overwrite=overwrite)
     return {
         "id": session_id,
         "profile": profile,
