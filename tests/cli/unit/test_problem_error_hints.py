@@ -175,6 +175,30 @@ def test_build_problem_hint_ignores_unrenderable_error_items() -> None:
     assert build_problem_hint(problem, default_hint=None) is None
 
 
+def test_build_problem_hint_explains_unreadable_request_body() -> None:
+    """Kod 21001 (udokumentowany w KSeF API 2.9.0) wymaga sprawdzenia treści żądania."""
+    problem = m.ExceptionResponse.from_dict(
+        {
+            "exception": {
+                "serviceCode": "00-1E",
+                "serviceName": "Faktury",
+                "exceptionDetailList": [
+                    {
+                        "exceptionCode": 21001,
+                        "exceptionDescription": "Nieczytelna treść",
+                    }
+                ],
+            }
+        }
+    )
+
+    hint = build_problem_hint(problem, default_hint="Check request.")
+
+    assert hint is not None
+    assert "[21001]" in hint
+    assert "Content-Type" in hint
+
+
 def test_build_problem_hint_explains_temporarily_unavailable_session() -> None:
     """Kod 21184 (KSeF API 2.8.0) wymaga konkretnego działania użytkownika."""
     problem = m.ExceptionResponse.from_dict(

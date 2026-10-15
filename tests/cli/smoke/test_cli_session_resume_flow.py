@@ -62,8 +62,8 @@ def test_cli_online_session_resume_flow(runner, monkeypatch, tmp_path: Path) -> 
                     reference_number="SES-SMOKE-ONLINE",
                     form_code=_form_code(),
                     valid_until="2026-04-01T12:30:00Z",
-                    symmetric_key_base64="AQID",
-                    iv_base64="BAUG",
+                    symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+                    iv_base64="AgICAgICAgICAgICAgICAg==",
                 )
             )
 
@@ -149,8 +149,8 @@ def test_cli_batch_session_resume_flow(runner, monkeypatch, tmp_path: Path) -> N
                 }
             )
         ],
-        symmetric_key_base64="AQID",
-        iv_base64="BAUG",
+        symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        iv_base64="AgICAgICAgICAgICAgICAg==",
     )
 
     class _BatchWorkflow:

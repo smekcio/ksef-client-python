@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 import ksef_client.cli.session_store as session_store
 from ksef_client import models as m
 from ksef_client.cli.errors import CliError
+from ksef_client.cli.exit_codes import ExitCode
 from ksef_client.cli.session_store import (
     BatchPayloadSource,
     BatchSessionCheckpoint,
@@ -36,8 +38,8 @@ def _online_checkpoint() -> OnlineSessionCheckpoint:
             reference_number="SES-ONLINE-1",
             form_code=_form_code(),
             valid_until="2026-04-01T12:30:00Z",
-            symmetric_key_base64="AQID",
-            iv_base64="BAUG",
+            symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            iv_base64="AgICAgICAgICAgICAgICAg==",
         ),
     )
 
@@ -68,8 +70,8 @@ def _batch_checkpoint() -> BatchSessionCheckpoint:
                     }
                 )
             ],
-            symmetric_key_base64="AQID",
-            iv_base64="BAUG",
+            symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            iv_base64="AgICAgICAgICAgICAgICAg==",
         ),
         payload_source=BatchPayloadSource(
             kind="zip",
@@ -389,3 +391,192 @@ def test_session_store_export_trailing_slash_and_import_missing_file(
 
     with pytest.raises(CliError):
         import_checkpoint("demo", tmp_path / "missing.json")
+
+
+def test_import_checkpoint_rejects_a_foreign_base_url(monkeypatch, tmp_path: Path) -> None:
+    """Checkpoint z pliku nie może wskazywać innego hosta niż profil.
+
+    Jego `base_url` decyduje, dokąd `session online send`/`close`/`status` wyślą
+    token dostępowy profilu, więc spreparowany plik mógł przekierować token KSeF
+    (i treść faktury) na dowolny host.
+    """
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    original = _online_checkpoint()
+    foreign = OnlineSessionCheckpoint(
+        id="online-demo",
+        profile="demo",
+        base_url="https://collector.attacker.example/v2",
+        stage="opened",
+        session_state=original.session_state,
+    )
+    source = tmp_path / "foreign.json"
+    session_store._write_json_atomic(source, foreign.to_dict())
+
+    # Nieznany host jest odrzucany już przy imporcie…
+    with pytest.raises(CliError, match="unknown host"):
+        import_checkpoint(
+            "demo",
+            source,
+            expected_base_url="https://api-demo.ksef.mf.gov.pl",
+        )
+
+    # …a świadoma zgoda (`--allow-foreign-host`) prowadzi do porównania z adresem
+    # efektywnym, które nadal odrzuca checkpoint z innego środowiska.
+    with pytest.raises(CliError, match="base_url does not match"):
+        import_checkpoint(
+            "demo",
+            source,
+            expected_base_url="https://api-demo.ksef.mf.gov.pl",
+            allow_foreign_host=True,
+        )
+
+
+def test_import_checkpoint_accepts_a_known_ksef_host(monkeypatch, tmp_path: Path) -> None:
+    """Checkpoint ze znanego środowiska importuje się bez żadnych flag."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    checkpoint = _online_checkpoint()
+    source = tmp_path / "known.json"
+    session_store._write_json_atomic(source, checkpoint.to_dict())
+
+    imported = import_checkpoint(
+        "demo", source, expected_base_url="https://api-demo.ksef.mf.gov.pl"
+    )
+
+    assert imported.base_url == checkpoint.base_url
+
+
+def test_require_matching_base_url_normalises_the_comparison(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    checkpoint = _online_checkpoint()
+    session_store.require_matching_base_url(checkpoint, "HTTPS://API-DEMO.KSEF.MF.GOV.PL/")
+    # Domyślny port to ten sam adres — nie może fałszywie odrzucać legalnego checkpointu.
+    session_store.require_matching_base_url(checkpoint, "https://api-demo.ksef.mf.gov.pl:443")
+
+    with pytest.raises(CliError, match="base_url does not match"):
+        session_store.require_matching_base_url(checkpoint, "https://api.ksef.mf.gov.pl")
+
+
+def test_export_checkpoint_refuses_to_overwrite_without_the_flag(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Checkpoint zawiera klucz i IV sesji — nie nadpisujemy pliku po cichu."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    checkpoint = _online_checkpoint()
+    save_checkpoint(checkpoint)
+    target = tmp_path / "export.json"
+    target.write_text("cudza treść", encoding="utf-8")
+
+    with pytest.raises(CliError, match="already exists"):
+        export_checkpoint("demo", checkpoint.id, target)
+    assert target.read_text(encoding="utf-8") == "cudza treść"
+
+    export_checkpoint("demo", checkpoint.id, target, overwrite=True)
+    assert "SES-ONLINE-1" in target.read_text(encoding="utf-8")
+
+
+def test_delete_all_checkpoints_reports_a_locked_file(monkeypatch, tmp_path: Path) -> None:
+    """Nieudane usunięcie pliku musi być błędem, nie cichym pominięciem."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    checkpoint = _online_checkpoint()
+    save_checkpoint(checkpoint)
+
+    def _busy(self: Path, **kwargs: object) -> None:
+        _ = (self, kwargs)
+        raise OSError("locked")
+
+    monkeypatch.setattr(Path, "unlink", _busy)
+
+    with pytest.raises(CliError, match="Cannot delete session checkpoint"):
+        session_store.delete_all_checkpoints("demo")
+
+
+def test_write_json_atomic_reports_a_directory_failure(monkeypatch, tmp_path: Path) -> None:
+    """`mkdir` poza `try` dawał surowy OSError (nieoczekiwany kod wyjścia CLI)."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+
+    def _denied(*args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "mkdir", _denied)
+
+    with pytest.raises(CliError, match="Cannot create the checkpoint directory"):
+        save_checkpoint(_online_checkpoint())
+
+
+def test_list_checkpoints_survives_a_checkpoint_with_a_broken_form_code(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Jeden checkpoint z `"form_code": {}` nie może wywracać całego listowania.
+
+    `checkpoint_from_dict` łapał wyłącznie `ValueError`, a `FormCode.from_dict({})`
+    rzuca `TypeError` z konstruktora — `session list` kończyło się wtedy kodem
+    `UNEXPECTED`/6 zamiast pokazać plik jako nienarparsowalny.
+    """
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    save_checkpoint(_online_checkpoint())
+    broken_path = session_store._profile_dir("demo") / "broken-form-code.json"
+    payload = _online_checkpoint().to_dict()
+    payload["session_state"]["form_code"] = {}
+    broken_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # Dobry checkpoint nadal jest listowany, a uszkodzony trafia na listę „unreadable".
+    assert [item.id for item in list_checkpoints("demo")] == ["online-demo"]
+    assert session_store.list_unreadable_checkpoints("demo") == ["broken-form-code.json"]
+
+    with pytest.raises(CliError) as exc:
+        load_checkpoint("demo", "broken-form-code")
+    assert exc.value.code == ExitCode.CONFIG_ERROR
+    assert "broken-form-code.json" in exc.value.message
+    assert "FormCode" in (exc.value.hint or "")
+
+    # Bezpośrednie wywołanie z `source` też wskazuje plik w komunikacie.
+    with pytest.raises(CliError, match="broken-form-code.json"):
+        session_store.checkpoint_from_dict(payload, source=broken_path)
+
+
+def test_read_json_reports_a_file_that_is_not_utf8(tmp_path: Path) -> None:
+    """Checkpoint z binarną treścią to `CONFIG_ERROR`, nie surowy `UnicodeDecodeError`."""
+    path = tmp_path / "binary.json"
+    path.write_bytes(b"\xff\xfe\x00\x00nie-json")
+
+    with pytest.raises(CliError) as exc:
+        session_store._read_json(path)
+
+    assert exc.value.code == ExitCode.CONFIG_ERROR
+
+
+def test_list_checkpoints_reports_broken_files_on_demand(monkeypatch, tmp_path: Path) -> None:
+    """`include_broken=True` zgłasza uszkodzony plik zamiast go pomijać."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    save_checkpoint(_online_checkpoint())
+    broken = session_store._profile_dir("demo") / "broken.json"
+    broken.write_text("{nie-json", encoding="utf-8")
+
+    # Domyślnie uszkodzone pliki są pomijane (lista działa dalej)…
+    assert len(list_checkpoints("demo")) == 1
+    # …a `list_unreadable_checkpoints` pozwala je pokazać.
+    assert session_store.list_unreadable_checkpoints("demo") == ["broken.json"]
+    with pytest.raises(CliError, match="Cannot read session checkpoint"):
+        list_checkpoints("demo", include_broken=True)
+
+
+def test_list_unreadable_checkpoints_without_directory(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    assert session_store.list_unreadable_checkpoints("nie-ma") == []
+
+
+def test_delete_all_checkpoints_removes_the_profile_directory(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """`profile delete` musi posprzątać sesje, żeby nowy profil ich nie dziedziczył."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    checkpoint = _online_checkpoint()
+    save_checkpoint(checkpoint)
+    directory = session_store._profile_dir("demo")
+    assert directory.exists()
+
+    removed = session_store.delete_all_checkpoints("demo")
+
+    assert removed == 1
+    assert not directory.exists()
+    assert session_store.delete_all_checkpoints("demo") == 0

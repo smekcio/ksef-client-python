@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -10,7 +12,7 @@ from ksef_client.cli.commands import export_cmd
 from ksef_client.cli.errors import CliError
 from ksef_client.cli.exit_codes import ExitCode
 from ksef_client.cli.sdk import adapters
-from ksef_client.exceptions import KsefHttpError
+from ksef_client.exceptions import KsefApiError, KsefHttpError
 
 
 class _FakeClient:
@@ -520,6 +522,72 @@ def test_download_invoice_respects_overwrite(monkeypatch, tmp_path) -> None:
     assert exc.value.code == ExitCode.IO_ERROR
 
 
+def test_download_invoice_sanitizes_traversal_in_default_filename(
+    monkeypatch, tmp_path
+) -> None:
+    """Numer KSeF z odpowiedzi API nie może wyprowadzić pliku poza katalog `--out`."""
+
+    class _Invoices:
+        def get_invoice(self, ksef_number, access_token):
+            _ = (ksef_number, access_token)
+            return SimpleNamespace(content="<faktura/>", sha256_base64="hash")
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(invoices=_Invoices()),
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    result = adapters.download_invoice(
+        profile="demo",
+        base_url="https://example.invalid",
+        ksef_number="..\\..\\escaped",
+        out=str(out_dir),
+        as_format="xml",
+        overwrite=False,
+    )
+
+    saved = Path(result["path"])
+    assert saved.parent == out_dir
+    assert saved.name == ".._.._escaped.xml"
+    assert saved.read_text(encoding="utf-8") == "<faktura/>"
+    assert list(out_dir.iterdir()) == [saved]
+    assert not (tmp_path / "escaped.xml").exists()
+
+
+def test_download_invoice_bytes_saves_pdf_payload(monkeypatch, tmp_path) -> None:
+    """PDF/`application/octet-stream` z `--as bytes` nie może być mylony ze stroną HTML."""
+
+    class _Invoices:
+        def get_invoice_bytes(self, ksef_number, access_token):
+            _ = (ksef_number, access_token)
+            return SimpleNamespace(content=b"%PDF-1.7\n%\xe2\xe3\xcf\xd3", sha256_base64="hashp")
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(invoices=_Invoices()),
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    result = adapters.download_invoice(
+        profile="demo",
+        base_url="https://example.invalid",
+        ksef_number="KSEF-9",
+        out=str(out_dir),
+        as_format="bytes",
+        overwrite=False,
+    )
+
+    assert (out_dir / "KSEF-9.bin").read_bytes() == b"%PDF-1.7\n%\xe2\xe3\xcf\xd3"
+    assert result["path"] == str(out_dir / "KSEF-9.bin")
+
+
 def test_get_upo_requires_single_identifier(monkeypatch) -> None:
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
 
@@ -563,6 +631,158 @@ def test_get_upo_by_invoice_ref_success(monkeypatch, tmp_path) -> None:
 
     assert result["session_ref"] == "SES-1"
     assert (tmp_path / "upo.xml").read_bytes() == b"<upo/>"
+
+
+@pytest.mark.parametrize(
+    "html_payload",
+    [
+        b"<!DOCTYPE html>\n<html><body>Captive portal</body></html>",
+        b"\n  <html lang='pl'><body>Proxy</body></html>",
+        b"\xef\xbb\xbf<HTML>",
+    ],
+)
+def test_get_upo_rejects_html_payload_without_saving_file(
+    monkeypatch, tmp_path, html_payload
+) -> None:
+    """Odpowiedź 200 z HTML (captive portal/proxy) nie może być zapisana jako UPO XML."""
+
+    class _Sessions:
+        def get_session_upo(self, session_ref, upo_ref, access_token):
+            _ = (session_ref, upo_ref, access_token)
+            return html_payload
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_Sessions()),
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    with pytest.raises(CliError) as exc:
+        adapters.get_upo(
+            profile="demo",
+            base_url="https://example.invalid",
+            session_ref="SES-1",
+            invoice_ref=None,
+            ksef_number=None,
+            upo_ref="UPO-1",
+            out=str(out_dir),
+            overwrite=False,
+        )
+
+    assert exc.value.code == ExitCode.API_ERROR
+    assert "HTML" in exc.value.message
+    assert list(out_dir.iterdir()) == []
+
+
+def test_get_upo_sanitizes_traversal_in_default_filename(monkeypatch, tmp_path) -> None:
+    """Referencje sesji/UPO z API nie mogą wyprowadzić pliku poza katalog `--out`."""
+
+    class _Sessions:
+        def get_session_upo(self, session_ref, upo_ref, access_token):
+            _ = (session_ref, upo_ref, access_token)
+            return b"<upo/>"
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_Sessions()),
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    result = adapters.get_upo(
+        profile="demo",
+        base_url="https://example.invalid",
+        session_ref="..\\..\\escaped",
+        invoice_ref=None,
+        ksef_number=None,
+        upo_ref="../../escaped",
+        out=str(out_dir),
+        overwrite=False,
+    )
+
+    saved = Path(result["path"])
+    assert saved.parent == out_dir
+    assert saved.name == "upo-.._.._escaped-.._.._escaped.xml"
+    assert saved.read_bytes() == b"<upo/>"
+    assert list(out_dir.iterdir()) == [saved]
+    assert not (tmp_path / "escaped.xml").exists()
+
+
+def test_get_upo_reports_directory_creation_failure_as_io_error(monkeypatch, tmp_path) -> None:
+    """`mkdir` na ścieżce, gdzie rodzic jest plikiem, musi dać CliError, nie OSError."""
+
+    class _Sessions:
+        def get_session_upo(self, session_ref, upo_ref, access_token):
+            _ = (session_ref, upo_ref, access_token)
+            return b"<upo/>"
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_Sessions()),
+    )
+
+    blocking_file = tmp_path / "blocker"
+    blocking_file.write_bytes(b"x")
+    with pytest.raises(CliError) as exc:
+        adapters.get_upo(
+            profile="demo",
+            base_url="https://example.invalid",
+            session_ref="SES-1",
+            invoice_ref=None,
+            ksef_number=None,
+            upo_ref="UPO-1",
+            out=str(blocking_file / "upo.xml"),
+            overwrite=False,
+        )
+
+    assert exc.value.code == ExitCode.IO_ERROR
+    assert "Cannot create output directory" in exc.value.message
+    assert isinstance(exc.value.__cause__, OSError)
+
+
+def test_wait_for_upo_rejects_html_payload_without_saving_file(monkeypatch, tmp_path) -> None:
+    class _Sessions:
+        def get_session_invoice_status(self, session_ref, invoice_ref, access_token):
+            _ = (session_ref, invoice_ref, access_token)
+            return {"status": {"code": 200}}
+
+        def get_session_invoice_upo_by_ref(self, session_ref, invoice_ref, access_token):
+            _ = (session_ref, invoice_ref, access_token)
+            return b"<!DOCTYPE html><html><body>Captive portal</body></html>"
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_Sessions()),
+    )
+    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    with pytest.raises(CliError) as exc:
+        adapters.wait_for_upo(
+            profile="demo",
+            base_url="https://example.invalid",
+            session_ref="SES-1",
+            invoice_ref="INV-1",
+            upo_ref=None,
+            batch_auto=False,
+            poll_interval=0.01,
+            max_attempts=1,
+            out=str(out_dir),
+            overwrite=False,
+        )
+
+    assert exc.value.code == ExitCode.API_ERROR
+    assert list(out_dir.iterdir()) == []
 
 
 def test_wait_for_upo_invoice_ref_success(monkeypatch, tmp_path) -> None:
@@ -2028,6 +2248,148 @@ def test_safe_child_path_rejects_traversal(tmp_path) -> None:
     assert exc.value.code == ExitCode.IO_ERROR
 
 
+def test_safe_default_filename_replaces_path_separators() -> None:
+    assert adapters._safe_default_filename("KSEF-1.xml") == "KSEF-1.xml"
+    assert adapters._safe_default_filename("..\\..\\escaped.xml") == ".._.._escaped.xml"
+    assert adapters._safe_default_filename("../../escaped.xml") == ".._.._escaped.xml"
+    assert adapters._safe_default_filename("C:/escaped.xml") == "C__escaped.xml"
+
+
+def test_safe_default_filename_falls_back_for_dot_names() -> None:
+    assert adapters._safe_default_filename("..") == "_"
+    assert adapters._safe_default_filename("") == "_"
+
+
+def test_resolve_output_path_sanitizes_default_filename_for_directory(tmp_path) -> None:
+    target_dir = tmp_path / "out"
+    target_dir.mkdir()
+    path = adapters._resolve_output_path(
+        str(target_dir), default_filename="../../escaped.xml"
+    )
+    assert path == target_dir / ".._.._escaped.xml"
+
+    trailing = adapters._resolve_output_path(
+        f"{target_dir.as_posix()}/", default_filename="..\\escaped.xml"
+    )
+    assert trailing == target_dir / ".._escaped.xml"
+
+
+def test_resolve_output_path_keeps_explicit_file_path(tmp_path) -> None:
+    target = tmp_path / "explicit.xml"
+    path = adapters._resolve_output_path(str(target), default_filename="../../escaped.xml")
+    assert path == target
+
+
+def test_save_bytes_reports_directory_creation_failure(tmp_path) -> None:
+    """`mkdir` przed `try` uciekał jako surowy OSError (CLI: UNEXPECTED/6)."""
+    blocking_file = tmp_path / "blocker"
+    blocking_file.write_bytes(b"x")
+
+    with pytest.raises(CliError) as exc:
+        adapters._save_bytes(blocking_file / "nested" / "out.xml", b"<upo/>", overwrite=False)
+
+    assert exc.value.code == ExitCode.IO_ERROR
+    assert "Cannot create output directory" in exc.value.message
+    assert isinstance(exc.value.__cause__, OSError)
+    assert not blocking_file.is_dir()
+
+
+def test_save_bytes_rejects_html_payload(tmp_path) -> None:
+    target = tmp_path / "upo-1.xml"
+
+    with pytest.raises(CliError) as exc:
+        adapters._save_bytes(target, b"<html><body>x</body></html>", overwrite=False)
+
+    assert exc.value.code == ExitCode.API_ERROR
+    assert not target.exists()
+
+
+def test_save_bytes_accepts_xml_and_binary_payloads(tmp_path) -> None:
+    xml_path = adapters._save_bytes(tmp_path / "upo.xml", b"<upo/>", overwrite=False)
+    bin_path = adapters._save_bytes(tmp_path / "invoice.bin", b"%PDF-1.7", overwrite=False)
+
+    assert xml_path.read_bytes() == b"<upo/>"
+    assert bin_path.read_bytes() == b"%PDF-1.7"
+
+
+def test_save_bytes_reports_write_failure(tmp_path, monkeypatch) -> None:
+    """Błąd samego zapisu (np. za długa nazwa) też musi być `IO_ERROR`, nie UNEXPECTED."""
+    target = tmp_path / "upo-1.xml"
+
+    def _fail(*_args, **_kwargs):
+        raise OSError(206, "Filename too long")
+
+    monkeypatch.setattr(Path, "write_bytes", _fail)
+
+    with pytest.raises(CliError) as exc:
+        adapters._save_bytes(target, b"<upo/>", overwrite=False)
+
+    assert exc.value.code == ExitCode.IO_ERROR
+    assert "Cannot write output file" in exc.value.message
+    assert isinstance(exc.value.__cause__, OSError)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"<!-- komentarz -->\n<!DOCTYPE html><html><body>portal</body></html>",
+        b"<!-- captive portal --><!DOCTYPE html>",
+        b"<?xml version='1.0'?><html xmlns='http://www.w3.org/1999/xhtml'></html>",
+        b"<head><meta http-equiv='refresh' content='0;url=http://portal.local'></head>",
+        b"<meta http-equiv=refresh content=0>",
+        b"<script>window.location='http://portal.local'</script>",
+        b"\xef\xbb\xbf\n  <!-- x -->\n  <HTML lang='pl'>",
+        b"<title>Login</title>",
+        b"<body onload='x()'>",
+        # Długi komentarz (> 4096 B) przed znacznikiem HTML.
+        b"<!-- " + b"x" * 6000 + b" --><!DOCTYPE html><html>portal</html>",
+        # UTF-16/32 z BOM-em — bajty przeplatane zerami.
+        "<!DOCTYPE html><html><body>portal</body></html>".encode("utf-16"),
+        "<html><body>portal</body></html>".encode("utf-16-be"),
+        "<html><body>portal</body></html>".encode("utf-32"),
+        # UTF-16 bez BOM-u (znaki ASCII poprzedzane zerem).
+        b"<\x00h\x00t\x00m\x00l\x00>\x00",
+    ],
+)
+def test_save_bytes_rejects_html_shapes(tmp_path, payload: bytes) -> None:
+    """Kształty portalu (komentarz, `<?xml`, `head`/`meta`/`script`, UTF-16) są blokowane."""
+    target = tmp_path / "upo-portal.xml"
+
+    with pytest.raises(CliError) as exc:
+        adapters._save_bytes(target, payload, overwrite=False)
+
+    assert exc.value.code == ExitCode.API_ERROR
+    assert not target.exists()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"<?xml version='1.0' encoding='UTF-8'?><Faktura xmlns='http://crd.gov.pl/wzor/2025/06/25/13775/'/>",
+        b"<!-- wygenerowane -->\n<Faktura><Naglowek/></Faktura>",
+        b"\xef\xbb\xbf  <UPO><Dokument/></UPO>",
+        b"%PDF-1.7\n%\xe2\xe3\xcf\xd3",
+        b"PK\x03\x04zip",
+        b"\x89PNG\r\n\x1a\n",
+        b"",
+        b"plain text without markup",
+        # Niedomknięty komentarz/instrukcja nie może wywracać sniffingu: treść nie
+        # zawiera znaczników HTML, więc traktujemy ją jak zwykły dokument.
+        b"<!-- nie zamkniety komentarz",
+        b"<?xml version='1.0'",
+        # Legalny dokument w UTF-16 z deklaracją XML — po dekodowaniu to `Faktura`.
+        "<?xml version='1.0' encoding='utf-16'?><Faktura><Naglowek/></Faktura>".encode(
+            "utf-16"
+        ),
+    ],
+)
+def test_save_bytes_accepts_documents_that_only_look_similar(tmp_path, payload: bytes) -> None:
+    """Legalne dokumenty (XML faktury, UPO, PDF, archiwum, obraz, pusty plik) przechodzą."""
+    target = adapters._save_bytes(tmp_path / "document.bin", payload, overwrite=False)
+
+    assert target.read_bytes() == payload
+
+
 def test_build_form_code_validation() -> None:
     with pytest.raises(CliError) as exc:
         adapters._build_form_code(" ", "1", "FA")
@@ -2907,6 +3269,12 @@ def test_run_export_success(monkeypatch, tmp_path) -> None:
     assert payload.filters.date_range.restrict_to_permanent_storage_hwm_date is None
     assert "restrictToPermanentStorageHwmDate" not in payload.filters.date_range.to_dict()
     assert (tmp_path / "_metadata.json").exists()
+    # Atrapa workflow nie zwraca `metadata_raw`, więc obowiązuje wariant awaryjny.
+    assert json.loads((tmp_path / "_metadata.json").read_text(encoding="utf-8")) == {
+        "invoices": [{"ksefNumber": "KSEF-1"}]
+    }
+    assert result["is_truncated"] is False
+    assert result["permanent_storage_hwm_date"] == ""
     assert (tmp_path / "a.xml").read_text(encoding="utf-8") == "<xml/>"
 
 
@@ -3103,6 +3471,226 @@ def test_run_export_rejects_hwm_guard_for_issue_date_type(monkeypatch, tmp_path)
     assert "PermanentStorage" in exc.value.hint
 
 
+def _export_package(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "compressionType": "Zip",
+        "invoiceCount": 1,
+        "size": 10,
+        "isTruncated": False,
+        "parts": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _install_export_client(
+    monkeypatch,
+    *,
+    package: dict[str, Any],
+    processed: Any,
+) -> None:
+    """Podmienia klienta SDK i workflow eksportu na atrapy (bez sieci)."""
+
+    class _Security:
+        def get_public_key_certificates(self):
+            return [
+                {
+                    "usage": ["SymmetricKeyEncryption"],
+                    "certificate": "CERT",
+                    "publicKeyId": "key-id",
+                }
+            ]
+
+    class _Invoices:
+        def export_invoices(self, payload, access_token):
+            _ = (payload, access_token)
+            return {"referenceNumber": "EXP-OK"}
+
+        def get_export_status(self, reference_number, access_token):
+            _ = (reference_number, access_token)
+            return {"status": {"code": 200, "description": "Done"}, "package": package}
+
+    class _Workflow:
+        def __init__(self, invoices_client, http_client):
+            _ = (invoices_client, http_client)
+
+        def download_and_process_package(self, package_payload, encryption_data):
+            _ = (package_payload, encryption_data)
+            return processed
+
+    fake_encryption = SimpleNamespace(
+        key=b"k",
+        iv=b"i",
+        encryption_info=SimpleNamespace(
+            encrypted_symmetric_key="enc",
+            initialization_vector="iv",
+            public_key_id="key-id",
+        ),
+    )
+
+    def _fake_create_client(base_url, access_token=None, system_warning_handler=None):
+        _ = (base_url, access_token)
+        if system_warning_handler is not None:
+            system_warning_handler("future warning")
+        return _FakeClient(
+            invoices=_Invoices(), security=_Security(), http_client=SimpleNamespace()
+        )
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(adapters, "create_client", _fake_create_client)
+    monkeypatch.setattr(adapters, "build_encryption_data", lambda cert, **kwargs: fake_encryption)
+    monkeypatch.setattr(adapters, "ExportWorkflow", _Workflow)
+    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+
+
+def _run_export_into(out: Path, **overrides: Any) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "profile": "demo",
+        "base_url": "https://example.invalid",
+        "date_from": "2026-01-01",
+        "date_to": "2026-01-31",
+        "subject_type": "Subject1",
+        "poll_interval": 0.01,
+        "max_attempts": 2,
+        "out": str(out),
+    }
+    kwargs.update(overrides)
+    return adapters.run_export(**kwargs)
+
+
+def test_run_export_out_is_an_existing_file(monkeypatch, tmp_path) -> None:
+    """`--out` wskazujący plik dawał `UNEXPECTED`/6 z surowym `WinError`, nie `IO_ERROR`."""
+    target = tmp_path / "not-a-dir.txt"
+    target.write_text("ważne dane", encoding="utf-8")
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+
+    with pytest.raises(CliError) as exc:
+        _run_export_into(target)
+
+    assert exc.value.code == ExitCode.IO_ERROR
+    assert "not a directory" in exc.value.message
+    # Cudzy plik nie może zniknąć ani zostać nadpisany.
+    assert target.read_text(encoding="utf-8") == "ważne dane"
+
+
+def test_run_export_maps_mkdir_failure_to_io_error(monkeypatch, tmp_path) -> None:
+    """`mkdir` poza `try` uciekał jako surowy `OSError` (`UNEXPECTED`/6)."""
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+
+    def _denied(*args: object, **kwargs: object) -> None:
+        _ = (args, kwargs)
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "mkdir", _denied)
+
+    with pytest.raises(CliError) as exc:
+        _run_export_into(tmp_path / "eksport")
+
+    assert exc.value.code == ExitCode.IO_ERROR
+    assert "Cannot create export directory" in exc.value.message
+
+
+def test_run_export_rejects_case_insensitive_name_collisions(monkeypatch, tmp_path) -> None:
+    """`Faktura.xml` i `faktura.xml` to na Windows jeden plik — dziś ginęła faktura."""
+    processed = SimpleNamespace(
+        metadata_summaries=[{"ksefNumber": "A"}],
+        invoice_xml_files={"Faktura.xml": "<A/>", "faktura.xml": "<B/>"},
+        metadata_raw=b'{"invoices":[{"ksefNumber":"A"}]}',
+    )
+    _install_export_client(monkeypatch, package=_export_package(), processed=processed)
+
+    with pytest.raises(CliError) as exc:
+        _run_export_into(tmp_path)
+
+    assert exc.value.code == ExitCode.VALIDATION_ERROR
+    assert "Faktura.xml" in exc.value.message
+    assert "faktura.xml" in exc.value.message
+    # Kolizja jest wykrywana przed zapisem — katalog zostaje pusty.
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_run_export_writes_metadata_verbatim_and_reports_truncation(
+    monkeypatch, tmp_path
+) -> None:
+    """`_metadata.json` musi być bajt w bajt plikiem z paczki, a obcięcie widoczne."""
+    metadata_bytes = json.dumps(
+        {
+            "invoiceList": [{"ksefNumber": "A"}],
+            "isTruncated": True,
+            "permanentStorageHwmDate": "2026-03-31T23:59:59Z",
+            "extraKeyFromServer": {"x": 1},
+        }
+    ).encode("utf-8")
+    processed = SimpleNamespace(
+        metadata_summaries=[{"ksefNumber": "A"}],
+        invoice_xml_files={"A.xml": "<Faktura/>"},
+        metadata_raw=metadata_bytes,
+    )
+    _install_export_client(
+        monkeypatch,
+        package=_export_package(
+            isTruncated=True,
+            permanentStorageHwmDate="2026-03-31T23:59:59Z",
+        ),
+        processed=processed,
+    )
+
+    result = _run_export_into(tmp_path)
+
+    assert result["is_truncated"] is True
+    assert result["permanent_storage_hwm_date"] == "2026-03-31T23:59:59Z"
+    assert (tmp_path / "_metadata.json").read_bytes() == metadata_bytes
+    assert result["metadata_count"] == 1
+    assert result["xml_files_count"] == 1
+    assert (tmp_path / "A.xml").read_text(encoding="utf-8") == "<Faktura/>"
+    # Ostrzeżenie o obcięciu dokłada się do ostrzeżeń systemowych, nie zastępuje ich.
+    assert result["system_warnings"][0] == "future warning"
+    assert "truncated" in result["system_warnings"][-1]
+    assert "permanentStorageHwmDate" not in result["system_warnings"][-1]
+    assert "2026-03-31T23:59:59Z" in result["system_warnings"][-1]
+
+
+def test_run_export_checks_all_targets_before_writing_anything(monkeypatch, tmp_path) -> None:
+    """Bez `--overwrite` żaden plik nie może zostać nadpisany ani dopisany po błędzie."""
+    existing = tmp_path / "A.xml"
+    existing.write_text("stary eksport", encoding="utf-8")
+    processed = SimpleNamespace(
+        metadata_summaries=[{"ksefNumber": "A"}],
+        invoice_xml_files={"A.xml": "<A/>"},
+        metadata_raw=b'{"invoices":[{"ksefNumber":"A"}]}',
+    )
+    _install_export_client(monkeypatch, package=_export_package(), processed=processed)
+
+    with pytest.raises(CliError) as exc:
+        _run_export_into(tmp_path)
+
+    assert exc.value.code == ExitCode.IO_ERROR
+    assert "already exists" in exc.value.message
+    assert existing.read_text(encoding="utf-8") == "stary eksport"
+    # Brak częściowego eksportu: metadane nie powstały, skoro XML kolidował.
+    assert not (tmp_path / "_metadata.json").exists()
+
+
+def test_run_export_overwrite_replaces_existing_files(monkeypatch, tmp_path) -> None:
+    """`--overwrite` nadpisuje pliki docelowe treścią z bieżącej paczki."""
+    metadata_path = tmp_path / "_metadata.json"
+    metadata_path.write_text("poprzedni eksport", encoding="utf-8")
+    xml_path = tmp_path / "A.xml"
+    xml_path.write_text("stara faktura", encoding="utf-8")
+    processed = SimpleNamespace(
+        metadata_summaries=[{"ksefNumber": "A"}],
+        invoice_xml_files={"A.xml": "<A/>"},
+        metadata_raw=b'{"invoices":[{"ksefNumber":"A"}]}',
+    )
+    _install_export_client(monkeypatch, package=_export_package(), processed=processed)
+
+    result = _run_export_into(tmp_path, overwrite=True)
+
+    assert result["metadata_file"] == str(metadata_path)
+    assert metadata_path.read_bytes() == b'{"invoices":[{"ksefNumber":"A"}]}'
+    assert xml_path.read_text(encoding="utf-8") == "<A/>"
+
+
 def test_export_run_cli_passes_incremental_options(monkeypatch) -> None:
     seen: dict[str, Any] = {}
 
@@ -3132,11 +3720,13 @@ def test_export_run_cli_passes_incremental_options(monkeypatch) -> None:
         poll_interval=1.0,
         max_attempts=10,
         out=".",
+        overwrite=True,
         base_url="https://example.invalid",
     )
 
     assert seen["kwargs"]["date_type"] == "PermanentStorage"
     assert seen["kwargs"]["restrict_to_permanent_storage_hwm_date"] is True
+    assert seen["kwargs"]["overwrite"] is True
     assert "sort_order" not in seen["kwargs"]
 
 
@@ -3764,3 +4354,119 @@ def test_run_health_check_ignores_non_list_usage_values(monkeypatch) -> None:
     )
     cert_check = [item for item in result["checks"] if item["name"] == "certificates"][0]
     assert cert_check["status"] == "FAIL"
+
+
+# ---------------------------------------------------------------------------
+# Regresja: numer referencyjny UPO.
+#
+# Kontrakt KSeF nie ma pola ``upoReferenceNumber``: status sesji niesie
+# ``upo.pages[].referenceNumber``. Wcześniejsza implementacja czytała
+# nieistniejące pole, więc ``send batch --wait-upo``, ``session batch close
+# --wait-upo`` i ``upo wait --batch-auto`` zawsze kończyły się błędem
+# "UPO reference number is not available".
+# ---------------------------------------------------------------------------
+
+
+def _session_status_payload(reference: str) -> dict[str, Any]:
+    return {
+        "dateCreated": "2026-01-01T00:00:00Z",
+        "dateUpdated": "2026-01-01T00:00:00Z",
+        "status": {"code": 200, "description": "Sesja wsadowa przetworzona pomyslnie"},
+        "upo": {
+            "pages": [
+                {
+                    "referenceNumber": reference,
+                    "downloadUrl": "https://ksef.example/upo/1",
+                    "downloadUrlExpirationDate": "2026-01-01T00:00:00Z",
+                }
+            ]
+        },
+    }
+
+
+def test_extract_upo_reference_from_typed_session_status() -> None:
+    status = m.SessionStatusResponse.from_dict(_session_status_payload("UPO-REF-REAL-1"))
+    assert adapters._extract_upo_reference(status) == "UPO-REF-REAL-1"
+
+
+def test_extract_upo_reference_from_raw_payload() -> None:
+    payload = _session_status_payload("UPO-REF-REAL-2")
+    assert adapters._extract_upo_reference(payload) == "UPO-REF-REAL-2"
+
+
+def test_extract_upo_reference_prefers_explicit_flat_field() -> None:
+    assert adapters._extract_upo_reference({"upoReferenceNumber": "FLAT-1"}) == "FLAT-1"
+
+
+def test_extract_upo_reference_without_upo_is_empty() -> None:
+    assert adapters._extract_upo_reference({"status": {"code": 100}}) == ""
+    assert adapters._extract_upo_reference({"upo": {"pages": []}}) == ""
+    assert adapters._extract_upo_reference({"upo": None}) == ""
+
+
+def test_extract_upo_reference_uses_first_page() -> None:
+    payload = {
+        "upo": {
+            "pages": [
+                {"referenceNumber": "PAGE-1"},
+                {"referenceNumber": "PAGE-2"},
+            ]
+        }
+    }
+    assert adapters._extract_upo_reference(payload) == "PAGE-1"
+
+
+def test_transient_retry_delay_reads_retry_after_from_5xx() -> None:
+    """`Retry-After` z 502/503/504 musi trafić do opóźnienia, nie tylko z 429.
+
+    Warstwa HTTP czyta ten nagłówek dla wszystkich statusów ponawialnych, więc
+    pominięcie go tutaj oznaczałoby ponowienie po 0,25 s zamiast po 30 s.
+    """
+    with_retry_after = KsefApiError(
+        status_code=503, message="API error", retry_after=30, retry_after_raw="30"
+    )
+    assert (
+        adapters._transient_retry_delay_seconds(
+            attempt=1, poll_interval=0.25, exc=with_retry_after
+        )
+        == 30.0
+    )
+
+    without_retry_after = KsefApiError(status_code=503, message="API error")
+    assert (
+        adapters._transient_retry_delay_seconds(
+            attempt=1, poll_interval=0.25, exc=without_retry_after
+        )
+        == 0.25
+    )
+
+
+def test_wait_for_export_status_waits_for_the_server_requested_delay(monkeypatch) -> None:
+    """Ponowienie po 503 z `Retry-After: 30` śpi 30 s, a nie `poll_interval`."""
+
+    class _TransientWithRetryAfter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get_export_status(self, reference_number, access_token):
+            _ = (reference_number, access_token)
+            self.calls += 1
+            if self.calls == 1:
+                raise KsefApiError(
+                    status_code=503, message="API error", retry_after=30, retry_after_raw="30"
+                )
+            return {"status": {"code": 200, "description": "Done"}}
+
+    delays: list[float] = []
+    monkeypatch.setattr(adapters.time, "sleep", delays.append)
+
+    ok = adapters._wait_for_export_status(
+        client=_FakeClient(invoices=_TransientWithRetryAfter()),
+        reference_number="EXP-RETRY-AFTER",
+        access_token="acc",
+        poll_interval=0.25,
+        max_attempts=2,
+    )
+
+    assert ok["status"]["code"] == 200
+    assert delays == [30.0]

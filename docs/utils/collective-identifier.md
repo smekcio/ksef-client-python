@@ -12,7 +12,8 @@ oraz helpery domenowe używane przez `client.collective_identifiers`.
 - `MAX_QUERY_RANGE_DAYS` (100)
 - `PAGE_SIZE_MIN` / `PAGE_SIZE_MAX` (10 / 200)
 - `PAGE_SIZE_INVOICES_MAX` (500)
-- `COLLECTIVE_IDENTIFIER_EXCEPTION_CODES` (`71001`, `71002`)
+- `COLLECTIVE_IDENTIFIER_EXCEPTION_CODES` (`71001`, `71002`, `71004`, `71005`) — opisy
+  zgodne z kontraktem OpenAPI KSeF (`71001` = faktura o podanym numerze nie istnieje)
 
 ## `validate_collective_identifier_number(value) -> ValidationResult`
 

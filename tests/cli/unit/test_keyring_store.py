@@ -2,17 +2,129 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 import threading
 import time
 import types
 import warnings
+from pathlib import Path
 
 import pytest
 
 from ksef_client.cli.auth import keyring_store
 from ksef_client.cli.errors import CliError
 from ksef_client.cli.exit_codes import ExitCode
+
+
+def test_keyring_store_clear_tokens_tolerates_a_missing_backend(monkeypatch, tmp_path) -> None:
+    """Brak backendu keyringa (headless Linux/CI) nie może blokować `auth logout`.
+
+    `NoKeyringError` znaczy „keyring nie jest w użyciu", a nie „nie udało się usunąć
+    wpisu" — na takiej maszynie tokeny żyją w magazynie fallbacku, więc `clear_tokens`
+    ma je wyczyścić i zakończyć się sukcesem. Traktowanie tego jak błędu wywracało
+    `auth logout`, `profile delete` i smoke testy CLI w CI (Linux).
+    """
+    keyring_errors = pytest.importorskip("keyring.errors")
+    missing_backend_error = keyring_errors.NoKeyringError
+
+    class _Backend:
+        def set_password(self, service: str, key: str, value: str) -> None:
+            _ = (service, key, value)
+            raise missing_backend_error("no backend")
+
+        def get_password(self, service: str, key: str) -> str | None:
+            _ = (service, key)
+            raise missing_backend_error("no backend")
+
+        def delete_password(self, service: str, key: str) -> None:
+            _ = (service, key)
+            raise missing_backend_error("no backend")
+
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", True)
+    monkeypatch.setattr(keyring_store, "_keyring", _Backend())
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+
+    fallback = tmp_path / "tokens.json"
+    fallback.write_text(
+        json.dumps({"demo": {"access_token": "acc", "refresh_token": "ref"}}), encoding="utf-8"
+    )
+
+    keyring_store.clear_tokens("demo")
+
+    assert json.loads(fallback.read_text(encoding="utf-8")) == {}
+
+
+def test_keyring_store_clear_reports_a_failed_delete(monkeypatch, tmp_path) -> None:
+    """Nieudane usunięcie wpisu nie może udawać wylogowania.
+
+    Wcześniej pętla `continue`-owała po błędzie, a `logout` raportował
+    „Stored tokens removed.", zostawiając ważny refresh token w magazynie.
+    """
+    stored = {"access_token": "acc", "refresh_token": "ref"}
+
+    class _Backend:
+        def set_password(self, service: str, key: str, value: str) -> None:
+            _ = (service, value)
+
+        def get_password(self, service: str, key: str) -> str | None:
+            _ = service
+            return stored.get(key.rsplit(":", 1)[-1])
+
+        def delete_password(self, service: str, key: str) -> None:
+            _ = (service, key)
+            raise keyring_store.KeyringErrorType("backend refuses to delete")
+
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", True)
+    monkeypatch.setattr(keyring_store, "_keyring", _Backend())
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+
+    with pytest.raises(CliError, match="Cannot remove tokens from the system keyring"):
+        keyring_store.clear_tokens("demo")
+
+
+def test_keyring_store_partial_save_falls_back_to_the_complete_copy(
+    monkeypatch, tmp_path
+) -> None:
+    """Częściowy zapis do keyringu nie może zostawić pary „nowy access + stary refresh".
+
+    Wcześniej taki zapis wracał bez błędu, a `get_tokens` zwracał mieszankę nigdy
+    nie istniejącej sesji, przesłaniając kompletny fallback.
+    """
+
+    class _Backend:
+        def __init__(self) -> None:
+            self.values = {"access_token": "OLD-ACCESS", "refresh_token": "OLD-REFRESH"}
+
+        def set_password(self, service: str, key: str, value: str) -> None:
+            _ = service
+            name = key.rsplit(":", 1)[-1]
+            if name == "refresh_token":
+                raise keyring_store.KeyringErrorType("backend refuses to write")
+            self.values[name] = value
+
+        def get_password(self, service: str, key: str) -> str | None:
+            _ = service
+            return self.values.get(key.rsplit(":", 1)[-1])
+
+        def delete_password(self, service: str, key: str) -> None:
+            _ = service
+            self.values.pop(key.rsplit(":", 1)[-1], None)
+
+    backend = _Backend()
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", True)
+    monkeypatch.setattr(keyring_store, "_keyring", backend)
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+    # Tryb szyfrowany (nie plaintext), żeby nie zużywać jednorazowego ostrzeżenia
+    # o fallbacku, którego oczekuje inny test.
+    monkeypatch.setenv(keyring_store._TOKEN_STORE_KEY_ENV, "test-passphrase")
+    monkeypatch.delenv(keyring_store._ALLOW_INSECURE_FALLBACK_ENV, raising=False)
+
+    keyring_store.save_tokens("demo", "NEW-ACCESS", "NEW-REFRESH")
+
+    # Magazyn keyringu nie zawiera mieszanki, a komplet czyta się z fallbacku.
+    assert backend.values == {}
+    assert keyring_store.get_tokens("demo") == ("NEW-ACCESS", "NEW-REFRESH")
 
 
 def test_keyring_store_roundtrip_file_fallback(monkeypatch, tmp_path) -> None:
@@ -132,7 +244,85 @@ def test_keyring_store_encrypted_fallback_invalid_token(monkeypatch, tmp_path) -
     assert keyring_store.get_tokens("demo") is None
 
 
-def test_keyring_store_file_fallback_clear_ignores_save_errors(monkeypatch, tmp_path) -> None:
+def test_keyring_store_fallback_lock_heals_after_a_killed_process(
+    monkeypatch, tmp_path
+) -> None:
+    """Ta sama klasa błędu co w blokadzie cache: osierocona blokada nie może trwać.
+
+    Proces zabity w trakcie nie sprząta `tokens.json.lock`, więc zapis i usunięcie
+    tokenów kończyły się błędem, dopóki człowiek nie usunął pliku ręcznie.
+    """
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", False)
+    monkeypatch.setattr(keyring_store, "_keyring", None)
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+    monkeypatch.setenv(keyring_store._TOKEN_STORE_KEY_ENV, "test-passphrase")
+    monkeypatch.delenv(keyring_store._ALLOW_INSECURE_FALLBACK_ENV, raising=False)
+    lock_path = tmp_path / f"tokens.json{keyring_store._FALLBACK_LOCK_SUFFIX}"
+    lock_path.write_text("999999 1.0", encoding="utf-8")
+    stale = time.time() - keyring_store._FALLBACK_LOCK_STALE_SECONDS - 5
+    os.utime(lock_path, (stale, stale))
+
+    keyring_store.save_tokens("demo", "acc", "ref")
+
+    assert keyring_store.get_tokens("demo") == ("acc", "ref")
+    assert not lock_path.exists()
+
+
+def test_keyring_store_fallback_lock_steals_are_bounded(monkeypatch, tmp_path) -> None:
+    """Gdy starej blokady nie da się usunąć, pętla kończy się błędem, nie kręci."""
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", False)
+    monkeypatch.setattr(keyring_store, "_keyring", None)
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+    monkeypatch.setenv(keyring_store._TOKEN_STORE_KEY_ENV, "test-passphrase")
+    monkeypatch.delenv(keyring_store._ALLOW_INSECURE_FALLBACK_ENV, raising=False)
+    lock_path = tmp_path / f"tokens.json{keyring_store._FALLBACK_LOCK_SUFFIX}"
+    lock_path.write_text("999999 1.0", encoding="utf-8")
+    stale = time.time() - keyring_store._FALLBACK_LOCK_STALE_SECONDS - 5
+    os.utime(lock_path, (stale, stale))
+    monkeypatch.setattr(keyring_store, "_FALLBACK_LOCK_TIMEOUT_SECONDS", 0.0)
+    attempts: list[int] = []
+
+    def _busy(self: Path, **kwargs: object) -> None:
+        _ = (self, kwargs)
+        attempts.append(1)
+        if len(attempts) > keyring_store._FALLBACK_LOCK_MAX_STEALS:
+            raise AssertionError("pętla przejmowania blokady nie jest ograniczona")
+        raise OSError("busy")
+
+    monkeypatch.setattr(Path, "unlink", _busy)
+
+    # `save_tokens` opakowuje OSError z magazynu w CliError (kontrakt CLI).
+    with pytest.raises(CliError, match="Cannot persist tokens in fallback file store"):
+        keyring_store.save_tokens("demo", "acc", "ref")
+
+    assert len(attempts) <= keyring_store._FALLBACK_LOCK_MAX_STEALS
+
+
+def test_keyring_store_fallback_lock_is_not_stale_when_stat_fails(
+    monkeypatch, tmp_path
+) -> None:
+    """Gdy nie da się odczytać wieku blokady fallbacku, nie przejmujemy jej na ślepo."""
+    lock_path = tmp_path / f"tokens.json{keyring_store._FALLBACK_LOCK_SUFFIX}"
+    lock_path.write_text("1 1.0", encoding="utf-8")
+    original_stat = Path.stat
+
+    def _stat(self: Path, *, follow_symlinks: bool = True):
+        if self == lock_path:
+            raise OSError("locked")
+        return original_stat(self, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", _stat)
+
+    assert keyring_store._fallback_lock_is_stale(lock_path) is False
+
+
+def test_keyring_store_file_fallback_clear_reports_save_errors(monkeypatch, tmp_path) -> None:
+    """Nieudane usunięcie tokenów z fallbacku nie może udawać wylogowania.
+
+    Wcześniej `clear_tokens` połykało `OSError`, więc `auth logout` raportował
+    „Stored tokens removed." i zwracał `logged_out: True`, zostawiając ważny
+    refresh token w `tokens.json`.
+    """
     monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", False)
     monkeypatch.setattr(keyring_store, "_keyring", None)
     monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
@@ -144,7 +334,12 @@ def test_keyring_store_file_fallback_clear_ignores_save_errors(monkeypatch, tmp_
         "_save_fallback_tokens",
         lambda payload: (_ for _ in ()).throw(OSError("disk")),
     )
-    keyring_store.clear_tokens("demo")
+
+    with pytest.raises(CliError, match="Cannot remove tokens from the fallback"):
+        keyring_store.clear_tokens("demo")
+
+    # Tokeny faktycznie zostały na dysku — dokładnie dlatego operacja musi zgłosić błąd.
+    assert (tmp_path / "tokens.json").read_text(encoding="utf-8").strip() != "{}"
 
 
 def test_keyring_store_clear_tokens_removes_legacy_fallback_entry_when_mode_disabled(
@@ -348,8 +543,70 @@ def test_keyring_store_keyring_backend_errors(monkeypatch) -> None:
     # get path should swallow backend errors and return None
     assert keyring_store.get_tokens("demo") is None
 
-    # clear path should swallow backend errors
+    # Gdy keyring rzuca i na `delete_password`, i na `get_password`, nie da się
+    # potwierdzić usunięcia wpisu — wylogowanie musi zgłosić błąd (fail-closed),
+    # a nie zwrócić sukcesu z tokenem, który może nadal żyć w magazynie.
+    with pytest.raises(CliError) as clear_exc:
+        keyring_store.clear_tokens("demo")
+    assert clear_exc.value.code == ExitCode.CONFIG_ERROR
+    assert "system keyring" in clear_exc.value.message
+
+
+def test_keyring_store_clear_fails_closed_when_the_entry_cannot_be_verified(
+    monkeypatch,
+) -> None:
+    """`auth logout` nie może kłamać, gdy weryfikacja usunięcia też się nie udaje.
+
+    Wcześniej `still_present` startowało od `False`, więc wyjątek z `get_password`
+    degradujący weryfikację do „wpisu nie ma" dawał `logged_out: True`, choć ważny
+    refresh token mógł zostać w magazynie systemowym.
+    """
+
+    class _Backend:
+        def set_password(self, service: str, key: str, value: str) -> None:
+            _ = (service, key, value)
+
+        def get_password(self, service: str, key: str) -> str | None:
+            _ = (service, key)
+            raise keyring_store.KeyringErrorType("backend refuses to read")
+
+        def delete_password(self, service: str, key: str) -> None:
+            _ = (service, key)
+            raise keyring_store.KeyringErrorType("backend refuses to delete")
+
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", True)
+    monkeypatch.setattr(keyring_store, "_keyring", _Backend())
+
+    with pytest.raises(CliError) as exc:
+        keyring_store.clear_tokens("demo")
+
+    assert exc.value.code == ExitCode.CONFIG_ERROR
+    assert "system keyring" in exc.value.message
+
+
+def test_keyring_store_clear_accepts_a_missing_entry(monkeypatch, tmp_path) -> None:
+    """Brak wpisu w keyringu to nie błąd — usunięcie jest wtedy idempotentne."""
+
+    class _Backend:
+        def set_password(self, service: str, key: str, value: str) -> None:
+            _ = (service, key, value)
+
+        def get_password(self, service: str, key: str) -> str | None:
+            _ = (service, key)
+            return None
+
+        def delete_password(self, service: str, key: str) -> None:
+            _ = (service, key)
+            raise keyring_store.KeyringErrorType("no such entry")
+
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", True)
+    monkeypatch.setattr(keyring_store, "_keyring", _Backend())
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+
+    # `delete_password` rzuca, ale `get_password` potwierdza brak wpisu — sukces.
     keyring_store.clear_tokens("demo")
+
+    assert not (tmp_path / "tokens.json").exists()
 
 
 def test_keyring_store_keyring_error_uses_encrypted_fallback(monkeypatch, tmp_path) -> None:

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Final
 
-from typing_extensions import Self
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:  # pragma: no cover - Python 3.10 nie ma `typing.Self`
+    from typing_extensions import Self
 
 from .domain import (
     Annotation,
@@ -362,8 +366,13 @@ class BaseFA3Builder(FA3InvoiceBuilderV2):
         )
         return self
 
-    def additional_description(self, key: str, value: str) -> BaseFA3Builder:
-        self._additional_descriptions.append(AdditionalDescription.key_value(key, value))
+    def additional_description(
+        self, key: str, value: str, *, row_number: int | None = None
+    ) -> BaseFA3Builder:
+        """Dodaje informację dodatkową; `row_number` wiąże ją z pozycją faktury."""
+        self._additional_descriptions.append(
+            AdditionalDescription.key_value(key, value, row_number=row_number)
+        )
         return self
 
     def foreign_currency_rate(
@@ -441,7 +450,15 @@ class BaseFA3Builder(FA3InvoiceBuilderV2):
         return self
 
     def attachment_text(self, header: str, *paragraphs: str) -> Self:
-        self._attachment = Attachment.text(header, *paragraphs)
+        """Dodaje blok tekstowy do załącznika (NIE nadpisuje istniejących bloków).
+
+        Wcześniej metoda podstawiała cały załącznik, więc
+        `attachment_text(...).attachment_table(...)` cicho gubiło tekst
+        (w modelu i w XML zostawał tylko blok z tabelą).
+        """
+        current = self._attachment or Attachment(())
+        added = Attachment.text(header, *paragraphs).blocks
+        self._attachment = Attachment((*current.blocks, *added))
         return self
 
     def attachment_table(
@@ -452,8 +469,12 @@ class BaseFA3Builder(FA3InvoiceBuilderV2):
         rows: tuple[tuple[str, ...], ...],
         description: str | None = None,
     ) -> Self:
+        """Dodaje blok z tabelą (wcześniej cicho nadpisywał cały załącznik)."""
         table = AttachmentTable(headers=columns, rows=rows, description=description)
-        self._attachment = Attachment((AttachmentBlock(header=header, tables=(table,)),))
+        current = self._attachment or Attachment(())
+        self._attachment = Attachment(
+            (*current.blocks, AttachmentBlock(header=header, tables=(table,)))
+        )
         return self
 
     def attachment_block(self, block: AttachmentBlock) -> Self:

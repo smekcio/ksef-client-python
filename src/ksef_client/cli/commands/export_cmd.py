@@ -98,6 +98,11 @@ def export_run(
     ),
     max_attempts: int = typer.Option(120, "--max-attempts", help="Maximum polling attempts."),
     out: str = typer.Option(..., "--out", help="Output directory for exported files and metadata."),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Overwrite files that already exist in --out (without it the export fails).",
+    ),
     base_url: str | None = typer.Option(
         None, "--base-url", help="Override KSeF base URL for this command."
     ),
@@ -120,6 +125,7 @@ def export_run(
             poll_interval=poll_interval,
             max_attempts=max_attempts,
             out=out,
+            overwrite=overwrite,
         )
     except Exception as exc:
         _render_error(ctx, "export.run", exc)

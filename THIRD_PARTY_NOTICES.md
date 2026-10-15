@@ -13,9 +13,12 @@ Pliki:
 
 Pochodzenie:
 
-- repozytorium dokumentacji KSeF: `https://github.com/CIRFMF/ksef-docs`
-- katalog schem FA: `https://github.com/CIRFMF/ksef-docs/tree/main/faktury/schemy/FA`
+- repozytorium dokumentacji KSeF: `https://github.com/CIRFMF/ksef-api` (link `CIRFMF/ksef-docs` przekierowuje tutaj)
+- katalog schem FA: `https://github.com/CIRFMF/ksef-api/tree/main/faktury/schemy/FA`
+- wzór w Centralnym Repozytorium Wzorów Dokumentów Elektronicznych: `crd.gov.pl/wzor/2025/06/25/13775/`
+  (ID `13775`, opublikowany `2025-06-25`, nazwa „FA USTRUKTURYZOWANA FAKTURA VAT")
 - strona informacyjna KSeF (FA(3)): `https://ksef.podatki.gov.pl/informacje-ogolne-ksef-20/struktura-logiczna-fa-3/`
+- broszura informacyjna MF o strukturze logicznej FA(3): `https://ksef.podatki.gov.pl/media/nuclnu0w/broszura-informacyjna-dotyczaca-struktury-logicznej-fa-3.pdf`
 
 Cel przechowywania plików w repo:
 
@@ -26,6 +29,7 @@ Cel przechowywania plików w repo:
 Data weryfikacji źródeł:
 
 - `2026-05-16`
+- źródła i linki ponownie zweryfikowane przy okazji przeglądu błędów (broszura FA(3), przykładowe pliki MF)
 
 ## Uwagi
 

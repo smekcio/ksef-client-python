@@ -9,6 +9,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from ksef_client.services.sessions import BatchSessionState, OnlineSessionState
 
@@ -49,11 +50,25 @@ def _checkpoint_path(profile: str, session_id: str) -> Path:
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # `mkdir` poza `try` uciekał jako surowy OSError, więc CLI kończyło się
+        # nieoczekiwanym kodem wyjścia (UNEXPECTED/6) zamiast CONFIG_ERROR.
+        raise CliError(
+            "Cannot create the checkpoint directory.",
+            ExitCode.CONFIG_ERROR,
+            "Grant write access to the cache directory or update its location settings.",
+        ) from exc
     tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     data = json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True)
     try:
-        with tmp_path.open("w", encoding="utf-8") as handle:
+        # Plik tymczasowy powstaje z prawami 0600 JUŻ przy tworzeniu: checkpoint
+        # niesie klucz sesji, a `open("w")` dawał 0644 (przy typowym umask 022)
+        # i `chmod` następował dopiero po `os.replace` — przerwanie procesu
+        # w tym oknie zostawiało czytelny dla wszystkich plik z kluczem.
+        descriptor = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(data)
             handle.flush()
             with suppress(OSError):
@@ -75,7 +90,9 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
+        # `ValueError` obejmuje `json.JSONDecodeError` oraz `UnicodeDecodeError`:
+        # plik z binarną albo obciętą treścią nie może wywracać całego `session list`.
         raise CliError(
             f"Cannot read session checkpoint: {path}",
             ExitCode.CONFIG_ERROR,
@@ -331,18 +348,30 @@ class BatchSessionCheckpoint:
 SessionCheckpoint = OnlineSessionCheckpoint | BatchSessionCheckpoint
 
 
-def checkpoint_from_dict(payload: dict[str, Any]) -> SessionCheckpoint:
+def checkpoint_from_dict(
+    payload: dict[str, Any], *, source: Path | None = None
+) -> SessionCheckpoint:
+    """Buduje checkpoint z JSON-a; każdy błąd kształtu to `CliError(CONFIG_ERROR)`.
+
+    `source` (jeśli podane) trafia do komunikatu, żeby użytkownik wiedział, KTÓRY
+    plik jest uszkodzony. Wcześniej łapany był wyłącznie `ValueError`, więc checkpoint
+    z np. `"form_code": {}` kończył się `TypeError`-em z `FormCode.__init__`
+    i wywracał całe `session list` kodem `UNEXPECTED`/6, zamiast trafić na listę
+    plików nienarparsowalnych (`unreadable`).
+    """
     kind = payload.get("kind")
     try:
         if kind == "online":
             return OnlineSessionCheckpoint.from_dict(payload)
         if kind == "batch":
             return BatchSessionCheckpoint.from_dict(payload)
-    except ValueError as exc:
+    except (CliError, TypeError, KeyError, ValueError, AttributeError) as exc:
+        # `json.JSONDecodeError` dziedziczy po `ValueError`, więc jest tu objęty.
+        location = f" in '{source}'" if source is not None else ""
         raise CliError(
-            "Invalid session checkpoint payload.",
+            f"Invalid session checkpoint payload{location}.",
             ExitCode.CONFIG_ERROR,
-            str(exc),
+            str(exc) or type(exc).__name__,
         ) from exc
     raise CliError(
         "Invalid session checkpoint payload.",
@@ -371,20 +400,71 @@ def load_checkpoint(profile: str, session_id: str) -> SessionCheckpoint:
             ExitCode.CONFIG_ERROR,
             "Create it first with `ksef session ... open` or `ksef send ... --save-session`.",
         )
-    return checkpoint_from_dict(_read_json(path))
+    return checkpoint_from_dict(_read_json(path), source=path)
 
 
-def list_checkpoints(profile: str) -> list[SessionCheckpoint]:
+def list_checkpoints(profile: str, *, include_broken: bool = False) -> list[SessionCheckpoint]:
+    """Checkpointy profilu; uszkodzone pliki nie znikają bez śladu.
+
+    `include_broken=True` zgłasza błąd zamiast pomijać plik — `session list`
+    pokazuje wtedy, że w katalogu leży coś, czego nie da się odczytać (wcześniej
+    lista wyglądała na kompletną, choć część plików była pomijana).
+    """
     directory = _profile_dir(profile)
     if not directory.exists():
         return []
     checkpoints: list[SessionCheckpoint] = []
     for path in sorted(directory.glob("*.json")):
         try:
-            checkpoints.append(checkpoint_from_dict(_read_json(path)))
-        except CliError:
+            checkpoints.append(checkpoint_from_dict(_read_json(path), source=path))
+        except CliError as exc:
+            if include_broken:
+                raise CliError(
+                    f"Cannot read session checkpoint '{path.name}': {exc.message}",
+                    ExitCode.CONFIG_ERROR,
+                    "Remove or fix the file, then run the command again.",
+                ) from exc
             continue
     return checkpoints
+
+
+def list_unreadable_checkpoints(profile: str) -> list[str]:
+    """Nazwy plików checkpointów, których nie da się odczytać (do ostrzeżenia)."""
+    directory = _profile_dir(profile)
+    if not directory.exists():
+        return []
+    broken: list[str] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            checkpoint_from_dict(_read_json(path), source=path)
+        except CliError:
+            broken.append(path.name)
+    return broken
+
+
+def delete_all_checkpoints(profile: str) -> int:
+    """Usuwa wszystkie checkpointy profilu i zwraca liczbę usuniętych plików.
+
+    Używane przez `profile delete`: bez tego nowy profil o tej samej nazwie
+    dziedziczył sesje poprzednika (wraz z kluczem i IV sesji w checkpoincie).
+    """
+    directory = _profile_dir(profile)
+    if not directory.exists():
+        return 0
+    removed = 0
+    for path in sorted(directory.glob("*.json")):
+        try:
+            path.unlink()
+            removed += 1
+        except OSError as exc:
+            raise CliError(
+                "Cannot delete session checkpoint.",
+                ExitCode.CONFIG_ERROR,
+                "Check filesystem permissions and try again.",
+            ) from exc
+    with suppress(OSError):
+        directory.rmdir()
+    return removed
 
 
 def delete_checkpoint(profile: str, session_id: str) -> None:
@@ -414,15 +494,95 @@ def update_checkpoint(
     return updated
 
 
-def export_checkpoint(profile: str, session_id: str, out_path: Path) -> Path:
+def export_checkpoint(
+    profile: str, session_id: str, out_path: Path, *, overwrite: bool = False
+) -> Path:
+    """Zapisuje checkpoint do pliku; bez `overwrite` nie nadpisuje istniejącego.
+
+    Checkpoint zawiera klucz i IV sesji, więc ciche nadpisanie cudzego pliku
+    (np. `--out` wskazujące na istniejący dokument) niszczyło dane bez ostrzeżenia.
+    """
     checkpoint = load_checkpoint(profile, session_id)
     target = out_path
     if target.exists() and target.is_dir():
         target = target / f"session-{checkpoint.id}.json"
     if str(out_path).replace("\\", "/").endswith("/"):
         target = Path(str(out_path).replace("\\", "/")) / f"session-{checkpoint.id}.json"
+    if target.exists() and not overwrite:
+        raise CliError(
+            f"File already exists: {target}",
+            ExitCode.IO_ERROR,
+            "Pass --overwrite to replace it.",
+        )
     _write_json_atomic(target, checkpoint.to_dict())
     return target
+
+
+def _normalize_base_url(value: str) -> str:
+    """Adres do porównania: bez ukośnika na końcu, bez portu domyślnego, małymi literami.
+
+    `https://host:443` i `https://host` to ten sam adres — bez zdjęcia portu
+    domyślnego legalny checkpoint bywał fałszywie odrzucany.
+    """
+    normalized = value.strip().rstrip("/").lower()
+    for scheme, default_port in (("https://", ":443"), ("http://", ":80")):
+        if normalized.startswith(scheme) and normalized.endswith(default_port):
+            return normalized[: -len(default_port)]
+    return normalized
+
+
+def require_matching_base_url(checkpoint: SessionCheckpoint, expected_base_url: str) -> None:
+    """Sprawdza, że checkpoint nie wskazuje innego adresu niż efektywny adres komendy.
+
+    Checkpoint bywa plikiem z zewnątrz (`session import`), a jego `base_url`
+    decyduje, DOKĄD trafia token dostępowy profilu (`session online send`,
+    `close`, `status`). Wcześniej porównywana była wyłącznie nazwa profilu, więc
+    spreparowany plik mógł wysłać token KSeF i treść faktury na dowolny host.
+    """
+    if _normalize_base_url(checkpoint.base_url) == _normalize_base_url(expected_base_url):
+        return
+    raise CliError(
+        "Checkpoint base_url does not match the effective base URL.",
+        ExitCode.VALIDATION_ERROR,
+        f"Checkpoint points at '{checkpoint.base_url}', this command uses "
+        f"'{expected_base_url}'. Re-import the checkpoint from the matching environment, "
+        "select that profile or pass the matching --base-url.",
+    )
+
+
+def _known_ksef_hosts() -> set[str]:
+    """Hosty środowisk KSeF — do rozpoznania checkpointu z zewnątrz."""
+    from ksef_client.config import KsefEnvironment
+
+    hosts = set()
+    for environment in KsefEnvironment:
+        host = urlparse(environment.value).hostname
+        if host:
+            hosts.add(host.lower())
+    return hosts
+
+
+def require_known_ksef_host(base_url: str, *, allow_foreign_host: bool = False) -> None:
+    """Importowany checkpoint musi wskazywać znane środowisko KSeF.
+
+    Plik checkpointu jest danymi z zewnątrz, a jego `base_url` decyduje, dokąd
+    trafi token dostępowy profilu. Dopuszczenie dowolnego hosta oznaczało, że
+    wystarczyło podać zgodny `--base-url`, żeby „zalegalizować” obcy adres —
+    teraz nieznany host wymaga świadomej zgody (`--allow-foreign-host`), co jest
+    potrzebne tylko przy własnych wdrożeniach.
+    """
+    if allow_foreign_host:
+        return
+    host = (urlparse(base_url).hostname or "").lower()
+    known = _known_ksef_hosts()
+    if host in known:
+        return
+    raise CliError(
+        f"Checkpoint points at an unknown host: {host or base_url!r}.",
+        ExitCode.VALIDATION_ERROR,
+        f"Known KSeF hosts: {', '.join(sorted(known))}. "
+        "Pass --allow-foreign-host if you really use a custom deployment.",
+    )
 
 
 def import_checkpoint(
@@ -430,6 +590,8 @@ def import_checkpoint(
     source_path: Path,
     *,
     session_id: str | None = None,
+    expected_base_url: str | None = None,
+    allow_foreign_host: bool = False,
 ) -> SessionCheckpoint:
     if not source_path.exists() or not source_path.is_file():
         raise CliError(
@@ -437,13 +599,16 @@ def import_checkpoint(
             ExitCode.IO_ERROR,
             "Use --in with an existing JSON checkpoint file.",
         )
-    checkpoint = checkpoint_from_dict(_read_json(source_path))
+    checkpoint = checkpoint_from_dict(_read_json(source_path), source=source_path)
     if checkpoint.profile != profile:
         raise CliError(
             "Checkpoint profile does not match selected profile.",
             ExitCode.VALIDATION_ERROR,
             f"Checkpoint profile is '{checkpoint.profile}', selected profile is '{profile}'.",
         )
+    require_known_ksef_host(checkpoint.base_url, allow_foreign_host=allow_foreign_host)
+    if expected_base_url is not None:
+        require_matching_base_url(checkpoint, expected_base_url)
     if session_id is not None:
         checkpoint = replace(checkpoint, id=_validate_session_id(session_id))
     save_checkpoint(checkpoint, overwrite=True)
@@ -463,4 +628,7 @@ __all__ = [
     "update_checkpoint",
     "export_checkpoint",
     "import_checkpoint",
+    "delete_all_checkpoints",
+    "list_unreadable_checkpoints",
+    "require_matching_base_url",
 ]

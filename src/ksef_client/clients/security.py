@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from ..models import PublicKeyCertificate, PublicKeyCertificateUsage
+from ..utils.datetime_parsing import try_parse_api_datetime
 from .base import AsyncBaseApiClient, BaseApiClient
 
 
@@ -22,20 +23,27 @@ def _normalize_certificate_usage(
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    """Parsuje znacznik czasu certyfikatu (z tolerancją na 7 cyfr ułamka).
+
+    API zwraca znaczniki z siedmioma cyframi części ułamkowej, czego
+    ``datetime.fromisoformat`` na Pythonie 3.10 nie przyjmuje. Wcześniejsza
+    wersja połykała wtedy ``ValueError`` i zwracała ``None``, przez co
+    :func:`_is_current_certificate` uznawał **każdy** certyfikat — także
+    wygasły — za aktualny.
+    """
+    return try_parse_api_datetime(value)
 
 
 def _is_current_certificate(certificate: PublicKeyCertificate, now: datetime) -> bool:
     valid_from = _parse_datetime(certificate.valid_from)
     valid_to = _parse_datetime(certificate.valid_to)
+    # Nieparsowalna GRANICA (obecna, ale nieczytelna) nie może oznaczać
+    # „bezterminowo ważny": bezpieczniej odrzucić certyfikat niż zaszyfrować
+    # klucz sesji kluczem, którego KSeF nie rozszyfruje albo który już wygasł.
+    if certificate.valid_from and valid_from is None:
+        return False
+    if certificate.valid_to and valid_to is None:
+        return False
     if valid_from is not None and valid_from > now:
         return False
     return not (valid_to is not None and valid_to < now)
@@ -44,6 +52,8 @@ def _is_current_certificate(certificate: PublicKeyCertificate, now: datetime) ->
 def _certificate_sort_key(certificate: PublicKeyCertificate) -> tuple[bool, datetime]:
     valid_from = _parse_datetime(certificate.valid_from)
     if valid_from is None:
+        # Certyfikat bez parsowalnej daty początku nie może wygrać sortowania
+        # „najnowszy validFrom" — inaczej `max()` sięga po pierwszy element listy.
         return (False, datetime.min.replace(tzinfo=timezone.utc))
     return (True, valid_from)
 

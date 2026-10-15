@@ -2,11 +2,18 @@
 
 ## `MAX_BATCH_PART_SIZE_BYTES`
 
-Stała: 100MB – limit wynikający z KSeF (paczka wsadowa jest dzielona na takie części przed szyfrowaniem).
+Stała: `100_000_000` (100 MB dziesiętnie) – limit KSeF dla części paczki wsadowej
+**przed** zaszyfrowaniem („Maksymalny dozwolony rozmiar części przed zaszyfrowaniem
+to 100MB"). Wcześniejsza wartość `100 * 1024 * 1024` (100 MiB) pozwalała wysłać część
+o ~4,9% większą niż dozwolona — KSeF odrzucał ją komunikatem
+„Rozmiar części 1 przekroczył dozwolony rozmiar 100MB".
 
 ## `build_zip(files: dict[str, bytes]) -> bytes`
 
-Buduje ZIP w pamięci. Przykład:
+Buduje ZIP w pamięci. Nazwy wpisów są sanityzowane tak samo jak w `build_tar_gz`:
+ścieżka absolutna, segment `..` albo nazwa powtarzająca się po normalizacji kończą się
+`ValueError` (wcześniej powstawało archiwum, którego własny czytnik SDK nie przyjmował).
+Przykład:
 
 ```python
 from ksef_client.utils import build_zip
@@ -46,6 +53,10 @@ Bezpieczne rozpakowanie ZIP z limitami:
 - maksymalny rozmiar pojedynczego pliku
 - maksymalny rozmiar sumaryczny
 - opcjonalny limit współczynnika kompresji (ochrona przed zip bomb)
+
+Każdy wpis jest czytany po swoim wpisie w archiwum (nie „po nazwie"), a powtórzona
+nazwa kończy się `ValueError` — wcześniej archiwum z trzema wpisami `faktura.xml`
+zwracało tylko treść ostatniego, gubiąc pozostałe faktury bez żadnego komunikatu.
 
 W przypadku paczek eksportu z KSeF zalecane jest użycie `unzip_bytes_safe()`.
 

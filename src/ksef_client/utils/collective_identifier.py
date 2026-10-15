@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from ..models import (
@@ -11,6 +11,7 @@ from ..models import (
     CollectiveIdentifierInvoicePayment,
     CurrencyCode,
 )
+from .datetime_parsing import parse_api_datetime
 from .ksef_number import ValidationResult, _crc8, require_ksef_number
 
 COLLECTIVE_IDENTIFIER_LENGTH = 35
@@ -31,7 +32,11 @@ PAGE_SIZE_MAX = 200
 PAGE_SIZE_INVOICES_MAX = 500
 
 COLLECTIVE_IDENTIFIER_EXCEPTION_CODES = {
-    71001: "Invoice cannot be assigned to a collective identifier",
+    # Opisy 1:1 z kontraktem OpenAPI KSeF: 71001 to „faktura o podanym
+    # identyfikatorze nie istnieje", a nie „nie można przypisać do identyfikatora
+    # zbiorczego" — wcześniejszy opis dotyczył innej sytuacji niż ta, którą
+    # zwraca API.
+    71001: "Invoice with the given KSeF number does not exist",
     71002: "Invoice is already assigned to the maximum number of collective identifiers",
     71004: "Invoices belong to different sellers",
     71005: "Duplicated KSeF number in the request",
@@ -108,9 +113,24 @@ def require_query_date_range(date_from: str, date_to: str) -> tuple[str, str]:
     parsed_to = _parse_query_datetime(date_to, field_name="dateCreatedTo")
     if parsed_from > parsed_to:
         raise ValueError("dateCreatedFrom must be earlier than or equal to dateCreatedTo")
-    if parsed_to - parsed_from > timedelta(days=MAX_QUERY_RANGE_DAYS):
+    span = parsed_to - parsed_from
+    if span > timedelta(days=MAX_QUERY_RANGE_DAYS):
+        # Data bez godziny jest rozszerzana do końca dnia (`T23:59:59.999999Z`), więc
+        # para dat oddalona dokładnie o 100 dni daje przedział dłuższy od limitu.
+        # Nie luzujemy kontroli (KSeF porównuje znaczniki czasu i odrzuciłby taki
+        # zakres), ale mówimy wprost, co zrobić.
+        day_only = (
+            _DATE_ONLY_RE.match(date_from) is not None
+            or _DATE_ONLY_RE.match(date_to) is not None
+        )
+        hint = (
+            " Podaj datę końcową o jeden dzień wcześniejszą — data bez godziny jest "
+            "rozszerzana do końca dnia (T23:59:59.999999Z)."
+            if day_only
+            else ""
+        )
         raise ValueError(
-            f"Collective identifier query range cannot exceed {MAX_QUERY_RANGE_DAYS} days"
+            f"Collective identifier query range cannot exceed {MAX_QUERY_RANGE_DAYS} days.{hint}"
         )
     return date_from, date_to
 
@@ -226,12 +246,9 @@ def _parse_query_datetime(value: str, *, field_name: str) -> datetime:
     if not value:
         raise ValueError(f"{field_name} is required")
     normalized = expand_query_date_bound(value, end_of_day=field_name == "dateCreatedTo")
-    if normalized.endswith("Z"):
-        normalized = f"{normalized[:-1]}+00:00"
     try:
-        parsed = datetime.fromisoformat(normalized)
+        # Wspólny parser toleruje 7-cyfrowy ułamek, który API KSeF zwraca
+        # (a którego `fromisoformat` na Pythonie 3.10 nie przyjmuje).
+        return parse_api_datetime(normalized)
     except ValueError as exc:
         raise ValueError(f"Invalid {field_name} datetime: {value}") from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)

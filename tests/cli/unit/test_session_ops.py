@@ -33,8 +33,8 @@ def _online_checkpoint() -> OnlineSessionCheckpoint:
             reference_number="SES-ONLINE-1",
             form_code=_form_code(),
             valid_until="2026-04-01T12:30:00Z",
-            symmetric_key_base64="AQID",
-            iv_base64="BAUG",
+            symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            iv_base64="AgICAgICAgICAgICAgICAg==",
         ),
     )
 
@@ -66,8 +66,8 @@ def _batch_checkpoint() -> BatchSessionCheckpoint:
                     }
                 )
             ],
-            symmetric_key_base64="AQID",
-            iv_base64="BAUG",
+            symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            iv_base64="AgICAgICAgICAgICAgICAg==",
         ),
         payload_source=BatchPayloadSource(
             kind="zip",
@@ -151,6 +151,30 @@ def test_build_batch_payload_source_and_load_source_bytes(monkeypatch, tmp_path:
     assert mismatch_exc.value.code == ExitCode.VALIDATION_ERROR
 
 
+def test_require_checkpoint_base_url_accepts_the_command_override() -> None:
+    """Override adresu z komendy musi być respektowany przez strażnika.
+
+    Sesja otwarta przez `session online open --base-url https://api-test…` ma ten
+    adres w checkpoincie, a profil zostaje na DEMO — bez honorowania override nie
+    dało się jej wysłać ani zamknąć.
+    """
+    checkpoint = _online_checkpoint()
+
+    assert (
+        session_ops._require_checkpoint_base_url(
+            checkpoint,
+            profile="demo",
+            base_url="https://api-demo.ksef.mf.gov.pl/",
+        )
+        == "https://api-demo.ksef.mf.gov.pl"
+    )
+
+    with pytest.raises(CliError, match="base_url does not match"):
+        session_ops._require_checkpoint_base_url(
+            checkpoint, profile="demo", base_url="https://api.ksef.mf.gov.pl"
+        )
+
+
 def test_session_ops_require_checkpoint_type_and_simple_commands(monkeypatch) -> None:
     batch_checkpoint = _batch_checkpoint()
     online_checkpoint = _online_checkpoint()
@@ -184,7 +208,7 @@ def test_session_ops_require_checkpoint_type_and_simple_commands(monkeypatch) ->
     monkeypatch.setattr(
         session_ops,
         "export_checkpoint",
-        lambda profile, session_id, out: out / "saved.json",
+        lambda profile, session_id, out, overwrite=False: out / "saved.json",
     )
     exported = session_ops.export_saved_session(
         profile="demo",
@@ -196,7 +220,8 @@ def test_session_ops_require_checkpoint_type_and_simple_commands(monkeypatch) ->
     monkeypatch.setattr(
         session_ops,
         "import_checkpoint",
-        lambda profile, source_path, session_id=None: online_checkpoint,
+        lambda profile, source_path, session_id=None, expected_base_url=None,
+        allow_foreign_host=False: online_checkpoint,
     )
     imported = session_ops.import_saved_session(
         profile="demo",
@@ -230,6 +255,26 @@ def test_session_ops_require_checkpoint_type_and_simple_commands(monkeypatch) ->
     )
     assert status["status_code"] == 200
     assert status["id"] == "resume-online"
+
+
+def test_show_saved_session_redacts_key_and_iv_unless_asked(monkeypatch) -> None:
+    """`session show` nie wypisuje klucza sesji bez `--show-secrets`."""
+    checkpoint = _online_checkpoint()
+    monkeypatch.setattr(session_ops, "load_checkpoint", lambda profile, session_id: checkpoint)
+
+    hidden = session_ops.show_saved_session(profile="demo", session_id="resume-online")
+    state = hidden["checkpoint"]["session_state"]
+    assert state["symmetric_key_base64"] == "<redacted>"
+    assert state["iv_base64"] == "<redacted>"
+    assert "AQEBAQ" not in str(hidden)
+    assert state["reference_number"] == "SES-ONLINE-1"
+
+    revealed = session_ops.show_saved_session(
+        profile="demo", session_id="resume-online", show_secrets=True
+    )
+    revealed_state = revealed["checkpoint"]["session_state"]
+    assert revealed_state["symmetric_key_base64"] == checkpoint.session_state.symmetric_key_base64
+    assert revealed_state["iv_base64"] == checkpoint.session_state.iv_base64
 
 
 def test_open_online_session_closes_handle_when_save_fails(monkeypatch) -> None:

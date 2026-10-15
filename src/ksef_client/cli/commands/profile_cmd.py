@@ -227,14 +227,30 @@ def set_profile_value_command(
 def delete_profile_command(
     ctx: typer.Context,
     name: str = typer.Option(..., "--name", help="Profile name to delete."),
+    keep_credentials: bool = typer.Option(
+        False,
+        "--keep-credentials",
+        help="Leave stored tokens and session checkpoints on disk.",
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
+    removed: dict[str, object] = {"tokens_removed": False, "checkpoints_removed": 0}
     try:
         profile_name = normalize_profile_name(name)
         config = load_config()
         delete_profile(config, name=profile_name)
         save_config(config)
+        # Samo usunięcie wpisu z konfiguracji zostawiało tokeny i checkpointy:
+        # nowy profil o tej samej nazwie dziedziczył ważny refresh token i sesje
+        # poprzednika. Domyślnie sprzątamy; `--keep-credentials` to wyłącznik.
+        if not keep_credentials:
+            from ..auth.manager import logout
+            from ..session_store import delete_all_checkpoints
+
+            logout(profile_name)
+            removed["tokens_removed"] = True
+            removed["checkpoints_removed"] = delete_all_checkpoints(profile_name)
     except Exception as exc:
         _render_error(ctx, "profile.delete", exc)
     renderer.success(
@@ -243,6 +259,7 @@ def delete_profile_command(
         data={
             "deleted_profile": profile_name,
             "active_profile": config.active_profile or "",
+            **removed,
         },
         message="Profile deleted.",
     )

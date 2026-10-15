@@ -48,8 +48,8 @@ def test_send_online_invoice_can_persist_session_checkpoint(monkeypatch, tmp_pat
                 reference_number="SES-ONLINE-1",
                 form_code=_form_code(),
                 valid_until="2026-04-01T12:30:00Z",
-                symmetric_key_base64="AQID",
-                iv_base64="BAUG",
+                symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+                iv_base64="AgICAgICAgICAgICAgICAg==",
                 upo_v43=True,
             )
 
@@ -164,8 +164,8 @@ def test_send_batch_invoices_can_persist_session_checkpoint(monkeypatch, tmp_pat
                         }
                     ),
                 ],
-                symmetric_key_base64="AQID",
-                iv_base64="BAUG",
+                symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+                iv_base64="AgICAgICAgICAgICAgICAg==",
             )
 
         def upload_parts(self, *, parallelism=1, skip_ordinals=None, progress_callback=None):
@@ -264,8 +264,8 @@ def test_send_online_invoice_closes_session_when_checkpoint_save_fails(
                 reference_number="SES-ONLINE-1",
                 form_code=_form_code(),
                 valid_until="2026-04-01T12:30:00Z",
-                symmetric_key_base64="AQID",
-                iv_base64="BAUG",
+                symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+                iv_base64="AgICAgICAgICAgICAgICAg==",
             )
 
         def close(self, *, access_token=None):
@@ -374,8 +374,8 @@ def test_send_batch_invoices_handles_progress_checkpoint_edge_cases(
                         }
                     ),
                 ],
-                symmetric_key_base64="AQID",
-                iv_base64="BAUG",
+                symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+                iv_base64="AgICAgICAgICAgICAgICAg==",
             )
 
         def upload_parts(self, *, parallelism=1, skip_ordinals=None, progress_callback=None):
@@ -511,8 +511,8 @@ def test_send_batch_invoices_closes_session_when_checkpoint_save_fails(
                         }
                     )
                 ],
-                symmetric_key_base64="AQID",
-                iv_base64="BAUG",
+                symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+                iv_base64="AgICAgICAgICAgICAgICAg==",
             )
 
         def close(self, *, access_token=None):

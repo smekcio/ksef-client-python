@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-import json
+from typing import Any
 
+import httpx
+
+from ..http import HttpResponse
 from ..models import (
     AuthenticationChallengeResponse,
     AuthenticationInitResponse,
@@ -11,22 +14,58 @@ from ..models import (
     AuthenticationTokensResponse,
     InitTokenAuthenticationRequest,
 )
-from .base import AsyncBaseApiClient, BaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient, _parse_json_response
 
 _KSEF_FEATURE_HEADER = "X-KSeF-Feature"
 _ENFORCE_XADES_COMPLIANCE_FEATURE = "enforce-xades-compliance"
 
+#: Status odpowiedzi inicjującej uwierzytelnianie XAdES.
+#:
+#: Ścieżkę podajemy w wywołaniach `_request_*` jako literał — statyczne kontrole
+#: (`tests/test_openapi_coverage.py`, `tools/check_coverage.py`) czytają ją z AST.
+_INIT_RESPONSE_STATUS = 202
 
-def _parse_init_response(response_bytes: bytes, *, path: str) -> AuthenticationInitResponse | None:
+
+def _parse_init_response(
+    response_bytes: bytes,
+    *,
+    path: str,
+    content_type: str | None = None,
+) -> AuthenticationInitResponse | None:
+    """Parsuje odpowiedź 202 inicjującą uwierzytelnianie (puste ciało → ``None``).
+
+    Brak JSON-a zgłaszamy wspólnym helperem ``_parse_json_response``: wcześniej ręczne
+    ``json.loads`` przepuszczało surowy ``JSONDecodeError`` bez informacji, którego
+    endpointu dotyczy i co przyszło zamiast JSON-a (przy 202 z HTML-em proxy albo
+    captive portalu).
+
+    ``_request_bytes`` zwraca same bajty, więc ``Content-Type`` przekazuje wołający —
+    odtwarzamy z niego odpowiedź, której oczekuje wspólny helper.
+    """
     if not response_bytes:
         return None
-    payload = json.loads(response_bytes.decode("utf-8"))
+    headers = httpx.Headers({"Content-Type": content_type} if content_type else {})
+    response = HttpResponse(_INIT_RESPONSE_STATUS, headers, response_bytes)
+    payload = _parse_json_response(response, path=path)
     if not isinstance(payload, dict):
         raise TypeError(f"Expected JSON object response for {path}, got {type(payload).__name__}")
     return AuthenticationInitResponse.from_dict(payload)
 
 
 class AuthClient(BaseApiClient):
+    #: `Content-Type` ostatniej odpowiedzi z `_request_bytes` (patrz nadpisanie niżej).
+    _last_content_type: str | None = None
+
+    def _request_bytes(self, *args: Any, **kwargs: Any) -> bytes:
+        """Wariant bazowego ``_request_bytes``, który zachowuje też ``Content-Type``.
+
+        ``submit_xades_auth_request`` musi umieć powiedzieć, co przyszło zamiast JSON-a
+        (proxy, captive portal), a bazowa metoda zwraca wyłącznie treść odpowiedzi.
+        Nagłówki odczytujemy więc tutaj — w miejscu, gdzie odpowiedź jest jeszcze cała.
+        """
+        response = self._request_raw(*args, **kwargs)
+        self._last_content_type = response.headers.get("Content-Type")
+        return response.content
     def get_active_sessions(
         self,
         *,
@@ -89,6 +128,9 @@ class AuthClient(BaseApiClient):
         }
         if enforce_xades_compliance:
             headers[_KSEF_FEATURE_HEADER] = _ENFORCE_XADES_COMPLIANCE_FEATURE
+        # Czyścimy zapamiętany `Content-Type`, żeby komunikat błędu nie opisywał
+        # nagłówkiem z poprzedniej odpowiedzi tego klienta.
+        self._last_content_type = None
         response_bytes = self._request_bytes(
             "POST",
             "/auth/xades-signature",
@@ -96,9 +138,11 @@ class AuthClient(BaseApiClient):
             headers=headers,
             data=signed_xml.encode("utf-8"),
             skip_auth=True,
-            expected_status={202},
+            expected_status={_INIT_RESPONSE_STATUS},
         )
-        return _parse_init_response(response_bytes, path="/auth/xades-signature")
+        return _parse_init_response(
+            response_bytes, path="/auth/xades-signature", content_type=self._last_content_type
+        )
 
     def submit_ksef_token_auth(
         self, request_payload: InitTokenAuthenticationRequest
@@ -140,6 +184,19 @@ class AuthClient(BaseApiClient):
 
 
 class AsyncAuthClient(AsyncBaseApiClient):
+    #: `Content-Type` ostatniej odpowiedzi z `_request_bytes` (patrz nadpisanie niżej).
+    _last_content_type: str | None = None
+
+    async def _request_bytes(self, *args: Any, **kwargs: Any) -> bytes:
+        """Wariant bazowego ``_request_bytes`` z zachowanym ``Content-Type``.
+
+        Patrz ``AuthClient._request_bytes`` — komunikat błędu ma powiedzieć, co
+        przyszło zamiast JSON-a, a bazowa metoda zwraca wyłącznie treść.
+        """
+        response = await self._request_raw(*args, **kwargs)
+        self._last_content_type = response.headers.get("Content-Type")
+        return response.content
+
     async def get_active_sessions(
         self,
         *,
@@ -202,6 +259,8 @@ class AsyncAuthClient(AsyncBaseApiClient):
         }
         if enforce_xades_compliance:
             headers[_KSEF_FEATURE_HEADER] = _ENFORCE_XADES_COMPLIANCE_FEATURE
+        # Patrz `AuthClient.submit_xades_auth_request`.
+        self._last_content_type = None
         response_bytes = await self._request_bytes(
             "POST",
             "/auth/xades-signature",
@@ -209,9 +268,11 @@ class AsyncAuthClient(AsyncBaseApiClient):
             headers=headers,
             data=signed_xml.encode("utf-8"),
             skip_auth=True,
-            expected_status={202},
+            expected_status={_INIT_RESPONSE_STATUS},
         )
-        return _parse_init_response(response_bytes, path="/auth/xades-signature")
+        return _parse_init_response(
+            response_bytes, path="/auth/xades-signature", content_type=self._last_content_type
+        )
 
     async def submit_ksef_token_auth(
         self, request_payload: InitTokenAuthenticationRequest

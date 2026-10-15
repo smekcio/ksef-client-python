@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -20,7 +20,8 @@ from cryptography.hazmat.primitives.serialization.pkcs12 import load_key_and_cer
 @dataclass(frozen=True)
 class XadesKeyPair:
     certificate_pem: str
-    private_key_pem: str
+    # Klucz prywatny nie może trafiać do `repr` — wyciekałby do logów i komunikatów błędów.
+    private_key_pem: str = field(repr=False)
 
     @classmethod
     def from_pem_files(

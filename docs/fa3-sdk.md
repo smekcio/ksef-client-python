@@ -160,7 +160,6 @@ Metody specyficzne dla korekt i zaliczek:
 - `settles_advance(...)`, `settles_advances(...)`, `remaining_to_pay(...)` – rozliczenie zaliczki.
 
 ## Walidacja i serializacja
-
 `build()` i `to_xml(validate=True)` uruchamiają walidację biznesową SDK. Wynik walidacji możesz też
 sprawdzić jawnie:
 
@@ -186,6 +185,61 @@ validate_fa3_xml_xsd(xml)
 ```
 
 Błąd XSD jest zgłaszany jako `FA3XmlValidationError`.
+
+### Ograniczenia pól schematu (`ksef_client.documents.fa3.validation`)
+
+`to_xml(validate=True)` sprawdza wygenerowany dokument także wobec **ograniczeń pól**
+wynikających ze schematu: długości tekstów, precyzji liczb, słowników wartości
+(np. `P_12`, `GTU`, `Procedura`, `Rola`, `FormaPlatnosci`), wzorców (NIP, numer KSeF,
+`SWIFT`, `IPKSeF`) oraz liczności elementów. Sprawdzenie działa bez `lxml` i zwraca
+komunikat ze **ścieżką elementu**, np.:
+
+```
+Faktura/Fa/FaWiersz/P_9A: wartość '1.123456789' ma 9 miejsc po przecinku,
+a schemat dopuszcza 8 (TKwotowy2)
+```
+
+Tabela ograniczeń jest jednym źródłem prawdy i jest weryfikowana ze schematem
+przez `tests/test_fa3_validation_facets.py`. Testy porównują z deklaracjami XSD:
+typ elementu, `maxLength`/`minLength`, `fractionDigits`, `enumeration`,
+`minInclusive`/`maxInclusive`, wzorce, `maxOccurs` i `minOccurs`. Rozjazd w
+którejkolwiek z tych wartości daje czerwony test (sprawdzone mutacyjnie).
+Walidację można też uruchomić samodzielnie na gotowym drzewie XML:
+
+```python
+from xml.etree import ElementTree as ET
+from ksef_client.documents.fa3.validation import validate_xml_facets
+
+issues = validate_xml_facets(ET.fromstring(xml))
+for issue in issues:
+    print(issue)   # "ścieżka: opis naruszenia"
+```
+
+`xsd_validate=True` pozostaje ostatecznym arbitrem — sprawdza dodatkowo kolejność
+elementów i pełną strukturę schematu.
+
+### Reguły, których nie da się wyrazić w XSD
+
+Część wymagań broszury MF nie ma odpowiednika w schemacie, więc SDK sprawdza je sam —
+inaczej dokument jest formalnie poprawny, ale KSeF go odrzuca albo nie udostępnia nabywcy:
+
+* **polski NIP nabywcy wyłącznie w polu `NIP`** (GEN-20/P2-16). `KodUE=PL`/`KodKraju=PL`
+  jest zgodne ze schematem, ale faktura nie trafi do nabywcy w KSeF. SDK zgłasza błąd
+  i podpowiada `PartyIdentifier.polish_nip(...)`.
+* **`Podmiot1/PrefiksPodatnika` = `PL`** — element ma w schemacie `fixed="PL"`, a jego typ
+  `TKodyKrajowUE` dopuszcza 28 kodów, więc `DE` przechodziło przez sam słownik. W `Podmiot1K`
+  schemat tego nie wymusza i SDK tego nie zawęża.
+* **nabywca bez nazwy tylko na fakturze uproszczonej** — `TPodmiot2` trzyma `Nazwa`
+  w `<xsd:sequence minOccurs="0">` dla art. 106e ust. 5 pkt 3. Użyj
+  `SimplifiedInvoiceBuilder` (np. `FA3Invoice.simplified("FV/1")`), a powstały `Podmiot2`
+  będzie zawierał sam `NIP`, tak jak w oficjalnym `FA_3_Przykład_15.xml`.
+* **`P_10` to obniżka na jednostkę**, nie kwota łączna — `Discount.amount(100)` przy
+  `20 × 1000 zł` daje `P_11 = 18 000 zł` (zgodnie z `FA_3_Przykład_4.xml`).
+* **procedura marży nie podaje stawki** — wiersz `TaxCategory.margin()` nie emituje `P_12`,
+  `P_9A` ani `P_11`, bo podstawą jest marża (`FA_3_Przykład_8.xml`).
+* **faktura rozliczająca (ROZ)** — `P_13_x`/`P_14_x` są proporcją kwoty pozostałej do zapłaty
+  i zależą od stawek oraz zaliczek, więc SDK nie wyprowadza ich z pełnej wartości zamówienia.
+  Zamiast deklarować błędny podatek, wymaga wierszy odpowiadających kwocie pozostałej do zapłaty.
 
 ## Drafty JSON i batch helper
 
@@ -243,3 +297,10 @@ W praktyce audyt składa się z trzech warstw:
 
 Aby domknąć brak pokrycia, należy dodać scenariusz, który generuje brakującą ścieżkę oraz przechodzi
 `xsd_validate=True`.
+
+## Dokumentacja FA(3) i schematy XSD
+
+- [Broszura informacyjna MF: struktura logiczna FA(3)](https://ksef.podatki.gov.pl/media/nuclnu0w/broszura-informacyjna-dotyczaca-struktury-logicznej-fa-3.pdf) (PDF, PL, 173 str.) – **pole po polu**, z przykładami wartości; wersja angielska: [Information sheet on the FA(3) logical structure](https://ksef.podatki.gov.pl/media/f2hnwjk2/information-sheet-on-the-fa-3-logical-structure.pdf)
+- [`schemas/README.md`](../src/ksef_client/documents/fa3/schemas/README.md) – pochodzenie lokalnych XSD, odstępstwa wobec oryginału, rozjazd słowników walut OpenAPI ↔ XSD oraz pełna lista materiałów MF
+- [Przykładowe pliki MF (26 faktur XML)](https://ksef.podatki.gov.pl/media/e5cia0ey/przykladowe-pliki-dla-struktury-logicznej-e-faktury-fa-3.zip) – wszystkie przechodzą walidację wobec lokalnego schematu
+- [Pliki do pobrania KSeF 2.0](https://ksef.podatki.gov.pl/pliki-do-pobrania-ksef-20) – podręczniki i pozostałe materiały MF

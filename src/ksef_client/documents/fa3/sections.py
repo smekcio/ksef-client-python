@@ -6,7 +6,10 @@ from decimal import Decimal
 from typing import Any
 
 from .domain import Address, Discount, InvoiceParty, TaxCategory
-from .models import decimal_from_value, money
+from .models import FA3ValidationIssue, decimal_from_value, money
+
+#: Warianty środka transportu wybierające gałąź schematu (`P_22B`/`P_22C`/`P_22D`).
+_TRANSPORT_KINDS = frozenset({"land", "water", "air"})
 
 
 def enum_value(value: Any) -> str | None:
@@ -19,10 +22,16 @@ def enum_value(value: Any) -> str | None:
 class AdditionalDescription:
     key: str
     value: str
+    #: Numer wiersza faktury (`NrWierszaFa`) albo zamówienia (`NrWierszaZam`),
+    #: gdy informacja dotyczy konkretnej pozycji. Schemat czyni to pole
+    #: opcjonalnym, ale bez niego nie da się przypisać opisu do pozycji.
+    row_number: int | None = None
 
     @classmethod
-    def key_value(cls, key: str, value: str) -> AdditionalDescription:
-        return cls(key, value)
+    def key_value(
+        cls, key: str, value: str, *, row_number: int | None = None
+    ) -> AdditionalDescription:
+        return cls(key, value, row_number)
 
 
 @dataclass(frozen=True)
@@ -120,6 +129,56 @@ class NewTransportMeans:
     taxable_base: str = "0"
     tax_rate: str | None = None
 
+    def validate(self, path: str) -> list[FA3ValidationIssue]:
+        """Sprawdza wariant środka transportu.
+
+        `kind` wybiera gałąź schematu: `land` (`P_22B`), `water` (`P_22C`) albo
+        `air` (`P_22D`). Wcześniej dowolny inny napis — np. literówka `sea` —
+        cicho wybierał gałąź lądową, więc dokument opisywał inny środek transportu
+        niż zamierzył wołający.
+        """
+        issues: list[FA3ValidationIssue] = []
+        if self.kind not in _TRANSPORT_KINDS:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.kind: nieznany wariant {self.kind!r}; dozwolone: "
+                    f"{', '.join(sorted(_TRANSPORT_KINDS))}.",
+                    column=f"{path}.kind",
+                )
+            )
+        if self.kind in {"water", "air"} and not (self.hours_used or "").strip():
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.hours_used: schemat wymaga liczby godzin roboczych dla "
+                    f"wariantu {self.kind!r}.",
+                    column=f"{path}.hours_used",
+                )
+            )
+        if self.row_number < 1:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.row_number: numer wiersza musi być dodatni.",
+                    column=f"{path}.row_number",
+                )
+            )
+        # `NowySrodkiTransportu` w schemacie FA(3) nie ma pól na wartość pojazdu,
+        # kwotę podatku ani podstawę — te trzy pola nie trafiają do dokumentu.
+        # Wcześniej znikały bez słowa, więc wołający mógł sądzić, że deklaruje
+        # podatek od importu środka transportu.
+        for field_name in ("value", "tax_amount", "taxable_base"):
+            raw = str(getattr(self, field_name) or "").strip()
+            if raw not in {"", "0", "0.0", "0.00"}:
+                issues.append(
+                    FA3ValidationIssue(
+                        f"{path}.{field_name}: pole nie występuje w schemacie FA(3) "
+                        f"(NowySrodkiTransportu nie ma wartości, kwoty podatku ani "
+                        f"podstawy) — wartość {raw!r} nie trafi do dokumentu.",
+                        column=f"{path}.{field_name}",
+                        severity="warning",
+                    )
+                )
+        return issues
+
 
 @dataclass(frozen=True)
 class CorrectedAdvanceState:
@@ -204,14 +263,34 @@ class OrderLine:
         return money(self.quantity * self.unit_net_price)
 
     @property
-    def discount_amount(self) -> Decimal:
+    def unit_discount_amount(self) -> Decimal:
+        """Obniżka na JEDNOSTKĘ (ta sama semantyka co `InvoiceLine`)."""
         if self.discount is None:
             return Decimal("0.00")
-        return min(self.discount.amount_for(self.base_net_amount), self.base_net_amount)
+        return min(self.discount.unit_amount_for(self.unit_net_price), self.unit_net_price)
+
+    @property
+    def discount_amount(self) -> Decimal:
+        """Łączna obniżka wiersza zamówienia (`P_10` × `P_8BZ`)."""
+        return min(money(self.unit_discount_amount * self.quantity), self.base_net_amount)
+
+    @property
+    def effective_unit_net_price(self) -> Decimal:
+        """Cena jednostkowa netto PO obniżce — to ona trafia do `P_9AZ`.
+
+        `ZamowienieWiersz` nie ma pola na rabat (w całym schemacie FA(3) nie ma
+        `P_10Z`), a oficjalny `FA_3_Przykład_29.xml` trzyma tożsamość
+        `P_11NettoZ = P_8BZ × P_9AZ`. Emisja ceny sprzed rabatu dawała dokument
+        wewnętrznie sprzeczny (dla 20 × 1000 z rabatem 100: `P_9AZ × P_8BZ`
+        = 20 000, a `P_11NettoZ` = 18 000), mimo że `xsd_validate=True` go
+        przepuszczało.
+        """
+        return money(self.unit_net_price - self.unit_discount_amount)
 
     @property
     def effective_net_amount(self) -> Decimal:
-        return money(self.base_net_amount - self.discount_amount)
+        """Wartość netto wiersza (`P_11NettoZ`) — zawsze `P_8BZ × P_9AZ`."""
+        return money(self.effective_unit_net_price * self.quantity)
 
     @property
     def effective_vat_amount(self) -> Decimal:

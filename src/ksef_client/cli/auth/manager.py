@@ -9,6 +9,7 @@ from ksef_client import models as m
 from ksef_client.config import KsefClientOptions, KsefEnvironment, KsefLighthouseEnvironment
 from ksef_client.services.workflows import AuthCoordinator
 from ksef_client.services.xades import XadesKeyPair
+from ksef_client.utils.datetime_parsing import try_parse_api_datetime
 
 from ..config.loader import load_config
 from ..errors import CliError
@@ -96,15 +97,15 @@ def _collect_active_token_reference_numbers(
 
 
 def _parse_certificate_datetime(value: Any) -> datetime | None:
+    """Parsuje znacznik czasu certyfikatu (toleruje 7 cyfr ułamka na 3.10).
+
+    Ta sama pułapka, którą naprawiono w ``clients.security``: na Pythonie 3.10
+    znacznik ``2026-07-11T12:23:56.0154302+00:00`` był nieparsowalny, więc filtr
+    ważności uznawał wygasły certyfikat za aktualny.
+    """
     if value in {None, ""}:
         return None
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    return try_parse_api_datetime(str(value))
 
 
 def _is_current_certificate(cert: Any, now: datetime) -> bool:
@@ -116,6 +117,12 @@ def _is_current_certificate(cert: Any, now: datetime) -> bool:
         valid_to_raw = getattr(cert, "valid_to", None)
     valid_from = _parse_certificate_datetime(valid_from_raw)
     valid_to = _parse_certificate_datetime(valid_to_raw)
+    # Nieparsowalna GRANICA (obecna, ale nieczytelna) nie oznacza „ważny
+    # bezterminowo" — bezpieczniej odrzucić certyfikat niż użyć niewłaściwego.
+    if valid_from_raw not in {None, ""} and valid_from is None:
+        return False
+    if valid_to_raw not in {None, ""} and valid_to is None:
+        return False
     if valid_from is not None and valid_from > now:
         return False
     return not (valid_to is not None and valid_to < now)
@@ -204,8 +211,15 @@ def resolve_lighthouse_base_url(
             try:
                 options = KsefClientOptions(base_url=profile_base_url.strip())
                 return options.resolve_lighthouse_base_url()
-            except ValueError:
-                pass
+            except ValueError as exc:
+                # Cichy powrót do latarni TEST dla nieznanego `base_url` profilu
+                # pokazywał statusy TEST bez żadnego sygnału dla użytkownika.
+                raise CliError(
+                    "Cannot resolve the Lighthouse environment for the profile base URL.",
+                    ExitCode.CONFIG_ERROR,
+                    "Set a known profile base_url (TEST/DEMO/PRD) or pass "
+                    "--base-url / KSEF_LIGHTHOUSE_BASE_URL.",
+                ) from exc
 
     return KsefLighthouseEnvironment.TEST.value
 
@@ -458,12 +472,10 @@ def refresh_access_token(*, profile: str, base_url: str, save: bool = True) -> d
     if save:
         save_tokens(profile, new_access_token, refresh_token)
         metadata = get_cached_metadata(profile) or {}
-        metadata.update(
-            {
-                "access_valid_until": str(access_valid_until or ""),
-                "method": metadata.get("method", "token"),
-            }
-        )
+        # NIE wymyślamy `method`: wcześniej brak wpisu w cache (np. uszkodzony
+        # albo skasowany plik) dawał `method="token"` nawet dla profilu XAdES,
+        # przez co `auth revoke-self-token` unieważniał firmowy token KSeF.
+        metadata["access_valid_until"] = str(access_valid_until or "")
         set_cached_metadata(profile, metadata)
 
     return {
@@ -529,8 +541,15 @@ def revoke_self_token(*, profile: str, base_url: str) -> dict[str, Any]:
 
 
 def logout(profile: str) -> dict[str, Any]:
-    clear_tokens(profile)
-    clear_cached_metadata(profile)
+    """Usuwa tokeny i metadane profilu.
+
+    Metadane czyścimy w `finally`: gdy magazyn tokenów odmówi usunięcia (np. brak
+    praw do `tokens.json`), wpis w cache nie może zostać i udawać aktywnej sesji.
+    """
+    try:
+        clear_tokens(profile)
+    finally:
+        clear_cached_metadata(profile)
     return {
         "profile": profile,
         "logged_out": True,

@@ -9,6 +9,7 @@ from ksef_client.services import BatchSessionHandle, BatchUploadHelper
 from ksef_client.services.crypto import get_file_metadata
 from ksef_client.services.workflows import BatchSessionWorkflow, OnlineSessionWorkflow
 
+from ..auth.manager import resolve_base_url
 from ..errors import CliError
 from ..exit_codes import ExitCode
 from ..session_store import (
@@ -20,7 +21,9 @@ from ..session_store import (
     export_checkpoint,
     import_checkpoint,
     list_checkpoints,
+    list_unreadable_checkpoints,
     load_checkpoint,
+    require_matching_base_url,
     save_checkpoint,
     update_checkpoint,
 )
@@ -169,19 +172,69 @@ def _checkpoint_summary(checkpoint: SessionCheckpoint) -> dict[str, Any]:
 
 def list_saved_sessions(*, profile: str) -> dict[str, Any]:
     checkpoints = list_checkpoints(profile)
-    return {
+    # Uszkodzone pliki były po cichu pomijane, więc lista wyglądała na kompletną.
+    unreadable = list_unreadable_checkpoints(profile)
+    result: dict[str, Any] = {
         "count": len(checkpoints),
         "items": [_checkpoint_summary(checkpoint) for checkpoint in checkpoints],
     }
+    if unreadable:
+        result["unreadable"] = unreadable
+        result["warning"] = (
+            f"{len(unreadable)} checkpoint file(s) could not be read: "
+            f"{', '.join(unreadable)}"
+        )
+    return result
 
 
-def show_saved_session(*, profile: str, session_id: str) -> dict[str, Any]:
+#: Pola stanu sesji, które nie mogą trafić na stdout bez wyraźnej prośby
+#: (`session show --show-secrets`): materiał klucza AES i wektor inicjalizujący.
+_SESSION_SECRET_KEYS = frozenset({"symmetric_key_base64", "iv_base64"})
+_SESSION_SECRET_PLACEHOLDER = "<redacted>"
+
+
+def _redact_session_secrets(value: Any) -> Any:
+    """Zastępuje materiał klucza sesji w (zagnieżdżonej) strukturze checkpointu."""
+    if isinstance(value, dict):
+        return {
+            key: (
+                _SESSION_SECRET_PLACEHOLDER
+                if key in _SESSION_SECRET_KEYS
+                else _redact_session_secrets(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_session_secrets(item) for item in value]
+    return value
+
+
+def show_saved_session(
+    *, profile: str, session_id: str, show_secrets: bool = False
+) -> dict[str, Any]:
+    """Skrót i checkpoint sesji; klucz AES oraz IV są domyślnie redagowane.
+
+    `session show` drukuje cały checkpoint (także w `--json`), a klucz sesji nie
+    musi trafiać do terminala, logów CI ani zrzutów ekranu. `show_secrets=True`
+    (flaga `--show-secrets`) oddaje pełny zapis świadomemu wywołującemu.
+    """
     checkpoint = load_checkpoint(profile, session_id)
-    return _checkpoint_summary(checkpoint) | {"checkpoint": checkpoint.to_dict()}
+    payload: dict[str, Any] = checkpoint.to_dict()
+    if not show_secrets:
+        redacted = _redact_session_secrets(payload)
+        assert isinstance(redacted, dict)
+        payload = redacted
+    return _checkpoint_summary(checkpoint) | {"checkpoint": payload}
 
 
-def export_saved_session(*, profile: str, session_id: str, out: str) -> dict[str, Any]:
-    target = export_checkpoint(profile, session_id, Path(out))
+def export_saved_session(
+    *,
+    profile: str,
+    session_id: str,
+    out: str,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    target = export_checkpoint(profile, session_id, Path(out), overwrite=overwrite)
     return {
         "id": session_id,
         "profile": profile,
@@ -194,9 +247,38 @@ def import_saved_session(
     profile: str,
     source_path: str,
     session_id: str | None = None,
+    base_url: str | None = None,
+    allow_foreign_host: bool = False,
 ) -> dict[str, Any]:
-    checkpoint = import_checkpoint(profile, Path(source_path), session_id=session_id)
+    checkpoint = import_checkpoint(
+        profile,
+        Path(source_path),
+        session_id=session_id,
+        # Checkpoint z pliku nie może wskazywać innego środowiska niż to, pod
+        # które trafi token dostępowy — dlatego porównujemy z efektywnym
+        # adresem komendy (`--base-url`, `KSEF_BASE_URL` albo profil).
+        expected_base_url=resolve_base_url(base_url, profile=profile),
+        # …a nieznany host wymaga świadomej zgody (dane z zewnątrz).
+        allow_foreign_host=allow_foreign_host,
+    )
     return _checkpoint_summary(checkpoint)
+
+
+def _require_checkpoint_base_url(
+    checkpoint: SessionCheckpoint,
+    *,
+    profile: str,
+    base_url: str | None = None,
+) -> str:
+    """`base_url` checkpointu po sprawdzeniu wobec efektywnego adresu komendy.
+
+    `base_url` to override przekazany przez komendę (`--base-url` /
+    `KSEF_BASE_URL`) — bez niego liczy się adres profilu. Wcześniej strażnik
+    patrzył wyłącznie na profil, więc sesja otwarta z `--base-url` (udokumentowana
+    opcja) nie dawała się już wysłać ani zamknąć.
+    """
+    require_matching_base_url(checkpoint, resolve_base_url(base_url, profile=profile))
+    return checkpoint.base_url
 
 
 def drop_saved_session(*, profile: str, session_id: str) -> dict[str, Any]:
@@ -256,6 +338,7 @@ def send_online_session_invoice(
     max_attempts: int,
     save_upo: str | None,
     save_upo_overwrite: bool = False,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     checkpoint = _require_online_checkpoint(profile, session_id)
     _ensure_checkpoint_not_closed(
@@ -274,7 +357,11 @@ def send_online_session_invoice(
         adapters._validate_polling_options(poll_interval, max_attempts)
 
     invoice_xml = adapters._load_invoice_xml(invoice)
-    with adapters.create_client(checkpoint.base_url, access_token=access_token) as client:
+    with adapters.create_client(
+        _require_checkpoint_base_url(
+            checkpoint, profile=profile, base_url=base_url
+        ), access_token=access_token
+    ) as client:
         workflow = OnlineSessionWorkflow(client.sessions)
         session = workflow.resume_session(checkpoint.session_state, access_token=access_token)
         send_response = session.send_invoice(invoice_xml, access_token=access_token)
@@ -352,6 +439,7 @@ def close_online_session(
     *,
     profile: str,
     session_id: str,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     checkpoint = _require_online_checkpoint(profile, session_id)
     _ensure_checkpoint_not_closed(
@@ -363,7 +451,11 @@ def close_online_session(
         ),
     )
     access_token = adapters._require_access_token(profile)
-    with adapters.create_client(checkpoint.base_url, access_token=access_token) as client:
+    with adapters.create_client(
+        _require_checkpoint_base_url(
+            checkpoint, profile=profile, base_url=base_url
+        ), access_token=access_token
+    ) as client:
         workflow = OnlineSessionWorkflow(client.sessions)
         session = workflow.resume_session(checkpoint.session_state, access_token=access_token)
         session.close(access_token=access_token)
@@ -422,6 +514,7 @@ def upload_batch_session(
     profile: str,
     session_id: str,
     parallelism: int,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     checkpoint = _require_batch_checkpoint(profile, session_id)
     _ensure_checkpoint_not_closed(
@@ -447,7 +540,11 @@ def upload_batch_session(
     )
     uploaded_ordinals = sorted(set(checkpoint.uploaded_ordinals))
 
-    with adapters.create_client(checkpoint.base_url, access_token=access_token) as client:
+    with adapters.create_client(
+        _require_checkpoint_base_url(
+            checkpoint, profile=profile, base_url=base_url
+        ), access_token=access_token
+    ) as client:
         workflow = BatchSessionWorkflow(client.sessions, client.http_client)
         session = workflow.resume_session(
             checkpoint.session_state,
@@ -504,6 +601,7 @@ def close_batch_session(
     max_attempts: int,
     save_upo: str | None,
     save_upo_overwrite: bool = False,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     checkpoint = _require_batch_checkpoint(profile, session_id)
     if save_upo and not wait_upo:
@@ -519,7 +617,11 @@ def close_batch_session(
         return _checkpoint_summary(checkpoint)
 
     access_token = adapters._require_access_token(profile)
-    with adapters.create_client(checkpoint.base_url, access_token=access_token) as client:
+    with adapters.create_client(
+        _require_checkpoint_base_url(
+            checkpoint, profile=profile, base_url=base_url
+        ), access_token=access_token
+    ) as client:
         if checkpoint.stage != "closed":
             session = BatchSessionHandle.from_state(
                 checkpoint.session_state,
@@ -588,11 +690,12 @@ def get_saved_session_status(
     profile: str,
     session_id: str,
     invoice_ref: str | None,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     checkpoint = load_checkpoint(profile, session_id)
     return adapters.get_send_status(
         profile=profile,
-        base_url=checkpoint.base_url,
+        base_url=_require_checkpoint_base_url(checkpoint, profile=profile, base_url=base_url),
         session_ref=checkpoint.session_state.reference_number,
         invoice_ref=invoice_ref,
     ) | {"id": checkpoint.id, "kind": checkpoint.kind, "stage": checkpoint.stage}

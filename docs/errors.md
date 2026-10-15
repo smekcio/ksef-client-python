@@ -1,12 +1,25 @@
 # Błędy, rate limits i retry
 
-Obsługa błędów jest oparta o kody HTTP (>= 400). Biblioteka nie interpretuje logiki biznesowej po stronie klienta; odpowiedzi API są mapowane bezpośrednio na wyjątki, a treść JSON (jeśli występuje) jest dostępna w polach obiektu wyjątku.
+Obsługa błędów jest oparta o kody HTTP. Sukcesem jest wyłącznie kod z `expected_status`
+(domyślnie 2xx) — **każdy 3xx też jest błędem**, bo `httpx` nie podąża za przekierowaniem,
+więc treść odpowiedzi pochodziłaby od pośrednika (albo byłaby pusta). Wyjątkiem jest
+`expected_status={..., 302}` podane świadomie. Biblioteka nie interpretuje logiki
+biznesowej po stronie klienta; odpowiedzi API są mapowane bezpośrednio na wyjątki,
+a treść JSON (jeśli występuje) jest dostępna w polach obiektu wyjątku.
 
 ## Typy wyjątków
 
-### `ValueError` (walidacja pre-signed URL)
+### `ValueError` (walidacja danych wejściowych)
 
-Dla żądań z `skip_auth=True` i absolutnym URL biblioteka wykonuje walidację bezpieczeństwa. W przypadku niespełnienia reguł (np. host `localhost`, loopback/private IP bez opt-in, host poza allowlistą, albo `http` przy `strict_presigned_url_validation=True`) rzucany jest `ValueError` z komunikatem bezpieczeństwa.
+- Pre-signed URL: dla żądań z `skip_auth=True` i absolutnym URL biblioteka wykonuje
+  walidację bezpieczeństwa. W przypadku niespełnienia reguł (np. host `localhost`,
+  loopback/private IP bez opt-in, host poza allowlistą, albo `http` przy
+  `strict_presigned_url_validation=True`) rzucany jest `ValueError` z komunikatem
+  bezpieczeństwa.
+- `json` i `data` w jednym żądaniu: `request(..., json=..., data=...)` rzuca
+  `ValueError: Pass either json or data, not both`. `httpx` wysyła wtedy tylko jedną
+  z tych wartości, więc bez tego błędu wołający nie wiedziałby, co trafiło do KSeF.
+  Dotyczy obu klientów (`BaseHttpClient` i `AsyncBaseHttpClient`).
 
 ### `KsefHttpError`
 
@@ -18,7 +31,7 @@ Bazowy błąd HTTP.
 
 ### `KsefApiError`
 
-Występuje, gdy odpowiedź ma `Content-Type: application/json` i status >= 400.
+Występuje, gdy odpowiedź ma `Content-Type: application/json` i status >= 300.
 
 - `exception_response`: legacy `ExceptionResponse`, jeśli API zwróci klasyczny format `application/json`
 - `problem`: zmapowany model błędu, jeśli odpowiedź daje się rozpoznać
@@ -27,7 +40,10 @@ Występuje, gdy odpowiedź ma `Content-Type: application/json` i status >= 400.
 
 Specjalny przypadek dla `429 Too Many Requests`.
 
-- `retry_after`: wartość nagłówka `Retry-After`
+- `retry_after`: wartość nagłówka `Retry-After` w sekundach, przycięta do zakresu
+  `0..MAX_RETRY_AFTER_SECONDS` (300 s). Nagłówek pochodzi od serwera, a bez sufitu
+  `Retry-After: 31536000` kazałoby czekać rok
+- `retry_after_raw`: surowa wartość nagłówka (do logów i własnej polityki retry)
 - `problem`: `TooManyRequestsResponse` albo `TooManyRequestsProblemDetails`
 
 ## Problem Details i `exc.problem`
@@ -80,4 +96,4 @@ def call_with_backoff(fn):
     raise TimeoutError("Zbyt dużo 429; przerwano po 10 próbach.")
 ```
 
-Ważne: KSeF stosuje dynamiczne okno limitów, a kolejne przekroczenia mogą skutkować wydłużaniem `Retry-After`. Nagłówek `Retry-After` powinien być respektowany.
+Ważne: KSeF stosuje dynamiczne okno limitów, a kolejne przekroczenia mogą skutkować wydłużaniem `Retry-After`. Nagłówek `Retry-After` powinien być respektowany — SDK przycina go jednak do 300 s (`MAX_RETRY_AFTER_SECONDS`), żeby wartość podana przez serwer nie usypiała procesu na dni. Własna polityka retry, która chce czekać dłużej, ma do dyspozycji surowe `exc.retry_after_raw`.

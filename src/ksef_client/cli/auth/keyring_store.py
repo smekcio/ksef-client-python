@@ -34,6 +34,11 @@ try:
     _keyring = importlib.import_module("keyring")
     _keyring_errors = importlib.import_module("keyring.errors")
     KeyringErrorType = cast(type[Exception], _keyring_errors.KeyringError)
+    #: `NoKeyringError` oznacza, że żaden backend nie jest dostępny (np. headless
+    #: Linux/CI) — w przeciwieństwie do błędu operacji na istniejącym wpisie.
+    NoKeyringErrorType = cast(
+        type[Exception], getattr(_keyring_errors, "NoKeyringError", _keyring_errors.KeyringError)
+    )
 
     _KEYRING_AVAILABLE = True
 except Exception:  # pragma: no cover - import fallback path
@@ -41,9 +46,11 @@ except Exception:  # pragma: no cover - import fallback path
         pass
 
     KeyringErrorType = _KeyringError
+    NoKeyringErrorType = _KeyringError
     _KEYRING_AVAILABLE = False
 
 KeyringError = KeyringErrorType
+NoKeyringError = NoKeyringErrorType
 
 _SERVICE_NAME = "ksef-client-python-cli"
 _ACCESS_KEY = "access_token"
@@ -52,6 +59,12 @@ _FALLBACK_FILE_NAME = "tokens.json"
 _FALLBACK_LOCK_SUFFIX = ".lock"
 _FALLBACK_LOCK_TIMEOUT_SECONDS = 2.0
 _FALLBACK_LOCK_POLL_INTERVAL_SECONDS = 0.05
+#: Blokada starsza niż tyle sekund pochodzi po procesie, który padł bez
+#: sprzątania, i jest przejmowana (sekcja krytyczna to zapis małego JSON-a).
+_FALLBACK_LOCK_STALE_SECONDS = 30.0
+#: Ograniczenie liczby przejęć — przy nieudanym `unlink` pętla nie może kręcić się
+#: w miejscu.
+_FALLBACK_LOCK_MAX_STEALS = 3
 _ALLOW_INSECURE_FALLBACK_ENV = "KSEF_CLI_ALLOW_INSECURE_TOKEN_STORE"
 _TOKEN_STORE_KEY_ENV = "KSEF_CLI_TOKEN_STORE_KEY"
 _ENCRYPTION_MODE = "fernet-v1"
@@ -80,6 +93,15 @@ def _fallback_tokens_file() -> Path:
 def _fallback_tokens_lock_file() -> Path:
     path = _fallback_tokens_file()
     return path.with_name(f"{path.name}{_FALLBACK_LOCK_SUFFIX}")
+
+
+def _fallback_lock_is_stale(lock_path: Path) -> bool:
+    """Czy plik blokady pochodzi po procesie, który padł bez sprzątania."""
+    try:
+        age = time.time() - lock_path.stat().st_mtime
+    except OSError:
+        return False
+    return age >= _FALLBACK_LOCK_STALE_SECONDS
 
 
 def _allow_insecure_fallback() -> bool:
@@ -181,7 +203,11 @@ def _save_fallback_tokens(payload: dict[str, dict[str, Any]]) -> None:
     data = json.dumps(payload, ensure_ascii=True, indent=2)
     temp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
-        with temp_path.open("w", encoding="utf-8") as handle:
+        # Prawa 0600 już przy tworzeniu pliku: fallback niesie tokeny, a `open("w")`
+        # dawał 0644 (typowy umask 022), a `chmod` szedł dopiero po `os.replace`,
+        # więc przerwanie procesu w tym oknie zostawiało czytelny plik z tokenami.
+        descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(data)
             handle.flush()
             with suppress(OSError):
@@ -198,18 +224,35 @@ def _save_fallback_tokens(payload: dict[str, dict[str, Any]]) -> None:
 
 @contextmanager
 def _fallback_tokens_lock() -> Iterator[None]:
+    """Blokada zapisu fallbacku, która leczy się po zabitym procesie.
+
+    Proces zabity w trakcie nie sprząta pliku blokady, więc blokada starsza niż
+    `_FALLBACK_LOCK_STALE_SECONDS` jest przejmowana — inaczej każde zapisanie i
+    każde usunięcie tokenów kończyłoby się błędem, dopóki człowiek nie usunąłby
+    pliku ręcznie (ten sam defekt, który naprawiono w blokadzie cache metadanych).
+    Liczba przejęć jest ograniczona, bo przy nieudanym `unlink` pętla kręciłaby
+    się w miejscu.
+    """
     lock_path = _fallback_tokens_lock_file()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle: int | None = None
     started = time.monotonic()
+    steals = 0
     while handle is None:
         try:
             handle = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
         except FileExistsError as exc:
+            if _fallback_lock_is_stale(lock_path) and steals < _FALLBACK_LOCK_MAX_STEALS:
+                steals += 1
+                with suppress(OSError):
+                    lock_path.unlink()
+                continue
             if time.monotonic() - started >= _FALLBACK_LOCK_TIMEOUT_SECONDS:
                 raise OSError("Timed out waiting for fallback token store lock.") from exc
             time.sleep(_FALLBACK_LOCK_POLL_INTERVAL_SECONDS)
     try:
+        with suppress(OSError):
+            os.write(handle, f"{os.getpid()} {time.time():.3f}".encode("ascii"))
         yield
     finally:
         with suppress(OSError):
@@ -277,6 +320,13 @@ def save_tokens(profile: str, access_token: str, refresh_token: str) -> None:
             )
             return
         except KeyringError as exc:
+            # Częściowy zapis zostawiał parę „nowy access + stary refresh", która
+            # wygląda na kompletną: `get_tokens` zwracał mieszankę nigdy nie
+            # istniejącej sesji i przesłaniał kompletny fallback. Usuwamy więc
+            # oba wpisy, żeby magazyn był albo w całości nowy, albo pusty.
+            for key in (_ACCESS_KEY, _REFRESH_KEY):
+                with suppress(KeyringError, Exception):
+                    keyring_backend.delete_password(_SERVICE_NAME, _token_key(profile, key))
             if _fallback_mode() is None:
                 fallback_hint = (
                     f"(or {_ALLOW_INSECURE_FALLBACK_ENV}=1 for plaintext fallback)."
@@ -314,15 +364,51 @@ def clear_tokens(profile: str) -> None:
         for key in (_ACCESS_KEY, _REFRESH_KEY):
             try:
                 keyring_backend.delete_password(_SERVICE_NAME, _token_key(profile, key))
-            except KeyringError:
-                # Missing entry/backend issues are non-fatal for logout path.
-                continue
+            except KeyringError as exc:
+                if isinstance(exc, NoKeyringError):
+                    # Brak działającego backendu (np. headless Linux/CI): keyring
+                    # nie jest w użyciu, więc nie ma czego kasować ani weryfikować
+                    # — tokeny żyją w magazynie fallbacku. Traktowanie tego jak
+                    # nieudane usunięcie blokowałoby `auth logout` na takich
+                    # maszynach (błąd zgłoszony przez CI na Linuksie).
+                    break
+                # Brak wpisu jest w porządku, ale NIEUDANE usunięcie nie może
+                # udawać wylogowania: wcześniej pętla szła dalej (`continue`),
+                # a `logout` raportował „Stored tokens removed.", zostawiając
+                # ważny refresh token w magazynie poświadczeń.
+                #
+                # `still_present=True` jest wartością domyślną (fail-closed): gdy
+                # backend rzuca również na `get_password`, NIE MOŻEMY potwierdzić
+                # usunięcia wpisu, a wtedy raportowanie sukcesu byłoby kłamstwem.
+                still_present = True
+                with suppress(KeyringError, Exception):
+                    still_present = bool(
+                        keyring_backend.get_password(_SERVICE_NAME, _token_key(profile, key))
+                    )
+                if still_present:
+                    raise CliError(
+                        "Cannot remove tokens from the system keyring.",
+                        ExitCode.CONFIG_ERROR,
+                        "Remove the entry manually or configure the OS keyring backend, "
+                        "then run `ksef auth logout` again.",
+                    ) from exc
 
     if not _fallback_tokens_file().exists():
         return
 
-    with suppress(OSError):
+    try:
         _update_fallback_tokens(profile, None)
+    except OSError as exc:
+        # Wcześniej błąd był połykany (`suppress(OSError)`), więc `auth logout`
+        # raportował „Stored tokens removed." i zwracał `logged_out: True`,
+        # zostawiając WAŻNY refresh token w `tokens.json`. Użytkownik musi
+        # wiedzieć, że wylogowanie się nie powiodło.
+        raise CliError(
+            "Cannot remove tokens from the fallback token store.",
+            ExitCode.CONFIG_ERROR,
+            "Remove the file manually (cache directory: tokens.json) or fix its permissions, "
+            "then run `ksef auth logout` again.",
+        ) from exc
 
 
 def get_tokens(profile: str) -> tuple[str, str] | None:

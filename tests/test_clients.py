@@ -41,6 +41,7 @@ from ksef_client.clients.security import (
 from ksef_client.clients.sessions import AsyncSessionsClient, SessionsClient
 from ksef_client.clients.testdata import AsyncTestDataClient, TestDataClient
 from ksef_client.clients.tokens import AsyncTokensClient, TokensClient
+from ksef_client.exceptions import KsefHttpError
 from ksef_client.http import HttpResponse
 
 
@@ -241,7 +242,12 @@ class ClientsTests(unittest.TestCase):
             request_json.assert_any_call(
                 "POST", "/sessions/online/ref/close", access_token="token", expected_status={204}
             )
-            request_bytes.assert_any_call("GET", "/sessions/ref/upo/upo", access_token="token")
+            request_bytes.assert_any_call(
+            "GET",
+            "/sessions/ref/upo/upo",
+            headers={"Accept": "application/xml"},
+            access_token="token",
+        )
 
         with patch.object(client, "_request_model", Mock(return_value=object())) as request_model:
             client.get_sessions(
@@ -249,6 +255,91 @@ class ClientsTests(unittest.TestCase):
             )
             self.assertEqual(request_model.call_args.kwargs["params"], {"sessionType": "online"})
             self.assertIsNone(request_model.call_args.kwargs["headers"])
+
+    def test_sessions_client_upo_v43_false_omits_feature_header(self):
+        """``upo_v43`` wyłączone (domyślnie) nie negocjuje wersji UPO v4.3.
+
+        Gałąź ``if upo_v43:`` z ``clients/sessions.py`` przy ``False`` nie miała
+        testu — każde wywołanie w tym pliku podawało ``upo_v43=True``, więc brak
+        nagłówka ``X-KSeF-Feature`` nie był nigdzie sprawdzany.
+        """
+        payload: Any = object()
+        client = SessionsClient(self.http)
+        with patch.object(client, "_request_model", Mock(return_value=object())) as request_model:
+            client.open_online_session(payload, access_token="token", upo_v43=False)
+            client.open_batch_session(payload, access_token="token", upo_v43=False)
+            # Wartość domyślna parametru musi zachowywać się tak samo jak jawne False.
+            client.open_online_session(payload, access_token="token")
+            client.open_batch_session(payload, access_token="token")
+
+            self.assertEqual(
+                [call.args[:2] for call in request_model.call_args_list],
+                [
+                    ("POST", "/sessions/online"),
+                    ("POST", "/sessions/batch"),
+                    ("POST", "/sessions/online"),
+                    ("POST", "/sessions/batch"),
+                ],
+            )
+            self.assertEqual(
+                [call.kwargs["headers"] for call in request_model.call_args_list],
+                [None, None, None, None],
+            )
+            self.assertEqual(
+                [call.kwargs["expected_status"] for call in request_model.call_args_list],
+                [{201}, {201}, {201}, {201}],
+            )
+
+        with patch.object(client, "_request_model", Mock(return_value=object())) as request_model:
+            client.open_online_session(payload, access_token="token", upo_v43=True)
+            client.open_batch_session(payload, access_token="token", upo_v43=True)
+            # Kontrast: to samo wywołanie z ``upo_v43=True`` wysyła nagłówek.
+            self.assertEqual(
+                [call.kwargs["headers"] for call in request_model.call_args_list],
+                [{"X-KSeF-Feature": "upo-v4-3"}, {"X-KSeF-Feature": "upo-v4-3"}],
+            )
+
+    def test_sessions_client_single_page_pagination_omits_continuation_header(self):
+        """Pojedyncza strona paginacji nie wysyła nagłówka kontynuacji."""
+        client = SessionsClient(self.http)
+        with patch.object(client, "_request_model", Mock(return_value=object())) as request_model:
+            client.get_sessions(session_type="online", page_size=1, access_token="token")
+            client.get_session_invoices("ref", page_size=1, access_token="token")
+            client.get_session_failed_invoices("ref", page_size=1, access_token="token")
+
+            self.assertEqual(
+                [call.args[:2] for call in request_model.call_args_list],
+                [
+                    ("GET", "/sessions"),
+                    ("GET", "/sessions/ref/invoices"),
+                    ("GET", "/sessions/ref/invoices/failed"),
+                ],
+            )
+            self.assertEqual(
+                [call.kwargs["params"] for call in request_model.call_args_list],
+                [
+                    {"sessionType": "online", "pageSize": 1},
+                    {"pageSize": 1},
+                    {"pageSize": 1},
+                ],
+            )
+            self.assertEqual(
+                [call.kwargs["headers"] for call in request_model.call_args_list],
+                [None, None, None],
+            )
+
+        with patch.object(client, "_request_model", Mock(return_value=object())) as request_model:
+            # Kolejna strona (z tokenem kontynuacji) wysyła nagłówek paginacji.
+            client.get_sessions(
+                session_type="online",
+                page_size=1,
+                continuation_token="next-page",
+                access_token="token",
+            )
+            self.assertEqual(
+                request_model.call_args.kwargs["headers"],
+                {"x-continuation-token": "next-page"},
+            )
 
     def test_invoices_client_and_helpers(self):
         client = InvoicesClient(self.http)
@@ -724,7 +815,12 @@ class ClientsTests(unittest.TestCase):
 
         testdata = TestDataClient(self.http)
         with (
-            patch.object(testdata, "_request_model", Mock(return_value=object())) as request_model,
+            patch.object(
+                testdata, "_request_model", Mock(return_value=object())
+            ) as request_model,
+            patch.object(
+                testdata, "_request_optional_model", Mock(return_value=None)
+            ) as request_optional_model,
             patch.object(testdata, "_request_json", Mock()) as request_json,
         ):
             testdata.create_subject(payload)
@@ -746,7 +842,7 @@ class ClientsTests(unittest.TestCase):
             testdata.restore_production_rate_limits(access_token="token")
             testdata.update_certificate("ABCDEF0123456789", payload, access_token="token")
             self.assertEqual(request_json.call_count, 11)
-            self.assertEqual(request_model.call_count, 7)
+            self.assertEqual(request_optional_model.call_count, 7)
             self.assertEqual(
                 request_json.call_args_list[-1].args[1],
                 "/testdata/certificates/ABCDEF0123456789",
@@ -785,7 +881,8 @@ class ClientsTests(unittest.TestCase):
             )
 
         with patch.object(client, "_request_json", Mock(side_effect=[None, {"unexpected": True}])):
-            self.assertEqual(client.get_status().status.value, "AVAILABLE")
+            # Brak statusu w odpowiedzi nie może być raportowany jako `AVAILABLE`.
+            self.assertEqual(client.get_status().status.value, "UNKNOWN")
             self.assertEqual(client.get_messages(), [])
 
         with self.assertRaises(ValueError):
@@ -945,6 +1042,67 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             )
         with self.assertRaisesRegex(TypeError, "typed model payload"):
             await invoices.export_invoices(cast(Any, {"filters": {}}), access_token="token")
+
+    async def test_async_sessions_client_upo_v43_false_and_single_page_pagination(self):
+        """Wariant asynchroniczny: ``upo_v43=False`` i pojedyncza strona paginacji.
+
+        Ten sam kontrakt co w ``SessionsClient``: brak nagłówka
+        ``X-KSeF-Feature`` oraz brak nagłówka kontynuacji, gdy strona jest
+        pierwsza i jedyna.
+        """
+        payload: Any = object()
+        sessions = AsyncSessionsClient(self.http)
+        with patch.object(
+            sessions, "_request_model", AsyncMock(return_value=object())
+        ) as request_model:
+            await sessions.open_online_session(payload, access_token="token", upo_v43=False)
+            await sessions.open_batch_session(payload, access_token="token", upo_v43=False)
+            await sessions.open_online_session(payload, access_token="token")
+            await sessions.get_sessions(session_type="online", page_size=5, access_token="token")
+            await sessions.get_session_invoices("ref", page_size=5, access_token="token")
+
+            self.assertEqual(
+                [call.args[:2] for call in request_model.call_args_list],
+                [
+                    ("POST", "/sessions/online"),
+                    ("POST", "/sessions/batch"),
+                    ("POST", "/sessions/online"),
+                    ("GET", "/sessions"),
+                    ("GET", "/sessions/ref/invoices"),
+                ],
+            )
+            self.assertEqual(
+                [call.kwargs["headers"] for call in request_model.call_args_list],
+                [None, None, None, None, None],
+            )
+            self.assertEqual(
+                [call.kwargs["params"] for call in request_model.call_args_list[3:]],
+                [{"sessionType": "online", "pageSize": 5}, {"pageSize": 5}],
+            )
+
+        with patch.object(
+            sessions, "_request_model", AsyncMock(return_value=object())
+        ) as request_model:
+            await sessions.open_online_session(payload, access_token="token", upo_v43=True)
+            await sessions.open_batch_session(payload, access_token="token", upo_v43=True)
+            self.assertEqual(
+                [call.kwargs["headers"] for call in request_model.call_args_list],
+                [{"X-KSeF-Feature": "upo-v4-3"}, {"X-KSeF-Feature": "upo-v4-3"}],
+            )
+
+        with patch.object(
+            sessions, "_request_model", AsyncMock(return_value=object())
+        ) as request_model:
+            await sessions.get_sessions(
+                session_type="online",
+                page_size=5,
+                continuation_token="next-page",
+                access_token="token",
+            )
+            self.assertEqual(
+                request_model.call_args.kwargs["headers"],
+                {"x-continuation-token": "next-page"},
+            )
 
     async def test_async_invoices_client_query_metadata_serializes_typed_payload_once(self):
         response = HttpResponse(
@@ -1194,6 +1352,9 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 testdata, "_request_model", AsyncMock(return_value=object())
             ) as request_model,
+            patch.object(
+                testdata, "_request_optional_model", AsyncMock(return_value=None)
+            ) as request_optional_model,
             patch.object(testdata, "_request_json", AsyncMock()) as request_json,
         ):
             await testdata.create_subject(payload)
@@ -1215,7 +1376,7 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             await testdata.restore_production_rate_limits(access_token="token")
             await testdata.update_certificate("ABCDEF0123456789", payload, access_token="token")
             self.assertEqual(request_json.await_count, 11)
-            self.assertEqual(request_model.await_count, 7)
+            self.assertEqual(request_optional_model.await_count, 7)
         with patch.object(testdata, "_request_json", AsyncMock()) as request_json:
             with self.assertRaises(ValueError):
                 await testdata.update_certificate("not-a-serial", payload, access_token="token")
@@ -1250,11 +1411,108 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             client, "_request_json", AsyncMock(side_effect=[None, {"unexpected": True}])
         ):
-            self.assertEqual((await client.get_status()).status.value, "AVAILABLE")
+            # Brak statusu w odpowiedzi nie może być raportowany jako `AVAILABLE`.
+            self.assertEqual((await client.get_status()).status.value, "UNKNOWN")
             self.assertEqual(await client.get_messages(), [])
 
         with self.assertRaises(ValueError):
             await AsyncLighthouseClient(self.http, "").get_messages()
+
+
+class LocalTimestampOffsetTests(unittest.TestCase):
+    """Znacznik bez strefy z 7-cyfrowym ułamkiem musi dostać offset warszawski.
+
+    Wcześniejsze testy sprawdzały tylko, że taka wartość się parsuje (`is not None`),
+    albo używały znaczników bez ułamka — więc utrata offsetu dla pary „bez strefy
+    + 7 cyfr" nie była wykrywana (na Pythonie 3.12 `datetime.fromisoformat` przyjmuje
+    7 cyfr, więc cofnięcie naprawy w `clients/invoices.py` jest tam niewidoczne).
+    """
+
+    def test_seven_digit_fraction_without_offset_gets_warsaw_offset(self):
+        winter = _normalize_datetime_without_offset("2026-01-01T10:00:00.1234567")
+        summer = _normalize_datetime_without_offset("2026-07-01T10:00:00.1234567")
+
+        self.assertTrue(winter.endswith("+01:00"), winter)
+        self.assertTrue(summer.endswith("+02:00"), summer)
+
+    def test_seven_digit_fraction_with_offset_is_left_untouched(self):
+        value = "2025-10-11T12:23:56.0154302+00:00"
+        self.assertEqual(_normalize_datetime_without_offset(value), value)
+
+    def test_seven_digit_bounds_pass_the_range_guard(self):
+        payload = _normalize_invoice_date_range_payload(
+            {
+                "dateRange": {
+                    "from": "2025-10-11T12:23:56.0154302+00:00",
+                    "to": "2025-12-01T12:23:56.0154302+00:00",
+                }
+            }
+        )
+        self.assertTrue(payload["dateRange"]["from"].startswith("2025-10-11"))
+
+
+def _init_response(content: bytes, content_type: str) -> HttpResponse:
+    return HttpResponse(202, httpx.Headers({"Content-Type": content_type}), content)
+
+
+class XadesInitResponseErrorTests(unittest.TestCase):
+    """202 z ciałem nie-JSON musi dać `KsefHttpError` z kontekstem żądania.
+
+    `submit_xades_auth_request` parsował odpowiedź ręcznym `json.loads`, więc przy 202
+    z HTML-em (proxy, captive portal) użytkownik dostawał surowy `JSONDecodeError`
+    bez informacji, którego endpointu dotyczy i co przyszło zamiast JSON-a.
+    """
+
+    def test_html_body_reports_the_endpoint_and_content_type(self):
+        http = DummyHttp(_init_response(b"<html>portal</html>", "text/html"))
+        with self.assertRaises(KsefHttpError) as ctx:
+            AuthClient(http).submit_xades_auth_request("<xml/>")
+
+        message = str(ctx.exception)
+        self.assertIn("/auth/xades-signature", message)
+        self.assertIn("text/html", message)
+        self.assertEqual(ctx.exception.status_code, 202)
+
+    def test_json_body_still_parses(self):
+        http = DummyHttp(_init_response(b'{"referenceNumber": "REF-1"}', "application/json"))
+        result = AuthClient(http).submit_xades_auth_request("<xml/>")
+
+        assert result is not None
+        self.assertEqual(result.reference_number, "REF-1")
+
+    def test_empty_body_still_returns_none(self):
+        http = DummyHttp(_init_response(b"", "application/json"))
+        self.assertIsNone(AuthClient(http).submit_xades_auth_request("<xml/>"))
+
+    def test_json_array_is_rejected_with_context(self):
+        http = DummyHttp(_init_response(b"[]", "application/json"))
+        with self.assertRaisesRegex(TypeError, "Expected JSON object response"):
+            AuthClient(http).submit_xades_auth_request("<xml/>")
+
+
+class AsyncXadesInitResponseErrorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_html_body_reports_the_endpoint_and_content_type(self):
+        http = DummyAsyncHttp(_init_response(b"<html>portal</html>", "text/html"))
+        with self.assertRaises(KsefHttpError) as ctx:
+            await AsyncAuthClient(http).submit_xades_auth_request("<xml/>")
+
+        message = str(ctx.exception)
+        self.assertIn("/auth/xades-signature", message)
+        self.assertIn("text/html", message)
+        self.assertEqual(ctx.exception.status_code, 202)
+
+    async def test_async_json_body_still_parses(self):
+        http = DummyAsyncHttp(
+            _init_response(b'{"referenceNumber": "REF-2"}', "application/json")
+        )
+        result = await AsyncAuthClient(http).submit_xades_auth_request("<xml/>")
+
+        assert result is not None
+        self.assertEqual(result.reference_number, "REF-2")
+
+    async def test_async_empty_body_still_returns_none(self):
+        http = DummyAsyncHttp(_init_response(b"", "application/json"))
+        self.assertIsNone(await AsyncAuthClient(http).submit_xades_auth_request("<xml/>"))
 
 
 if __name__ == "__main__":

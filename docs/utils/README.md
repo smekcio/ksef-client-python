@@ -6,4 +6,5 @@ Narzędzia pomocnicze, które w praktyce są potrzebne w integracji (ZIP, Base64
 - [Numer KSeF](ksef-number.md)
 - [Identyfikator zbiorczy](collective-identifier.md)
 - [Numer seryjny certyfikatu](certificate-serial.md)
+- [Znaczniki czasu z API](datetime-parsing.md)
 - [ZIP i podział ≤100MB](zip.md)

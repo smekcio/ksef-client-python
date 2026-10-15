@@ -1,18 +1,23 @@
+import asyncio
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 
 from ksef_client import models
+from ksef_client.cli.policies.retry import RetryPolicy, compute_retry_delay_seconds
 from ksef_client.config import KsefClientOptions
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 from ksef_client.http import (
+    MAX_RETRY_AFTER_SECONDS,
+    NO_HTTP_STATUS_CODE,
     AsyncBaseHttpClient,
     BaseHttpClient,
     HttpResponse,
     _host_allowed,
     _is_json_content_type,
+    _loggable_url,
     _merge_headers,
     _parse_api_problem,
     _parse_retry_after,
@@ -50,6 +55,14 @@ class HttpTests(unittest.TestCase):
         with patch.object(client._client, "close") as close_mock:
             client.close()
             close_mock.assert_called_once()
+
+    def test_request_rejects_json_and_data_together(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        with patch.object(client._client, "request", Mock()) as request_mock:
+            with self.assertRaisesRegex(ValueError, "either json or data"):
+                client.request("POST", "/path", json={"a": 1}, data=b"RAW")
+            request_mock.assert_not_called()
 
     def test_system_warning_handler_receives_response_header(self):
         warnings: list[str] = []
@@ -335,6 +348,52 @@ class HttpTests(unittest.TestCase):
             _, kwargs = request_mock.call_args
             self.assertEqual(kwargs["url"], "https://10.1.2.3/upload")
 
+    def test_loggable_url_strips_credentials_and_query(self):
+        self.assertEqual(
+            _loggable_url("https://user:SECRET@api-test.ksef.mf.gov.pl/v2/x?sig=SECRET#frag"),
+            "https://api-test.ksef.mf.gov.pl/v2/x",
+        )
+        self.assertEqual(
+            _loggable_url("https://storage.example.com/part?sv=1&sig=SECRET"),
+            "https://storage.example.com/part",
+        )
+        self.assertEqual(_loggable_url("https://host:8443/a/b"), "https://host:8443/a/b")
+        self.assertEqual(_loggable_url("https://[::1]:8443/a"), "https://[::1]:8443/a")
+        self.assertEqual(_loggable_url("/relative/path?x=1"), "/relative/path")
+
+    def test_skip_auth_presigned_url_rejects_credentials_in_url(self):
+        """Userinfo nie może wyciec do logu diagnostycznego."""
+        self.assertNotIn(
+            "pw", _loggable_url("https://user:pw@uploads.example.com/x?sig=SECRET")
+        )
+        self.assertEqual(
+            _loggable_url("https://user:pw@uploads.example.com/x?sig=SECRET"),
+            "https://uploads.example.com/x",
+        )
+
+    def test_skip_auth_presigned_url_rejects_ipv4_mapped_loopback(self):
+        """`[::ffff:127.0.0.1]` to loopback — nawet przy zgodzie na sieci prywatne."""
+        for allow_private in (False, True):
+            options = KsefClientOptions(
+                base_url="https://api-test.ksef.mf.gov.pl",
+                allow_private_network_presigned_urls=allow_private,
+            )
+            with self.assertRaisesRegex(ValueError, "loopback"):
+                _validate_presigned_url_security(options, "https://[::ffff:127.0.0.1]/x")
+
+        default_options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        with self.assertRaisesRegex(ValueError, "private, link-local"):
+            _validate_presigned_url_security(
+                default_options, "https://[::ffff:169.254.169.254]/x"
+            )
+
+    def test_skip_auth_presigned_url_rejects_ambiguous_numeric_hosts(self):
+        """Zapisy, które resolvery rozumieją jako IP, a `ipaddress` już nie."""
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        for host in ("2130706433", "0x7f000001", "127.1", "0177.0.0.1"):
+            with self.assertRaisesRegex(ValueError, "ambiguous numeric host"):
+                _validate_presigned_url_security(options, f"https://{host}/x")
+
     def test_skip_auth_presigned_url_allowlist_exact_and_subdomain(self):
         options = KsefClientOptions(
             base_url="https://api-test.ksef.mf.gov.pl",
@@ -387,6 +446,32 @@ class HttpTests(unittest.TestCase):
         self.assertIsNotNone(parsed_http_date)
         assert parsed_http_date is not None
         self.assertGreater(parsed_http_date, 0)
+
+    def test_parse_retry_after_is_capped_and_never_negative(self):
+        self.assertEqual(_parse_retry_after("31536000"), MAX_RETRY_AFTER_SECONDS)
+        self.assertEqual(_parse_retry_after("-5"), 0)
+        self.assertEqual(
+            _parse_retry_after("Wed, 01 Jan 2099 00:00:00 GMT"),
+            MAX_RETRY_AFTER_SECONDS,
+        )
+        with patch(
+            "ksef_client.http.parsedate_to_datetime",
+            return_value=datetime(2000, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+        ):
+            self.assertEqual(_parse_retry_after("Sat, 01 Jan 2000 00:00:00 GMT"), 0)
+
+    def test_rate_limit_error_caps_retry_after_but_keeps_the_raw_header(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options)
+        response = httpx.Response(
+            429,
+            headers={"Retry-After": "31536000"},
+            json={"error": "limit"},
+        )
+        with self.assertRaises(KsefRateLimitError) as ctx:
+            client._raise_for_status(response)
+        self.assertEqual(ctx.exception.retry_after, MAX_RETRY_AFTER_SECONDS)
+        self.assertEqual(ctx.exception.retry_after_raw, "31536000")
 
     def test_parse_api_problem_variants(self):
         self.assertIsNone(_parse_api_problem(400, []))
@@ -534,6 +619,14 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
             await client.aclose()
             aclose_mock.assert_called_once()
 
+    async def test_async_request_rejects_json_and_data_together(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = AsyncBaseHttpClient(options)
+        with patch.object(client._client, "request", AsyncMock()) as request_mock:
+            with self.assertRaisesRegex(ValueError, "either json or data"):
+                await client.request("POST", "/path", json={"a": 1}, data=b"RAW")
+            request_mock.assert_not_called()
+
     async def test_async_httpx_client_init_proxy_and_redirects(self):
         with patch("ksef_client.http.httpx.AsyncClient") as mocked:
             options = KsefClientOptions(
@@ -636,6 +729,386 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
             _, kwargs = request_mock.call_args
             self.assertEqual(kwargs["url"], "https://files.example.com/upload")
             self.assertNotIn("Authorization", kwargs["headers"])
+
+
+class RedirectHandlingTests(unittest.TestCase):
+    """3xx nie może być traktowane jak sukces.
+
+    `httpx` nie podąża za przekierowaniami (`follow_redirects=False`), więc treść
+    odpowiedzi 3xx to strona pośrednika albo puste ciało — przyjmowanie jej jako
+    sukcesu zapisywało PUSTY plik UPO/faktury i raportowało sukces.
+    """
+
+    def test_sync_redirect_without_expected_status_is_an_error(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(302, headers={"Location": "https://example.com/login"})
+        with (
+            patch.object(client._client, "request", Mock(return_value=response)),
+            self.assertRaises(KsefHttpError),
+        ):
+            client.request("GET", "/path")
+
+    def test_sync_redirect_is_accepted_when_explicitly_expected(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(302, headers={"Location": "https://example.com/x"})
+        with patch.object(client._client, "request", Mock(return_value=response)):
+            result = client.request("GET", "/path", expected_status={302})
+            self.assertEqual(result.status_code, 302)
+
+    def test_sync_2xx_is_still_a_success(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options, access_token="token")
+        for status_code in (200, 201, 202, 204):
+            response = httpx.Response(status_code)
+            with patch.object(client._client, "request", Mock(return_value=response)):
+                self.assertEqual(client.request("GET", "/path").status_code, status_code)
+
+
+class AsyncRedirectHandlingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_redirect_is_an_error(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = AsyncBaseHttpClient(options, access_token="token")
+        response = httpx.Response(307, headers={"Location": "https://example.com/x"})
+        with (
+            patch.object(client._client, "request", AsyncMock(return_value=response)),
+            self.assertRaises(KsefHttpError),
+        ):
+            await client.request("GET", "/path")
+
+
+class VerboseLoggingTests(unittest.TestCase):
+    """`-v/--verbose` ma realny efekt: żądania trafiają do logu bez sekretów."""
+
+    def test_request_is_logged_without_query_parameters(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(200)
+        with (
+            patch.object(client._client, "request", Mock(return_value=response)),
+            self.assertLogs("ksef_client.http", level="DEBUG") as captured,
+        ):
+            client.request("GET", "https://storage.example.com/package?sig=SEKRET")
+
+        joined = "\n".join(captured.output)
+        assert "-> 200" in joined
+        assert "storage.example.com/package" in joined
+        assert "SEKRET" not in joined, "podpis presigned URL nie może trafiać do logu"
+
+    def test_relative_path_is_logged_without_the_query(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(200)
+        with (
+            patch.object(client._client, "request", Mock(return_value=response)),
+            self.assertLogs("ksef_client.http", level="DEBUG") as captured,
+        ):
+            client.request("GET", "/invoices?secret=SEKRET")
+
+        joined = "\n".join(captured.output)
+        assert "/invoices" in joined
+        assert "SEKRET" not in joined
+
+    def test_loggable_url_handles_a_relative_path(self):
+        from ksef_client.http import _loggable_url
+
+        assert _loggable_url("invoices/1?sig=SEKRET") == "invoices/1"
+        assert (
+            _loggable_url("https://host.example/path?sig=SEKRET")
+            == "https://host.example/path"
+        )
+
+
+class PresignedUrlRedirectTests(unittest.TestCase):
+    """Presigned URL nie może podążać za przekierowaniem.
+
+    Walidacja `_validate_presigned_url_security` dotyczy wyłącznie adresu
+    początkowego, a przy `skip_auth` nie ma nagłówka `Authorization` — podążenie
+    za przekierowaniem wykonałoby żądanie pod adres wskazany przez serwer (także
+    do sieci wewnętrznej) i zwróciło jego treść jako wynik.
+    """
+
+    def test_skip_auth_never_follows_redirects(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl", follow_redirects=True
+        )
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(302, headers={"Location": "http://169.254.169.254/secret"})
+        request_mock = Mock(return_value=response)
+        with (
+            patch.object(client._client, "request", request_mock),
+            self.assertRaises(KsefHttpError),
+        ):
+            client.request("GET", "https://storage.example.com/presigned?x=1", skip_auth=True)
+
+        self.assertFalse(request_mock.call_args.kwargs["follow_redirects"])
+
+    def test_authenticated_request_keeps_the_option(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl", follow_redirects=True
+        )
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(200)
+        request_mock = Mock(return_value=response)
+        with patch.object(client._client, "request", request_mock):
+            client.request("GET", "/path")
+
+        self.assertTrue(request_mock.call_args.kwargs["follow_redirects"])
+
+    def test_async_skip_auth_never_follows_redirects(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl", follow_redirects=True
+        )
+        client = AsyncBaseHttpClient(options, access_token="token")
+        response = httpx.Response(302, headers={"Location": "http://169.254.169.254/secret"})
+        request_mock = AsyncMock(return_value=response)
+
+        async def _run() -> None:
+            with (
+                patch.object(client._client, "request", request_mock),
+                self.assertRaises(KsefHttpError),
+            ):
+                await client.request(
+                    "GET", "https://storage.example.com/presigned?x=1", skip_auth=True
+                )
+
+        asyncio.run(_run())
+        self.assertFalse(request_mock.call_args.kwargs["follow_redirects"])
+
+
+class RetryAfterOnRetryableStatusesTests(unittest.TestCase):
+    """`Retry-After` musi trafiać na wyjątek także dla 502/503/504, nie tylko dla 429.
+
+    CLI ponawia wszystkie te kody (`should_retry`), więc bez nagłówka czekało
+    `poll_interval` (0,25 s) zamiast czasu żądanego przez serwer.
+    """
+
+    def setUp(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        self.client = BaseHttpClient(options)
+        self.policy = RetryPolicy(max_retries=3, base_delay_ms=250, jitter_ratio=0.2)
+
+    def _raise_for_status(self, status_code: int, headers: dict[str, str]) -> KsefApiError:
+        response = httpx.Response(
+            status_code,
+            headers={"Content-Type": "application/problem+json", **headers},
+            json={"title": "Service Unavailable", "status": status_code, "detail": "d"},
+        )
+        with self.assertRaises(KsefApiError) as ctx:
+            self.client._raise_for_status(response)
+        return ctx.exception
+
+    def _delay_for(self, exc: KsefHttpError) -> float:
+        return compute_retry_delay_seconds(
+            1, self.policy, retry_after=exc.retry_after_raw, random_value=0.5
+        )
+
+    def test_retry_after_is_exposed_for_502_503_504(self):
+        for status_code in (502, 503, 504):
+            with self.subTest(status_code=status_code):
+                exc = self._raise_for_status(status_code, {"Retry-After": "30"})
+                self.assertEqual(exc.status_code, status_code)
+                self.assertEqual(exc.retry_after, 30)
+                self.assertEqual(exc.retry_after_raw, "30")
+                self.assertEqual(self._delay_for(exc), 30.0)
+
+    def test_missing_retry_after_falls_back_to_the_backoff(self):
+        exc = self._raise_for_status(503, {})
+        self.assertIsNone(exc.retry_after)
+        self.assertIsNone(exc.retry_after_raw)
+        self.assertEqual(self._delay_for(exc), 0.25)
+
+    def test_retry_after_is_not_exposed_for_non_retryable_statuses(self):
+        exc = self._raise_for_status(500, {"Retry-After": "30"})
+        self.assertIsNone(exc.retry_after)
+        self.assertIsNone(exc.retry_after_raw)
+
+    def test_non_json_5xx_keeps_the_header(self):
+        response = httpx.Response(
+            503,
+            headers={"Content-Type": "text/plain", "Retry-After": "30"},
+            content=b"maintenance",
+        )
+        with self.assertRaises(KsefHttpError) as ctx:
+            self.client._raise_for_status(response)
+        self.assertNotIsInstance(ctx.exception, KsefApiError)
+        self.assertEqual(ctx.exception.retry_after, 30)
+        self.assertEqual(ctx.exception.retry_after_raw, "30")
+
+    def test_429_keeps_its_class_and_fields(self):
+        response = httpx.Response(429, headers={"Retry-After": "5"}, json={"error": "limit"})
+        with self.assertRaises(KsefRateLimitError) as ctx:
+            self.client._raise_for_status(response)
+        self.assertEqual(ctx.exception.retry_after, 5)
+        self.assertEqual(ctx.exception.retry_after_raw, "5")
+
+    def test_5xx_reaches_the_caller_through_request(self):
+        for status_code in (502, 503, 504):
+            with self.subTest(status_code=status_code):
+                response = httpx.Response(
+                    status_code, headers={"Retry-After": "30"}, json={"error": "boom"}
+                )
+                with (
+                    patch.object(self.client._client, "request", Mock(return_value=response)),
+                    self.assertRaises(KsefApiError) as ctx,
+                ):
+                    self.client.request("GET", "/invoices/exports")
+                self.assertEqual(ctx.exception.retry_after, 30)
+
+    def test_429_with_exception_payload_fills_exception_response(self):
+        payload = {"exception": {"exceptionDetailList": [{"exceptionCode": 21405}]}}
+        response = httpx.Response(429, json=payload)
+        with self.assertRaises(KsefRateLimitError) as ctx:
+            self.client._raise_for_status(response)
+        self.assertIsInstance(ctx.exception.problem, models.ExceptionResponse)
+        self.assertIs(ctx.exception.exception_response, ctx.exception.problem)
+
+
+class TransportErrorTests(unittest.TestCase):
+    """Błędy sieci i timeouty nie mogą przeciekać jako surowe wyjątki `httpx`.
+
+    Dokumentacja obiecuje wyjątki `Ksef*`, a `ConnectError`/`ReadTimeout`/
+    `RemoteProtocolError` (i `TooManyRedirects`) leciały do użytkownika bez zmian.
+    Oryginał zostaje w `__cause__`, a `status_code` to `NO_HTTP_STATUS_CODE`.
+    """
+
+    def setUp(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        self.client = BaseHttpClient(options, access_token="token")
+
+    def _request_with_error(self, error: Exception) -> KsefHttpError:
+        with (
+            patch.object(self.client._client, "request", Mock(side_effect=error)),
+            self.assertRaises(KsefHttpError) as ctx,
+        ):
+            self.client.request("GET", "/path")
+        return ctx.exception
+
+    def test_transport_errors_are_wrapped(self):
+        for error in (
+            httpx.ConnectError("nodename nor servname provided"),
+            httpx.ConnectTimeout("timed out"),
+            httpx.ReadTimeout("read timed out"),
+            httpx.RemoteProtocolError("server disconnected"),
+            httpx.TooManyRedirects("too many redirects"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                wrapped = self._request_with_error(error)
+                self.assertIs(wrapped.__cause__, error)
+                self.assertEqual(wrapped.status_code, NO_HTTP_STATUS_CODE)
+                self.assertIsNone(wrapped.problem)
+                self.assertIn(type(error).__name__, str(wrapped))
+                self.assertIn("api-test.ksef.mf.gov.pl", str(wrapped))
+
+    def test_transport_error_message_hides_presigned_url_secrets(self):
+        with (
+            patch.object(
+                self.client._client, "request", Mock(side_effect=httpx.ConnectError("boom"))
+            ),
+            self.assertRaises(KsefHttpError) as ctx,
+        ):
+            self.client.request(
+                "GET", "https://storage.example.com/part1?sig=SEKRET", skip_auth=True
+            )
+        self.assertNotIn("SEKRET", str(ctx.exception))
+
+
+class SkipAuthAuthorizationHeaderTests(unittest.TestCase):
+    """`skip_auth` musi usunąć `Authorization` także z `custom_headers`/`headers`.
+
+    Pre-signed URL wskazuje obcy host (magazyn plików) — token KSeF nie może tam trafić,
+    nawet jeśli użytkownik ustawił go globalnie w opcjach klienta.
+    """
+
+    def _client(self, **options) -> BaseHttpClient:
+        return BaseHttpClient(
+            KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl", **options),
+            access_token="token",
+        )
+
+    def _sent_headers(self, client: BaseHttpClient, path: str, **kwargs) -> dict[str, str]:
+        response = httpx.Response(200, json={"ok": True})
+        with patch.object(client._client, "request", Mock(return_value=response)) as request_mock:
+            client.request("GET", path, **kwargs)
+        return request_mock.call_args.kwargs["headers"]
+
+    @staticmethod
+    def _authorization_values(headers: dict[str, str]) -> list[str]:
+        return [value for name, value in headers.items() if name.lower() == "authorization"]
+
+    def test_custom_authorization_is_dropped_for_presigned_requests(self):
+        client = self._client(custom_headers={"Authorization": "Bearer CUSTOM-SECRET"})
+        headers = self._sent_headers(
+            client, "https://storage.example.com/part1?sig=abc", skip_auth=True
+        )
+        self.assertEqual(self._authorization_values(headers), [])
+
+    def test_per_request_authorization_is_dropped_for_presigned_requests(self):
+        client = self._client()
+        headers = self._sent_headers(
+            client,
+            "https://storage.example.com/part1?sig=abc",
+            skip_auth=True,
+            headers={"authorization": "Bearer CUSTOM-SECRET", "x-custom": "1"},
+        )
+        self.assertEqual(self._authorization_values(headers), [])
+        self.assertEqual(headers["x-custom"], "1")
+
+    def test_custom_authorization_is_kept_for_regular_requests(self):
+        client = self._client(custom_headers={"Authorization": "Bearer CUSTOM-SECRET"})
+        headers = self._sent_headers(client, "/path")
+        self.assertEqual(self._authorization_values(headers), ["Bearer CUSTOM-SECRET"])
+
+
+class AsyncTransportAndAuthTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_transport_errors_are_wrapped(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = AsyncBaseHttpClient(options, access_token="token")
+        errors = [
+            httpx.ConnectError("nodename nor servname provided"),
+            httpx.ReadTimeout("read timed out"),
+            httpx.RemoteProtocolError("server disconnected"),
+            httpx.TooManyRedirects("too many redirects"),
+        ]
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                with (
+                    patch.object(client._client, "request", AsyncMock(side_effect=error)),
+                    self.assertRaises(KsefHttpError) as ctx,
+                ):
+                    await client.request("GET", "/path")
+                self.assertIs(ctx.exception.__cause__, error)
+                self.assertEqual(ctx.exception.status_code, NO_HTTP_STATUS_CODE)
+
+    async def test_async_5xx_carries_retry_after(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = AsyncBaseHttpClient(options)
+        response = httpx.Response(
+            503,
+            headers={"Retry-After": "30", "Content-Type": "application/problem+json"},
+            json={"title": "Service Unavailable", "status": 503, "detail": "d"},
+        )
+        with self.assertRaises(KsefApiError) as ctx:
+            client._raise_for_status(response)
+        self.assertEqual(ctx.exception.retry_after, 30)
+        self.assertEqual(ctx.exception.retry_after_raw, "30")
+
+    async def test_async_skip_auth_drops_custom_authorization(self):
+        options = KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl",
+            custom_headers={"Authorization": "Bearer CUSTOM-SECRET"},
+        )
+        client = AsyncBaseHttpClient(options, access_token="token")
+        response = httpx.Response(200, json={"ok": True})
+        with patch.object(
+            client._client, "request", AsyncMock(return_value=response)
+        ) as request_mock:
+            await client.request("GET", "https://storage.example.com/part1?sig=abc", skip_auth=True)
+        headers = request_mock.call_args.kwargs["headers"]
+        self.assertEqual(
+            [value for name, value in headers.items() if name.lower() == "authorization"], []
+        )
 
 
 if __name__ == "__main__":

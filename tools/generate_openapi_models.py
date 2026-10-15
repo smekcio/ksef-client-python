@@ -1,5 +1,6 @@
 import argparse
 import difflib
+import json
 import keyword
 import re
 import sys
@@ -52,8 +53,101 @@ def _enum_member_name(value: str, used: set[str]) -> str:
     return name
 
 
-def _ref_name(ref: str) -> str:
-    return ref.rsplit("/", 1)[-1]
+def _ref_name(ref: object) -> str:
+    """Zwraca nazwę schematu z `$ref` i pilnuje, że nadaje się na typ w kodzie."""
+    if not isinstance(ref, str):
+        raise OpenApiSpecError(f"Invalid $ref {ref!r}: expected a string")
+    return _validate_identifier(
+        ref.rsplit("/", 1)[-1],
+        kind="Referenced schema name",
+        context=f"$ref {ref!r}",
+    )
+
+
+def _string_literal(value: str) -> str:
+    """Zamienia tekst ze specyfikacji na bezpieczny literał Pythona.
+
+    `json.dumps` escapuje cudzysłowy, backslashe i znaki sterujące, a jego wynik
+    jest jednocześnie poprawnym literałem `str` w Pythonie. Bez tego dowolna
+    wartość ze specyfikacji (np. wartość enuma) mogła domknąć napis i wstawić
+    własny kod do generowanego pliku.
+    """
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _validate_identifier(
+    name: object,
+    *,
+    kind: str,
+    context: str,
+    allow_keyword: bool = False,
+) -> str:
+    """Pilnuje, żeby nazwa wstawiana do kodu była poprawnym identyfikatorem.
+
+    Nazwy schematów, właściwości i typów z `$ref` trafiają do generowanego
+    `openapi_models.py` jako kod, a plik jest importowany (m.in. przez
+    `tools/generate_models_stub.py`), więc bez tej walidacji treść specyfikacji
+    wykonywałaby się przy każdym imporcie artefaktu.
+
+    ``allow_keyword=True`` dopuszczamy tylko dla nazw właściwości: słowo kluczowe
+    w JSON jest poprawnym kluczem, a `_sanitize_field_name` dokłada mu `_`.
+    """
+    if not isinstance(name, str) or not name.isidentifier():
+        raise OpenApiSpecError(
+            f"{kind} {name!r} in {context} is not a valid Python identifier"
+        )
+    if keyword.iskeyword(name) and not allow_keyword:
+        raise OpenApiSpecError(f"{kind} {name!r} in {context} is a reserved Python keyword")
+    return name
+
+
+#: Pola, które kontrakt oznacza jako wymagane, ale oficjalny przykład odpowiedzi
+#: ich nie zawiera — API potrafi przysłać taki obiekt, a wtedy `from_dict`
+#: kończyłoby się `TypeError: missing 1 required positional argument`.
+#:
+#: `POST /collective-identifiers/invoices` (200) ma w specyfikacji przykład
+#: pozycji złożonej wyłącznie z `ksefNumber`, `payment`, `description`
+#: i `detailsHidden`, choć schemat `CollectiveIdentifierInvoicesQueryResponseItem`
+#: wymienia `collectiveIdentifierNumber` w `required`. Bez tego wyjątku
+#: `list_invoices()`/`iter_invoices()` wywracały się na odpowiedzi zgodnej
+#: z własnym przykładem kontraktu (przykład w `docs/api/collective-identifiers.md`
+#: pokazuje pozycje z `collectiveIdentifierNumber`, więc pole zostaje w modelu —
+#: jako opcjonalne).
+OPTIONAL_DESPITE_REQUIRED: dict[str, frozenset[str]] = {
+    "CollectiveIdentifierInvoicesQueryResponseItem": frozenset({"collectiveIdentifierNumber"}),
+}
+
+
+def _is_required_field(model_name: str, prop_name: str, required: set[str]) -> bool:
+    if prop_name in OPTIONAL_DESPITE_REQUIRED.get(model_name, frozenset()):
+        return False
+    return prop_name in required
+
+
+#: Pola, których wartości nie mogą trafiać do `repr()` — tokeny, klucze i hasła
+#: wyciekałyby wtedy do logów i komunikatów błędów. Lista trzyma nazwy pól po
+#: konwersji (`snake_case`) i klucze JSON z kontraktu (`camelCase`), bo to drugie
+#: jest tym, co realnie przychodzi z API.
+SENSITIVE_FIELD_NAMES: frozenset[str] = frozenset(
+    {
+        "token",
+        "access_token",
+        "accessToken",
+        "refresh_token",
+        "refreshToken",
+        "private_key",
+        "privateKey",
+        "password",
+        "secret",
+        "client_secret",
+        "clientSecret",
+        "key",
+    }
+)
+
+
+def _is_sensitive_field(prop_name: str, field_name: str) -> bool:
+    return prop_name in SENSITIVE_FIELD_NAMES or field_name in SENSITIVE_FIELD_NAMES
 
 
 def _schema_type(schema: dict) -> str:
@@ -120,7 +214,7 @@ def _generate_enum(name: str, schema: dict) -> list[str]:
     for value in schema.get("enum", []):
         value_str = str(value)
         member = _enum_member_name(value_str, used)
-        lines.append(f'    {member} = "{value_str}"')
+        lines.append(f"    {member} = {_string_literal(value_str)}")
     if len(lines) == 1:
         lines.append("    pass")
     return lines
@@ -136,29 +230,45 @@ def _generate_object(name: str, schema: dict) -> list[str]:
         return lines
     prepared = []
     for prop_name, prop_schema in props.items():
+        _validate_identifier(
+            prop_name,
+            kind="Property name",
+            context=f"schema {name}",
+            allow_keyword=True,
+        )
         field_name = _sanitize_field_name(prop_name, used_names)
+        # Nazwa pola powstaje z klucza JSON, więc wymaga osobnej walidacji:
+        # np. `_0` jest poprawnym identyfikatorem, ale `_to_snake_case` ścina
+        # wiodące podkreślenia i zostaje z niego `0`, czyli niepoprawna adnotacja.
+        _validate_identifier(
+            field_name,
+            kind="Field name",
+            context=f"schema {name} (property {prop_name!r})",
+        )
         type_name = _schema_type(prop_schema)
-        is_required = prop_name in required
+        is_required = _is_required_field(name, prop_name, required)
         is_nullable = bool(prop_schema.get("nullable"))
         if is_nullable or not is_required:
             type_name = _optional_type(type_name)
-        metadata = None
-        if field_name != prop_name:
-            metadata = f'metadata={{"json_key": "{prop_name}"}}'
-        prepared.append((is_required, field_name, type_name, metadata))
-    prepared.sort(key=lambda item: (not item[0], item[1]))
-    for is_required, field_name, type_name, metadata in prepared:
+        field_kwargs: list[str] = []
         if not is_required:
-            if metadata:
-                default = f"field(default=None, {metadata})"
-                lines.append(f"    {field_name}: {type_name} = {default}")
-            else:
-                lines.append(f"    {field_name}: {type_name} = None")
+            field_kwargs.append("default=None")
+        if _is_sensitive_field(prop_name, field_name):
+            # Tokeny i klucze nie mogą wyciekać przez `repr()` (logi, wyjątki).
+            field_kwargs.append("repr=False")
+        if field_name != prop_name:
+            field_kwargs.append(f'metadata={{"json_key": {_string_literal(prop_name)}}}')
+        prepared.append((is_required, field_name, type_name, field_kwargs))
+    prepared.sort(key=lambda item: (not item[0], item[1]))
+    for _is_required, field_name, type_name, field_kwargs in prepared:
+        if not field_kwargs:
+            lines.append(f"    {field_name}: {type_name}")
+        elif field_kwargs == ["default=None"]:
+            # Pola opcjonalne bez metadanych zostają w dotychczasowej, krótszej postaci.
+            lines.append(f"    {field_name}: {type_name} = None")
         else:
-            if metadata:
-                lines.append(f"    {field_name}: {type_name} = field({metadata})")
-            else:
-                lines.append(f"    {field_name}: {type_name}")
+            rendered_kwargs = ", ".join(field_kwargs)
+            lines.append(f"    {field_name}: {type_name} = field({rendered_kwargs})")
     return lines
 
 
@@ -168,6 +278,7 @@ def render_models(data: dict[str, Any]) -> str:
     enum_names = []
     object_names = []
     for name, schema in schemas.items():
+        _validate_identifier(name, kind="Schema name", context="components.schemas")
         schema_type = schema.get("type")
         if schema_type == "object":
             object_names.append(name)
@@ -297,7 +408,14 @@ def generate_models(
     *,
     snapshot_path: Path = DEFAULT_KSEF_OPENAPI_FALLBACK_PATH,
     allow_fallback: bool = True,
+    write_snapshot: bool = True,
 ) -> None:
+    """Generuje modele z dokumentu OpenAPI.
+
+    ``write_snapshot=False`` pomija aktualizację śledzonego snapshotu — tryb
+    ``--check`` nie może zmieniać plików repozytorium, bo wtedy sama weryfikacja
+    brudzi drzewo i raportuje rozjazd, który dopiero co stworzyła.
+    """
     document = load_openapi_document(
         input_path=input_path,
         fallback_path=snapshot_path,
@@ -306,7 +424,7 @@ def generate_models(
     data = parse_openapi_json(document)
     rendered = render_models(data)
     output_path.write_text(rendered, encoding="utf-8", newline="\n")
-    if input_path is None and not document.used_fallback:
+    if write_snapshot and input_path is None and not document.used_fallback:
         write_openapi_snapshot(document.text, snapshot_path=snapshot_path)
 
 

@@ -93,6 +93,8 @@ Istotne: dla operacji wysyłki i pobierania partów KSeF zwraca wymagane nagłó
 
 Opcja zwykle nie jest potrzebna. Włączenie ma uzasadnienie wyłącznie w środowiskach, w których infrastruktura wymusza przekierowania.
 
+**Ważne:** reguła dotyczy wyłącznie żądań uwierzytelnionych. Żądania z `skip_auth=True` (pre-signed URL do partów paczki, UPO, pobieranie faktur oraz wywołania `auth`/`security`/`peppol` bez nagłówka `Authorization`) **nigdy** nie podążają za przekierowaniem, niezależnie od tej opcji. Powód: walidacja bezpieczeństwa (`strict_presigned_url_validation`, `allowed_presigned_hosts`) dotyczy tylko adresu początkowego, więc podążenie za przekierowaniem wykonałoby żądanie pod adres wskazany przez serwer — także do sieci wewnętrznej — i zwróciło jego treść jako wynik. Odpowiedź 3xx jest w takim przypadku błędem (`KsefHttpError`), a nie pustym sukcesem.
+
 ### `verify_ssl`
 
 Domyślnie `True`. Wyłączenie ma uzasadnienie wyłącznie w specyficznych środowiskach testowych (np. z własnym MITM/proxy).

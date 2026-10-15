@@ -1,0 +1,28 @@
+# Testy nie należą do dystrybucji źródłowej: `setuptools` domyślnie dołącza do
+# sdist pliki `tests/test*.py`, ale bez `conftest.py`, `helpers.py`, katalogu
+# `tools/` i specyfikacji takich testów nie da się uruchomić po rozpakowaniu
+# archiwum (`12 errors during collection`). Instalacja z sdist działa bez nich.
+prune tests
+# Katalogi robocze przeglądów i sond (kopie drzewa repo) nie mogą trafić do paczki.
+# W tym checkoutcie leżą w katalogu nadrzędnym, więc reguły działają tylko wtedy,
+# gdy build uruchamiany jest z kopii drzewa zawierającej te katalogi.
+prune _review_final2
+prune _review_final3
+prune _review_final4
+prune _fix_probe
+prune _review_branch
+prune _review_scratch
+prune _low_probe
+prune _fa3_rules
+# sdist ma być kompletnym źródłem: bez `specs/` i `tools/` nie da się z niego
+# wygenerować modeli ani sprawdzić artefaktów, a bez `requirements*.txt` nie
+# zadziała ścieżka instalacji z dokumentacji (dowód z przeglądu: brakowało
+# 189 z 306 plików repo).
+include requirements.txt
+include requirements-dev.txt
+recursive-include specs *.json
+recursive-include tools *.py
+recursive-include docs *.md *.py
+# `*.py[cod]` obejmuje także zagnieżdżone `__pycache__` (wzorce z ukośnikiem są
+# zakotwiczone w katalogu głównym, więc sam `__pycache__/*` by ich nie złapał).
+global-exclude *.py[cod]

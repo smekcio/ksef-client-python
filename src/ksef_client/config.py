@@ -46,6 +46,12 @@ class KsefClientOptions:
     timeout_seconds: float = 30.0
     proxy: str | None = None
     custom_headers: dict[str, str] | None = None
+    #: Czy podążać za przekierowaniami żądań **uwierzytelnionych**. Żądania z
+    #: `skip_auth=True` (pre-signed URL, wywołania bez nagłówka `Authorization`)
+    #: nigdy nie podążają za przekierowaniem: walidacja bezpieczeństwa dotyczy
+    #: wyłącznie adresu początkowego, więc przekierowanie wykonałoby żądanie pod
+    #: adres wskazany przez serwer (także do sieci wewnętrznej) i zwróciło jego
+    #: treść jako wynik. 3xx w takim żądaniu jest błędem (`KsefHttpError`).
     follow_redirects: bool = False
     verify_ssl: bool = True
     require_export_part_hash: bool = True

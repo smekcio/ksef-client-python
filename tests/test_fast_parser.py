@@ -1,5 +1,6 @@
 """Unit tests for fast_extract_ksef_metadata function."""
 
+import time
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 
@@ -74,5 +75,145 @@ def test_fast_extract_ksef_metadata_buffered_io():
 
 def test_fast_extract_ksef_metadata_too_long_p11():
     xml = '<Faktura><Fa><FaWiersz><P_11>' + '1' * 35 + '</P_11></FaWiersz></Fa></Faktura>'
-    with pytest.raises(ValueError, match="Wartość P_11 jest zbyt długa"):
+    with pytest.raises(ValueError, match="zbyt długa"):
         fast_extract_ksef_metadata(xml)
+
+
+KSEF_P_11A_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
+<Faktura><Fa>
+  <FaWiersz><P_8B>1</P_8B><P_11A>2000</P_11A><P_12>23</P_12></FaWiersz>
+  <FaWiersz><P_8B>1</P_8B><P_11A>1000</P_11A><P_12>23</P_12></FaWiersz>
+</Fa></Faktura>
+"""
+
+KSEF_KOR_ROZ_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
+<Faktura><Fa>
+  <FaWiersz><NrWierszaFa>1</NrWierszaFa><P_11>307500</P_11><StanPrzed>1</StanPrzed></FaWiersz>
+  <FaWiersz><NrWierszaFa>1</NrWierszaFa><P_11>307500</P_11></FaWiersz>
+  <FaWiersz><NrWierszaFa>2</NrWierszaFa><P_11>4500</P_11><StanPrzed>1</StanPrzed></FaWiersz>
+  <FaWiersz><NrWierszaFa>2</NrWierszaFa><P_11>4500</P_11></FaWiersz>
+</Fa></Faktura>
+"""
+
+
+KSEF_ORDER_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
+<Faktura><Fa>
+  <ZamowienieWiersz>
+    <P_11NettoZ>305000.00</P_11NettoZ><P_11VatZ>70150.00</P_11VatZ>
+  </ZamowienieWiersz>
+  <ZamowienieWiersz>
+    <P_11NettoZ>5000.00</P_11NettoZ><P_11VatZ>1150.00</P_11VatZ><StanPrzedZ>1</StanPrzedZ>
+  </ZamowienieWiersz>
+</Fa></Faktura>
+"""
+
+
+def test_fast_extract_ksef_metadata_handles_order_rows():
+    """`ZamowienieWiersz` liczone osobno (`order_*`), nie jako kwoty faktury.
+
+    Wiersze zamówienia niosą wartość zamówienia/umowy, a nie kwoty faktury — w
+    dokumencie zaliczkowym suma tych wierszy bywa zupełnie inna niż `P_13_x`/`P_15`
+    (oficjalny `FA_3_Przykład_10.xml`: `WartoscZamowienia` 375150 wobec `P_15`
+    20000). Wcześniej parser ignorował te wiersze (jawne zero), a pierwsza wersja
+    poprawki wpisywała wartość zamówienia w `total_netto`, czyli liczbę
+    wyglądającą wiarygodnie, ale obcą dla faktury.
+    """
+    res = fast_extract_ksef_metadata(KSEF_ORDER_SAMPLE)
+    assert res["total_netto"] == Decimal("0.00")
+    assert res["total_brutto"] == Decimal("0.00")
+    assert res["item_count"] == 0
+    assert res["order_netto"] == Decimal("305000.00")
+    # Brak jawnego brutto w schemacie, więc brutto = netto + podatek.
+    assert res["order_brutto"] == Decimal("375150.00")
+    assert res["order_item_count"] == 2
+    assert res["stan_przed_item_count"] == 1
+
+
+def test_fast_extract_ksef_metadata_keeps_brutto_zero_without_p_11a():
+    """Dla `FaWiersz` brutto bierzemy tylko z `P_11A`.
+
+    Wcześniejsza wersja poprawki liczyła brutto jako netto + podatek także dla
+    zwykłych wierszy, przez co `total_brutto` równało się `total_netto` i myliło
+    odbiorcę (dla `FaWiersz` elementem podatku jest `P_11Vat`, nie `P_11VatZ`).
+    """
+    res = fast_extract_ksef_metadata(
+        '<Faktura><Fa><FaWiersz><P_11>100.00</P_11><P_11Vat>23.00</P_11Vat></FaWiersz></Fa></Faktura>'
+    )
+    assert res["total_netto"] == Decimal("100.00")
+    assert res["total_brutto"] == Decimal("0.00")
+    assert res["item_count"] == 1
+
+
+def test_fast_extract_ksef_metadata_order_row_without_amounts_is_skipped():
+    """Wiersz zamówienia bez kwot nie jest liczony (i nie wywraca parsera)."""
+    res = fast_extract_ksef_metadata(
+        '<Faktura><Fa><ZamowienieWiersz><P_8AZ>szt.</P_8AZ></ZamowienieWiersz>'
+        "<ZamowienieWiersz><P_11NettoZ>10.00</P_11NettoZ></ZamowienieWiersz></Fa></Faktura>"
+    )
+    assert res["order_item_count"] == 1
+    assert res["order_netto"] == Decimal("10.00")
+    # Bez `P_11VatZ` brutto = netto (nie ma z czego doliczyć podatku).
+    assert res["order_brutto"] == Decimal("10.00")
+    # Wartość zamówienia nie udaje kwoty faktury.
+    assert res["total_netto"] == Decimal("0.00")
+    assert res["item_count"] == 0
+
+
+def test_fast_extract_ksef_metadata_handles_gross_only_lines():
+    """Faktury z art. 106e ust. 7 i 8 mają `P_11A`, a nie `P_11`.
+
+    Wcześniej parser dopasowywał wyłącznie `P_11` (dokładne porównanie), więc dla
+    takich dokumentów zwracał `total_netto=0.00` i `item_count=0` bez sygnału.
+    """
+    res = fast_extract_ksef_metadata(KSEF_P_11A_SAMPLE)
+    assert res["item_count"] == 2
+    assert res["total_brutto"] == Decimal("3000")
+    assert res["total_netto"] == Decimal("0.00")
+
+
+def test_fast_extract_ksef_metadata_skips_before_correction_rows():
+    """`StanPrzed` to stan przed korektą — nie może wchodzić do sumy.
+
+    Wcześniej korekta (KOR_ROZ) liczyła oba stany, więc `total_netto` był
+    podwojony (624000 zamiast 312000) i sprzeczny z podsumowaniem dokumentu.
+    """
+    res = fast_extract_ksef_metadata(KSEF_KOR_ROZ_SAMPLE)
+    assert res["total_netto"] == Decimal("312000")
+    assert res["item_count"] == 4
+    assert res["stan_przed_item_count"] == 2
+
+
+def test_fast_extract_ksef_metadata_deep_nesting_stays_linear():
+    """64 000 zagnieżdżeń i 64 000 `<NIP>` nie mogą dawać kosztu O(n²).
+
+    `"Podmiot1" in stack` było liniowe względem głębokości, więc audyt zmierzył
+    8,05 s dla 594 KiB i 30,09 s dla 1,19 MiB (×4 na podwojenie rozmiaru).
+    Liczniki otwartych przodków rozpoznają podmiot w O(1) i nie zmieniają
+    zachowania: NIP poza `Podmiot1`/`Podmiot2` nadal nie jest niczyim NIP-em,
+    a dokument o tej samej treści (bez zagnieżdżeń) daje identyczny wynik.
+    """
+    depth = 64_000
+    nested = (
+        "<Faktura>"
+        + "<a>" * depth
+        + "<NIP>1111111111</NIP>" * depth
+        + "</a>" * depth
+        + "<Podmiot1><NIP>5260250995</NIP></Podmiot1>"
+        + "</Faktura>"
+    )
+    flat = (
+        "<Faktura>"
+        + "<NIP>1111111111</NIP>" * depth
+        + "<Podmiot1><NIP>5260250995</NIP></Podmiot1>"
+        + "</Faktura>"
+    )
+
+    started = time.perf_counter()
+    res = fast_extract_ksef_metadata(nested)
+    elapsed = time.perf_counter() - started
+
+    assert res == fast_extract_ksef_metadata(flat)
+    assert res["seller_nip"] == "5260250995"
+    assert res["buyer_nip"] is None
+    assert res["nips"] == ["1111111111"] * depth + ["5260250995"]
+    assert elapsed < 2.0, f"parsowanie 64 000 zagnieżdżeń zajęło {elapsed:.2f} s"

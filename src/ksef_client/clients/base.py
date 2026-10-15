@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, TypeVar
 
+from ..exceptions import KsefHttpError
 from ..http import HttpResponse
 
 
@@ -38,6 +39,26 @@ def _serialize_json_payload(payload: _SerializableModel | None) -> dict[str, Any
             "ksef_client.models.* request model before calling the client."
         )
     return payload.to_dict()
+
+
+def _parse_json_response(response: HttpResponse, *, path: str) -> Any:
+    """Zwraca treść odpowiedzi jako JSON, a brak JSON-a zgłasza z kontekstem żądania.
+
+    ``HttpResponse.json()`` rzuca surowy ``json.JSONDecodeError`` („Expecting value:
+    line 1 column 1”), który nie mówi, którego endpointu dotyczy ani co przyszło
+    zamiast JSON-a. Przy 200 z HTML-em (proxy, captive portal) użytkownik dostawał
+    wyjątek z biblioteki standardowej bez żadnej wskazówki.
+    """
+    try:
+        return response.json()
+    except ValueError as exc:  # json.JSONDecodeError jest podklasą ValueError
+        content_type = response.headers.get("Content-Type", "unknown content type")
+        preview = response.content[:120].decode("utf-8", errors="replace")
+        raise KsefHttpError(
+            response.status_code,
+            f"Expected a JSON response from {path}, got {content_type}: {preview!r}",
+            response_body=response.content,
+        ) from exc
 
 
 def _validate_model_payload(payload: Any, *, path: str) -> dict[str, Any]:
@@ -88,7 +109,7 @@ class BaseApiClient:
             expected_status=expected_status,
         )
         if response.content:
-            return response.json()
+            return _parse_json_response(response, path=path)
         return None
 
     def _request_model(
@@ -258,7 +279,7 @@ class AsyncBaseApiClient:
             expected_status=expected_status,
         )
         if response.content:
-            return response.json()
+            return _parse_json_response(response, path=path)
         return None
 
     async def _request_model(

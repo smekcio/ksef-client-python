@@ -99,13 +99,22 @@ def session_list(ctx: typer.Context) -> None:
 def session_show(
     ctx: typer.Context,
     session_id: str = typer.Option(..., "--id", help="Saved session checkpoint id."),
+    show_secrets: bool = typer.Option(
+        False,
+        "--show-secrets",
+        help="Print the session key and IV instead of redacting them.",
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
     profile = profile_label(cli_ctx)
     try:
         profile = require_profile(cli_ctx)
-        result = show_saved_session(profile=profile, session_id=session_id)
+        result = show_saved_session(
+            profile=profile,
+            session_id=session_id,
+            show_secrets=show_secrets,
+        )
     except Exception as exc:
         _render_error(ctx, "session.show", exc)
     renderer.success(command="session.show", profile=profile, data=result)
@@ -118,6 +127,9 @@ def session_status(
     invoice_ref: str | None = typer.Option(
         None, "--invoice-ref", help="Invoice reference for online-session invoice status."
     ),
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Override KSeF base URL for this command."
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
@@ -128,6 +140,7 @@ def session_status(
             profile=profile,
             session_id=session_id,
             invoice_ref=invoice_ref,
+            base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
         )
     except Exception as exc:
         _render_error(ctx, "session.status", exc)
@@ -139,13 +152,18 @@ def session_export(
     ctx: typer.Context,
     session_id: str = typer.Option(..., "--id", help="Saved session checkpoint id."),
     out: str = typer.Option(..., "--out", help="Destination JSON path or directory."),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Overwrite the destination file when it exists."
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
     profile = profile_label(cli_ctx)
     try:
         profile = require_profile(cli_ctx)
-        result = export_saved_session(profile=profile, session_id=session_id, out=out)
+        result = export_saved_session(
+            profile=profile, session_id=session_id, out=out, overwrite=overwrite
+        )
     except Exception as exc:
         _render_error(ctx, "session.export", exc)
     renderer.success(command="session.export", profile=profile, data=result)
@@ -156,6 +174,14 @@ def session_import(
     ctx: typer.Context,
     source_path: str = typer.Option(..., "--in", help="Checkpoint JSON file to import."),
     session_id: str | None = typer.Option(None, "--id", help="Override imported session id."),
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Override KSeF base URL for this command."
+    ),
+    allow_foreign_host: bool = typer.Option(
+        False,
+        "--allow-foreign-host",
+        help="Accept a checkpoint pointing at a host other than the KSeF environments.",
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
@@ -166,6 +192,8 @@ def session_import(
             profile=profile,
             source_path=source_path,
             session_id=session_id,
+            base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
+            allow_foreign_host=allow_foreign_host,
         )
     except Exception as exc:
         _render_error(ctx, "session.import", exc)
@@ -246,6 +274,9 @@ def session_online_send(
         "--save-upo-overwrite",
         help="Overwrite file specified by --save-upo when it already exists.",
     ),
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Override KSeF base URL for this command."
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
@@ -262,6 +293,7 @@ def session_online_send(
             max_attempts=max_attempts,
             save_upo=save_upo,
             save_upo_overwrite=save_upo_overwrite,
+            base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
         )
     except Exception as exc:
         _render_error(ctx, "session.online.send", exc)
@@ -272,13 +304,20 @@ def session_online_send(
 def session_online_close(
     ctx: typer.Context,
     session_id: str = typer.Option(..., "--id", help="Saved session checkpoint id."),
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Override KSeF base URL for this command."
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
     profile = profile_label(cli_ctx)
     try:
         profile = require_profile(cli_ctx)
-        result = close_online_session(profile=profile, session_id=session_id)
+        result = close_online_session(
+            profile=profile,
+            session_id=session_id,
+            base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
+        )
     except Exception as exc:
         _render_error(ctx, "session.online.close", exc)
     renderer.success(command="session.online.close", profile=profile, data=result)
@@ -330,6 +369,9 @@ def session_batch_upload(
     ctx: typer.Context,
     session_id: str = typer.Option(..., "--id", help="Saved session checkpoint id."),
     parallelism: int = typer.Option(4, "--parallelism", help="Parallel upload worker count."),
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Override KSeF base URL for this command."
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
@@ -340,6 +382,7 @@ def session_batch_upload(
             profile=profile,
             session_id=session_id,
             parallelism=parallelism,
+            base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
         )
     except Exception as exc:
         _render_error(ctx, "session.batch.upload", exc)
@@ -370,6 +413,9 @@ def session_batch_close(
         "--save-upo-overwrite",
         help="Overwrite file specified by --save-upo when it already exists.",
     ),
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Override KSeF base URL for this command."
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
@@ -385,6 +431,7 @@ def session_batch_close(
             max_attempts=max_attempts,
             save_upo=save_upo,
             save_upo_overwrite=save_upo_overwrite,
+            base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
         )
     except Exception as exc:
         _render_error(ctx, "session.batch.close", exc)

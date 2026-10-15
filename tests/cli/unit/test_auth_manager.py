@@ -342,6 +342,51 @@ def test_refresh_access_token_success(monkeypatch) -> None:
     assert result["access_valid_until"] == "v2"
 
 
+def test_refresh_access_token_does_not_invent_the_auth_method(monkeypatch) -> None:
+    """Brak wpisu `method` w cache nie może udawać logowania tokenem.
+
+    Wcześniej `metadata.get("method", "token")` wpisywało `"token"` także dla
+    profilu XAdES (gdy cache był uszkodzony albo skasowany), przez co
+    `auth revoke-self-token` unieważniał firmowy token KSeF zamiast odmówić.
+    """
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
+    monkeypatch.setattr(manager, "save_tokens", lambda profile, access, refresh: None)
+    monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {})
+    monkeypatch.setattr(
+        manager, "set_cached_metadata", lambda profile, metadata: saved.update(metadata)
+    )
+
+    manager.refresh_access_token(profile="demo", base_url="https://api-demo.ksef.mf.gov.pl")
+
+    assert "method" not in saved, saved
+    assert saved["access_valid_until"] == "v2"
+
+
+def test_refresh_access_token_keeps_the_recorded_auth_method(monkeypatch) -> None:
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
+    monkeypatch.setattr(manager, "save_tokens", lambda profile, access, refresh: None)
+    monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {"method": "xades"})
+    monkeypatch.setattr(
+        manager, "set_cached_metadata", lambda profile, metadata: saved.update(metadata)
+    )
+
+    manager.refresh_access_token(profile="demo", base_url="https://api-demo.ksef.mf.gov.pl")
+
+    assert saved["method"] == "xades"
+
+
+def test_revoke_self_token_refuses_when_the_method_is_unknown(monkeypatch) -> None:
+    """Brak `method` (albo inna metoda) = brak zgody na unieważnienie tokenu."""
+    monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {})
+    with pytest.raises(CliError, match="only for sessions authenticated with KSeF token"):
+        manager.revoke_self_token(profile="demo", base_url="https://api-demo.ksef.mf.gov.pl")
+
+
 def test_status_and_logout(monkeypatch) -> None:
     monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
     monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {"method": "token"})
@@ -512,7 +557,8 @@ def test_resolve_lighthouse_base_url_fallbacks_to_lighthouse_test(monkeypatch) -
     assert manager.resolve_lighthouse_base_url(None) == KsefLighthouseEnvironment.TEST.value
 
 
-def test_resolve_lighthouse_base_url_invalid_profile_base_fallback(monkeypatch) -> None:
+def test_resolve_lighthouse_base_url_invalid_profile_base_raises_config_error(monkeypatch) -> None:
+    """Nieznany `base_url` profilu nie może cicho wracać do latarni TEST."""
     monkeypatch.setattr(
         manager,
         "load_config",
@@ -529,8 +575,58 @@ def test_resolve_lighthouse_base_url_invalid_profile_base_fallback(monkeypatch) 
             },
         ),
     )
-    assert manager.resolve_lighthouse_base_url(None, profile="demo") == (
-        KsefLighthouseEnvironment.TEST.value
+    with pytest.raises(CliError) as exc:
+        manager.resolve_lighthouse_base_url(None, profile="demo")
+
+    assert exc.value.code == ExitCode.CONFIG_ERROR
+    assert "Lighthouse environment" in exc.value.message
+    assert exc.value.hint is not None
+
+
+def test_resolve_lighthouse_base_url_explicit_value_wins_over_invalid_profile_base(
+    monkeypatch,
+) -> None:
+    """Nieznany `base_url` profilu nadal da się obejść jawnym adresem latarni."""
+    monkeypatch.setattr(
+        manager,
+        "load_config",
+        lambda: CliConfig(
+            active_profile="demo",
+            profiles={
+                "demo": ProfileConfig(
+                    name="demo",
+                    env="DEMO",
+                    base_url="https://unknown.example",
+                    context_type="nip",
+                    context_value="123",
+                )
+            },
+        ),
+    )
+    assert manager.resolve_lighthouse_base_url(
+        "https://api-latarnia.ksef.mf.gov.pl", profile="demo"
+    ) == "https://api-latarnia.ksef.mf.gov.pl"
+
+
+def test_resolve_lighthouse_base_url_uses_profile_prod_mapping(monkeypatch) -> None:
+    monkeypatch.setattr(
+        manager,
+        "load_config",
+        lambda: CliConfig(
+            active_profile="prod",
+            profiles={
+                "prod": ProfileConfig(
+                    name="prod",
+                    env="PRD",
+                    base_url="https://api.ksef.mf.gov.pl",
+                    context_type="nip",
+                    context_value="123",
+                )
+            },
+        ),
+    )
+    assert manager.resolve_lighthouse_base_url(None, profile="prod") == (
+        KsefLighthouseEnvironment.PROD.value
     )
 
 

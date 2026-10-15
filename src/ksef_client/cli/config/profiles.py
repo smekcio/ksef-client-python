@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from ksef_client.config import KsefEnvironment
 
 from ..constants import DEFAULT_PROFILE
@@ -14,12 +16,27 @@ _SUPPORTED_ENVS = {
     "PROD": KsefEnvironment.PROD.value,
 }
 _EDITABLE_KEYS = {"env", "base_url", "context_type", "context_value"}
+#: Bezpieczna nazwa profilu: trafia do ścieżki `sessions/<profil>/`.
+_PROFILE_NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
 def normalize_profile_name(name: str | None) -> str:
+    """Nazwa profilu po walidacji — musi być bezpiecznym segmentem ścieżki.
+
+    Nazwa trafia do katalogu checkpointów (`sessions/<profil>/`), więc bez
+    walidacji profil o nazwie `..` albo `C:\\temp` zapisywał checkpointy poza
+    katalogiem sesji. Dozwolone są litery, cyfry, `_`, `-` i `.` (bez `..`).
+    """
     if name is None or name.strip() == "":
         return DEFAULT_PROFILE
-    return name.strip()
+    normalized = name.strip()
+    if not _PROFILE_NAME_RE.fullmatch(normalized) or ".." in normalized:
+        raise CliError(
+            f"Invalid profile name: {name!r}.",
+            ExitCode.VALIDATION_ERROR,
+            "Use letters, digits, '_', '-' and '.' (without '..'), e.g. 'prod' or 'demo-2'.",
+        )
+    return normalized
 
 
 def resolve_base_url(*, env: str | None, base_url: str | None) -> tuple[str, str | None]:

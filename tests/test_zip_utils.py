@@ -1,7 +1,9 @@
 import tarfile
+import tracemalloc
 import unittest
 import zipfile
 from io import BytesIO
+from typing import Any
 from unittest.mock import patch
 
 from ksef_client.utils.zip_utils import (
@@ -13,6 +15,43 @@ from ksef_client.utils.zip_utils import (
     unzip_bytes,
     unzip_bytes_safe,
 )
+
+
+def _zip_with_entry_name(name: str, payload: bytes) -> bytes:
+    """Zip z nazwą wpisu zapisaną dosłownie (`zipfile` ucina tylko NUL)."""
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(name, payload)
+    return buffer.getvalue()
+
+
+def _tar_with_entry_name(name: str) -> bytes:
+    buffer = BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        info = tarfile.TarInfo(name)
+        payload = b"x"
+        info.size = len(payload)
+        archive.addfile(info, BytesIO(payload))
+    return buffer.getvalue()
+
+
+class _EndlessEntryStream:
+    """Strumień wpisu tar oddający więcej bajtów, niż deklaruje nagłówek.
+
+    `tarfile` sam ogranicza odczyt do `size` z nagłówka tar, więc kłamiący
+    nagłówek (scenariusz z audytu: deklaracja 1 KiB przy payloadzie 128 MiB)
+    odtwarzamy podmieniając strumień wpisu.
+    """
+
+    def __init__(self, total: int) -> None:
+        self._left = total
+
+    def read(self, size: int = -1) -> bytes:
+        if self._left <= 0:
+            return b""
+        chunk = min(size if size and size > 0 else self._left, self._left, 64 * 1024)
+        self._left -= chunk
+        return b"a" * chunk
 
 
 class ZipUtilsTests(unittest.TestCase):
@@ -222,6 +261,170 @@ class ZipUtilsTests(unittest.TestCase):
         data = b"a" * 3
         parts = split_bytes(data, max_part_size=10)
         self.assertEqual(parts, [data])
+
+
+class ArchiveMemoryLimitTests(unittest.TestCase):
+    """Limity muszą ograniczać PAMIĘĆ, nie tylko metadane wpisu.
+
+    Regresja: `entry.read()` bez rozmiaru materializował całą treść wpisu, więc
+    metadane mogły deklarować 1 KiB, gdy DEFLATE produkował 128 MiB (peak
+    `tracemalloc` 269,5 MiB dla archiwum 130 KiB przy limitach 2048/4096/200).
+    """
+
+    LIMITS: dict[str, Any] = {
+        "max_files": 2048,
+        "max_total_uncompressed_size": 4096,
+        "max_file_uncompressed_size": 2048,
+        "max_compression_ratio": 200.0,
+    }
+
+    @staticmethod
+    def _zip_with_lying_file_size(payload: bytes, declared_size: int):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("a.xml", payload)
+        original_infolist = zipfile.ZipFile.infolist
+
+        def lying_infolist(self):
+            infos = original_infolist(self)
+            infos[0].file_size = declared_size
+            return infos
+
+        return buffer.getvalue(), lying_infolist
+
+    def test_unzip_safe_does_not_materialise_entry_with_lying_file_size(self):
+        """Kłamiące 1024 B przy payloadzie 32 MiB nie może zjeść pamięci.
+
+        `zipfile` ucina strumień wpisu do zadeklarowanego `file_size` i kończy
+        odczyt `BadZipFile` (CRC-32 nie zgadza się z deklaracją), ale samo
+        rozmnożenie treści DEFLATE następowało PRZED tym błędem: peak
+        `tracemalloc` rósł do 269,5 MiB dla payloadu 128 MiB (audyt). Teraz
+        porcja odczytu ogranicza pojedyncze `decompress()`, więc peak jest rzędu
+        limitu, a nie payloadu.
+        """
+        payload = b"a" * (32 * 1024 * 1024)
+        archive, lying_infolist = self._zip_with_lying_file_size(payload, 1024)
+
+        tracemalloc.start()
+        try:
+            with (
+                patch.object(zipfile.ZipFile, "infolist", lying_infolist),
+                self.assertRaises((ValueError, zipfile.BadZipFile)),
+            ):
+                unzip_bytes_safe(archive, **self.LIMITS)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
+        self.assertLess(peak, 2 * 1024 * 1024, f"peak {peak} B zamiast ~limitu 2048 B")
+
+    def test_unzip_safe_rejects_entry_over_limit_without_reading_it(self):
+        payload = b"a" * (32 * 1024 * 1024)
+        archive = build_zip({"a.xml": payload})
+
+        tracemalloc.start()
+        try:
+            with self.assertRaisesRegex(ValueError, "max_file_uncompressed_size"):
+                unzip_bytes_safe(archive, **self.LIMITS)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
+        self.assertLess(peak, 2 * 1024 * 1024, f"peak {peak} B — limitu nie wolno odczytać")
+
+    def test_unzip_safe_streams_legal_entry_byte_for_byte(self):
+        """Odczyt porcjami nie może zmienić treści poprawnych archiwów."""
+        payload = bytes(range(256)) * 1024
+        unzipped = unzip_bytes_safe(build_zip({"a.xml": payload}))
+        self.assertEqual(unzipped, {"a.xml": payload})
+
+    def test_untar_gz_safe_counts_really_read_bytes_not_header_size(self):
+        archive = build_tar_gz({"a.txt": b"x"})
+        stream = _EndlessEntryStream(8 * 1024 * 1024)
+
+        tracemalloc.start()
+        try:
+            with (
+                patch.object(tarfile.TarFile, "extractfile", return_value=stream),
+                self.assertRaisesRegex(ValueError, "max_file_uncompressed_size"),
+            ):
+                untar_gz_bytes_safe(archive, max_file_uncompressed_size=2048)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
+        self.assertLess(peak, 2 * 1024 * 1024, f"peak {peak} B zamiast ~limitu 2048 B")
+
+    def test_untar_gz_safe_counts_really_read_bytes_against_total_limit(self):
+        archive = build_tar_gz({"a.txt": b"x"})
+        stream = _EndlessEntryStream(8 * 1024 * 1024)
+
+        with (
+            patch.object(tarfile.TarFile, "extractfile", return_value=stream),
+            self.assertRaisesRegex(ValueError, "tar.gz exceeds max_total_uncompressed_size"),
+        ):
+            untar_gz_bytes_safe(
+                archive,
+                max_total_uncompressed_size=64,
+                max_file_uncompressed_size=1_000_000,
+            )
+
+
+class ArchiveEntryNameTests(unittest.TestCase):
+    """Nazwy wpisów nie mogą wnosić znaków sterujących ani być puste.
+
+    Regresja: NUL w nazwie ucinał ją do `""`, a `""`/`"."` normalizowały się do
+    `"."` (klucz `"."` przechodził dalej), `\\x01`/`\\x7f` trafiały wprost do
+    rozpakowywanych ścieżek, a PAX `path` z NUL-em dochodził do `stat` jako
+    surowe „embedded null character in path".
+    """
+
+    def test_builders_reject_control_characters_in_entry_names(self):
+        for name in ("\x00", "a\x00b.txt", "a\x01b.txt", "a\x7fb.txt"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, "control character"):
+                    build_zip({name: b"x"})
+                with self.assertRaisesRegex(ValueError, "control character"):
+                    build_tar_gz({name: b"x"})
+
+    def test_unzip_safe_rejects_control_characters_in_entry_names(self):
+        for name in ("a\x01b.txt", "a\x7fb.txt"):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "control character"):
+                unzip_bytes_safe(_zip_with_entry_name(name, b"x"))
+
+    def test_readers_reject_empty_and_dot_entry_names(self):
+        for name in ("", ".", "./"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, "must not be empty"):
+                    build_zip({name: b"x"})
+                with self.assertRaisesRegex(ValueError, "must not be empty"):
+                    build_tar_gz({name: b"x"})
+                with self.assertRaisesRegex(ValueError, "must not be empty"):
+                    untar_gz_bytes_safe(_tar_with_entry_name(name))
+        for name in ("", "."):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "must not be empty"):
+                unzip_bytes_safe(_zip_with_entry_name(name, b"x"))
+
+    def test_untar_gz_safe_rejects_nul_in_pax_path(self):
+        """PAX `path` nie jest terminowany NUL-em, więc NUL dochodził do nazwy."""
+        buffer = BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz", format=tarfile.PAX_FORMAT) as archive:
+            info = tarfile.TarInfo("d" * 110 + "\x00" + "x.txt")
+            info.size = 1
+            archive.addfile(info, BytesIO(b"x"))
+
+        with self.assertRaisesRegex(ValueError, r"control character \(U\+0000\)"):
+            untar_gz_bytes_safe(buffer.getvalue())
+
+    def test_untar_gz_safe_accepts_long_legal_pax_name(self):
+        long_name = "d" * 110 + "x.txt"
+        buffer = BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz", format=tarfile.PAX_FORMAT) as archive:
+            info = tarfile.TarInfo(long_name)
+            info.size = 1
+            archive.addfile(info, BytesIO(b"x"))
+
+        self.assertEqual(untar_gz_bytes_safe(buffer.getvalue()), {long_name: b"x"})
 
 
 if __name__ == "__main__":

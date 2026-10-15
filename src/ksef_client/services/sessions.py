@@ -4,7 +4,7 @@ import base64
 import binascii
 import json
 from collections.abc import Callable, Collection, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from .. import models as m
@@ -12,6 +12,10 @@ from .batch import encrypt_batch_parts
 from .crypto import EncryptionData, build_send_invoice_request
 
 _SESSION_STATE_SCHEMA_VERSION = 1
+
+# Stan sesji przechowuje klucz AES-256 i wektor inicjalizujący w Base64.
+_SYMMETRIC_KEY_BYTES = 32
+_IV_BYTES = 16
 
 
 def _encode_base64(value: bytes) -> str:
@@ -23,6 +27,24 @@ def _decode_base64(value: str, *, field_name: str) -> bytes:
         return base64.b64decode(value.encode("ascii"), validate=True)
     except (ValueError, UnicodeEncodeError, binascii.Error) as exc:
         raise ValueError(f"Invalid {field_name}: expected Base64 data.") from exc
+
+
+def _require_length(value: bytes, *, field_name: str, expected: int) -> None:
+    if len(value) != expected:
+        raise ValueError(
+            f"Invalid {field_name}: expected {expected} bytes, got {len(value)} bytes."
+        )
+
+
+def _validate_session_key_material(*, symmetric_key: bytes, iv: bytes) -> None:
+    """Waliduje długości klucza i IV odtworzonych z pól Base64 stanu sesji.
+
+    Bez tego skrócony (albo zbyt długi) materiał kryptograficzny przechodził przez
+    walidację stanu i wybuchał dopiero w `cryptography` — z komunikatem, który nie
+    wskazywał, które pole stanu sesji jest uszkodzone.
+    """
+    _require_length(symmetric_key, field_name="symmetric_key_base64", expected=_SYMMETRIC_KEY_BYTES)
+    _require_length(iv, field_name="iv_base64", expected=_IV_BYTES)
 
 
 def _require_dict(value: Any, *, field_name: str) -> dict[str, Any]:
@@ -225,7 +247,10 @@ class OnlineSessionState:
     reference_number: str
     form_code: m.FormCode
     valid_until: str | None
-    symmetric_key_base64: str
+    #: Klucz AES-256 w Base64 — poza `repr()`, bo stan trafia do logów i komunikatów
+    #: błędów. IV zostaje widoczny: nie jest tajny (jedzie jawnie w `EncryptionInfo`),
+    #: a pomaga w diagnostyce. Serializacja (`to_dict`) obejmuje oba pola.
+    symmetric_key_base64: str = field(repr=False)
     iv_base64: str
     upo_v43: bool = False
     schema_version: int = _SESSION_STATE_SCHEMA_VERSION
@@ -239,8 +264,7 @@ class OnlineSessionState:
             )
         if self.kind != "online":
             raise ValueError(f"Invalid session state kind: {self.kind!r}. Expected 'online'.")
-        _ = self.symmetric_key
-        _ = self.iv
+        _validate_session_key_material(symmetric_key=self.symmetric_key, iv=self.iv)
 
     @property
     def symmetric_key(self) -> bytes:
@@ -321,7 +345,8 @@ class BatchSessionState:
     form_code: m.FormCode
     batch_file: m.BatchFileInfo
     part_upload_requests: list[m.PartUploadRequest]
-    symmetric_key_base64: str
+    #: Klucz AES-256 w Base64 — poza `repr()` (patrz `OnlineSessionState`).
+    symmetric_key_base64: str = field(repr=False)
     iv_base64: str
     upo_v43: bool = False
     offline_mode: bool | None = None
@@ -336,8 +361,7 @@ class BatchSessionState:
             )
         if self.kind != "batch":
             raise ValueError(f"Invalid session state kind: {self.kind!r}. Expected 'batch'.")
-        _ = self.symmetric_key
-        _ = self.iv
+        _validate_session_key_material(symmetric_key=self.symmetric_key, iv=self.iv)
 
     @property
     def symmetric_key(self) -> bytes:

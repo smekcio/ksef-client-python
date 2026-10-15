@@ -3,11 +3,17 @@
 Features:
 - Stream-based XML parsing via ElementTree.iterparse (event-driven pull-parser)
 - Ignores CDATA sections, comments, PIs, and element attributes
-- Exact tag matching for P_11 (ignoring sub-elements such as P_11A, P_11Vat, etc.)
+- Handles `FaWiersz` rows (`P_11` net, `P_11A` gross — art. 106e ust. 7 and 8)
+  **and** `ZamowienieWiersz` rows (`P_11NettoZ` net plus `P_11VatZ` tax as gross),
+  so an order/settlement document is not reported as an empty one
+- Skips rows marked `StanPrzed`/`StanPrzedZ` (state before a correction), so a
+  KOR/KOR_ROZ document is not counted twice
 - Precision Decimal monetary calculations with comma-to-dot normalization
 - Input support for str, bytes, and BufferedIOBase streams
 - Parent element tracking (Podmiot1 vs Podmiot2) for seller and buyer NIP identification
-- Graceful handling of XML syntax errors (ET.ParseError) to prevent batch pipeline crashes
+
+`ET.ParseError` is deliberately **propagated** to the caller (the parser does not
+swallow malformed XML).
 """
 
 import io
@@ -18,13 +24,62 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+#: Znaczniki, które kończą bieżący wiersz faktury.
+_ROW_TAGS = frozenset({"FaWiersz", "ZamowienieWiersz"})
+
+#: Podmioty, których NIP rozpoznajemy (sprzedawca i nabywca).
+_SUBJECT_TAGS = frozenset({"Podmiot1", "Podmiot2"})
+
+
+def _parse_amount(text: str) -> Decimal | None:
+    sanitized_text = text.replace(",", ".")
+    if len(sanitized_text) > 30:
+        raise ValueError(
+            f"Wartość kwotowa jest zbyt długa (potencjalny atak DoS): "
+            f"{len(sanitized_text)} znaków"
+        )
+    try:
+        return Decimal(sanitized_text)
+    except (ValueError, InvalidOperation):
+        return None
+
+
+def _sum_optional(left: Decimal | None, right: Decimal | None) -> Decimal | None:
+    """Suma dwóch opcjonalnych kwot (None, gdy obie są nieobecne)."""
+    if left is None and right is None:
+        return None
+    return (left or Decimal("0.00")) + (right or Decimal("0.00"))
+
 
 def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> dict[str, Any]:
-    """Stream-extract NIP list, seller/buyer NIP, total netto, and line item count from KSeF XML.
+    """Stream-extract NIP list, seller/buyer NIP, totals, and line item count from KSeF XML.
 
     :param xml_content: KSeF XML invoice content (str, bytes, or BufferedIOBase stream)
-    :return: Dictionary containing 'seller_nip', 'buyer_nip', 'nips',
-        'total_netto', and 'item_count'
+    :return: Dictionary containing 'seller_nip', 'buyer_nip', 'nips', 'total_netto',
+        'total_brutto', 'item_count', 'stan_przed_item_count' and the order-row
+        counterparts 'order_netto', 'order_brutto', 'order_item_count'.
+
+    ``total_netto``/``total_brutto``/``item_count`` opisują **pozycje faktury**
+    (``FaWiersz``): netto z ``P_11``, brutto z ``P_11A``. Dokumenty z art. 106e
+    ust. 7 i 8 nie mają ``P_11``, więc wcześniejsza wersja zwracała dla nich
+    ``total_netto = 0.00`` i ``item_count = 0`` bez żadnego sygnału.
+
+    Wiersze zamówienia (``ZamowienieWiersz``) są liczone OSOBNO w ``order_*``,
+    bo niosą wartość zamówienia/umowy, a nie kwoty faktury — w dokumencie
+    zaliczkowym (``ZAL``/``KOR_ZAL``) suma tych wierszy bywa zupełnie inna niż
+    ``P_13_x``/``P_15`` tej samej faktury (np. ``FA_3_Przykład_10.xml``:
+    ``WartoscZamowienia`` 375150 wobec ``P_15`` 20000). Wcześniej te dokumenty
+    zwracały jawne zero; teraz zwracają zero w ``total_*`` i prawdziwą wartość
+    zamówienia w ``order_*``, więc nic nie udaje kwoty faktury.
+
+    Wiersze oznaczone ``StanPrzed``/``StanPrzedZ`` (stan przed korektą) są liczone
+    osobno w ``stan_przed_item_count`` i nie wchodzą do sum — inaczej korekta
+    (KOR/KOR_ROZ) podwajała wartości.
+
+    Otwartych przodków śledzimy licznikami (``open_subjects``), a nie przez
+    ``tag in stack``: przeszukiwanie listy jest liniowe względem głębokości, więc
+    dokument z 64 000 zagnieżdżeń i 64 000 ``<NIP>`` miał koszt O(n²) (8 s dla
+    594 KiB, 30 s dla 1,19 MiB).
     """
     source: Any
     if isinstance(xml_content, str):
@@ -38,13 +93,26 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
     buyer_nip: str | None = None
     nips: list[str] = []
     total_netto = Decimal("0.00")
+    total_brutto = Decimal("0.00")
     item_count = 0
+    stan_przed_item_count = 0
+    order_netto = Decimal("0.00")
+    order_brutto = Decimal("0.00")
+    order_item_count = 0
 
     stack: list[str] = []
+    # Liczniki otwartych `Podmiot1`/`Podmiot2` — odpowiednik `"Podmiot1" in stack`,
+    # ale w O(1). Brak klucza lub zero znaczy „nie jesteśmy w środku”.
+    open_subjects: dict[str, int] = {}
+    row_tag: str | None = None
+    row_net: Decimal | None = None
+    row_vat: Decimal | None = None
+    row_gross: Decimal | None = None
+    row_before_correction = False
 
     context = ET.iterparse(source, events=("start", "end"))
     context_iter = iter(context)
-    
+
     try:
         _, root = next(context_iter)
     except StopIteration:
@@ -55,41 +123,78 @@ def fast_extract_ksef_metadata(xml_content: str | bytes | io.BufferedIOBase) -> 
 
         if event == "start":
             stack.append(tag_name)
-        elif event == "end":
-            text = (elem.text or "").strip()
+            if tag_name in _SUBJECT_TAGS:
+                open_subjects[tag_name] = open_subjects.get(tag_name, 0) + 1
+            if tag_name in _ROW_TAGS:
+                row_tag = tag_name
+                row_net = None
+                row_vat = None
+                row_gross = None
+                row_before_correction = False
+            continue
 
-            if tag_name == "NIP" and text:
-                nips.append(text)
-                if "Podmiot1" in stack and seller_nip is None:
-                    seller_nip = text
-                elif "Podmiot2" in stack and buyer_nip is None:
-                    buyer_nip = text
+        text = (elem.text or "").strip()
 
-            elif tag_name == "P_11" and text:
-                sanitized_text = text.replace(",", ".")
-                if len(sanitized_text) > 30:
-                    raise ValueError(
-                        f"Wartość P_11 jest zbyt długa (potencjalny atak DoS): "
-                        f"{len(sanitized_text)} znaków"
-                    )
-                try:
-                    amount = Decimal(sanitized_text)
-                    total_netto += amount
+        if tag_name == "NIP" and text:
+            nips.append(text)
+            if open_subjects.get("Podmiot1") and seller_nip is None:
+                seller_nip = text
+            elif open_subjects.get("Podmiot2") and buyer_nip is None:
+                buyer_nip = text
+        elif tag_name == "P_11" and text:
+            row_net = _parse_amount(text)
+        elif tag_name == "P_11A" and text:
+            row_gross = _parse_amount(text)
+        elif tag_name == "P_11NettoZ" and text:
+            # `ZamowienieWiersz` (zamówienie/rozliczenie) nie ma `P_11`/`P_11A` —
+            # wartości siedzą w `P_11NettoZ` (netto) i `P_11VatZ` (podatek).
+            row_net = _parse_amount(text)
+        elif tag_name == "P_11VatZ" and text:
+            row_vat = _parse_amount(text)
+        elif tag_name in ("StanPrzed", "StanPrzedZ") and text == "1":
+            # Znaczniki występują w wierszu PO kwotach, dlatego decyzję
+            # podejmujemy dopiero na końcu wiersza.
+            row_before_correction = True
+        elif tag_name in _ROW_TAGS:
+            # `ZamowienieWiersz` nie ma jawnej kwoty brutto (`P_11A`), więc brutto
+            # to netto + podatek. Dla `FaWiersz` brutto bierzemy wyłącznie z
+            # `P_11A` — bez tego „brutto" byłoby równe netto i myliłoby odbiorcę.
+            is_order_row = row_tag == "ZamowienieWiersz"
+            if row_gross is None and is_order_row:
+                row_gross = _sum_optional(row_net, row_vat)
+            has_values = row_net is not None or row_gross is not None
+            if has_values:
+                if is_order_row:
+                    order_item_count += 1
+                else:
                     item_count += 1
-                except (ValueError, InvalidOperation):
-                    pass
+                if row_before_correction:
+                    stan_przed_item_count += 1
+                elif is_order_row:
+                    order_netto += row_net or Decimal("0.00")
+                    order_brutto += row_gross or Decimal("0.00")
+                else:
+                    total_netto += row_net or Decimal("0.00")
+                    total_brutto += row_gross or Decimal("0.00")
 
-            if stack and stack[-1] == tag_name:
-                stack.pop()
+        if stack and stack[-1] == tag_name:
+            stack.pop()
+            if tag_name in _SUBJECT_TAGS:
+                open_subjects[tag_name] -= 1
 
-            elem.clear()
-            if root is not None and elem is not root:
-                root.clear()
+        elem.clear()
+        if root is not None and elem is not root:
+            root.clear()
 
     return {
         "seller_nip": seller_nip,
         "buyer_nip": buyer_nip,
         "nips": nips,
         "total_netto": total_netto,
+        "total_brutto": total_brutto,
         "item_count": item_count,
+        "stan_przed_item_count": stan_przed_item_count,
+        "order_netto": order_netto,
+        "order_brutto": order_brutto,
+        "order_item_count": order_item_count,
     }

@@ -59,6 +59,21 @@ def test_check_generated_models_stub_detects_diff(tmp_path: Path) -> None:
     assert "generated-models-stub" in diff
 
 
+def test_render_models_stub_keeps_required_fields_required() -> None:
+    rendered = stub_generator.render_models_stub(
+        MODELS_PATH,
+        openapi_models_path=OPENAPI_MODELS_PATH,
+    )
+
+    token_info = rendered.split("class TokenInfo:", 1)[1].split("@_dataclass", 1)[0]
+    # `field(repr=False)` bez domyślnej wartości nie czyni pola opcjonalnym.
+    assert "    token: str\n" in token_info
+    assert "token: str = ..." not in token_info
+    # Pola z `default_factory` nadal mają domyślną wartość w stubie.
+    assert "usage: list[PublicKeyCertificateUsage] = ..." in rendered
+    assert "invoices: list[InvoiceMetadata] = ..." in rendered
+
+
 def test_main_supports_check_mode(monkeypatch, tmp_path: Path) -> None:
     output_path = tmp_path / "models.pyi"
     stub_generator.generate_models_stub(

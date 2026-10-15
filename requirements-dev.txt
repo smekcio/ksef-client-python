@@ -9,3 +9,11 @@ ruff>=0.6.0
 mypy>=1.10.0
 pytest-mock>=3.14.0
 lxml>=5.0.0
+# Testy `tests/test_services_qr.py` pokrywają `services/qr.py`, który wchodzi do
+# bramki `--cov-fail-under=100`. Bez tych zależności (extras `qr`) część testów
+# była pomijana, a jeden failował — czyli CI nie mogło zmierzyć pokrycia tego modułu.
+qrcode[pil]>=7.4.2
+pillow>=10.0.0
+# `tomllib` istnieje dopiero od 3.11; bez `tomli` strażnicy deklaracji zależności
+# w `tests/test_packaging_dependencies.py` byli po cichu pomijani na Pythonie 3.10.
+tomli>=2.0.0; python_version < "3.11"

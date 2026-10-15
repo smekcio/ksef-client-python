@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import json
@@ -166,6 +167,28 @@ class RecordingAsyncHttp:
 
     async def request(self, *args, **kwargs) -> HttpResponse:
         self.calls.append((args, kwargs))
+        return self.response
+
+
+class ConcurrencyTrackingAsyncHttp:
+    """Atrapa HTTP mierząca, ile żądań było w locie jednocześnie (`max_in_flight`)."""
+
+    def __init__(self, content: bytes = b"ok") -> None:
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.response = HttpResponse(200, httpx.Headers({}), content)
+
+    async def request(self, *args, **kwargs) -> HttpResponse:
+        self.calls.append((args, kwargs))
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            # Kilka przełączeń kontekstu: bez nich zadania nie mają szansy się nałożyć.
+            for _ in range(3):
+                await asyncio.sleep(0)
+        finally:
+            self.in_flight -= 1
         return self.response
 
 
@@ -636,6 +659,9 @@ class WorkflowsTests(unittest.TestCase):
             result = workflow.download_and_process_package(_invoice_package("u"), encryption)
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
         self.assertIn("inv.xml", result.invoice_xml_files)
+        # Surowa treść `_metadata.json` wędruje do CLI: rekonstrukcja z listy faktur
+        # gubiła `isTruncated` i `permanentStorageHwmDate`.
+        self.assertEqual(result.metadata_raw, files["_metadata.json"])
 
     def test_export_workflow_processes_tar_gz_package(self):
         key = generate_symmetric_key()
@@ -908,6 +934,58 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await helper.upload_parts(reqs, [b"a", b"b"])
 
+    async def test_async_batch_upload_helper_limits_parallel_requests(self):
+        """`parallelism` musi ograniczać liczbę równoległych PUT-ów (wcześniej ignorowany)."""
+        reqs = [
+            m.PartUploadRequest.from_dict(
+                {
+                    "ordinalNumber": ordinal,
+                    "url": f"https://upload/{ordinal}",
+                    "method": "PUT",
+                    "headers": {},
+                }
+            )
+            for ordinal in (1, 2, 3, 4)
+        ]
+        parts = [b"a", b"b", b"c", b"d"]
+
+        sequential_http = ConcurrencyTrackingAsyncHttp()
+        await workflows.AsyncBatchUploadHelper(
+            sequential_http, parallelism=1
+        ).upload_parts(reqs, parts)
+        self.assertEqual(sequential_http.max_in_flight, 1)
+        self.assertEqual(len(sequential_http.calls), 4)
+
+        concurrent_http = ConcurrencyTrackingAsyncHttp()
+        await workflows.AsyncBatchUploadHelper(
+            concurrent_http, parallelism=3
+        ).upload_parts(reqs, parts)
+        self.assertEqual(concurrent_http.max_in_flight, 3)
+        self.assertEqual(len(concurrent_http.calls), 4)
+
+    async def test_async_open_upload_and_close_forwards_parallelism(self):
+        """`open_upload_and_close` musi przekazać `parallelism` do uploadera."""
+        parallelisms: list[int] = []
+
+        class _RecordingHelper(workflows.AsyncBatchUploadHelper):
+            def __init__(self, http_client, *, parallelism: int = 1) -> None:
+                super().__init__(http_client, parallelism=parallelism)
+                parallelisms.append(parallelism)
+
+        sessions = StubAsyncSessionsClient()
+        batch = workflows.AsyncBatchSessionWorkflow(sessions, RecordingAsyncHttp())
+        with patch.object(workflows, "AsyncBatchUploadHelper", _RecordingHelper):
+            ref = await batch.open_upload_and_close(
+                form_code=_form_code(),
+                zip_bytes=build_zip({"a.xml": b"<xml/>"}),
+                public_certificate=generate_rsa_cert().certificate_pem,
+                access_token="token",
+                parallelism=3,
+            )
+
+        self.assertEqual(ref, "ref")
+        self.assertEqual(parallelisms[-1], 3)
+
     async def test_async_export_download_helper(self):
         http = RecordingAsyncHttp(content=b"part", headers={"x-ms-meta-hash": "hash"})
         helper = workflows.AsyncExportDownloadHelper(http)
@@ -1121,6 +1199,8 @@ class AsyncWorkflowsTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await workflow.download_and_process_package(_invoice_package("u"), encryption)
         self.assertEqual(result.metadata_summaries[0]["ksefNumber"], "1")
+        # Async musi nieść surowe metadane tak samo jak sync (CLI zapisuje je verbatim).
+        self.assertEqual(result.metadata_raw, files["_metadata.json"])
 
     async def test_async_export_workflow_uses_package_compression_type_when_omitted(self):
         key = generate_symmetric_key()

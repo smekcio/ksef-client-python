@@ -50,6 +50,7 @@ from .openapi_models import (
     InvoiceType,
     InvoicingMode,
     KsefCertificateType,
+    OwnerPermissionScope,
     PermissionState,
     PersonIdentifierType,
     PersonPermissionScope,
@@ -408,6 +409,7 @@ class LighthouseKsefStatus(str, _Enum):
     MAINTENANCE = ...
     FAILURE = ...
     TOTAL_FAILURE = ...
+    UNKNOWN = ...
 
 
 @_dataclass(frozen=True)
@@ -609,6 +611,7 @@ __all__ = [
     "InvoiceType",
     "InvoicingMode",
     "KsefCertificateType",
+    "OwnerPermissionScope",
     "PermissionState",
     "PersonIdentifierType",
     "PersonPermissionScope",

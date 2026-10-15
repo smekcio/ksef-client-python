@@ -51,11 +51,23 @@ class CryptoTests(unittest.TestCase):
         stream = io.BytesIO(data)
         stream_meta = crypto.get_stream_metadata(stream)
         self.assertEqual(stream_meta.file_size, 4)
+        self.assertEqual(stream_meta.sha256_base64, crypto.sha256_base64(data))
         self.assertEqual(stream.read(), data)
 
+    def test_stream_metadata_rejects_streams_it_cannot_rewind(self):
+        """Nieprzewijalny strumień: hash/rozmiar objęłyby tylko resztę danych.
+
+        Zamiast cicho zwracać metadane z ogona strumienia (np. potoku czy odpowiedzi
+        sieciowej) `get_stream_metadata` zgłasza `ValueError` — wyjątkiem jest
+        strumień, który sam raportuje pozycję 0, bo wtedy odczyt obejmuje całość.
+        """
+        data = b"data"
+
         class NonSeekable:
-            def __init__(self, payload: bytes) -> None:
+            def __init__(self, payload: bytes, *, offset: int = 0) -> None:
                 self._buf = io.BytesIO(payload)
+                if offset:
+                    self._buf.read(offset)
 
             def read(self, size: int = -1) -> bytes:
                 return self._buf.read(size)
@@ -63,11 +75,15 @@ class CryptoTests(unittest.TestCase):
             def seekable(self) -> bool:
                 return False
 
-        non_seek = NonSeekable(data)
-        non_seek_meta = crypto.get_stream_metadata(cast(BinaryIO, non_seek))
-        self.assertEqual(non_seek_meta.file_size, 4)
+        class NonSeekableWithTell(NonSeekable):
+            def tell(self) -> int:
+                return self._buf.tell()
 
-        class SeekError:
+        class NonSeekableWithBrokenTell(NonSeekable):
+            def tell(self) -> int:
+                raise OSError("brak pozycji")
+
+        class SeekableCheckFails:
             def __init__(self, payload: bytes) -> None:
                 self._buf = io.BytesIO(payload)
 
@@ -77,9 +93,33 @@ class CryptoTests(unittest.TestCase):
             def seekable(self) -> bool:
                 raise OSError("nope")
 
-        seek_error = SeekError(data)
-        seek_error_meta = crypto.get_stream_metadata(cast(BinaryIO, seek_error))
-        self.assertEqual(seek_error_meta.file_size, 4)
+        not_rewindable = (
+            ("bez tell()", NonSeekable(data)),
+            ("tell() rzuca", NonSeekableWithBrokenTell(data)),
+            ("seekable() rzuca", SeekableCheckFails(data)),
+            ("po odczycie 2 B", NonSeekableWithTell(data, offset=2)),
+        )
+        for name, stream in not_rewindable:
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "not seekable"):
+                crypto.get_stream_metadata(cast(BinaryIO, stream))
+
+        at_start = NonSeekableWithTell(data)
+        at_start_meta = crypto.get_stream_metadata(cast(BinaryIO, at_start))
+        self.assertEqual(at_start_meta.file_size, 4)
+        self.assertEqual(at_start_meta.sha256_base64, crypto.sha256_base64(data))
+        # Strumienia nie da się przewinąć, więc odczyt metadanych go konsumuje.
+        self.assertEqual(at_start.tell(), len(data))
+
+    def test_encryption_data_repr_hides_the_key(self):
+        encryption = crypto.EncryptionData(
+            key=b"SUPERSECRETKEY",
+            iv=b"IV-16-bytes-abc!",
+            encryption_info=None,
+        )
+        rendered = repr(encryption)
+        self.assertNotIn("SUPERSECRETKEY", rendered)
+        self.assertIn("IV-16-bytes-abc!", rendered)
+        self.assertEqual(encryption.key, b"SUPERSECRETKEY")
 
     def test_certificate_loading(self):
         rsa_cert = generate_rsa_cert()

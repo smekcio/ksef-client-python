@@ -68,6 +68,11 @@ Endpoint: `POST /permissions/query/eu-entities/grants`
 ### `query_personal_grants(request_payload, ..., access_token)`
 Endpoint: `POST /permissions/query/personal/grants`
 
+Odpowiedź zawiera `has_more`, `permissions` oraz — od KSeF API 2.9.0 — `owner_permissions`
+(lista `OwnerPermissionScope`: `CredentialsManage`, `CredentialsRead`, `InvoiceWrite`,
+`InvoiceRead`, `Introspection`, `SubunitManage`, `EnforcementOperations`,
+`CollectiveIdentifierManage`), czyli uprawnienia właścicielskie kontekstu.
+
 ### `query_persons_grants(request_payload, ..., access_token)`
 Endpoint: `POST /permissions/query/persons/grants`
 

@@ -221,6 +221,7 @@ class SessionsClient(BaseApiClient):
         return self._request_bytes(
             "GET",
             f"/sessions/{reference_number}/invoices/{invoice_reference_number}/upo",
+            headers={"Accept": "application/xml"},
             access_token=access_token,
         )
 
@@ -234,6 +235,7 @@ class SessionsClient(BaseApiClient):
         return self._request_bytes(
             "GET",
             f"/sessions/{reference_number}/invoices/ksef/{ksef_number}/upo",
+            headers={"Accept": "application/xml"},
             access_token=access_token,
         )
 
@@ -247,6 +249,7 @@ class SessionsClient(BaseApiClient):
         return self._request_bytes(
             "GET",
             f"/sessions/{reference_number}/upo/{upo_reference_number}",
+            headers={"Accept": "application/xml"},
             access_token=access_token,
         )
 
@@ -457,6 +460,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         return await self._request_bytes(
             "GET",
             f"/sessions/{reference_number}/invoices/{invoice_reference_number}/upo",
+            headers={"Accept": "application/xml"},
             access_token=access_token,
         )
 
@@ -470,6 +474,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         return await self._request_bytes(
             "GET",
             f"/sessions/{reference_number}/invoices/ksef/{ksef_number}/upo",
+            headers={"Accept": "application/xml"},
             access_token=access_token,
         )
 
@@ -483,5 +488,6 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         return await self._request_bytes(
             "GET",
             f"/sessions/{reference_number}/upo/{upo_reference_number}",
+            headers={"Accept": "application/xml"},
             access_token=access_token,
         )

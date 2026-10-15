@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+import re
+import sys
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from typing_extensions import Self
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:  # pragma: no cover - Python 3.10 nie ma `typing.Self`
+    from typing_extensions import Self
 
 from .models import (
+    MONEY_QUANT,
     FA3InvoiceKind,
     FA3ValidationIssue,
     decimal_from_value,
     money,
+    parse_vat_code,
     parse_vat_rate,
 )
 
@@ -45,6 +52,17 @@ _CORRECTION_KINDS = {
     FA3InvoiceKind.ADVANCE_CORRECTION,
     FA3InvoiceKind.SETTLEMENT_CORRECTION,
 }
+
+# Identyfikator płatności KSeF: schemat FA(3) wymaga dokładnie
+# `[0-9]{3}[a-zA-Z0-9]{10}` (max 13 znaków) - patrz `IPKSeF` w schemacie.
+IPKSEF_PATTERN = re.compile(r"[0-9]{3}[a-zA-Z0-9]{10}")
+
+# Link do płatności bezgotówkowej: schemat wymaga adresu http(s), który niesie
+# parametr `IPKSeF=<3 cyfry><10 znaków alfanumerycznych>`, i ogranicza długość do 512.
+PAYMENT_LINK_PATTERN = re.compile(
+    r"(https?)://([a-zA-Z0-9][a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}(:[0-9]{1,5})?(/[^\s?#]*)?"
+    r"\?([^#\s]*&)?IPKSeF=[0-9]{3}[a-zA-Z0-9]{10}(&[^#\s]*)?(#.*)?"
+)
 
 
 class PartyIdentifierKind(str, Enum):
@@ -143,9 +161,11 @@ class Address:
 
     def validate(self, path: str) -> list[FA3ValidationIssue]:
         issues: list[FA3ValidationIssue] = []
-        if not self.country_code.strip():
+        # Pola pochodzą z danych wołającego, więc `None` (np. z JSON-a) ma dać
+        # czytelny komunikat, a nie `AttributeError: 'NoneType' ... strip()`.
+        if not str(self.country_code or "").strip():
             issues.append(FA3ValidationIssue(f"{path}: kod kraju jest wymagany.", column=path))
-        if not self.line1.strip():
+        if not str(self.line1 or "").strip():
             issues.append(FA3ValidationIssue(f"{path}: adres jest wymagany.", column=path))
         return issues
 
@@ -263,11 +283,36 @@ class InvoiceParty:
             address=_coerce_address(address, country_code=country_code),
         )
 
-    def validate(self, path: str, *, address_required: bool = False) -> list[FA3ValidationIssue]:
+    def validate(
+        self,
+        path: str,
+        *,
+        address_required: bool = False,
+        buyer: bool = False,
+        name_optional: bool = False,
+    ) -> list[FA3ValidationIssue]:
         issues: list[FA3ValidationIssue] = []
-        if not self.name.strip():
+        if not self.name.strip() and not name_optional:
             issues.append(FA3ValidationIssue(f"{path}: nazwa jest wymagana.", column=path))
         issues.extend(self.identifier.validate(f"{path}.identifier"))
+        if buyer and self.identifier.kind in (
+            PartyIdentifierKind.EU_VAT,
+            PartyIdentifierKind.FOREIGN,
+        ):
+            # GEN-20 / P2-16 broszury MF: polski NIP nabywcy MUSI trafić w pole
+            # `NIP`. W `NrVatUE`/`NrID` faktura jest zgodna ze schematem, ale
+            # KSeF nie udostępni jej nabywcy — czyli cicha porażka biznesowa.
+            country = str(self.identifier.country_code or "").strip().upper()
+            if country == "PL":
+                issues.append(
+                    FA3ValidationIssue(
+                        f"{path}.identifier: nabywcę z polskim NIP wskazuj w polu NIP, "
+                        "a nie w NrVatUE/NrID — KSeF udostępni fakturę nabywcy tylko "
+                        "wtedy, gdy NIP znajdzie się w NIP (GEN-20/P2-16 broszury MF). "
+                        "Użyj PartyIdentifier.polish_nip(...).",
+                        column=f"{path}.identifier",
+                    )
+                )
         if address_required and self.address is None:
             issues.append(FA3ValidationIssue(f"{path}: adres jest wymagany.", column=path))
         if self.address is not None:
@@ -276,12 +321,24 @@ class InvoiceParty:
             issues.extend(self.correspondence_address.validate(f"{path}.correspondence_address"))
         for index, contact in enumerate(self.contacts, start=1):
             issues.extend(contact.validate(f"{path}.contacts[{index}]"))
+        if len(self.contacts) > MAX_CONTACTS_PER_PARTY:
+            # Schemat: `DaneKontaktowe` ma `maxOccurs="3"`. Serializator obcinał
+            # listę (`contacts[:3]`), więc nadmiarowe kontakty znikały bez
+            # komunikatu — teraz wołający dowiaduje się o utracie danych.
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.contacts: podano {len(self.contacts)} kontaktów, "
+                    f"a schemat FA(3) dopuszcza maksymalnie {MAX_CONTACTS_PER_PARTY}.",
+                    column=f"{path}.contacts",
+                )
+            )
         if self.share is not None and not (Decimal("0") < self.share <= Decimal("100")):
             issues.append(FA3ValidationIssue(f"{path}: udział musi być z zakresu 0-100."))
         role_value = str(getattr(self.role, "value", self.role))
-        if role_value == ThirdPartyRole.OTHER.value and not str(
-            self.other_role_description or ""
-        ).strip():
+        if (
+            role_value == ThirdPartyRole.OTHER.value
+            and not str(self.other_role_description or "").strip()
+        ):
             issues.append(
                 FA3ValidationIssue(
                     f"{path}.other_role_description: opis roli jest wymagany dla innego podmiotu.",
@@ -313,7 +370,22 @@ class Discount:
     def percent(cls, value: Decimal | str | int | float, reason: str | None = None) -> Discount:
         return cls(DiscountKind.PERCENT, decimal_from_value(value, field_name="discount"), reason)
 
+    def unit_amount_for(self, unit_net_price: Decimal) -> Decimal:
+        """Obniżka przypadająca na JEDNOSTKĘ — to ona trafia do `P_10`.
+
+        Schemat opisuje `P_10` jako „kwoty wszelkich opustów lub obniżek cen",
+        a oficjalny `FA_3_Przykład_4.xml` rozstrzyga semantykę: wiersz
+        `P_8B=20, P_9A=1000, P_10=100` ma `P_11=18000`, czyli
+        `20 × (1000 − 100)`, a nie `20 × 1000 − 100`. Wcześniejsza wersja
+        traktowała wartość jako kwotę łączną, przez co dla tych samych liczb
+        emitowała `P_11=19900` i zawyżała netto o 1900 zł oraz VAT o 437 zł.
+        """
+        if self.kind is DiscountKind.PERCENT:
+            return money(unit_net_price * self.value / Decimal("100"))
+        return money(self.value)
+
     def amount_for(self, base: Decimal) -> Decimal:
+        """Łączna kwota obniżki dla podanej podstawy (do wyliczeń wewnętrznych)."""
         if self.kind is DiscountKind.PERCENT:
             return money(base * self.value / Decimal("100"))
         return money(self.value)
@@ -426,7 +498,15 @@ class TaxCategory:
 
     @classmethod
     def margin(cls) -> TaxCategory:
-        return cls(TaxCategoryKind.MARGIN, None, "np I")
+        """Procedura marży (art. 119/120): wiersz NIE niesie stawki (`P_12`).
+
+        Podręcznik KSeF: faktura marży nie zawiera stawki podatku, ceny
+        jednostkowej netto ani wartości sprzedaży netto. Wcześniejsza wersja
+        ustawiała `P_12="np I"` („dostawa poza terytorium kraju, niepodlegająca
+        opodatkowaniu"), co na krajowej sprzedaży opodatkowanej od marży było
+        nieprawdziwą deklaracją.
+        """
+        return cls(TaxCategoryKind.MARGIN, None, None)
 
     @classmethod
     def xii(cls, rate: Decimal | str | int | float) -> TaxCategory:
@@ -435,9 +515,31 @@ class TaxCategory:
 
     @classmethod
     def from_vat_rate(cls, value: Decimal | str | int | float | None) -> TaxCategory:
+        """Buduje kategorię stawki z samej wartości procentowej.
+
+        Zakres dopuszczalnych wartości wynika z `TStawkaPodatku` w schemacie FA(3)
+        oraz z broszury MF ("Information sheet on the FA(3) logical structure",
+        str. 94): 23, 22, 8, 7, 5, 4, 3 oraz stawki zerowe i zwolnienie.
+
+        Wcześniejsza wersja wrzucała każdą nieznaną stawkę do koszyka stawki
+        podstawowej (`STANDARD_23`) z zachowaniem surowej wartości w `P_12`, więc
+        np. 4% było deklarowane jako sprzedaż opodatkowana stawką podstawową.
+        Stawki 3% i 4% (ryczałt dla taksówek) mają własny koszyk `P_13_4`/`P_14_4`.
+        """
         parsed = parse_vat_rate(value)
         if parsed is None:
+            # `parse_vat_rate` zwraca `None` zarówno dla zwolnienia, jak i dla
+            # kodów bez stawki procentowej (`oo`, `np I`, `np II`) oraz dla
+            # zapisu wprost kodu (`zw`) — te przypadki rozstrzyga kod.
+            code = parse_vat_code(value)
+            if code is not None:
+                return cls.from_rate_code(code)
             return cls.exempt("zwolnienie")
+        if parsed == Decimal("0"):
+            # Sama wartość `0` nie rozróżnia `0 KR`/`0 WDT`/`0 EX`: kod z zapisu
+            # (`"0 WDT"`) wygrywa, a `0`/`0.0`/`0e0` znaczy stawkę krajową
+            # (`parse_vat_code` zwraca dla nich pełny kod `0 KR`).
+            return cls.from_rate_code(parse_vat_code(value) or "0 KR")
         if parsed == Decimal("23"):
             return cls.standard_23()
         if parsed == Decimal("22"):
@@ -448,9 +550,15 @@ class TaxCategory:
             return cls.reduced_7()
         if parsed == Decimal("5"):
             return cls.reduced_5()
-        if parsed == Decimal("0"):
-            return cls.zero_domestic()
-        return cls(TaxCategoryKind.STANDARD_23, parsed, format(parsed.normalize(), "f"))
+        if parsed in {Decimal("4"), Decimal("3")}:
+            return cls(TaxCategoryKind.TAXI_FLAT_RATE, parsed, format(parsed.normalize(), "f"))
+        raise ValueError(
+            f"Nieobsługiwana stawka VAT FA(3): {value!r}. "
+            "Dozwolone stawki to 23, 22, 8, 7, 5, 4, 3 oraz stawki zerowe "
+            "('0 KR'/'0 WDT'/'0 EX'), zwolnienie ('zw'), odwrotne obciążenie ('oo') "
+            "i niepodlegające opodatkowaniu ('np I'/'np II') - te ostatnie podaj "
+            "przez TaxCategory.from_rate_code()."
+        )
 
     @classmethod
     def from_rate_code(cls, value: Any) -> TaxCategory:
@@ -637,10 +745,21 @@ class InvoiceLine:
         return money(self.quantity * self.unit_net_price)
 
     @property
-    def discount_amount(self) -> Decimal:
+    def discount_unit_amount(self) -> Decimal:
+        """Wartość `P_10` — obniżka na jednostkę (zgodnie z przykładem MF 4)."""
         if self.discount is None:
             return Decimal("0.00")
-        return min(self.discount.amount_for(self.base_net_amount), self.base_net_amount)
+        return min(self.discount.unit_amount_for(self.unit_net_price), self.unit_net_price)
+
+    @property
+    def discount_amount(self) -> Decimal:
+        """Łączna obniżka wiersza (`P_10 × P_8B`), ograniczona do wartości netto."""
+        if self.discount is None:
+            return Decimal("0.00")
+        return min(
+            money(self.discount_unit_amount * self.quantity),
+            self.base_net_amount,
+        )
 
     @property
     def computed_net_amount(self) -> Decimal:
@@ -674,8 +793,54 @@ class InvoiceLine:
             issues.append(FA3ValidationIssue(f"{path}: ilość musi być większa od zera."))
         if self.unit_net_price < 0:
             issues.append(FA3ValidationIssue(f"{path}: cena netto nie może być ujemna."))
+        if self.tax.vat_rate is not None and self.tax.vat_rate < 0:
+            issues.append(FA3ValidationIssue(f"{path}: stawka VAT nie może być ujemna."))
         if self.discount is not None:
             issues.extend(self.discount.validate(f"{path}.discount"))
+        # `OkresFa`/`P_6_Od`/`P_6_Do` oraz `DodatkowyOpis` istnieją w schemacie
+        # WYŁĄCZNIE na poziomie `Fa` (nie w `FaWiersz`), więc pól `period_from`,
+        # `period_to` i `additional_description` na pozycji nie da się zapisać.
+        # Serializator je pomijał, więc wołający tracił dane bez komunikatu —
+        # teraz dostaje błąd ze wskazaniem właściwego API.
+        if self.period_from is not None or self.period_to is not None:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.period_from: okres faktury (`OkresFa`/`P_6_Od`/`P_6_Do`) "
+                    "jest polem na poziomie faktury, nie pozycji — ustaw go na "
+                    "`FA3Invoice.period_from`/`period_to`.",
+                    column=f"{path}.period_from",
+                )
+            )
+        if self.additional_description:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.additional_description: informacja dodatkowa "
+                    "(`DodatkowyOpis`) jest polem na poziomie faktury — użyj "
+                    "`additional_description(key, value, row_number=...)` na builderze, "
+                    "żeby powiązać ją z tą pozycją.",
+                    column=f"{path}.additional_description",
+                )
+            )
+
+        # Spójność arytmetyczna wiersza (`P_11 = P_13_x + P_14_x`). Nadpisanie
+        # brutto różne od netto + VAT dawało dokument z `P_15` różnym od sumy
+        # `P_13_x`/`P_14_x` — KSeF taki dokument odrzuca, a SDK raportował sukces
+        # (kontrola istniała tylko w ścieżce szkiców).
+        if self.gross_amount is not None:
+            expected_gross = money(self.effective_net_amount + self.effective_vat_amount)
+            # Tolerancja jednego grosza: różnice zaokrągleń między pozycją
+            # a podsumowaniem występują też w oficjalnych przykładach MF.
+            if abs(money(self.gross_amount) - expected_gross) > MONEY_QUANT:
+                issues.append(
+                    FA3ValidationIssue(
+                        f"{path}: wartość brutto {money(self.gross_amount)} nie zgadza się "
+                        f"z netto + VAT ({self.effective_net_amount} + "
+                        f"{self.effective_vat_amount} = {expected_gross}). Popraw brutto "
+                        "albo usuń nadpisanie, bo KSeF odrzuci dokument, w którym P_15 "
+                        "nie równa się sumie P_13_x i P_14_x.",
+                        column=f"{path}.gross_amount",
+                    )
+                )
         return issues
 
 
@@ -765,6 +930,25 @@ class PaymentTerms:
             bank_accounts=(bank_account,) if bank_account else (),
         )
 
+    def validate(self, path: str) -> list[FA3ValidationIssue]:
+        """Sprawdza spójność terminu płatności.
+
+        `due_terms` i `due_dates` są łączone przez serializator (jedne i drugie
+        trafiają do `TerminPlatnosci`), więc nie ma tu konfliktu do zgłoszenia —
+        wcześniej `due_dates` było po cichu pomijane, gdy `due_terms` było niepuste.
+        """
+        issues: list[FA3ValidationIssue] = []
+        if self.paid_date is not None and self.partial_payments:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.paid_date: schemat pozwala opisać albo pełną zapłatę "
+                    "(`DataZaplaty`), albo zapłaty częściowe — nie oba naraz.",
+                    column=f"{path}.paid_date",
+                )
+            )
+        return issues
+
+
 @dataclass(frozen=True)
 class AttachmentTable:
     headers: tuple[str, ...]
@@ -789,7 +973,20 @@ class Attachment:
 
     @classmethod
     def text(cls, header: str, *paragraphs: str) -> Attachment:
-        return cls((AttachmentBlock(header=header, paragraphs=tuple(paragraphs)),))
+        """Załącznik tekstowy.
+
+        `BlokDanych/MetaDane` jest w schemacie FA(3) wymagane, więc dokładamy
+        neutralny wpis metadanych - inaczej wygenerowany XML byłby niezgodny z XSD.
+        """
+        return cls(
+            (
+                AttachmentBlock(
+                    header=header,
+                    metadata=(("Zalacznik", "Zalacznik"),),
+                    paragraphs=tuple(paragraphs),
+                ),
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -888,12 +1085,66 @@ class FA3Invoice:
         return SettlementCorrectionInvoiceBuilder(invoice_number=invoice_number)
 
     @property
+    def line_gross_total(self) -> Decimal:
+        """Suma brutto samych pozycji (bez zaliczek)."""
+        return money(
+            sum(
+                (
+                    self._signed_line_amount(line, line.effective_gross_amount)
+                    for line in self.lines
+                ),
+                Decimal("0.00"),
+            )
+        )
+
+    @property
+    def gross_with_advances(self) -> Decimal:
+        """Brutto pozycji powiększone o zapłacone zaliczki (wartość zamówienia)."""
+        advance_total = sum(
+            (payment.amount for payment in self.advance_payments),
+            Decimal("0.00"),
+        )
+        return money(self.line_gross_total + advance_total)
+
+    @property
+    def summary_gross(self) -> Decimal:
+        """Wartość `P_15` — kwota należna z tytułu sprzedaży.
+
+        To brutto pozycji powiększone o zapłaty częściowe otrzymane przy
+        wystawianiu tej faktury (`ZaliczkaCzesciowa`/`P_15Z`), zgodnie z opisem
+        pola w schemacie („różnica kwoty w polu P_15 i sumy poszczególnych pól
+        P_15Z stanowi kwotę pozostałą…").
+
+        Dla faktury rozliczającej (ROZ/KOR_ROZ) `P_15` to **kwota pozostała do
+        zapłaty** (art. 106f ust. 3): wiersze niosą pełną wartość zamówienia, a
+        `P_13_x`/`P_14_x` są proporcją tej kwoty — dokładnie tak, jak w oficjalnym
+        `FA_3_Przykład_14.xml` (wiersze 307500@8% + 4500@23%, `P_15` = 307635,
+        koszyki = wartości wierszy × 307635/337635).
+        """
+        if self.kind in SETTLEMENT_SCALE_KINDS and self.settlement_data is not None:
+            amount_due = self.settlement_data.amount_due
+            if amount_due is not None:
+                charges = money(
+                    sum(
+                        (charge.amount for charge in self.settlement_data.charges),
+                        Decimal("0.00"),
+                    )
+                )
+                deductions = money(
+                    sum(
+                        (deduction.amount for deduction in self.settlement_data.deductions),
+                        Decimal("0.00"),
+                    )
+                )
+                # `DoZaplaty = P_15 + SumaObciazen - SumaOdliczen`, więc P_15 to
+                # kwota pozostała do zapłaty pomniejszona o obciążenia.
+                return money(amount_due - charges + deductions)
+        return self.total_gross
+
+    @property
     def total_net(self) -> Decimal:
         line_total = sum(
-            (
-                self._signed_line_amount(line, line.effective_net_amount)
-                for line in self.lines
-            ),
+            (self._signed_line_amount(line, line.effective_net_amount) for line in self.lines),
             Decimal("0.00"),
         )
         advance_total = sum(
@@ -905,10 +1156,7 @@ class FA3Invoice:
     @property
     def total_vat(self) -> Decimal:
         line_total = sum(
-            (
-                self._signed_line_amount(line, line.effective_vat_amount)
-                for line in self.lines
-            ),
+            (self._signed_line_amount(line, line.effective_vat_amount) for line in self.lines),
             Decimal("0.00"),
         )
         advance_total = sum(
@@ -920,10 +1168,7 @@ class FA3Invoice:
     @property
     def total_gross(self) -> Decimal:
         line_total = sum(
-            (
-                self._signed_line_amount(line, line.effective_gross_amount)
-                for line in self.lines
-            ),
+            (self._signed_line_amount(line, line.effective_gross_amount) for line in self.lines),
             Decimal("0.00"),
         )
         advance_total = sum(
@@ -956,12 +1201,133 @@ class FA3Invoice:
         if self.issue_date is None:
             errors.append(FA3ValidationIssue("invoice.issue_date: data jest wymagana."))
         errors.extend(self.seller.validate("invoice.seller", address_required=True))
-        errors.extend(self.buyer.validate("invoice.buyer"))
-        line_optional_kinds = {FA3InvoiceKind.ADVANCE, FA3InvoiceKind.ADVANCE_CORRECTION}
+        if self.seller.taxpayer_prefix is not None and self.seller.taxpayer_prefix != "PL":
+            # Schemat wymusza w `Podmiot1/PrefiksPodatnika` wartość 'PL'
+            # (`xsd:element/@fixed="PL"`, schemat_FA(3):2137), a jego typ
+            # `TKodyKrajowUE` dopuszcza 28 kodów — dlatego 'DE' przeszłoby przez
+            # sam słownik i dokument odrzuciłby dopiero KSeF. Kontrola dotyczy
+            # wyłącznie `Podmiot1`: w `Podmiot1K` schemat tego nie wymusza.
+            errors.append(
+                FA3ValidationIssue(
+                    "invoice.seller.taxpayer_prefix: schemat FA(3) wymusza w "
+                    f"Podmiot1 wartość 'PL', otrzymano {self.seller.taxpayer_prefix!r}.",
+                    column="invoice.seller.taxpayer_prefix",
+                )
+            )
+        # Nazwa nabywcy jest w `TPodmiot2` opcjonalna (`<xsd:sequence minOccurs="0">`),
+        # ale tylko po to, by dało się wystawić fakturę uproszczoną (art. 106e
+        # ust. 5 pkt 3 — sprzedaż do 450 zł). Dla pozostałych rodzajów jej brak
+        # to błąd: KSeF nie udostępni faktury, na której nie ma nabywcy.
+        buyer_name_optional = self.kind is FA3InvoiceKind.SIMPLIFIED
+        errors.extend(
+            self.buyer.validate(
+                "invoice.buyer",
+                buyer=True,
+                name_optional=buyer_name_optional,
+            )
+        )
+        # `Podmiot1K` musi nieść pełne dane sprzedawcy z faktury korygowanej,
+        # więc adres jest tam wymagany (XSD: minOccurs=1). Nabywca korygowany
+        # (`Podmiot2K`) ma adres opcjonalny — zgodnie ze schematem.
+        if self.corrected_seller is not None:
+            errors.extend(
+                self.corrected_seller.validate("invoice.corrected_seller", address_required=True)
+            )
+        for index, corrected_buyer in enumerate(self.corrected_buyers, start=1):
+            errors.extend(
+                corrected_buyer.validate(
+                    f"invoice.corrected_buyers[{index}]",
+                    buyer=True,
+                    name_optional=buyer_name_optional,
+                )
+            )
+        # `FaWiersz` jest opcjonalne dla faktury zaliczkowej, faktury korygującej
+        # zaliczkę ORAZ korekty zbiorczej z art. 106j ust. 3 (podręcznik KSeF:
+        # taka faktura „nie zawiera żadnych danych w części FaWiersz”; oficjalny
+        # `FA_3_Przykład_6.xml` ma zero wierszy przy P_13_1=-40650.41 i P_15=-50000).
+        line_optional_kinds = {
+            FA3InvoiceKind.ADVANCE,
+            FA3InvoiceKind.ADVANCE_CORRECTION,
+            FA3InvoiceKind.CORRECTION,
+            FA3InvoiceKind.SETTLEMENT_CORRECTION,
+        }
         if not self.lines and self.kind not in line_optional_kinds:
             errors.append(
                 FA3ValidationIssue("invoice.lines: faktura wymaga co najmniej jednej pozycji.")
             )
+        # Pola korekty są w schemacie FA(3) JEDNĄ opcjonalną `xsd:sequence`,
+        # w której wymagane jest `DaneFaKorygowanej`; `P_15ZK`/`KursWalutyZK`
+        # to zagnieżdżona w niej kolejna opcjonalna grupa. Serializator
+        # (`xml._domain_correction`) wypisuje je więc z DANYCH, a nie z rodzaju
+        # faktury — bez faktury korygowanej nie ma jednak czym wypełnić
+        # `DaneFaKorygowanej`, więc cała grupa musi zostać pominięta
+        # (inaczej XSD zgłasza `SCHEMAV_ELEMENT_CONTENT`). Wcześniej komentarz
+        # w tym miejscu twierdził, że serializator wypisuje te pola „na podstawie
+        # samych danych (nie rodzaju)", a kod robił odwrotnie: wychodził dla
+        # każdego rodzaju spoza KOR/KOR_ZAL/KOR_ROZ i gubił dane bez słowa.
+        if not self.corrected_invoices:
+            correction_fields = (
+                ("invoice.correction_reason", self.correction_reason),
+                ("invoice.correction_type", self.correction_type),
+                ("invoice.corrected_period", self.corrected_period),
+                (
+                    "invoice.corrected_invoice_number_override",
+                    self.corrected_invoice_number_override,
+                ),
+                ("invoice.corrected_seller", self.corrected_seller),
+                ("invoice.corrected_buyers", self.corrected_buyers),
+                ("invoice.corrected_advance_state", self.corrected_advance_state),
+            )
+            dropped = [name for name, value in correction_fields if value]
+            if dropped:
+                errors.append(
+                    FA3ValidationIssue(
+                        f"{', '.join(dropped)}: bez faktury korygowanej "
+                        "(`corrected_invoices`) nie da się wypisać tych pól — schemat "
+                        "wymaga w tej samej sekwencji `DaneFaKorygowanej`."
+                    )
+                )
+        # `NoweSrodkiTransportu` bez wiersza jest niezgodne ze schematem
+        # (`P_22N=1` przy braku `NowySrodketTransportu`), a fasety tego nie łapią,
+        # bo brakuje elementu, nie wartości.
+        if self.annotations.new_transport and not self.annotations.new_transport_means:
+            errors.append(
+                FA3ValidationIssue(
+                    "invoice.annotations.new_transport: znacznik nowego środka transportu "
+                    "wymaga co najmniej jednego wiersza `new_transport_means` "
+                    "(schemat: `NoweSrodkiTransportu/NowySrodekTransportu`)."
+                )
+            )
+        if not self.annotations.new_transport and self.annotations.new_transport_means:
+            errors.append(
+                FA3ValidationIssue(
+                    "invoice.annotations.new_transport_means: wiersze środków transportu są "
+                    "pomijane bez `new_transport=True` — ustaw znacznik albo usuń wiersze."
+                )
+            )
+        # `P_42_5` (obowiązek z art. 42 ust. 5) jest emitowane wyłącznie razem
+        # z `P_22=1`, czyli wtedy, gdy ustawiono `new_transport` — bez tego
+        # znacznika serializer wypisuje `P_22N=1` i flaga intra-EU cicho ginie.
+        if self.annotations.new_transport_intra_eu and not self.annotations.new_transport:
+            errors.append(
+                FA3ValidationIssue(
+                    "invoice.annotations.new_transport_intra_eu: flaga procedury "
+                    "intra-EU (`P_42_5`) wymaga `new_transport=True` — bez niego "
+                    "`NoweSrodkiTransportu` dostaje `P_22N=1`, a znacznik intra-EU "
+                    "jest pomijany. Ustaw `new_transport` albo zdejmij flagę."
+                )
+            )
+        for index, means in enumerate(self.annotations.new_transport_means, start=1):
+            # Zgłoszenia z `severity="warning"` (np. pola spoza schematu FA(3))
+            # muszą trafić do ostrzeżeń, nie do błędów — inaczej dokument, który
+            # schemat akceptuje, nie dałby się zbudować.
+            for issue in means.validate(f"invoice.annotations.new_transport_means[{index}]"):
+                if issue.severity == "warning":
+                    warnings.append(issue)
+                else:
+                    errors.append(issue)
+        if self.payment_terms is not None:
+            errors.extend(self.payment_terms.validate("invoice.payment_terms"))
         for index, line in enumerate(self.lines, start=1):
             errors.extend(line.validate(f"invoice.lines[{index}]"))
         for index, party in enumerate(self.additional_parties, start=1):
@@ -1005,26 +1371,10 @@ class FA3Invoice:
         settlement_kinds = {FA3InvoiceKind.SETTLEMENT, FA3InvoiceKind.SETTLEMENT_CORRECTION}
         if self.kind in settlement_kinds and not self.advance_invoices:
             errors.append(FA3ValidationIssue("invoice.advance_invoices: podaj fakturę zaliczkową."))
-        if self.settlement_data is not None and self.settlement_data.amount_due is not None:
-            charges_total = money(
-                sum((charge.amount for charge in self.settlement_data.charges), Decimal("0.00"))
-            )
-            deductions_total = money(
-                sum(
-                    (deduction.amount for deduction in self.settlement_data.deductions),
-                    Decimal("0.00"),
-                )
-            )
-            expected_due = money(self.total_gross + charges_total - deductions_total)
-            provided_due = money(self.settlement_data.amount_due)
-            if provided_due != expected_due:
-                errors.append(
-                    FA3ValidationIssue(
-                        "invoice.settlement_data.amount_due: Rozliczenie niespójne; "
-                        f"oczekiwane DoZaplaty={expected_due:.2f} "
-                        f"(P_15 + SumaObciazen - SumaOdliczen), otrzymano {provided_due:.2f}."
-                    )
-                )
+        # Kontrola spójności `DoZaplaty` nie jest tu potrzebna: `P_15` jest teraz
+        # WYPROWADZANE z `amount_due` (`summary_gross`), więc tożsamość
+        # `DoZaplaty = P_15 + SumaObciazen - SumaOdliczen` zachodzi z definicji.
+        # Sensowność proporcji pilnuje `_validate_settlement_proportion`.
         if self.buyer.is_jst_subunit and not any(
             str(getattr(party.role, "value", party.role)) == ThirdPartyRole.JST_SUBUNIT.value
             for party in self.additional_parties
@@ -1045,13 +1395,79 @@ class FA3Invoice:
                     "invoice.raw_extensions: RawXmlExtension nie jest wspierany w typed FA(3) SDK."
                 )
             )
+        errors.extend(self._validate_settlement_proportion())
         errors.extend(self._validate_xml_shape())
         return FA3ValidationResult(tuple(errors), tuple(warnings))
 
-    def to_xml(self, *, validate: bool = True, xsd_validate: bool = False) -> bytes:
+    def to_xml(
+        self,
+        *,
+        validate: bool = True,
+        facets: bool = True,
+        xsd_validate: bool = False,
+    ) -> bytes:
         from .xml import invoice_to_xml
 
-        return invoice_to_xml(self, validate=validate, xsd_validate=xsd_validate)
+        return invoice_to_xml(self, validate=validate, facets=facets, xsd_validate=xsd_validate)
+
+    def _validate_settlement_proportion(self) -> list[FA3ValidationIssue]:
+        """Sprawdza, czy z wierszy da się wyprowadzić proporcję `P_13_x` dla ROZ.
+
+        Proporcję liczy serializator (`_scale_settlement_summary`): mnoży koszyki
+        przez `P_15 / wartość zamówienia`, tak jak w oficjalnym
+        `FA_3_Przykład_14.xml`. Tu pilnujemy tylko, żeby operacja miała sens —
+        dodatnia wartość zamówienia nie może dać ujemnej kwoty do zapłaty.
+        """
+        if self.kind not in SETTLEMENT_SCALE_KINDS:
+            # Rodzaj nie-skalujący: `P_15` pochodzi z wierszy, więc `DoZaplaty`
+            # musi się zgadzać z `P_15 + SumaObciazen - SumaOdliczen`.
+            if self.settlement_data is None or self.settlement_data.amount_due is None:
+                return []
+            charges = money(
+                sum((charge.amount for charge in self.settlement_data.charges), Decimal("0.00"))
+            )
+            deductions = money(
+                sum(
+                    (deduction.amount for deduction in self.settlement_data.deductions),
+                    Decimal("0.00"),
+                )
+            )
+            expected_due = money(self.total_gross + charges - deductions)
+            provided_due = money(self.settlement_data.amount_due)
+            if provided_due != expected_due:
+                return [
+                    FA3ValidationIssue(
+                        "invoice.settlement_data.amount_due: Rozliczenie niespójne; "
+                        f"oczekiwane DoZaplaty={expected_due:.2f} "
+                        f"(P_15 + SumaObciazen - SumaOdliczen), otrzymano {provided_due:.2f}."
+                    )
+                ]
+            return []
+        if self.settlement_data is None or self.settlement_data.amount_due is None:
+            return []
+        full = money(
+            self.line_gross_total
+            + sum((payment.amount for payment in self.advance_payments), Decimal("0.00"))
+        )
+        target = money(self.summary_gross)
+        if full > 0 and target < 0:
+            return [
+                FA3ValidationIssue(
+                    "invoice.settlement_data.amount_due: dodatnia wartość zamówienia "
+                    f"({full:.2f}) nie może dawać ujemnej kwoty pozostałej do zapłaty "
+                    f"({target:.2f}) — sprawdź obciążenia i odliczenia."
+                )
+            ]
+        if full > 0 and target > full:
+            return [
+                FA3ValidationIssue(
+                    "invoice.settlement_data.amount_due: Rozliczenie niespójne — kwota "
+                    f"pozostała do zapłaty ({target:.2f}) przekracza wartość zamówienia "
+                    f"({full:.2f}). Obciążenia i odliczenia podaj w `Rozliczenie`, a nie "
+                    "przez podnoszenie kwoty do zapłaty."
+                )
+            ]
+        return []
 
     def _validate_xml_shape(self) -> list[FA3ValidationIssue]:
         issues: list[FA3ValidationIssue] = []
@@ -1065,9 +1481,7 @@ class FA3Invoice:
             )
         if (self.period_from is None) ^ (self.period_to is None):
             issues.append(
-                FA3ValidationIssue(
-                    "invoice.period: okres faktury wymaga obu dat: od i do."
-                )
+                FA3ValidationIssue("invoice.period: okres faktury wymaga obu dat: od i do.")
             )
         if (
             self.payment_terms is not None
@@ -1079,6 +1493,41 @@ class FA3Invoice:
                     "invoice.payment_terms: podaj date zaplaty albo platnosci czesciowe, nie oba."
                 )
             )
+        if self.attachment is not None:
+            for block_index, block in enumerate(self.attachment.blocks, start=1):
+                for table_index, table in enumerate(block.tables, start=1):
+                    issues.extend(
+                        _validate_attachment_table(
+                            table,
+                            f"invoice.attachment.blocks[{block_index}].tables[{table_index}]",
+                        )
+                    )
+        if self.payment_terms is not None:
+            # `Skonto` ma w schemacie dwa wymagane pola; podanie jednego
+            # powodowało ciche pominięcie całego bloku (utrata danych).
+            discount_parts = (
+                bool(self.payment_terms.cash_discount_terms),
+                bool(self.payment_terms.cash_discount_amount),
+            )
+            if any(discount_parts) and not all(discount_parts):
+                issues.append(
+                    FA3ValidationIssue(
+                        "invoice.payment_terms: skonto wymaga jednocześnie warunków "
+                        "(cash_discount_terms) i wysokości (cash_discount_amount)."
+                    )
+                )
+        if self.transaction_terms is not None:
+            # `KursUmowny` i `WalutaUmowna` to w schemacie jedna opcjonalna
+            # sekwencja — jedno bez drugiego było cicho pomijane.
+            rate = self.transaction_terms.contractual_rate
+            currency = self.transaction_terms.contractual_currency
+            if (rate is None) ^ (currency is None):
+                issues.append(
+                    FA3ValidationIssue(
+                        "invoice.transaction_terms: kurs umowny i waluta umowna muszą "
+                        "być podane razem (KursUmowny + WalutaUmowna)."
+                    )
+                )
         if (
             self.settlement_data is not None
             and self.settlement_data.amount_due is not None
@@ -1125,7 +1574,57 @@ class FA3Invoice:
                         "albo numer KSeF, nie oba."
                     )
                 )
+        issues.extend(self._validate_payment_link())
+        issues.extend(self._validate_contractual_currency())
         return issues
+
+    def _validate_payment_link(self) -> list[FA3ValidationIssue]:
+        """`LinkDoPlatnosci` musi być adresem z parametrem `IPKSeF`.
+
+        Schemat FA(3) wymusza wzorzec:
+        ``(https?)://...?IPKSeF=[0-9]{3}[a-zA-Z0-9]{10}`` (max 512 znaków), a osobne
+        pole `IPKSeF` ma dokładnie ``[0-9]{3}[a-zA-Z0-9]{10}``. Bez tej walidacji
+        dowolny URL przechodził `validate()` i wywalał się dopiero na XSD/KSeF.
+        """
+        terms = self.payment_terms
+        if terms is None:
+            return []
+        issues: list[FA3ValidationIssue] = []
+        if terms.ipksef and not IPKSEF_PATTERN.fullmatch(terms.ipksef):
+            issues.append(
+                FA3ValidationIssue(
+                    "invoice.payment_terms.ipksef: identyfikator IPKSeF musi mieć "
+                    "postaċ 3 cyfr i 10 znaków alfanumerycznych (np. '123abc456DEF7')."
+                )
+            )
+        if terms.payment_link and not PAYMENT_LINK_PATTERN.fullmatch(terms.payment_link):
+            issues.append(
+                FA3ValidationIssue(
+                    "invoice.payment_terms.payment_link: link do płatności musi być "
+                    "adresem http(s) zawierającym parametr 'IPKSeF=' z 3 cyframi i "
+                    "10 znakami alfanumerycznymi (max 512 znaków)."
+                )
+            )
+        return issues
+
+    def _validate_contractual_currency(self) -> list[FA3ValidationIssue]:
+        """`WalutaUmowna` nie może być PLN.
+
+        Broszura MF (str. 124): "The Polish currency (PLN) should never appear in
+        the WalutaUmowna field." Schemat dopuszcza PLN (słownik `TKodWaluty`), więc
+        to reguła biznesowa, której XSD nie wyegzekwuje.
+        """
+        terms = self.transaction_terms
+        if terms is None or not terms.contractual_currency:
+            return []
+        if terms.contractual_currency.strip().upper() == "PLN":
+            return [
+                FA3ValidationIssue(
+                    "invoice.transaction_terms.contractual_currency: 'WalutaUmowna' nie "
+                    "może być PLN (waluta umowna dotyczy wyłącznie waluty obcej)."
+                )
+            ]
+        return []
 
 
 @dataclass
@@ -1314,8 +1813,14 @@ class FA3InvoiceBuilderV2:
             return FA3ValidationResult((FA3ValidationIssue(str(exc)),), ())
         return invoice.validate()
 
-    def to_xml(self, *, validate: bool = True, xsd_validate: bool = False) -> bytes:
-        return self.build().to_xml(validate=validate, xsd_validate=xsd_validate)
+    def to_xml(
+        self,
+        *,
+        validate: bool = True,
+        facets: bool = True,
+        xsd_validate: bool = False,
+    ) -> bytes:
+        return self.build().to_xml(validate=validate, facets=facets, xsd_validate=xsd_validate)
 
 
 def _coerce_address(
@@ -1362,3 +1867,90 @@ def _replace_party_role(
         is_vat_group_member=party.is_vat_group_member,
         other_role_description=party.other_role_description,
     )
+
+
+#: Rodzaje faktur, dla których `P_13_x`/`P_14_x` są PROPORCJĄ kwoty pozostałej
+#: do zapłaty (art. 106f ust. 3): rozliczenie zamówienia i jego korekta.
+SETTLEMENT_SCALE_KINDS = frozenset(
+    {FA3InvoiceKind.SETTLEMENT, FA3InvoiceKind.SETTLEMENT_CORRECTION}
+)
+
+
+#: Dozwolone wartości atrybutu `Kol/@Typ` (schemat: `use="required"` + enumeracja).
+COLUMN_TYPES: frozenset[str] = frozenset({"date", "datetime", "dec", "int", "time", "txt"})
+
+#: Limity tabeli załącznika (schemat: `Kol`/`WKom` max 20, `Wiersz` 1..1000).
+TABLE_MAX_COLUMNS = 20
+TABLE_MAX_ROWS = 1000
+
+#: Maksymalna liczba `DaneKontaktowe` na podmiot (schemat: `maxOccurs="3"`).
+MAX_CONTACTS_PER_PARTY = 3
+
+
+def _validate_attachment_table(table: AttachmentTable, path: str) -> list[FA3ValidationIssue]:
+    """Sprawdza tabelę załącznika wobec schematu.
+
+    Wcześniej żadne z tych ograniczeń nie było pilnowane: `column_types=("text",)`
+    dawało niepoprawny atrybut `@Typ`, a krótsza lista typów niż nagłówków
+    **cicho gubiła** nadmiarowe kolumny (`zip(strict=False)`).
+    """
+    issues: list[FA3ValidationIssue] = []
+    if not table.headers:
+        issues.append(FA3ValidationIssue(f"{path}: tabela wymaga co najmniej jednej kolumny."))
+    if len(table.headers) > TABLE_MAX_COLUMNS:
+        issues.append(
+            FA3ValidationIssue(
+                f"{path}: tabela ma {len(table.headers)} kolumn, a schemat dopuszcza "
+                f"maksymalnie {TABLE_MAX_COLUMNS}."
+            )
+        )
+    if not table.rows:
+        issues.append(FA3ValidationIssue(f"{path}: tabela wymaga co najmniej jednego wiersza."))
+    if len(table.rows) > TABLE_MAX_ROWS:
+        issues.append(
+            FA3ValidationIssue(
+                f"{path}: tabela ma {len(table.rows)} wierszy, a schemat dopuszcza "
+                f"maksymalnie {TABLE_MAX_ROWS}."
+            )
+        )
+    for index, row in enumerate(table.rows, start=1):
+        if not row:
+            # `Wiersz` wymaga co najmniej jednego `WKom` (XSD: minOccurs=1).
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.rows[{index}]: wiersz tabeli wymaga co najmniej jednej "
+                    "komórki (WKom)."
+                )
+            )
+        if len(row) > TABLE_MAX_COLUMNS:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.rows[{index}]: wiersz ma {len(row)} komórek, a schemat "
+                    f"dopuszcza maksymalnie {TABLE_MAX_COLUMNS}."
+                )
+            )
+    if table.footer and len(table.footer) > TABLE_MAX_COLUMNS:
+        issues.append(
+            FA3ValidationIssue(
+                f"{path}.footer: suma ma {len(table.footer)} komórek, a schemat "
+                f"dopuszcza maksymalnie {TABLE_MAX_COLUMNS}."
+            )
+        )
+    if table.column_types:
+        if len(table.column_types) != len(table.headers):
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}: podano {len(table.column_types)} typów kolumn dla "
+                    f"{len(table.headers)} nagłówków — brakujące kolumny zostałyby "
+                    "cicho pominięte."
+                )
+            )
+        invalid = sorted({value for value in table.column_types if value not in COLUMN_TYPES})
+        if invalid:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}: nieznany typ kolumny {invalid}; dozwolone to "
+                    f"{', '.join(sorted(COLUMN_TYPES))}."
+                )
+            )
+    return issues

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import BinaryIO
 
 from cryptography import x509
@@ -17,7 +17,9 @@ from ..models import EncryptionInfo, FileMetadata, SendInvoiceRequest
 
 @dataclass(frozen=True)
 class EncryptionData:
-    key: bytes
+    # `key` to klucz sesji (sekret), więc nie trafia do `repr` — logi i wyjątki nie
+    # mogą wyciekać materiału klucza. IV jest jawny w `EncryptionInfo`, zostaje widoczny.
+    key: bytes = field(repr=False)
     iv: bytes
     encryption_info: EncryptionInfo | None
 
@@ -88,14 +90,49 @@ def get_file_metadata(data: bytes) -> FileMetadata:
     return FileMetadata(file_size=len(data), sha256_base64=sha256_base64(data))
 
 
-def get_stream_metadata(stream: BinaryIO) -> FileMetadata:
-    position = None
+def _rewind_stream(stream: BinaryIO) -> int | None:
+    """Przewija strumień na początek i zwraca pozycję do przywrócenia.
+
+    `None` oznacza strumień, którego nie da się przewinąć — odczyt od bieżącej
+    pozycji opisuje wtedy tylko resztę danych, a nie całą treść strumienia.
+    """
     try:
-        if stream.seekable():
-            position = stream.tell()
-            stream.seek(0)
+        if not stream.seekable():
+            return None
+        position = stream.tell()
+        stream.seek(0)
+        return position
     except Exception:
-        position = None
+        return None
+
+
+def _stream_at_position_zero(stream: BinaryIO) -> bool:
+    """Sprawdza, czy nieprzewijalny strumień sam raportuje pozycję 0."""
+    tell = getattr(stream, "tell", None)
+    if tell is None:
+        return False
+    try:
+        return bool(tell() == 0)
+    except Exception:
+        return False
+
+
+def get_stream_metadata(stream: BinaryIO) -> FileMetadata:
+    """Zwraca rozmiar i SHA-256 całej treści strumienia.
+
+    Metadane opisują **cały** strumień, więc wymagamy możliwości przewinięcia go na
+    początek (po odczycie wracamy na zapamiętaną pozycję). Strumień nieprzewijalny
+    (potok, odpowiedź sieciowa) akceptujemy tylko wtedy, gdy sam raportuje pozycję 0;
+    inaczej policzylibyśmy rozmiar i hash wyłącznie z reszty danych, więc zgłaszamy
+    `ValueError` zamiast cichego, mylącego wyniku.
+    """
+    position = _rewind_stream(stream)
+    if position is None and not _stream_at_position_zero(stream):
+        raise ValueError(
+            "Stream is not seekable and does not report position 0; "
+            "file size and hash would describe only the remaining data. "
+            "Read the stream first and use get_file_metadata instead."
+        )
 
     digest = hashes.Hash(hashes.SHA256())
     size = 0
