@@ -168,6 +168,11 @@ def session_import(
     base_url: str | None = typer.Option(
         None, "--base-url", help="Override KSeF base URL for this command."
     ),
+    allow_foreign_host: bool = typer.Option(
+        False,
+        "--allow-foreign-host",
+        help="Accept a checkpoint pointing at a host other than the KSeF environments.",
+    ),
 ) -> None:
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
@@ -179,6 +184,7 @@ def session_import(
             source_path=source_path,
             session_id=session_id,
             base_url=resolve_base_url(base_url or os.getenv("KSEF_BASE_URL"), profile=profile),
+            allow_foreign_host=allow_foreign_host,
         )
     except Exception as exc:
         _render_error(ctx, "session.import", exc)

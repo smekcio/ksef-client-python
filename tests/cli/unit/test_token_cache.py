@@ -203,6 +203,106 @@ def test_token_cache_lock_is_not_stale_when_stat_fails(monkeypatch, tmp_path: Pa
     assert token_cache._lock_is_stale(lock_path) is False
 
 
+def test_token_cache_does_not_steal_from_a_live_owner(monkeypatch, tmp_path: Path) -> None:
+    """Żywego właściciela nie przejmujemy, nawet gdy blokada wygląda na starą.
+
+    Na POSIX `unlink` otwartego pliku zawsze się udaje, więc bez sprawdzenia stanu
+    procesu dwa procesy pisałyby do cache równocześnie (utrata zapisu).
+    """
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(token_cache, "cache_file", lambda: cache_path)
+    lock_path = cache_path.with_name("cache.json.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("4242 1.0", encoding="utf-8")
+    stale_time = time.time() - token_cache._CACHE_LOCK_STALE_SECONDS - 5
+    os.utime(lock_path, (stale_time, stale_time))
+    monkeypatch.setattr(token_cache, "_CACHE_LOCK_TIMEOUT_SECONDS", 0.0)
+    monkeypatch.setattr(token_cache, "_process_state", lambda pid: "alive")
+
+    with pytest.raises(CliError, match="Timed out waiting"):
+        token_cache.get_cached_metadata("demo")
+
+    assert lock_path.exists(), "cudza blokada nie może zostać usunięta"
+
+
+def test_token_cache_steals_from_a_dead_owner(monkeypatch, tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(token_cache, "cache_file", lambda: cache_path)
+    lock_path = cache_path.with_name("cache.json.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("4242 1.0", encoding="utf-8")
+    stale_time = time.time() - token_cache._CACHE_LOCK_STALE_SECONDS - 5
+    os.utime(lock_path, (stale_time, stale_time))
+    monkeypatch.setattr(token_cache, "_process_state", lambda pid: "gone")
+
+    token_cache.set_cached_metadata("demo", {"method": "token"})
+
+    assert token_cache.get_cached_metadata("demo") is not None
+    assert not lock_path.exists()
+
+
+def test_token_cache_process_state_reports_alive_and_gone(monkeypatch, tmp_path: Path) -> None:
+    """`_process_state` rozstrzyga na POSIX przez `os.kill(pid, 0)`."""
+    monkeypatch.setattr(token_cache.os, "name", "posix", raising=False)
+    monkeypatch.setattr(token_cache.os, "kill", lambda pid, sig: None)
+    assert token_cache._process_state(1234) == "alive"
+
+    def _gone(pid: int, sig: int) -> None:
+        _ = (pid, sig)
+        raise ProcessLookupError
+
+    monkeypatch.setattr(token_cache.os, "kill", _gone)
+    assert token_cache._process_state(1234) == "gone"
+
+    def _denied(pid: int, sig: int) -> None:
+        _ = (pid, sig)
+        raise PermissionError
+
+    monkeypatch.setattr(token_cache.os, "kill", _denied)
+    assert token_cache._process_state(1234) == "alive"
+
+    def _other(pid: int, sig: int) -> None:
+        _ = (pid, sig)
+        raise OSError("nope")
+
+    monkeypatch.setattr(token_cache.os, "kill", _other)
+    assert token_cache._process_state(1234) == "unknown"
+
+    monkeypatch.setattr(token_cache.os, "name", "nt", raising=False)
+    assert token_cache._process_state(1234) == "unknown"
+
+
+def test_token_cache_lock_owner_state_handles_unreadable_lock(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Nieczytelny plik blokady to „nie wiem”, nie „wolne”."""
+    lock_path = tmp_path / "cache.json.lock"
+    lock_path.write_text("1 1.0", encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def _denied(self: Path, *args: object, **kwargs: object) -> str:
+        if self == lock_path:
+            raise OSError("locked")
+        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", _denied)
+
+    assert token_cache._lock_owner_state(lock_path) == "unknown"
+
+
+def test_token_cache_lock_owner_state_reads_the_pid(monkeypatch, tmp_path: Path) -> None:
+    lock_path = tmp_path / "cache.json.lock"
+    lock_path.write_text("nie-liczba 1.0", encoding="utf-8")
+    assert token_cache._lock_owner_state(lock_path) == "unknown"
+    lock_path.write_text("", encoding="utf-8")
+    assert token_cache._lock_owner_state(lock_path) == "unknown"
+    lock_path.write_text("-5 1.0", encoding="utf-8")
+    assert token_cache._lock_owner_state(lock_path) == "unknown"
+    lock_path.write_text(f"{os.getpid()} 1.0", encoding="utf-8")
+    monkeypatch.setattr(token_cache, "_process_state", lambda pid: "alive" if pid else "unknown")
+    assert token_cache._lock_owner_state(lock_path) == "alive"
+
+
 def test_token_cache_lock_creation_error_is_wrapped(monkeypatch, tmp_path: Path) -> None:
     """Błąd utworzenia blokady (np. brak praw) to `CliError`, nie surowy OSError."""
     cache_path = tmp_path / "cache.json"

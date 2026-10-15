@@ -410,12 +410,37 @@ def test_import_checkpoint_rejects_a_foreign_base_url(monkeypatch, tmp_path: Pat
     source = tmp_path / "foreign.json"
     session_store._write_json_atomic(source, foreign.to_dict())
 
-    with pytest.raises(CliError, match="base_url does not match"):
+    # Nieznany host jest odrzucany już przy imporcie…
+    with pytest.raises(CliError, match="unknown host"):
         import_checkpoint(
             "demo",
             source,
             expected_base_url="https://api-demo.ksef.mf.gov.pl",
         )
+
+    # …a świadoma zgoda (`--allow-foreign-host`) prowadzi do porównania z adresem
+    # efektywnym, które nadal odrzuca checkpoint z innego środowiska.
+    with pytest.raises(CliError, match="base_url does not match"):
+        import_checkpoint(
+            "demo",
+            source,
+            expected_base_url="https://api-demo.ksef.mf.gov.pl",
+            allow_foreign_host=True,
+        )
+
+
+def test_import_checkpoint_accepts_a_known_ksef_host(monkeypatch, tmp_path: Path) -> None:
+    """Checkpoint ze znanego środowiska importuje się bez żadnych flag."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    checkpoint = _online_checkpoint()
+    source = tmp_path / "known.json"
+    session_store._write_json_atomic(source, checkpoint.to_dict())
+
+    imported = import_checkpoint(
+        "demo", source, expected_base_url="https://api-demo.ksef.mf.gov.pl"
+    )
+
+    assert imported.base_url == checkpoint.base_url
 
 
 def test_require_matching_base_url_normalises_the_comparison(monkeypatch, tmp_path: Path) -> None:

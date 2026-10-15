@@ -203,6 +203,7 @@ def import_saved_session(
     source_path: str,
     session_id: str | None = None,
     base_url: str | None = None,
+    allow_foreign_host: bool = False,
 ) -> dict[str, Any]:
     checkpoint = import_checkpoint(
         profile,
@@ -212,6 +213,8 @@ def import_saved_session(
         # które trafi token dostępowy — dlatego porównujemy z efektywnym
         # adresem komendy (`--base-url`, `KSEF_BASE_URL` albo profil).
         expected_base_url=resolve_base_url(base_url, profile=profile),
+        # …a nieznany host wymaga świadomej zgody (dane z zewnątrz).
+        allow_foreign_host=allow_foreign_host,
     )
     return _checkpoint_summary(checkpoint)
 

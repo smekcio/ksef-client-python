@@ -9,6 +9,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from ksef_client.services.sessions import BatchSessionState, OnlineSessionState
 
@@ -495,12 +496,48 @@ def require_matching_base_url(checkpoint: SessionCheckpoint, expected_base_url: 
     )
 
 
+def _known_ksef_hosts() -> set[str]:
+    """Hosty środowisk KSeF — do rozpoznania checkpointu z zewnątrz."""
+    from ksef_client.config import KsefEnvironment
+
+    hosts = set()
+    for environment in KsefEnvironment:
+        host = urlparse(environment.value).hostname
+        if host:
+            hosts.add(host.lower())
+    return hosts
+
+
+def require_known_ksef_host(base_url: str, *, allow_foreign_host: bool = False) -> None:
+    """Importowany checkpoint musi wskazywać znane środowisko KSeF.
+
+    Plik checkpointu jest danymi z zewnątrz, a jego `base_url` decyduje, dokąd
+    trafi token dostępowy profilu. Dopuszczenie dowolnego hosta oznaczało, że
+    wystarczyło podać zgodny `--base-url`, żeby „zalegalizować” obcy adres —
+    teraz nieznany host wymaga świadomej zgody (`--allow-foreign-host`), co jest
+    potrzebne tylko przy własnych wdrożeniach.
+    """
+    if allow_foreign_host:
+        return
+    host = (urlparse(base_url).hostname or "").lower()
+    known = _known_ksef_hosts()
+    if host in known:
+        return
+    raise CliError(
+        f"Checkpoint points at an unknown host: {host or base_url!r}.",
+        ExitCode.VALIDATION_ERROR,
+        f"Known KSeF hosts: {', '.join(sorted(known))}. "
+        "Pass --allow-foreign-host if you really use a custom deployment.",
+    )
+
+
 def import_checkpoint(
     profile: str,
     source_path: Path,
     *,
     session_id: str | None = None,
     expected_base_url: str | None = None,
+    allow_foreign_host: bool = False,
 ) -> SessionCheckpoint:
     if not source_path.exists() or not source_path.is_file():
         raise CliError(
@@ -515,6 +552,7 @@ def import_checkpoint(
             ExitCode.VALIDATION_ERROR,
             f"Checkpoint profile is '{checkpoint.profile}', selected profile is '{profile}'.",
         )
+    require_known_ksef_host(checkpoint.base_url, allow_foreign_host=allow_foreign_host)
     if expected_base_url is not None:
         require_matching_base_url(checkpoint, expected_base_url)
     if session_id is not None:

@@ -220,7 +220,8 @@ def test_session_ops_require_checkpoint_type_and_simple_commands(monkeypatch) ->
     monkeypatch.setattr(
         session_ops,
         "import_checkpoint",
-        lambda profile, source_path, session_id=None, expected_base_url=None: online_checkpoint,
+        lambda profile, source_path, session_id=None, expected_base_url=None,
+        allow_foreign_host=False: online_checkpoint,
     )
     imported = session_ops.import_saved_session(
         profile="demo",

@@ -39,6 +39,44 @@ def _lock_is_stale(lock_path: Path) -> bool:
     return age >= _CACHE_LOCK_STALE_SECONDS
 
 
+def _process_state(pid: int) -> str:
+    """Stan procesu-właściciela: `alive`, `gone` albo `unknown`.
+
+    Na POSIX `os.kill(pid, 0)` rozstrzyga jednoznacznie. Na Windows nie ma
+    bezpiecznego odpowiednika (`os.kill` z sygnałem 0 kończy proces!), ale nie
+    jest potrzebny: dopóki właściciel trzyma uchwyt do pliku, `unlink` się nie
+    udaje, więc samo usunięcie blokady jest sprawdzeniem.
+    """
+    if os.name == "nt":
+        return "unknown"
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return "gone"
+    except PermissionError:
+        return "alive"
+    except OSError:
+        return "unknown"
+    return "alive"
+
+
+def _lock_owner_state(lock_path: Path) -> str:
+    """Stan właściciela blokady na podstawie PID-u zapisanego w pliku."""
+    try:
+        content = lock_path.read_text(encoding="ascii", errors="ignore").split()
+    except OSError:
+        return "unknown"
+    if not content:
+        return "unknown"
+    try:
+        pid = int(content[0])
+    except ValueError:
+        return "unknown"
+    if pid <= 0:
+        return "unknown"
+    return _process_state(pid)
+
+
 @contextmanager
 def _cache_lock() -> Iterator[None]:
     """Blokada międzyprocesowa wokół odczytu i zapisu cache.
@@ -69,7 +107,14 @@ def _cache_lock() -> Iterator[None]:
         try:
             handle = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
         except FileExistsError as exc:
-            if _lock_is_stale(lock_path) and steals < _CACHE_LOCK_MAX_STEALS:
+            if (
+                _lock_is_stale(lock_path)
+                and steals < _CACHE_LOCK_MAX_STEALS
+                # Żywego właściciela NIE przejmujemy, nawet gdy blokada wygląda na
+                # starą (długa pauza procesu): na POSIX `unlink` zawsze się udaje,
+                # więc bez tego sprawdzenia dwa procesy pisałyby równocześnie.
+                and _lock_owner_state(lock_path) != "alive"
+            ):
                 # Poprzedni właściciel padł bez sprzątania — przejmujemy blokadę.
                 # Liczba prób jest ograniczona, bo gdy `unlink` się nie uda
                 # (np. brak praw), ta gałąź kręciłaby się w miejscu bez końca.
