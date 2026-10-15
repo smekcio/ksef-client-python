@@ -930,6 +930,24 @@ class PaymentTerms:
             bank_accounts=(bank_account,) if bank_account else (),
         )
 
+    def validate(self, path: str) -> list[FA3ValidationIssue]:
+        """Sprawdza spójność terminu płatności.
+
+        `due_terms` i `due_dates` są łączone przez serializator (jedne i drugie
+        trafiają do `TerminPlatnosci`), więc nie ma tu konfliktu do zgłoszenia —
+        wcześniej `due_dates` było po cichu pomijane, gdy `due_terms` było niepuste.
+        """
+        issues: list[FA3ValidationIssue] = []
+        if self.paid_date is not None and self.partial_payments:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.paid_date: schemat pozwala opisać albo pełną zapłatę "
+                    "(`DataZaplaty`), albo zapłaty częściowe — nie oba naraz.",
+                    column=f"{path}.paid_date",
+                )
+            )
+        return issues
+
 
 @dataclass(frozen=True)
 class AttachmentTable:
@@ -1219,6 +1237,34 @@ class FA3Invoice:
             errors.append(
                 FA3ValidationIssue("invoice.lines: faktura wymaga co najmniej jednej pozycji.")
             )
+        # Uwaga: pól korekty (`correction_reason`, `corrected_*`) NIE blokujemy dla
+        # rodzajów nie-korygujących — serializator emituje `PrzyczynaKorekty`,
+        # `DaneFaKorygowanej` itd. na podstawie samych danych (nie rodzaju), a
+        # schemat FA(3) dopuszcza je niezależnie od `RodzajFaktury`. Kontrola
+        # „tylko dla korekt” odrzucałaby legalne dokumenty (m.in. bogaty przypadek
+        # pokrycia schematu w testach audytu).
+        # `NoweSrodkiTransportu` bez wiersza jest niezgodne ze schematem
+        # (`P_22N=1` przy braku `NowySrodketTransportu`), a fasety tego nie łapią,
+        # bo brakuje elementu, nie wartości.
+        if self.annotations.new_transport and not self.annotations.new_transport_means:
+            errors.append(
+                FA3ValidationIssue(
+                    "invoice.annotations.new_transport: znacznik nowego środka transportu "
+                    "wymaga co najmniej jednego wiersza `new_transport_means` "
+                    "(schemat: `NoweSrodkiTransportu/NowySrodekTransportu`)."
+                )
+            )
+        if not self.annotations.new_transport and self.annotations.new_transport_means:
+            errors.append(
+                FA3ValidationIssue(
+                    "invoice.annotations.new_transport_means: wiersze środków transportu są "
+                    "pomijane bez `new_transport=True` — ustaw znacznik albo usuń wiersze."
+                )
+            )
+        for index, means in enumerate(self.annotations.new_transport_means, start=1):
+            errors.extend(means.validate(f"invoice.annotations.new_transport_means[{index}]"))
+        if self.payment_terms is not None:
+            errors.extend(self.payment_terms.validate("invoice.payment_terms"))
         for index, line in enumerate(self.lines, start=1):
             errors.extend(line.validate(f"invoice.lines[{index}]"))
         for index, party in enumerate(self.additional_parties, start=1):

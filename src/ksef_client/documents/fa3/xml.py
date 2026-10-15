@@ -836,7 +836,11 @@ def _domain_payment(
         ET.SubElement(node, _q("ZnacznikZaplatyCzesciowej")).text = marker
         for partial in payment.partial_payments:
             _partial_payment(node, partial)
-    due_terms = payment.due_terms or tuple(PaymentDue.date(value) for value in payment.due_dates)
+    # `due_dates` to skrót dla terminu bez opisu; łączymy oba źródła, bo wcześniej
+    # `due_dates` było po cichu pomijane, gdy `due_terms` było niepuste.
+    due_terms = tuple(payment.due_terms) + tuple(
+        PaymentDue.date(value) for value in payment.due_dates
+    )
     for due_term in due_terms:
         due_node = ET.SubElement(node, _q("TerminPlatnosci"))
         if due_term.due_date is not None:

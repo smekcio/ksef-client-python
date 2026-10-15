@@ -6,7 +6,10 @@ from decimal import Decimal
 from typing import Any
 
 from .domain import Address, Discount, InvoiceParty, TaxCategory
-from .models import decimal_from_value, money
+from .models import FA3ValidationIssue, decimal_from_value, money
+
+#: Warianty środka transportu wybierające gałąź schematu (`P_22B`/`P_22C`/`P_22D`).
+_TRANSPORT_KINDS = frozenset({"land", "water", "air"})
 
 
 def enum_value(value: Any) -> str | None:
@@ -125,6 +128,40 @@ class NewTransportMeans:
     tax_amount: str = "0"
     taxable_base: str = "0"
     tax_rate: str | None = None
+
+    def validate(self, path: str) -> list[FA3ValidationIssue]:
+        """Sprawdza wariant środka transportu.
+
+        `kind` wybiera gałąź schematu: `land` (`P_22B`), `water` (`P_22C`) albo
+        `air` (`P_22D`). Wcześniej dowolny inny napis — np. literówka `sea` —
+        cicho wybierał gałąź lądową, więc dokument opisywał inny środek transportu
+        niż zamierzył wołający.
+        """
+        issues: list[FA3ValidationIssue] = []
+        if self.kind not in _TRANSPORT_KINDS:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.kind: nieznany wariant {self.kind!r}; dozwolone: "
+                    f"{', '.join(sorted(_TRANSPORT_KINDS))}.",
+                    column=f"{path}.kind",
+                )
+            )
+        if self.kind in {"water", "air"} and not (self.hours_used or "").strip():
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.hours_used: schemat wymaga liczby godzin roboczych dla "
+                    f"wariantu {self.kind!r}.",
+                    column=f"{path}.hours_used",
+                )
+            )
+        if self.row_number < 1:
+            issues.append(
+                FA3ValidationIssue(
+                    f"{path}.row_number: numer wiersza musi być dodatni.",
+                    column=f"{path}.row_number",
+                )
+            )
+        return issues
 
 
 @dataclass(frozen=True)

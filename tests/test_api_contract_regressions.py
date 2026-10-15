@@ -1726,6 +1726,137 @@ class TestSchemaConstraintsFromTheXsd:
         assert any(issue.element == "NrWierszaFa" for issue in issues)
 
 
+class TestTransportMeansValidation:
+    """`NoweSrodkiTransportu` musi być spójne ze schematem.
+
+    Znacznik bez wiersza dawał XML odrzucany przez XSD (`P_22N=1` bez
+    `NowySrodekTransportu`), a literówka w `kind` (np. `sea`) cicho wybierała
+    gałąź lądową — czyli dokument opisywał inny środek transportu.
+    """
+
+    def _invoice(self):
+        from ksef_client.documents.fa3 import FA3Invoice, InvoiceParty, VatClass
+
+        builder = FA3Invoice.basic("FV/NST/1")
+        builder.seller(
+            InvoiceParty.polish_company(
+                nip="1111111111", name="Sprzedawca", address="ul. Testowa 1"
+            )
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. Testowa 2")
+        )
+        builder.add_service_line(
+            "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+        )
+        return builder.build()
+
+    def _means(self, **overrides):
+        from datetime import date
+
+        from ksef_client.documents.fa3 import NewTransportMeans
+
+        return NewTransportMeans(
+            allowed_date=overrides.get("allowed_date", date(2026, 2, 20)),
+            row_number=overrides.get("row_number", 1),
+            kind=overrides.get("kind", "land"),
+            mileage=overrides.get("mileage", "1000"),
+            hours_used=overrides.get("hours_used"),
+        )
+
+    def test_flag_without_rows_is_reported(self):
+        from dataclasses import replace
+
+        invoice = self._invoice()
+        broken = replace(invoice, annotations=replace(invoice.annotations, new_transport=True))
+        messages = [issue.message for issue in broken.validate().errors]
+        assert any("new_transport" in message and "wiersz" in message for message in messages)
+
+    def test_rows_without_flag_are_reported(self):
+        from dataclasses import replace
+
+        invoice = self._invoice()
+        broken = replace(
+            invoice,
+            annotations=replace(invoice.annotations, new_transport_means=(self._means(),)),
+        )
+        messages = [issue.message for issue in broken.validate().errors]
+        assert any("new_transport_means" in message for message in messages)
+
+    def test_unknown_kind_is_reported(self):
+        issues = self._means(kind="sea").validate("means")
+        assert any("kind" in issue.message for issue in issues)
+
+    def test_water_and_air_require_working_hours(self):
+        for kind in ("water", "air"):
+            issues = self._means(kind=kind).validate("means")
+            assert any("hours_used" in issue.message for issue in issues), kind
+
+    def test_water_with_hours_is_accepted(self):
+        assert self._means(kind="water", hours_used="12").validate("means") == []
+
+    def test_non_positive_row_number_is_reported(self):
+        issues = self._means(row_number=0).validate("means")
+        assert any("row_number" in issue.message for issue in issues)
+
+
+class TestPaymentDueDatesAreMerged:
+    """`due_dates` nie może być po cichu pomijane, gdy `due_terms` jest niepuste."""
+
+    def _invoice(self):
+        from ksef_client.documents.fa3 import FA3Invoice, InvoiceParty, VatClass
+
+        builder = FA3Invoice.basic("FV/PAY/1")
+        builder.seller(
+            InvoiceParty.polish_company(
+                nip="1111111111", name="Sprzedawca", address="ul. Testowa 1"
+            )
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. Testowa 2")
+        )
+        builder.add_service_line(
+            "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+        )
+        return builder.build()
+
+    def test_both_sources_land_in_the_xml(self):
+        from dataclasses import replace
+        from datetime import date
+
+        from ksef_client.documents.fa3 import PaymentTerms
+        from ksef_client.documents.fa3.sections import PaymentDue
+
+        payment = PaymentTerms(
+            due_dates=(date(2026, 3, 15),),
+            due_terms=(PaymentDue.date(date(2026, 3, 1)),),
+        )
+        xml = (
+            replace(self._invoice(), payment_terms=payment)
+            .to_xml(validate=False)
+            .decode("utf-8")
+        )
+        assert xml.count("<TerminPlatnosci>") == 2
+        assert "<Termin>2026-03-01</Termin>" in xml
+        assert "<Termin>2026-03-15</Termin>" in xml
+
+    def test_paid_date_with_partial_payments_is_reported(self):
+        """Schemat pozwala opisać albo pełną zapłatę, albo zapłaty częściowe."""
+        from datetime import date
+        from decimal import Decimal
+
+        from ksef_client.documents.fa3.domain import PartialPayment, PaymentTerms
+
+        payment = PaymentTerms(
+            paid_date=date(2026, 3, 1),
+            partial_payments=(
+                PartialPayment(amount=Decimal("10.00"), payment_date=date(2026, 2, 1)),
+            ),
+        )
+        issues = payment.validate("payment")
+        assert any("paid_date" in issue.message for issue in issues)
+
+
 class TestExportArchiveLimits:
     """Paczka eksportu może mieć 10 000 faktur + `_metadata.json` (nie liczy się)."""
 
