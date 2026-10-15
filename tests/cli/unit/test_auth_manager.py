@@ -557,7 +557,8 @@ def test_resolve_lighthouse_base_url_fallbacks_to_lighthouse_test(monkeypatch) -
     assert manager.resolve_lighthouse_base_url(None) == KsefLighthouseEnvironment.TEST.value
 
 
-def test_resolve_lighthouse_base_url_invalid_profile_base_fallback(monkeypatch) -> None:
+def test_resolve_lighthouse_base_url_invalid_profile_base_raises_config_error(monkeypatch) -> None:
+    """Nieznany `base_url` profilu nie może cicho wracać do latarni TEST."""
     monkeypatch.setattr(
         manager,
         "load_config",
@@ -574,8 +575,58 @@ def test_resolve_lighthouse_base_url_invalid_profile_base_fallback(monkeypatch) 
             },
         ),
     )
-    assert manager.resolve_lighthouse_base_url(None, profile="demo") == (
-        KsefLighthouseEnvironment.TEST.value
+    with pytest.raises(CliError) as exc:
+        manager.resolve_lighthouse_base_url(None, profile="demo")
+
+    assert exc.value.code == ExitCode.CONFIG_ERROR
+    assert "Lighthouse environment" in exc.value.message
+    assert exc.value.hint is not None
+
+
+def test_resolve_lighthouse_base_url_explicit_value_wins_over_invalid_profile_base(
+    monkeypatch,
+) -> None:
+    """Nieznany `base_url` profilu nadal da się obejść jawnym adresem latarni."""
+    monkeypatch.setattr(
+        manager,
+        "load_config",
+        lambda: CliConfig(
+            active_profile="demo",
+            profiles={
+                "demo": ProfileConfig(
+                    name="demo",
+                    env="DEMO",
+                    base_url="https://unknown.example",
+                    context_type="nip",
+                    context_value="123",
+                )
+            },
+        ),
+    )
+    assert manager.resolve_lighthouse_base_url(
+        "https://api-latarnia.ksef.mf.gov.pl", profile="demo"
+    ) == "https://api-latarnia.ksef.mf.gov.pl"
+
+
+def test_resolve_lighthouse_base_url_uses_profile_prod_mapping(monkeypatch) -> None:
+    monkeypatch.setattr(
+        manager,
+        "load_config",
+        lambda: CliConfig(
+            active_profile="prod",
+            profiles={
+                "prod": ProfileConfig(
+                    name="prod",
+                    env="PRD",
+                    base_url="https://api.ksef.mf.gov.pl",
+                    context_type="nip",
+                    context_value="123",
+                )
+            },
+        ),
+    )
+    assert manager.resolve_lighthouse_base_url(None, profile="prod") == (
+        KsefLighthouseEnvironment.PROD.value
     )
 
 

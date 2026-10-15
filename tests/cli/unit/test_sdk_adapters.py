@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -520,6 +521,72 @@ def test_download_invoice_respects_overwrite(monkeypatch, tmp_path) -> None:
     assert exc.value.code == ExitCode.IO_ERROR
 
 
+def test_download_invoice_sanitizes_traversal_in_default_filename(
+    monkeypatch, tmp_path
+) -> None:
+    """Numer KSeF z odpowiedzi API nie może wyprowadzić pliku poza katalog `--out`."""
+
+    class _Invoices:
+        def get_invoice(self, ksef_number, access_token):
+            _ = (ksef_number, access_token)
+            return SimpleNamespace(content="<faktura/>", sha256_base64="hash")
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(invoices=_Invoices()),
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    result = adapters.download_invoice(
+        profile="demo",
+        base_url="https://example.invalid",
+        ksef_number="..\\..\\escaped",
+        out=str(out_dir),
+        as_format="xml",
+        overwrite=False,
+    )
+
+    saved = Path(result["path"])
+    assert saved.parent == out_dir
+    assert saved.name == ".._.._escaped.xml"
+    assert saved.read_text(encoding="utf-8") == "<faktura/>"
+    assert list(out_dir.iterdir()) == [saved]
+    assert not (tmp_path / "escaped.xml").exists()
+
+
+def test_download_invoice_bytes_saves_pdf_payload(monkeypatch, tmp_path) -> None:
+    """PDF/`application/octet-stream` z `--as bytes` nie może być mylony ze stroną HTML."""
+
+    class _Invoices:
+        def get_invoice_bytes(self, ksef_number, access_token):
+            _ = (ksef_number, access_token)
+            return SimpleNamespace(content=b"%PDF-1.7\n%\xe2\xe3\xcf\xd3", sha256_base64="hashp")
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(invoices=_Invoices()),
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    result = adapters.download_invoice(
+        profile="demo",
+        base_url="https://example.invalid",
+        ksef_number="KSEF-9",
+        out=str(out_dir),
+        as_format="bytes",
+        overwrite=False,
+    )
+
+    assert (out_dir / "KSEF-9.bin").read_bytes() == b"%PDF-1.7\n%\xe2\xe3\xcf\xd3"
+    assert result["path"] == str(out_dir / "KSEF-9.bin")
+
+
 def test_get_upo_requires_single_identifier(monkeypatch) -> None:
     monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
 
@@ -563,6 +630,158 @@ def test_get_upo_by_invoice_ref_success(monkeypatch, tmp_path) -> None:
 
     assert result["session_ref"] == "SES-1"
     assert (tmp_path / "upo.xml").read_bytes() == b"<upo/>"
+
+
+@pytest.mark.parametrize(
+    "html_payload",
+    [
+        b"<!DOCTYPE html>\n<html><body>Captive portal</body></html>",
+        b"\n  <html lang='pl'><body>Proxy</body></html>",
+        b"\xef\xbb\xbf<HTML>",
+    ],
+)
+def test_get_upo_rejects_html_payload_without_saving_file(
+    monkeypatch, tmp_path, html_payload
+) -> None:
+    """Odpowiedź 200 z HTML (captive portal/proxy) nie może być zapisana jako UPO XML."""
+
+    class _Sessions:
+        def get_session_upo(self, session_ref, upo_ref, access_token):
+            _ = (session_ref, upo_ref, access_token)
+            return html_payload
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_Sessions()),
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    with pytest.raises(CliError) as exc:
+        adapters.get_upo(
+            profile="demo",
+            base_url="https://example.invalid",
+            session_ref="SES-1",
+            invoice_ref=None,
+            ksef_number=None,
+            upo_ref="UPO-1",
+            out=str(out_dir),
+            overwrite=False,
+        )
+
+    assert exc.value.code == ExitCode.API_ERROR
+    assert "HTML" in exc.value.message
+    assert list(out_dir.iterdir()) == []
+
+
+def test_get_upo_sanitizes_traversal_in_default_filename(monkeypatch, tmp_path) -> None:
+    """Referencje sesji/UPO z API nie mogą wyprowadzić pliku poza katalog `--out`."""
+
+    class _Sessions:
+        def get_session_upo(self, session_ref, upo_ref, access_token):
+            _ = (session_ref, upo_ref, access_token)
+            return b"<upo/>"
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_Sessions()),
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    result = adapters.get_upo(
+        profile="demo",
+        base_url="https://example.invalid",
+        session_ref="..\\..\\escaped",
+        invoice_ref=None,
+        ksef_number=None,
+        upo_ref="../../escaped",
+        out=str(out_dir),
+        overwrite=False,
+    )
+
+    saved = Path(result["path"])
+    assert saved.parent == out_dir
+    assert saved.name == "upo-.._.._escaped-.._.._escaped.xml"
+    assert saved.read_bytes() == b"<upo/>"
+    assert list(out_dir.iterdir()) == [saved]
+    assert not (tmp_path / "escaped.xml").exists()
+
+
+def test_get_upo_reports_directory_creation_failure_as_io_error(monkeypatch, tmp_path) -> None:
+    """`mkdir` na ścieżce, gdzie rodzic jest plikiem, musi dać CliError, nie OSError."""
+
+    class _Sessions:
+        def get_session_upo(self, session_ref, upo_ref, access_token):
+            _ = (session_ref, upo_ref, access_token)
+            return b"<upo/>"
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_Sessions()),
+    )
+
+    blocking_file = tmp_path / "blocker"
+    blocking_file.write_bytes(b"x")
+    with pytest.raises(CliError) as exc:
+        adapters.get_upo(
+            profile="demo",
+            base_url="https://example.invalid",
+            session_ref="SES-1",
+            invoice_ref=None,
+            ksef_number=None,
+            upo_ref="UPO-1",
+            out=str(blocking_file / "upo.xml"),
+            overwrite=False,
+        )
+
+    assert exc.value.code == ExitCode.IO_ERROR
+    assert "Cannot create output directory" in exc.value.message
+    assert isinstance(exc.value.__cause__, OSError)
+
+
+def test_wait_for_upo_rejects_html_payload_without_saving_file(monkeypatch, tmp_path) -> None:
+    class _Sessions:
+        def get_session_invoice_status(self, session_ref, invoice_ref, access_token):
+            _ = (session_ref, invoice_ref, access_token)
+            return {"status": {"code": 200}}
+
+        def get_session_invoice_upo_by_ref(self, session_ref, invoice_ref, access_token):
+            _ = (session_ref, invoice_ref, access_token)
+            return b"<!DOCTYPE html><html><body>Captive portal</body></html>"
+
+    monkeypatch.setattr(adapters, "get_tokens", lambda profile: ("acc", "ref"))
+    monkeypatch.setattr(
+        adapters,
+        "create_client",
+        lambda base_url, access_token=None: _FakeClient(sessions=_Sessions()),
+    )
+    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    with pytest.raises(CliError) as exc:
+        adapters.wait_for_upo(
+            profile="demo",
+            base_url="https://example.invalid",
+            session_ref="SES-1",
+            invoice_ref="INV-1",
+            upo_ref=None,
+            batch_auto=False,
+            poll_interval=0.01,
+            max_attempts=1,
+            out=str(out_dir),
+            overwrite=False,
+        )
+
+    assert exc.value.code == ExitCode.API_ERROR
+    assert list(out_dir.iterdir()) == []
 
 
 def test_wait_for_upo_invoice_ref_success(monkeypatch, tmp_path) -> None:
@@ -2026,6 +2245,70 @@ def test_safe_child_path_rejects_traversal(tmp_path) -> None:
     with pytest.raises(CliError) as exc:
         adapters._safe_child_path(tmp_path, "../outside.xml")
     assert exc.value.code == ExitCode.IO_ERROR
+
+
+def test_safe_default_filename_replaces_path_separators() -> None:
+    assert adapters._safe_default_filename("KSEF-1.xml") == "KSEF-1.xml"
+    assert adapters._safe_default_filename("..\\..\\escaped.xml") == ".._.._escaped.xml"
+    assert adapters._safe_default_filename("../../escaped.xml") == ".._.._escaped.xml"
+    assert adapters._safe_default_filename("C:/escaped.xml") == "C__escaped.xml"
+
+
+def test_safe_default_filename_falls_back_for_dot_names() -> None:
+    assert adapters._safe_default_filename("..") == "_"
+    assert adapters._safe_default_filename("") == "_"
+
+
+def test_resolve_output_path_sanitizes_default_filename_for_directory(tmp_path) -> None:
+    target_dir = tmp_path / "out"
+    target_dir.mkdir()
+    path = adapters._resolve_output_path(
+        str(target_dir), default_filename="../../escaped.xml"
+    )
+    assert path == target_dir / ".._.._escaped.xml"
+
+    trailing = adapters._resolve_output_path(
+        f"{target_dir.as_posix()}/", default_filename="..\\escaped.xml"
+    )
+    assert trailing == target_dir / ".._escaped.xml"
+
+
+def test_resolve_output_path_keeps_explicit_file_path(tmp_path) -> None:
+    target = tmp_path / "explicit.xml"
+    path = adapters._resolve_output_path(str(target), default_filename="../../escaped.xml")
+    assert path == target
+
+
+def test_save_bytes_reports_directory_creation_failure(tmp_path) -> None:
+    """`mkdir` przed `try` uciekał jako surowy OSError (CLI: UNEXPECTED/6)."""
+    blocking_file = tmp_path / "blocker"
+    blocking_file.write_bytes(b"x")
+
+    with pytest.raises(CliError) as exc:
+        adapters._save_bytes(blocking_file / "nested" / "out.xml", b"<upo/>", overwrite=False)
+
+    assert exc.value.code == ExitCode.IO_ERROR
+    assert "Cannot create output directory" in exc.value.message
+    assert isinstance(exc.value.__cause__, OSError)
+    assert not blocking_file.is_dir()
+
+
+def test_save_bytes_rejects_html_payload(tmp_path) -> None:
+    target = tmp_path / "upo-1.xml"
+
+    with pytest.raises(CliError) as exc:
+        adapters._save_bytes(target, b"<html><body>x</body></html>", overwrite=False)
+
+    assert exc.value.code == ExitCode.API_ERROR
+    assert not target.exists()
+
+
+def test_save_bytes_accepts_xml_and_binary_payloads(tmp_path) -> None:
+    xml_path = adapters._save_bytes(tmp_path / "upo.xml", b"<upo/>", overwrite=False)
+    bin_path = adapters._save_bytes(tmp_path / "invoice.bin", b"%PDF-1.7", overwrite=False)
+
+    assert xml_path.read_bytes() == b"<upo/>"
+    assert bin_path.read_bytes() == b"%PDF-1.7"
 
 
 def test_build_form_code_validation() -> None:

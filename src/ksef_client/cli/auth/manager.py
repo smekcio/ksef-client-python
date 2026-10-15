@@ -211,8 +211,15 @@ def resolve_lighthouse_base_url(
             try:
                 options = KsefClientOptions(base_url=profile_base_url.strip())
                 return options.resolve_lighthouse_base_url()
-            except ValueError:
-                pass
+            except ValueError as exc:
+                # Cichy powrót do latarni TEST dla nieznanego `base_url` profilu
+                # pokazywał statusy TEST bez żadnego sygnału dla użytkownika.
+                raise CliError(
+                    "Cannot resolve the Lighthouse environment for the profile base URL.",
+                    ExitCode.CONFIG_ERROR,
+                    "Set a known profile base_url (TEST/DEMO/PRD) or pass "
+                    "--base-url / KSEF_LIGHTHOUSE_BASE_URL.",
+                ) from exc
 
     return KsefLighthouseEnvironment.TEST.value
 

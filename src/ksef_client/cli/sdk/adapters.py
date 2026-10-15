@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
@@ -58,6 +59,11 @@ _COMPRESSION_TYPE_BY_CLI_VALUE = {
     "targz": m.CompressionType.TARGZ,
     "tar.gz": m.CompressionType.TARGZ,
 }
+#: Znaki dozwolone w domyślnej nazwie pliku (bez separatorów ścieżki i dwukropka dysku).
+_SAFE_FILENAME_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]")
+_HTML_DOCUMENT_PREFIXES = (b"<!doctype html", b"<html")
+_HTML_SNIFF_STRIP_BYTES = b"\xef\xbb\xbf \t\r\n"
+_HTML_SNIFF_LIMIT = 512
 
 
 @dataclass(frozen=True)
@@ -168,22 +174,64 @@ def _require_non_negative_page_offset(value: int) -> int:
     )
 
 
+def _safe_default_filename(name: str) -> str:
+    """Czyści domyślną nazwę pliku zbudowaną z identyfikatorów zwróconych przez KSeF.
+
+    Numer KSeF oraz referencje sesji, faktury i UPO pochodzą z odpowiedzi API, więc
+    ``..\\..\\escaped`` tworzyło plik poza katalogiem ``--out``. Znaki spoza
+    ``[A-Za-z0-9._-]`` (m.in. separatory ścieżki i dwukropek dysku) zastępujemy ``_``,
+    a nazwy ``.``/``..`` wskazujące na katalog odrzucamy.
+    """
+    sanitized = _SAFE_FILENAME_CHARS_RE.sub("_", name)
+    if sanitized in {"", ".", ".."}:
+        return "_"
+    return sanitized
+
+
 def _resolve_output_path(
     out: str,
     *,
     default_filename: str,
 ) -> Path:
+    safe_filename = _safe_default_filename(default_filename)
     path = Path(out)
     if path.exists() and path.is_dir():
-        return path / default_filename
+        return path / safe_filename
     normalized_out = out.replace("\\", "/")
     if normalized_out.endswith("/"):
-        return Path(normalized_out) / default_filename
+        return Path(normalized_out) / safe_filename
     return path
 
 
+def _reject_html_payload(content: bytes, *, path: Path) -> None:
+    """Blokuje zapis strony HTML w miejscu dokumentu KSeF.
+
+    Captive portal albo proxy potrafi odpowiedzieć kodem 200 i treścią ``text/html``;
+    zapisana jako ``upo-*.xml`` strona była raportowana jako sukces, choć nie zawierała
+    UPO. Legalne odpowiedzi (XML faktury, UPO XML, PDF, ``application/octet-stream``)
+    nie zaczynają się od ``<!DOCTYPE html``/``<html``, więc nie są odrzucane.
+    """
+    head = content.lstrip(_HTML_SNIFF_STRIP_BYTES)[:_HTML_SNIFF_LIMIT].lower()
+    if head.startswith(_HTML_DOCUMENT_PREFIXES):
+        raise CliError(
+            f"Expected a KSeF document but received an HTML page: {path}",
+            ExitCode.API_ERROR,
+            "The response came from a proxy or captive portal; retry on another network.",
+        )
+
+
 def _save_bytes(path: Path, content: bytes, *, overwrite: bool) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _reject_html_payload(content, path=path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # `mkdir` poza `try` uciekał jako surowy OSError, więc CLI kończyło się
+        # nieoczekiwanym kodem wyjścia (UNEXPECTED/6) zamiast czytelnego IO_ERROR.
+        raise CliError(
+            f"Cannot create output directory: {path.parent}",
+            ExitCode.IO_ERROR,
+            "Grant write access to the target directory or choose another --out.",
+        ) from exc
     if path.exists() and not overwrite:
         raise CliError(
             f"Output file already exists: {path}",
