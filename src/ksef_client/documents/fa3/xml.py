@@ -33,7 +33,6 @@ from .domain import (
 )
 from .models import (
     FA3Draft,
-    FA3InvoiceKind,
     FA3Line,
     FA3Party,
     FA3ValidationIssue,
@@ -283,18 +282,38 @@ def validate_fa3_xml_xsd(xml: bytes | str) -> None:
         raise FA3XmlValidationError(detail)
 
 
+#: Pliki schematu FA(3) dostępne w pakiecie. Resolver przyjmuje wyłącznie te
+#: nazwy — wszystko inne (w tym URL-e z ``xsd:include``) kończy się błędem,
+#: żeby walidacja nie mogła pobrać niczego z sieci.
+_BUNDLED_SCHEMAS = frozenset(
+    {
+        "schemat_FA(3)_v1-0E.xsd",
+        "StrukturyDanych_v10-0E.xsd",
+        "ElementarneTypyDanych_v10-0E.xsd",
+        "KodyKrajow_v10-0E.xsd",
+    }
+)
+
+
 def _schema_resolver(etree: Any) -> Any:
+    """Resolver schematów FA(3) czytający WYŁĄCZNIE bundlowane pliki.
+
+    Resolver jest **fail-closed**: dla nazwy spoza bundlowanych schematów rzuca
+    wyjątek, a nie zwraca ``None``. Zwrócenie ``None`` oddawało sprawę
+    domyślnemu resolverowi lxml, a ten przy ``xsd:include``/``xsd:import`` sięga
+    do sieci (``no_network`` tego nie blokuje — potwierdzone żądaniem do serwera
+    loopback). Nowy plik w ``include`` upstreamu oznaczałby więc wychodzące
+    żądanie HTTP z procesu walidującego dokument podatnika.
+    """
+
     class PackageSchemaResolver(etree.Resolver):
         def resolve(self, url: str, public_id: str | None, context: Any) -> Any:
             file_name = Path(url).name
-            known = {
-                "schemat_FA(3)_v1-0E.xsd",
-                "StrukturyDanych_v10-0E.xsd",
-                "ElementarneTypyDanych_v10-0E.xsd",
-                "KodyKrajow_v10-0E.xsd",
-            }
-            if file_name not in known:
-                return None
+            if file_name not in _BUNDLED_SCHEMAS:
+                raise FA3XmlValidationError(
+                    f"Schemat {url!r} nie należy do bundlowanych plików FA(3) "
+                    f"({', '.join(sorted(_BUNDLED_SCHEMAS))})."
+                )
             schema_package = resources.files("ksef_client.documents.fa3.schemas")
             with resources.as_file(schema_package / file_name) as schema_path:
                 return self.resolve_filename(str(schema_path), context)
@@ -541,12 +560,13 @@ def _add_advance_summary(
                 )
 
 
-def _scale_settlement_summary(
-    invoice: FA3Invoice,
+def _scale_summary_to_target(
     summary: dict[str, Decimal],
     vat_summary: dict[str, Decimal],
+    target: Decimal,
+    foreign_vat_summary: dict[str, Decimal] | None = None,
 ) -> None:
-    """Dla ROZ/KOR_ROZ przelicza koszyki na proporcję kwoty pozostałej do zapłaty.
+    """Skaluje koszyki `P_13_x`/`P_14_x` (i lustrzane `P_14_xW`) do kwoty `target`.
 
     Wiersze faktury rozliczającej niosą **pełną wartość zamówienia**, a
     `P_13_x`/`P_14_x` są proporcją kwoty pozostałej do zapłaty (art. 106f ust. 3).
@@ -555,8 +575,6 @@ def _scale_settlement_summary(
     `P_13_2` = 280177.59, `P_14_2` = 22414.21 oraz `P_13_1` = 4100.16,
     `P_14_1` = 943.04 — czyli dokładnie wartości wierszy × 307635/337635.
     """
-    if invoice.kind not in SETTLEMENT_SCALE_KINDS:
-        return
 
     def _total() -> Decimal:
         return money(
@@ -565,7 +583,6 @@ def _scale_settlement_summary(
         )
 
     total = _total()
-    target = money(invoice.summary_gross)
     if total == 0 or target == 0 or total == target:
         return
     factor = target / total
@@ -575,6 +592,20 @@ def _scale_settlement_summary(
         summary[tag] = money(value * factor)
     for tag, value in list(vat_summary.items()):
         vat_summary[tag] = money(value * factor)
+    # Lustrzane `P_14_xW` skalujemy TYM SAMYM współczynnikiem: niosą ten sam
+    # podatek w walucie obcej, więc bez proporcji przeczyłyby `P_14_x` w tym
+    # samym dokumencie (ROZ USD z kursem 4.0 dawał `P_14_2` = 22414.21 przy
+    # `P_14_2W` = 98400.00, czyli pełnej kwocie z wierszy zamiast 89656.83).
+    # Nie wliczamy ich do `_total()` ani nie dokładamy do nich reszty:
+    # tożsamość `P_15 = ΣP_13_x + ΣP_14_x` ich nie obejmuje (to kwoty
+    # w walucie obcej, a `P_15` jest w złotych), więc reszta z zaokrągleń
+    # trafia do koszyka złotowego. `P_14_xW` i `P_14_x × kurs` mogą różnić się
+    # o grosz: obie strony są zaokrąglane osobno (`money(Σvat×kurs×factor)`
+    # kontra `money(money(Σvat×factor)×kurs)`), a pełnej zgodności nie da się
+    # osiągnąć bez założenia, że cały koszyk dzieli jeden kurs.
+    if foreign_vat_summary:
+        for tag, value in list(foreign_vat_summary.items()):
+            foreign_vat_summary[tag] = money(value * factor)
     # Po zaokrągleniu do groszy suma może różnić się od `P_15` o 1–2 grosze;
     # resztę dokładamy do największego koszyka, żeby `P_15 = ΣP_13_x + ΣP_14_x`
     # zachodziło co do grosza.
@@ -582,6 +613,26 @@ def _scale_settlement_summary(
     if residual != 0 and summary:
         largest = max(summary, key=lambda tag: summary[tag])
         summary[largest] = money(summary[largest] + residual)
+
+
+def _scale_settlement_summary(
+    invoice: FA3Invoice,
+    summary: dict[str, Decimal],
+    vat_summary: dict[str, Decimal],
+    foreign_vat_summary: dict[str, Decimal],
+) -> None:
+    """Dla ROZ/KOR_ROZ przelicza koszyki na proporcję kwoty pozostałej do zapłaty.
+
+    Samo skalowanie i jego uzasadnienie opisuje `_scale_summary_to_target`.
+    """
+    if invoice.kind not in SETTLEMENT_SCALE_KINDS:
+        return
+    _scale_summary_to_target(
+        summary,
+        vat_summary,
+        money(invoice.summary_gross),
+        foreign_vat_summary,
+    )
 
 
 def _tax_summary(fa: ET.Element, invoice: FA3Invoice) -> None:
@@ -613,7 +664,7 @@ def _tax_summary(fa: ET.Element, invoice: FA3Invoice) -> None:
     # łamało tożsamość `P_15 = ΣP_13_x + ΣP_14_x` — np. dla `KOR_ZAL`
     # z zaliczką dokument nie deklarował żadnej podstawy opodatkowania.
     _add_advance_summary(invoice, summary, vat_summary, foreign_vat_summary)
-    _scale_settlement_summary(invoice, summary, vat_summary)
+    _scale_settlement_summary(invoice, summary, vat_summary, foreign_vat_summary)
     for net_tag, vat_tag, _vat_w_tag in _TAX_SUMMARY_ORDER:
         if net_tag in summary:
             ET.SubElement(fa, _q(net_tag)).text = _amount(summary[net_tag])
@@ -725,11 +776,27 @@ def _domain_annotations(fa: ET.Element, annotations: AnnotationSet) -> None:
 
 
 def _domain_correction(fa: ET.Element, invoice: FA3Invoice) -> None:
-    if invoice.kind not in {
-        FA3InvoiceKind.CORRECTION,
-        FA3InvoiceKind.ADVANCE_CORRECTION,
-        FA3InvoiceKind.SETTLEMENT_CORRECTION,
-    }:
+    """Pola korekty — wypisywane z DANYCH, a nie z `RodzajFaktury`.
+
+    Wcześniejsza wersja wychodziła dla każdego rodzaju spoza `KOR`/`KOR_ZAL`/
+    `KOR_ROZ`, więc `correction_reason`, `corrected_invoices`,
+    `corrected_advance_state` i `corrected_invoice_number_override` ginęły bez
+    jednego słowa (`validate().ok` było `True`, a w XML nie było ani
+    `PrzyczynaKorekty`, ani `DaneFaKorygowanej`, ani `P_15ZK`).
+
+    Schemat nie warunkuje tych elementów rodzajem faktury: to
+    `xsd:sequence minOccurs="0"` (opisana jako „dane dla przypadków, gdy pole
+    RodzajFaktury przyjmuje wartości KOR, KOR_ZAL lub KOR_ROZ", ale bez
+    `xsd:assert`, którego FA(3) nie używa). Jedyne TWARDE ograniczenie jest
+    składniowe: `DaneFaKorygowanej` jest w tej sekwencji wymagane, a
+    `PrzyczynaKorekty`, `TypKorekty`, `OkresFaKorygowanej`, `NrFaKorygowany`,
+    `Podmiot1K`, `Podmiot2K`, `P_15ZK` i `KursWalutyZK` leżą w tej samej lub
+    zagnieżdżonej grupie — bez faktury korygowanej XSD odrzuca całość
+    (`SCHEMAV_ELEMENT_CONTENT`). Dlatego grupę wypisujemy tylko wtedy, gdy jest
+    co wpisać w `DaneFaKorygowanej`; o polach pominiętych z tego powodu mówi
+    `FA3Invoice.validate()`.
+    """
+    if not invoice.corrected_invoices:
         return
     if invoice.correction_reason:
         ET.SubElement(fa, _q("PrzyczynaKorekty")).text = invoice.correction_reason
@@ -1255,6 +1322,12 @@ def _draft_tax_summary(fa: ET.Element, draft: FA3Draft) -> None:
 
     Kwoty są sumowane per stawka tak samo jak w ścieżce typowanej
     (``_tax_summary``), a nie wrzucane w całości do ``P_13_1``/``P_14_1``.
+
+    Dla szkicu rozliczeniowego (``ROZ``/``KOR_ROZ``) wiersze niosą pełną wartość
+    zamówienia, więc koszyki trzeba przeskalować do ``P_15``
+    (``FA3Draft.summary_gross`` = ``settlement_amount`` = ``DoZaplaty``) — bez
+    tego ``P_15 != ΣP_13_x + ΣP_14_x``. Używamy tego samego helpera co ścieżka
+    typowana, więc proporcja i rozdział reszty są identyczne w obu ścieżkach.
     """
     summary: dict[str, Decimal] = {}
     vat_summary: dict[str, Decimal] = {}
@@ -1265,12 +1338,14 @@ def _draft_tax_summary(fa: ET.Element, draft: FA3Draft) -> None:
             vat_summary[vat_tag] = money(
                 vat_summary.get(vat_tag, Decimal("0.00")) + line.effective_vat_amount
             )
+    if draft.kind in SETTLEMENT_SCALE_KINDS:
+        _scale_summary_to_target(summary, vat_summary, money(draft.summary_gross))
     for net_tag, _net_order, vat_tag, _vat_order in _DRAFT_SUMMARY_ORDER:
         if net_tag in summary:
             ET.SubElement(fa, _q(net_tag)).text = _amount(summary[net_tag])
         if vat_tag and vat_tag in vat_summary:
             ET.SubElement(fa, _q(vat_tag)).text = _amount(vat_summary[vat_tag])
-    ET.SubElement(fa, _q("P_15")).text = _amount(draft.total_gross)
+    ET.SubElement(fa, _q("P_15")).text = _amount(draft.summary_gross)
 
 
 def _draft_exemption_basis(draft: FA3Draft) -> str | None:
@@ -1386,21 +1461,23 @@ def _annotations(fa: ET.Element, *, exemption_basis: str | None = None) -> None:
 
 
 def _correction(fa: ET.Element, draft: FA3Draft) -> None:
-    if draft.kind not in {
-        FA3InvoiceKind.CORRECTION,
-        FA3InvoiceKind.ADVANCE_CORRECTION,
-        FA3InvoiceKind.SETTLEMENT_CORRECTION,
-    }:
+    """Grupa korekty szkicu — z DANYCH, nie z `RodzajFaktury`.
+
+    Tak samo jak w ścieżce typowanej (`_domain_correction`): schemat nie
+    warunkuje tych elementów rodzajem faktury, a jedynym twardym ograniczeniem
+    jest wymagane `DaneFaKorygowanej` — dlatego wypisujemy grupę wtedy i tylko
+    wtedy, gdy szkic niesie jej komplet (`FA3Draft.correction_data`).
+    Pominięte dane zgłasza `FA3Draft.validate()`.
+    """
+    correction_data = draft.correction_data
+    if correction_data is None:
         return
+    reason, issue_date, number = correction_data
     correction = ET.SubElement(fa, _q("PrzyczynaKorekty"))
-    correction.text = draft.correction_reason
+    correction.text = reason
     corrected = ET.SubElement(fa, _q("DaneFaKorygowanej"))
-    if draft.corrected_invoice_date:
-        ET.SubElement(
-            corrected, _q("DataWystFaKorygowanej")
-        ).text = draft.corrected_invoice_date.isoformat()
-    if draft.corrected_invoice_number:
-        ET.SubElement(corrected, _q("NrFaKorygowanej")).text = draft.corrected_invoice_number
+    ET.SubElement(corrected, _q("DataWystFaKorygowanej")).text = issue_date.isoformat()
+    ET.SubElement(corrected, _q("NrFaKorygowanej")).text = number
     if draft.corrected_ksef_number:
         ET.SubElement(corrected, _q("NrKSeF")).text = "1"
         ET.SubElement(corrected, _q("NrKSeFFaKorygowanej")).text = draft.corrected_ksef_number
@@ -1497,16 +1574,32 @@ def _amount2(value: Decimal | str | int | float) -> str:
     return _decimal(value)
 
 
-def _decimal(value: Decimal) -> str:
+def _decimal(value: Decimal, *, field_name: str = "amount") -> str:
+    """Zapis liczby bez zer końcowych; `NaN`/`Infinity` to błąd walidacji.
+
+    `Decimal("NaN")` przechodzi przez `to_integral_value()` i `normalize()`
+    bez wyjątku, więc do XML trafiałoby `<P_11>NaN</P_11>` — dokument, którego
+    nie zaakceptuje ani schemat, ani KSeF.
+    """
+    if not value.is_finite():
+        raise FA3XmlValidationError(_not_a_number(field_name, value))
     if value == value.to_integral_value():
         return str(int(value))
     return format(value.normalize(), "f")
 
 
+def _not_a_number(field_name: str, value: object) -> str:
+    """Komunikat dla wartości spoza precyzji/wartości skończonych `decimal`."""
+    return (
+        f"Pole '{field_name}': wartość {value!r} nie jest poprawną liczbą dziesiętną "
+        "(dozwolone są wyłącznie liczby skończone, o maksymalnie 28 cyfrach)."
+    )
+
+
 _RATE6_QUANT = Decimal("0.000001")
 
 
-def _rate6(value: Decimal | str | int | float) -> str:
+def _rate6(value: Decimal | str | int | float, *, field_name: str = "rate") -> str:
     """Pola typu `TIlosci`/`TProcentowy`: do 6 miejsc po przecinku.
 
     Broszura MF (str. 6) wylicza je wprost: "For the fields P_8B, P_12_XII,
@@ -1515,10 +1608,18 @@ def _rate6(value: Decimal | str | int | float) -> str:
     Schemat egzekwuje to wzorcem, więc wartość z większą liczbą miejsc (np. ilość
     z dzielenia albo kurs skopiowany z tabeli NBP) dawała XML odrzucany przez KSeF,
     a `validate()` milczał. Zaokrąglamy do 6 miejsc (ROUND_HALF_UP, jak `money`).
+
+    `quantize` wymaga 6 miejsc po przecinku, więc wartość dłuższa niż 28 cyfr
+    przekraczała precyzję kontekstu `decimal` i rzucała surowe
+    `decimal.InvalidOperation` zamiast błędu walidacji.
     """
     if not isinstance(value, Decimal):
-        value = decimal_from_value(value, field_name="rate")
-    return _decimal(value.quantize(_RATE6_QUANT, rounding=ROUND_HALF_UP))
+        value = decimal_from_value(value, field_name=field_name)
+    try:
+        quantized = value.quantize(_RATE6_QUANT, rounding=ROUND_HALF_UP)
+    except ArithmeticError as exc:
+        raise FA3XmlValidationError(_not_a_number(field_name, value)) from exc
+    return _decimal(quantized, field_name=field_name)
 
 
 def _yes_no(value: bool) -> str:

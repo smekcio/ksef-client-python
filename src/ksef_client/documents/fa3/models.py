@@ -81,22 +81,53 @@ def _normalize_label(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", " ").replace("_", " ")
 
 
+def _decimal_error(field_name: str, value: object) -> ValueError:
+    """Czytelny błąd walidacji zamiast surowego `decimal.InvalidOperation`.
+
+    Arytmetyka `decimal` ma kontekst o precyzji 28 cyfr, więc `quantize` na
+    wartości dłuższej (albo na `NaN`/`Infinity`) rzucał `InvalidOperation`,
+    który uciekał z publicznego API (`FA3Party`/`FA3Draft`/`FA3Invoice`) jako
+    wyjątek biblioteki standardowej, bez nazwy pola i bez wskazania wartości.
+    """
+    return ValueError(
+        f"Pole '{field_name}': wartość {value!r} nie jest poprawną liczbą dziesiętną "
+        "(dozwolone są wyłącznie liczby skończone, o maksymalnie 28 cyfrach)."
+    )
+
+
 def decimal_from_value(value: Any, *, field_name: str) -> Decimal:
     if isinstance(value, Decimal):
-        return value
-    if isinstance(value, int | float):
-        return Decimal(str(value))
-    text = str(value or "").strip().replace(" ", "").replace(",", ".")
-    if not text:
-        raise ValueError(f"Pole '{field_name}' jest wymagane.")
+        parsed = value
+    elif isinstance(value, int | float):
+        # `bool` też tu wpada, a `Decimal("True")` rzuca `InvalidOperation`.
+        try:
+            parsed = Decimal(str(value))
+        except InvalidOperation as exc:
+            raise ValueError(f"Pole '{field_name}' musi być liczbą.") from exc
+    else:
+        text = str(value or "").strip().replace(" ", "").replace(",", ".")
+        if not text:
+            raise ValueError(f"Pole '{field_name}' jest wymagane.")
+        try:
+            parsed = Decimal(text)
+        except InvalidOperation as exc:
+            raise ValueError(f"Pole '{field_name}' musi być liczbą.") from exc
+    if not parsed.is_finite():
+        # `Decimal("NaN")`/`Decimal("Infinity")` konstruują się bez błędu, a dopiero
+        # pierwsze porównanie (`cena < 0`) rzucało `InvalidOperation` z głębi
+        # walidacji domenowej — komunikat nie mówił, o które pole chodzi.
+        raise _decimal_error(field_name, value)
+    return parsed
+
+
+def money(value: Decimal, *, field_name: str = "amount") -> Decimal:
+    if not value.is_finite():
+        raise _decimal_error(field_name, value)
     try:
-        return Decimal(text)
-    except InvalidOperation as exc:
-        raise ValueError(f"Pole '{field_name}' musi być liczbą.") from exc
-
-
-def money(value: Decimal) -> Decimal:
-    return value.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+        return value.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+    except ArithmeticError as exc:
+        # Kwota dłuższa niż 28 cyfr nie mieści się w precyzji kontekstu `decimal`.
+        raise _decimal_error(field_name, value) from exc
 
 
 def _decimal_to_json(value: Decimal | None) -> str | None:
@@ -513,6 +544,43 @@ class FA3Draft:
     def total_gross(self) -> Decimal:
         return money(sum((line.effective_gross_amount for line in self.lines), Decimal("0.00")))
 
+    @property
+    def summary_gross(self) -> Decimal:
+        """Wartość `P_15` w XML — odpowiednik `FA3Invoice.summary_gross`.
+
+        Dla szkicu rozliczeniowego (`ROZ`/`KOR_ROZ`) wiersze niosą pełną wartość
+        zamówienia, a `P_15` to kwota pozostała do zapłaty, czyli
+        `settlement_amount` — ta sama kwota trafia do `Rozliczenie/DoZaplaty`.
+        Reguła [ROZ-15] `DoZaplaty = P_15 + Obciazenia − Odliczenia` zachodzi
+        wtedy z definicji (szkic nie ma pól `Obciazenia`/`Odliczenia`).
+        Wcześniej `P_15` liczyło się wyłącznie z wierszy, więc szkic deklarował
+        np. `P_15=300.00` przy `DoZaplaty=100.00`, a `validate()` o tym milczał.
+
+        `SETTLEMENT_SCALE_KINDS` importujemy lokalnie: `domain` importuje `models`
+        na poziomie modułu, więc import na górze pliku domknąłby cykl.
+        """
+        from .domain import SETTLEMENT_SCALE_KINDS
+
+        if self.kind in SETTLEMENT_SCALE_KINDS and self.settlement_amount is not None:
+            return money(self.settlement_amount)
+        return self.total_gross
+
+    @property
+    def correction_data(self) -> tuple[str, date, str] | None:
+        """Komplet danych grupy korekty: ``(przyczyna, data, numer)`` albo ``None``.
+
+        Schemat FA(3) wymaga w grupie `PrzyczynaKorekty`/`DaneFaKorygowanej`
+        elementu `DaneFaKorygowanej` z `DataWystFaKorygowanej` i `NrFaKorygowanej`,
+        więc bez kompletu nie da się tej grupy wypisać: `xml._correction` pomija
+        ją wtedy, a `validate()` zgłasza utratę danych zamiast milczeć.
+        """
+        reason = self.correction_reason
+        issue_date = self.corrected_invoice_date
+        number = self.corrected_invoice_number
+        if reason and issue_date and number:
+            return (reason, issue_date, number)
+        return None
+
     def validate(self) -> tuple[list[FA3ValidationIssue], list[FA3ValidationIssue]]:
         errors: list[FA3ValidationIssue] = []
         warnings = list(self.warnings)
@@ -622,6 +690,26 @@ class FA3Draft:
                         column="Numer faktury korygowanej",
                     )
                 )
+        else:
+            # Lustrzana kontrola do `FA3Invoice.validate()`: `xml._correction`
+            # wypisuje grupę korekty z danych (nie z rodzaju), ale `DaneFaKorygowanej`
+            # wymaga w schemacie kompletu „data + numer", więc bez niego dane muszą
+            # zostać pominięte — i wtedy muszą zostać zgłoszone, a nie zniknąć.
+            correction_fields = (
+                ("Przyczyna korekty", self.correction_reason),
+                ("Numer faktury korygowanej", self.corrected_invoice_number),
+                ("Data faktury korygowanej", self.corrected_invoice_date),
+                ("Numer KSeF faktury korygowanej", self.corrected_ksef_number),
+            )
+            provided = [name for name, value in correction_fields if value]
+            if provided and self.correction_data is None:
+                issues.append(
+                    FA3ValidationIssue(
+                        f"{', '.join(provided)}: grupy korekty nie da się wypisać bez "
+                        "kompletu (przyczyna + data + numer faktury korygowanej) — "
+                        "schemat wymaga w tej samej sekwencji `DaneFaKorygowanej`."
+                    )
+                )
         settlement_kinds = {FA3InvoiceKind.SETTLEMENT, FA3InvoiceKind.SETTLEMENT_CORRECTION}
         if self.kind in settlement_kinds and not (
             self.advance_invoice_number or self.advance_ksef_number
@@ -631,6 +719,25 @@ class FA3Draft:
                     "Rozliczenie: podaj numer faktury zaliczkowej albo numer KSeF "
                     "faktury zaliczkowej.",
                     column="Numer faktury zaliczkowej",
+                )
+            )
+        # Dla rodzaju nie-skalującego `P_15` pochodzi z wierszy, a `DoZaplaty`
+        # z `settlement_amount` — rozjazd oznacza dokument, który deklaruje dwie
+        # różne kwoty do zapłaty (reguła [ROZ-15] `DoZaplaty = P_15 +
+        # Obciazenia − Odliczenia`; szkic nie ma obu składników korekty).
+        # Ścieżka typowana zgłasza to samo w `_validate_settlement_proportion`.
+        if (
+            self.kind not in settlement_kinds
+            and self.settlement_amount is not None
+            and money(self.settlement_amount) != self.total_gross
+        ):
+            issues.append(
+                FA3ValidationIssue(
+                    "Rozliczenie niespójne: oczekiwane DoZaplaty="
+                    f"{self.total_gross:.2f} (P_15 + SumaObciazen - SumaOdliczen), "
+                    f"otrzymano {money(self.settlement_amount):.2f}. Kwotę pozostałą "
+                    "do zapłaty podaje się dla rodzaju ROZ/KOR_ROZ.",
+                    column="Rozliczenie",
                 )
             )
         return issues

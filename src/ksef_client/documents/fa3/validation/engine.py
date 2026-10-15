@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 from ....utils.datetime_parsing import parse_api_datetime
 from .facets import (
     _DECIMAL_TEXT,
+    _INTEGER_TEXT,
     ELEMENT_FACETS,
     REQUIRED_IN_ANCESTOR,
     REQUIRED_IN_PARENT,
@@ -157,10 +158,28 @@ def _check_text(value: str, facet: Facet, path: str, element: str) -> list[Facet
         ]
 
     issues = []
-    # Schemat wymusza wzorzec `-?([1-9]\d{0,N}|0)(\.\d{1,M})?`: brak zer
-    # wiodących, brak wykładnika, brak kropki bez cyfr. `Decimal("007.50")`
-    # przechodził przez samą kontrolę precyzji i dopiero KSeF go odrzucał.
-    if not _DECIMAL_TEXT.fullmatch(value):
+    if facet.kind is FacetKind.INTEGER:
+        # `xsd:integer` ma własną przestrzeń leksykalną `[+-]?[0-9]+`: `30.0`
+        # (float przekazany do pola całkowitego, np. `Ilosc`) przechodził przez
+        # kontrolę wartości, bo `Decimal("30.0") == Decimal("30")`, a dokument
+        # odrzucał dopiero schemat (`SCHEMAV_CVC_DATATYPE_VALID_1_2_1`).
+        # Zera wiodące (`007`) i znak `+` są w XSD POPRAWNE, więc ich nie zgłaszamy.
+        # Ten warunek zastępuje dawną kontrolę `number != number.to_integral_value()`,
+        # która była już nieosiągalna: sam zapis gwarantuje wartość całkowitą.
+        if not _INTEGER_TEXT.fullmatch(value):
+            issues.append(
+                FacetIssue(
+                    path,
+                    element,
+                    f"wartość {value!r} nie jest liczbą całkowitą w zapisie wymaganym "
+                    f"przez schemat ({facet.xsd_type or facet.kind.value})",
+                )
+            )
+            return issues
+    elif not _DECIMAL_TEXT.fullmatch(value):
+        # Schemat wymusza wzorzec `-?([1-9]\d{0,N}|0)(\.\d{1,M})?`: brak zer
+        # wiodących, brak wykładnika, brak kropki bez cyfr. `Decimal("007.50")`
+        # przechodził przez samą kontrolę precyzji i dopiero KSeF go odrzucał.
         issues.append(
             FacetIssue(
                 path,
@@ -195,8 +214,6 @@ def _check_text(value: str, facet: Facet, path: str, element: str) -> list[Facet
                     f"{facet.total_digits} ({facet.xsd_type})",
                 )
             )
-    if facet.kind is FacetKind.INTEGER and number != number.to_integral_value():
-        issues.append(FacetIssue(path, element, f"wartość {value!r} musi być liczbą całkowitą"))
     if facet.decimals is not None:
         places = _decimal_places(number)
         if places > facet.decimals:
@@ -324,13 +341,21 @@ def _apply_whitespace(value: str, mode: str) -> str:
     * ``preserve`` (``xsd:string``) — bez zmian: ``<NIP> 1111111111</NIP>`` jest
       niezgodny ze schematem i musi zostać zgłoszony,
     * ``replace`` (``xsd:normalizedString``) — ``\\t``/``\\n``/``\\r`` na spację,
-    * ``collapse`` (``xsd:token``, typy liczbowe i daty) — dodatkowo zwinięcie
-      powtórzonych spacji i obcięcie skrajnych.
+    * ``collapse`` (``xsd:token``, typy liczbowe i daty) — po ``replace`` zwija
+      powtórzone spacje i obcina skrajne.
+
+    Białym znakiem są WYŁĄCZNIE ``#x9``, ``#xA``, ``#xD`` i ``#x20`` — dlatego
+    zwijamy i obcinamy tylko ``U+0020``, a nie ``str.split()``/``str.strip()``
+    bez argumentu, które traktują jako białe znaki także ``U+00A0`` (NBSP),
+    ``U+3000``, ``U+0085``, ``U+000B`` czy ``U+2028``. Wartość 600×NBSP + "A"
+    przechodziła wtedy kontrolę długości (601 znaków zwinięte do 1), a XSD
+    odrzucał dokument przez ``maxLength``.
     """
-    if mode == "collapse":
-        return " ".join(value.split())
     if mode == "replace":
         return value.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+    if mode == "collapse":
+        replaced = value.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+        return " ".join(part for part in replaced.split(" ") if part)
     return value
 
 
@@ -472,40 +497,59 @@ def _check_required(
     return issues
 
 
-def _walk(element: Element, path: str) -> list[FacetIssue]:
-    """Rekurencyjnie waliduje poddrzewo, budując ścieżki i liczniki rodzeństwa."""
-    parent_name = _local_name(element.tag)
-    children = [child for child in element if _is_fa3_element(child.tag)]
-    counter: Counter[str] = Counter(_local_name(child.tag) for child in children)
+def _walk(root: Element, path: str) -> list[FacetIssue]:
+    """Waliduje poddrzewo iteracyjnie (jawny stos), budując ścieżki i liczniki.
 
+    Przejście rekurencyjne wywracało się na `RecursionError` przy ok. 1000
+    zagnieżdżonych elementach — dokument parsował się poprawnie, a publiczny
+    walidator przestawał działać. Kolejność zgłoszeń jest identyczna jak
+    w wersji rekurencyjnej: dla elementu najpierw wymagania i liczność
+    rodzeństwa, a potem — dla każdego dziecka po kolei — jego wartość
+    (``@fixed``/fasety) i całe jego poddrzewo.
+    """
     issues: list[FacetIssue] = []
-    issues.extend(_check_required(set(counter), parent_name, path))
-    issues.extend(_check_occurrences(parent_name, counter, _first_paths(path, children)))
-
-    seen: Counter[str] = Counter()
-    for child in children:
-        name = _local_name(child.tag)
-        seen[name] += 1
-        child_path = f"{path}/{name}"
-        if counter[name] > 1:
-            child_path = f"{child_path}[{seen[name]}]"
-        fixed = fixed_value(parent_name, name)
-        if fixed is not None and isinstance(child.text, str) and child.text != fixed:
-            # `xsd:element/@fixed` wymusza dokładnie jedną wartość, niezależnie od
-            # słownika typu. `Podmiot1/PrefiksPodatnika` ma `fixed="PL"`, choć jego
-            # typ `TKodyKrajowUE` dopuszcza 28 kodów — bez tej kontroli `DE`
-            # przechodziło przez słownik, a dokument odrzucał dopiero KSeF.
-            issues.append(
-                FacetIssue(
-                    child_path,
-                    name,
-                    f"wartość {child.text!r} musi być równa {fixed!r} — schemat ma dla "
-                    f"tego elementu w {parent_name} stałą wartość",
+    # (element, ścieżka, nazwa rodzica); korzeń nie ma rodzica, więc jego
+    # wartości nie sprawdzamy — dokładnie tak jak wcześniej.
+    stack: list[tuple[Element, str, str | None]] = [(root, path, None)]
+    while stack:
+        element, element_path, parent_name = stack.pop()
+        name = _local_name(element.tag)
+        if parent_name is not None:
+            fixed = fixed_value(parent_name, name)
+            if fixed is not None and isinstance(element.text, str) and element.text != fixed:
+                # `xsd:element/@fixed` wymusza dokładnie jedną wartość, niezależnie od
+                # słownika typu. `Podmiot1/PrefiksPodatnika` ma `fixed="PL"`, choć jego
+                # typ `TKodyKrajowUE` dopuszcza 28 kodów — bez tej kontroli `DE`
+                # przechodziło przez słownik, a dokument odrzucał dopiero KSeF.
+                issues.append(
+                    FacetIssue(
+                        element_path,
+                        name,
+                        f"wartość {element.text!r} musi być równa {fixed!r} — schemat ma dla "
+                        f"tego elementu w {parent_name} stałą wartość",
+                    )
                 )
-            )
-        else:
-            issues.extend(_check_value(child, name, child_path))
-        issues.extend(_walk(child, child_path))
+            else:
+                issues.extend(_check_value(element, name, element_path))
+
+        children = [child for child in element if _is_fa3_element(child.tag)]
+        counter: Counter[str] = Counter(_local_name(child.tag) for child in children)
+        issues.extend(_check_required(set(counter), name, element_path))
+        issues.extend(
+            _check_occurrences(name, counter, _first_paths(element_path, children))
+        )
+
+        seen: Counter[str] = Counter()
+        pending: list[tuple[Element, str, str | None]] = []
+        for child in children:
+            child_name = _local_name(child.tag)
+            seen[child_name] += 1
+            child_path = f"{element_path}/{child_name}"
+            if counter[child_name] > 1:
+                child_path = f"{child_path}[{seen[child_name]}]"
+            pending.append((child, child_path, name))
+        # Dzieci zdejmujemy w kolejności dokumentu, więc odkładamy je odwrotnie.
+        stack.extend(reversed(pending))
     return issues
 
 

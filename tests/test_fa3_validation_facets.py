@@ -12,6 +12,7 @@ Dwa poziomy testów:
 
 from __future__ import annotations
 
+import functools
 import re
 from datetime import date
 from decimal import Decimal
@@ -320,6 +321,76 @@ def test_whitespace_padded_value_is_not_over_rejected() -> None:
     assert number is not None and number.text is not None
     number.text = " " * 250 + number.text
     assert validate_xml_facets(root) == []
+
+
+#: Białe znaki, które `str.split()`/`str.strip()` zwijają, a `xsd:whiteSpace`
+#: i tak NIE: schemat zamienia na spację wyłącznie ``#x9``/``#xA``/``#xD``.
+#: ``U+000B`` pomijamy tutaj, bo XML 1.0 w ogóle go nie dopuszcza (osobna reguła).
+_NON_XML_SPACES = ("\u00a0", "\u3000", "\u0085", "\u2028")
+
+
+@functools.lru_cache(maxsize=1)
+def _fa3_xsd_schema() -> Any:
+    """Skompilowany, bundlowany schemat FA(3) — wzorzec werdyktu dla faset."""
+    from lxml import etree
+
+    return etree.XMLSchema(etree.parse(str(SCHEMAS / "schemat_FA(3)_v1-0E.xsd")))
+
+
+def _xsd_accepts(root: ET.Element) -> bool:
+    """Czy schemat FA(3) przyjmuje dokument (walidacja lxml)."""
+    from lxml import etree
+
+    document = etree.fromstring(ET.tostring(root, encoding="utf-8"))
+    return bool(_fa3_xsd_schema().validate(document))
+
+
+@pytest.mark.parametrize("space", _NON_XML_SPACES)
+@pytest.mark.parametrize("element", ["Nazwa", "P_2"])
+def test_unicode_space_does_not_shorten_the_value(element: str, space: str) -> None:
+    """``600×NBSP + "A"`` ma dla faset 601 znaków — dokładnie tak, jak liczy XSD.
+
+    Wcześniej `_apply_whitespace` wołało `str.split()` bez argumentu, które
+    zwijało także U+00A0/U+3000/U+0085/U+2028, więc wartość malała do jednego
+    znaku i dokument z 601 znakami przechodził walidację SDK.
+    """
+    root = _tree()
+    target = root.find(f".//{_q(element)}")
+    assert target is not None
+    target.text = space * 600 + "A"
+
+    issues = validate_xml_facets(root)
+
+    assert any(
+        issue.element == element and "przekracza maksimum" in issue.message for issue in issues
+    ), [str(issue) for issue in issues]
+
+
+@pytest.mark.parametrize("space", _NON_XML_SPACES)
+@pytest.mark.parametrize("element", ["Nazwa", "P_2"])
+def test_facet_verdict_matches_lxml_for_unicode_spaces(element: str, space: str) -> None:
+    """Fasety i walidacja XSD muszą wydać TEN SAM werdykt dla nietypowych spacji."""
+    root = _tree()
+    target = root.find(f".//{_q(element)}")
+    assert target is not None
+    target.text = space * 600 + "A"
+
+    reported = any(issue.element == element for issue in validate_xml_facets(root))
+
+    assert reported is True
+    assert _xsd_accepts(root) is False
+
+
+@pytest.mark.parametrize("element", ["Nazwa", "P_2"])
+def test_ascii_spaces_are_still_collapsed(element: str) -> None:
+    """Kontrola: ``#x20`` nadal jest zwijane, więc 600 spacji to nie 600 znaków."""
+    root = _tree()
+    target = root.find(f".//{_q(element)}")
+    assert target is not None
+    target.text = " " * 600 + "A"
+
+    assert validate_xml_facets(root) == []
+    assert _xsd_accepts(root) is True
 
 
 def test_whitespace_preserving_type_still_rejects_padding() -> None:
@@ -764,6 +835,61 @@ def test_integer_facet_rejects_value_below_minimum() -> None:
 
     issues = _check_text("0", NATURALNY, "path", "NrWierszaFa")
     assert any("mniejsza od minimum" in issue.message for issue in issues)
+
+
+def test_integer_facet_enforces_the_xsd_integer_lexical_space() -> None:
+    """`xsd:integer` dopuszcza wyłącznie ``[+-]?[0-9]+`` — ``30.0`` nie jest liczbą.
+
+    `Decimal("30.0") == Decimal("30")`, więc kontrola wartości przepuszczała
+    float przekazany do pola całkowitego (`Ilosc` z `payment_due_description`),
+    a dokument odrzucał dopiero schemat (`SCHEMAV_CVC_DATATYPE_VALID_1_2_1`).
+    """
+    from ksef_client.documents.fa3.validation.engine import _check_text
+
+    naturalny = ELEMENT_FACETS["NrWierszaFa"].facet
+    for value in ("30.0", "23.00", "1E+1", "+1.0", "-0.0"):
+        assert _check_text(value, naturalny, "path", "NrWierszaFa"), value
+
+
+def test_integer_facet_accepts_what_the_schema_accepts() -> None:
+    """``007``, ``+1`` i ``0`` są w XSD poprawne — fałszywy alarm to błąd.
+
+    Tabela wymuszała na polach całkowitych wzorzec liczb KWOTOWYCH (bez zer
+    wiodących i bez znaku ``+``), więc poprawne w ``xsd:integer`` wartości były
+    odrzucane lokalnie. ``0`` jest poprawne dla `Ilosc` (``xsd:integer``), a dla
+    `TNaturalny` (``totalDigits=14``) zgłaszany jest wyłącznie zakres.
+    """
+    from ksef_client.documents.fa3.validation.engine import _check_text
+
+    ilosc = ELEMENT_FACETS["Ilosc"].facet
+    naturalny = ELEMENT_FACETS["NrWierszaFa"].facet
+    for value in ("007", "+1", "0", "12345678901234"):
+        assert _check_text(value, ilosc, "path", "Ilosc") == [], value
+    for value in ("007", "+1", "12345678901234"):
+        assert _check_text(value, naturalny, "path", "NrWierszaFa") == [], value
+    zero = _check_text("0", naturalny, "path", "NrWierszaFa")
+    assert zero and all("mniejsza od minimum" in issue.message for issue in zero), zero
+
+
+def test_deeply_nested_document_is_validated_without_recursion_error() -> None:
+    """Głębokie drzewo (1500 elementów) nie może wywracać walidatora.
+
+    Przejście rekurencyjne sięgało limitu stosu Pythona przy ~1000 zagnieżdżonych
+    elementach, choć sam dokument parsował się bez problemu — publiczne API
+    przestawało działać na poprawnym XML-u.
+    """
+    depth = 1500
+    body = "<FaWiersz><P_7>w</P_7>" * depth + "</FaWiersz>" * depth
+    document = ET.fromstring(
+        f'<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">{body}</Faktura>'
+    )
+
+    issues = validate_xml_facets(document)
+
+    rows = [issue for issue in issues if issue.element == "NrWierszaFa"]
+    assert len(rows) == depth, "każdy FaWiersz musi zgłosić brakujący NrWierszaFa"
+    assert rows[0].path == "Faktura/FaWiersz"
+    assert rows[-1].path.count("/") == depth, "ścieżka musi sięgać najgłębszego elementu"
 
 
 def test_facet_describe_covers_all_kinds() -> None:

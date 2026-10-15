@@ -132,3 +132,30 @@ def test_valid_minimal_parties_have_no_issues() -> None:
         for issue in issues
         if issue.element in {"Nazwa", "DaneKontaktowe", "PrefiksPodatnika"}
     ], [str(issue) for issue in issues]
+
+
+def test_apply_whitespace_collapse_ignores_non_xml_whitespace() -> None:
+    """`xsd:whiteSpace=collapse` zwija WYŁĄCZNIE ``#x9``/``#xA``/``#xD``/``#x20``.
+
+    Python `str.split()`/`str.strip()` bez argumentu traktują jako białe znaki
+    także U+00A0 (NBSP), U+3000, U+0085, U+000B i U+2028. Fasety mierzyły więc
+    wartość krótszą, niż widzi schemat: ``600×NBSP + "A"`` przechodziło kontrolę
+    długości, a XSD odrzucał dokument przez `maxLength` (601 > 256).
+    """
+    from ksef_client.documents.fa3.validation.engine import _apply_whitespace
+
+    assert _apply_whitespace("  a\t\tb\n\nc\r\n", "collapse") == "a b c"
+    assert _apply_whitespace("\t \n", "collapse") == ""
+    for exotic in ("\u00a0", "\u3000", "\u0085", "\u000b", "\u2028"):
+        assert _apply_whitespace(f"a{exotic}b", "collapse") == f"a{exotic}b", repr(exotic)
+        assert _apply_whitespace(exotic * 3, "collapse") == exotic * 3, repr(exotic)
+
+
+def test_apply_whitespace_replace_and_preserve_keep_everything_else() -> None:
+    """`replace` zamienia tylko ``#x9``/``#xA``/``#xD``, a `preserve` nic nie zmienia."""
+    from ksef_client.documents.fa3.validation.engine import _apply_whitespace
+
+    assert _apply_whitespace(" a\tb\nc\rd ", "replace") == " a b c d "
+    assert _apply_whitespace(" a\tb\nc\rd ", "preserve") == " a\tb\nc\rd "
+    assert _apply_whitespace("a\u00a0b", "replace") == "a\u00a0b"
+    assert _apply_whitespace("a\u00a0b", "preserve") == "a\u00a0b"

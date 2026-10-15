@@ -1255,12 +1255,38 @@ class FA3Invoice:
             errors.append(
                 FA3ValidationIssue("invoice.lines: faktura wymaga co najmniej jednej pozycji.")
             )
-        # Uwaga: pól korekty (`correction_reason`, `corrected_*`) NIE blokujemy dla
-        # rodzajów nie-korygujących — serializator emituje `PrzyczynaKorekty`,
-        # `DaneFaKorygowanej` itd. na podstawie samych danych (nie rodzaju), a
-        # schemat FA(3) dopuszcza je niezależnie od `RodzajFaktury`. Kontrola
-        # „tylko dla korekt” odrzucałaby legalne dokumenty (m.in. bogaty przypadek
-        # pokrycia schematu w testach audytu).
+        # Pola korekty są w schemacie FA(3) JEDNĄ opcjonalną `xsd:sequence`,
+        # w której wymagane jest `DaneFaKorygowanej`; `P_15ZK`/`KursWalutyZK`
+        # to zagnieżdżona w niej kolejna opcjonalna grupa. Serializator
+        # (`xml._domain_correction`) wypisuje je więc z DANYCH, a nie z rodzaju
+        # faktury — bez faktury korygowanej nie ma jednak czym wypełnić
+        # `DaneFaKorygowanej`, więc cała grupa musi zostać pominięta
+        # (inaczej XSD zgłasza `SCHEMAV_ELEMENT_CONTENT`). Wcześniej komentarz
+        # w tym miejscu twierdził, że serializator wypisuje te pola „na podstawie
+        # samych danych (nie rodzaju)", a kod robił odwrotnie: wychodził dla
+        # każdego rodzaju spoza KOR/KOR_ZAL/KOR_ROZ i gubił dane bez słowa.
+        if not self.corrected_invoices:
+            correction_fields = (
+                ("invoice.correction_reason", self.correction_reason),
+                ("invoice.correction_type", self.correction_type),
+                ("invoice.corrected_period", self.corrected_period),
+                (
+                    "invoice.corrected_invoice_number_override",
+                    self.corrected_invoice_number_override,
+                ),
+                ("invoice.corrected_seller", self.corrected_seller),
+                ("invoice.corrected_buyers", self.corrected_buyers),
+                ("invoice.corrected_advance_state", self.corrected_advance_state),
+            )
+            dropped = [name for name, value in correction_fields if value]
+            if dropped:
+                errors.append(
+                    FA3ValidationIssue(
+                        f"{', '.join(dropped)}: bez faktury korygowanej "
+                        "(`corrected_invoices`) nie da się wypisać tych pól — schemat "
+                        "wymaga w tej samej sekwencji `DaneFaKorygowanej`."
+                    )
+                )
         # `NoweSrodkiTransportu` bez wiersza jest niezgodne ze schematem
         # (`P_22N=1` przy braku `NowySrodketTransportu`), a fasety tego nie łapią,
         # bo brakuje elementu, nie wartości.

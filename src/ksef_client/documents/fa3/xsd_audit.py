@@ -74,17 +74,23 @@ def audit_fa3_xsd_coverage(
 
 
 def extract_xml_paths(xml_content: str | bytes) -> set[str]:
+    """Zbiera ścieżki wszystkich elementów dokumentu (korzeń to ``/Faktura``).
+
+    Przejście jest iteracyjne (jawny stos): rekurencja wywracała się na
+    `RecursionError` przy ok. 1000 zagnieżdżonych elementach, czyli na
+    dokumencie, który parsuje się bez problemu. Kolejność odwiedzania nie ma
+    znaczenia, bo wynikiem jest zbiór.
+    """
     xml_bytes = xml_content.encode("utf-8") if isinstance(xml_content, str) else xml_content
     root = ET.fromstring(xml_bytes)
     paths: set[str] = set()
 
-    def walk(node: ET.Element, current_path: str) -> None:
+    stack: list[tuple[ET.Element, str]] = [(root, "/Faktura")]
+    while stack:
+        node, current_path = stack.pop()
         paths.add(current_path)
         for child in node:
-            local_name = _local_xml_name(child.tag)
-            walk(child, f"{current_path}/{local_name}")
-
-    walk(root, "/Faktura")
+            stack.append((child, f"{current_path}/{_local_xml_name(child.tag)}"))
     return paths
 
 

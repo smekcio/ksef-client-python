@@ -878,12 +878,88 @@ def test_xsd_validation_accepts_basic_generated_invoice_and_rejects_invalid_xml(
         validate_fa3_xml_xsd(b"<Faktura />")
 
 
-def test_schema_resolver_ignores_unknown_schema() -> None:
+def test_schema_resolver_is_fail_closed_for_unknown_schemas() -> None:
+    """Resolver nie może oddać nieznanej nazwy domyślnemu resolverowi lxml.
+
+    Zwrócenie `None` sprawiało, że `xsd:include`/`xsd:import` z obcym adresem
+    był pobierany z sieci (libxml2 ma własny klient HTTP, więc `no_network`
+    i podmiana `socket.socket` tego nie łapią) — dowód w
+    `test_xsd_validation_never_reaches_the_network`.
+    """
     from lxml import etree
 
     resolver = _schema_resolver(etree)
 
-    assert resolver.resolve("NieznanySchemat.xsd", None, None) is None
+    with pytest.raises(FA3XmlValidationError, match="bundlowanych"):
+        resolver.resolve("NieznanySchemat.xsd", None, None)
+    with pytest.raises(FA3XmlValidationError, match="bundlowanych"):
+        resolver.resolve("http://127.0.0.1:9/remote.xsd", None, None)
+
+
+def test_xsd_validation_never_reaches_the_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Walidacja nie może otworzyć żadnego połączenia — nawet przy `include` z URL-em.
+
+    Serwer loopback jest tu jedynym wiarygodnym detektorem: żądania z libxml2 nie
+    przechodzą przez moduł `socket` Pythona, więc sam `monkeypatch` na
+    `socket.socket` nie dowodzi braku sieci (przed naprawą resolver zwracał `None`
+    i serwer dostawał żądanie `GET /remote.xsd`).
+    """
+    import socket
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from lxml import etree
+
+    received: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - nazwa wymagana przez http.server
+            received.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/xml")
+            self.end_headers()
+            self.wfile.write(b'<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"/>')
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    opened: list[str] = []
+    original_socket = socket.socket
+
+    def _spy(*args: Any, **kwargs: Any) -> Any:
+        opened.append("socket")
+        return original_socket(*args, **kwargs)
+
+    monkeypatch.setattr(socket, "socket", _spy)
+    try:
+        schema_url = f"http://127.0.0.1:{server.server_address[1]}/remote.xsd"
+        parser = etree.XMLParser()
+        parser.resolvers.add(_schema_resolver(etree))
+        remote_include = (
+            '<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">'
+            f'<xsd:include schemaLocation="{schema_url}"/>'
+            "</xsd:schema>"
+        )
+
+        hard_error = False
+        try:
+            etree.XMLSchema(etree.fromstring(remote_include.encode("utf-8"), parser))
+        except (FA3XmlValidationError, etree.XMLSchemaParseError):
+            hard_error = True
+        # Poprawny dokument nadal waliduje się bez sięgania do sieci.
+        validate_fa3_xml_xsd(_draft("FV/XSD/NET").to_xml())
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert received == [], f"walidacja pobrała zasób z sieci: {received}"
+    assert hard_error, "obcy `xsd:include` musi kończyć się twardym błędem"
+    assert opened == [], "walidacja próbowała otworzyć gniazdo"
 
 
 def test_xsd_coverage_audit_reports_the_whole_schema() -> None:
@@ -2041,7 +2117,6 @@ def test_builder_fluent_paths_cover_annotations_payments_and_typed_sections() ->
         .with_section(Footer.info("Info stopki"))
         .with_section(Footer.registry(Registry.regon_entry("123456789")))
         .with_section(ExciseRefund())
-        .with_section(CorrectedAdvanceState.create("10", currency_rate="4.1"))
         .footer_info("Druga stopka")
         .registry(Registry.bdo_entry("000012345"))
         .attachment_block(block)
@@ -2468,7 +2543,8 @@ def test_section_factories_xsd_map_and_audit_edges(tmp_path: Path) -> None:
         Resolver = FakeResolver
 
     resolver = _schema_resolver(FakeEtree)
-    assert resolver.resolve("unknown.xsd", None, object()) is None
+    with pytest.raises(FA3XmlValidationError, match="bundlowanych"):
+        resolver.resolve("unknown.xsd", None, object())
 
 
 def test_builder_section_error_and_attachment_helpers_cover_edges() -> None:
@@ -2948,7 +3024,6 @@ def _audit_coverage_invoice_rich() -> FA3Invoice:
         .with_section(Footer.info("Info stopki"))
         .with_section(Footer.registry(Registry.regon_entry("123456789")))
         .with_section(ExciseRefund())
-        .with_section(CorrectedAdvanceState.create("10", currency_rate="4.1"))
         .footer_info("Druga stopka")
         .registry(Registry.bdo_entry("000012345"))
         .attachment_block(block)
@@ -4595,6 +4670,98 @@ def test_amount2_accepts_string_and_decimal() -> None:
     assert _amount2(Decimal("100")) == "100"
 
 
+def test_money_maps_decimal_invalid_operation_to_a_readable_error() -> None:
+    """`quantize` na wartości dłuższej niż 28 cyfr rzucał surowe `InvalidOperation`.
+
+    Kontekst `decimal` ma precyzję 28 cyfr, więc `money(Decimal("1E+26"))` kończyło
+    się wyjątkiem biblioteki standardowej zamiast błędem walidacji z nazwą pola.
+    """
+    for value in ("1E+26", "1E+40", "1" * 27, "NaN", "Infinity", "-Infinity"):
+        with pytest.raises(ValueError, match="nie jest poprawną liczbą dziesiętną"):
+            money(Decimal(value), field_name="unit_net_price")
+
+
+def test_money_keeps_working_below_the_decimal_precision() -> None:
+    """26 cyfr mieści się w precyzji kontekstu — zachowanie musi zostać bez zmian."""
+    assert money(Decimal("1" * 26)) == Decimal("1" * 26 + ".00")
+    assert money(Decimal("1.005")) == Decimal("1.01")
+
+
+def test_rate6_maps_precision_overflow_to_a_validation_error() -> None:
+    """`_rate6` kwantyzuje do 6 miejsc, więc 28 cyfr przekraczało precyzję kontekstu."""
+    from ksef_client.documents.fa3.xml import _rate6
+
+    for value in ("1E+26", "1E+40", "1" * 30):
+        with pytest.raises(FA3XmlValidationError, match="nie jest poprawną liczbą dziesiętną"):
+            _rate6(value, field_name="KursWaluty")
+    assert _rate6("1.2345678901", field_name="KursWaluty") == "1.234568"
+
+
+def test_decimal_rejects_non_finite_values_instead_of_emitting_nan() -> None:
+    """`Decimal("NaN")` przechodzi `to_integral_value()`, więc do XML trafiałoby `NaN`."""
+    from ksef_client.documents.fa3.xml import _decimal
+
+    value = _decimal(Decimal("123.456"), field_name="P_11")
+    assert value == "123.456"
+    with pytest.raises(FA3XmlValidationError, match="Pole 'P_8B'"):
+        _decimal(Decimal("NaN"), field_name="P_8B")
+
+
+def test_decimal_from_value_rejects_non_finite_and_unconvertible_values() -> None:
+    """Wejście do walidacji nie może przepuszczać `NaN`/`Infinity` ani rzucać wyjątku STDLIB."""
+    for value in ("NaN", "Infinity", "-Infinity", Decimal("NaN"), float("nan")):
+        with pytest.raises(ValueError, match="Pole 'ilosc'"):
+            decimal_from_value(value, field_name="ilosc")
+    with pytest.raises(ValueError, match="musi być liczbą"):
+        decimal_from_value(True, field_name="ilosc")
+
+
+@pytest.mark.parametrize("unit_net_price", ["1E+26", "1E+40"])
+def test_draft_unit_price_beyond_decimal_precision_is_rejected_by_validation(
+    unit_net_price: str,
+) -> None:
+    """Ścieżka użytkownika: `unit_net_price` bez precyzji `decimal` musi dać `ValueError`."""
+    builder = BasicInvoiceBuilder(invoice_number="FV/PREC")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2"))
+    builder.add_service_line("Usługa", quantity="1", unit_net_price=unit_net_price)
+
+    with pytest.raises(ValueError, match="(?i)nie jest poprawną liczbą"):
+        builder.build().to_xml()
+
+
+def test_payment_due_description_requires_the_integer_lexical_form() -> None:
+    """`<Ilosc>` to `xsd:integer`: `30.0` przechodziło kontrolę wartości, a XSD je odrzucał."""
+    builder = BasicInvoiceBuilder(invoice_number="FV/ILOSC")
+    builder.seller(
+        InvoiceParty.polish_company(nip="1111111111", name="Sprzedawca", address="ul. A 1")
+    )
+    builder.buyer(InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. B 2"))
+    builder.add_service_line("Usługa", quantity="1", unit_net_price="100")
+    builder.payment_due_description(30.0, "dni", "data wystawienia")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="Ilosc"):
+        builder.build().to_xml()
+
+
+def test_extract_xml_paths_handles_deep_documents() -> None:
+    """Audyt schematu nie może się wywracać na głębokim dokumencie (1500 poziomów)."""
+    depth = 1500
+    body = "".join(f"<FaWiersz><P_7>w{i}</P_7>" for i in range(depth)) + "</FaWiersz>" * depth
+    xml = (
+        '<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">' + body + "</Faktura>"
+    )
+
+    paths = xsd_audit_module.extract_xml_paths(xml)
+
+    assert len(paths) == 2 * depth + 1
+    assert "/Faktura" in paths
+    assert "/Faktura/" + "/".join(["FaWiersz"] * depth) in paths
+    assert "/Faktura/" + "/".join(["FaWiersz"] * depth) + "/P_7" in paths
+
+
 def test_xml_illegal_control_character_is_reported() -> None:
     """Znaki spoza produkcji `Char` XML 1.0 dają bajty, których nie przyjmie parser."""
     root = _facets_tree()
@@ -4971,3 +5138,359 @@ def test_facet_describe_covers_minimum_length_and_minimum() -> None:
     assert "maksymalnie 16 cyfr części całkowitej" in Facet(
         FacetKind.DECIMAL, "X", integer_digits=16
     ).describe()
+
+
+# --- Regresje FA(3): ROZ w walucie obcej, `P_15` szkicu i pola korekty ---------
+
+
+def _fa_elements(xml: bytes) -> dict[str, str]:
+    """Mapa „nazwa elementu -> tekst" dla wszystkich elementów FA(3) dokumentu.
+
+    `_tag_texts` zna wyłącznie koszyki podsumowania i kilka znaczników, a te
+    regresje dotyczą też `P_14_xW`, `DoZaplaty`, `P_15ZK` i `NrFaKorygowany`.
+    """
+    root = ET.fromstring(xml)
+    namespace = root.tag.split("}")[0].strip("{")
+    prefix = f"{{{namespace}}}"
+    found: dict[str, str] = {}
+    for element in root.iter():
+        if isinstance(element.tag, str) and element.tag.startswith(prefix):
+            found[element.tag[len(prefix) :]] = element.text or ""
+    return found
+
+
+def _invoice_parties() -> tuple[Any, Any]:
+    return (
+        Party.polish_company(nip="1111111111", name="S", address="ul. Testowa 1"),
+        Party.polish_company(nip="2222222222", name="N", address="ul. Kupiec 2"),
+    )
+
+
+def _scale_settlement_invoice(
+    builder: Any,
+    *,
+    currency: str = "USD",
+    rate: str | None = "4.000000",
+) -> FA3Invoice:
+    """ROZ/KOR_ROZ z wierszami 307500@8% + 4500@23% i kwotą do zapłaty 307635."""
+    seller, buyer = _invoice_parties()
+    builder.issued_on(date(2026, 3, 1)).seller(seller).buyer(buyer).currency(currency)
+    if rate is not None:
+        builder.foreign_currency_rate(rate)
+    builder.settles_advance(invoice_number="FZ/1").remaining_to_pay("307635")
+    builder.add_goods_line(
+        "8%", quantity="1", unit_net_price="307500", tax=VatClass.reduced_8()
+    )
+    builder.add_goods_line("23%", quantity="1", unit_net_price="4500", tax=VatClass.standard_23())
+    return builder.build()
+
+
+def test_settlement_in_foreign_currency_scales_the_foreign_mirror() -> None:
+    """`P_14_xW` musi być tą samą proporcją co `P_14_x` (ROZ w USD, kurs 4.0).
+
+    Przed naprawą `_scale_settlement_summary` skalowało wyłącznie koszyki złotowe,
+    więc dokument deklarował `P_14_2` = 22414.21 przy `P_14_2W` = 98400.00
+    i `P_14_1` = 943.04 przy `P_14_1W` = 4140.00 — czyli pełne kwoty z wierszy,
+    sprzeczne z koszykami złotowymi w tym samym dokumencie (audyt `p13_confirm` Z4).
+    """
+    invoice = _scale_settlement_invoice(FA3Invoice.settlement("FR/USD/SCALE"))
+    found = _fa_elements(invoice.to_xml(xsd_validate=True))
+
+    assert found["P_13_1"] == "4100.16"
+    assert found["P_14_1"] == "943.04"
+    assert found["P_13_2"] == "280177.59"
+    assert found["P_14_2"] == "22414.21"
+    assert found["P_15"] == "307635.00"
+    # Tożsamość `P_15 = ΣP_13_x + ΣP_14_x` nadal zachodzi co do grosza.
+    baskets = sum(
+        (Decimal(found[tag]) for tag in ("P_13_1", "P_14_1", "P_13_2", "P_14_2")),
+        Decimal("0.00"),
+    )
+    assert baskets == Decimal(found["P_15"])
+    # Lustro walutowe to TA SAMA proporcja; dopuszczamy grosz różnicy, bo obie
+    # strony są zaokrąglane osobno (`money(Σvat×kurs×factor)` kontra
+    # `money(money(Σvat×factor)×kurs)`).
+    for vat_tag, foreign_tag in (("P_14_1", "P_14_1W"), ("P_14_2", "P_14_2W")):
+        expected = Decimal(found[vat_tag]) * Decimal("4")
+        assert abs(Decimal(found[foreign_tag]) - expected) <= Decimal("0.01"), foreign_tag
+    # ... a nie pełna kwota z wierszy, jak przed naprawą.
+    assert found["P_14_1W"] != "4140.00"
+    assert found["P_14_2W"] != "98400.00"
+
+
+def test_settlement_correction_in_foreign_currency_scales_the_foreign_mirror() -> None:
+    """`KOR_ROZ` w walucie obcej idzie tą samą gałęzią (`SETTLEMENT_SCALE_KINDS`)."""
+    builder = FA3Invoice.settlement_correction("KOR_ROZ/USD/SCALE")
+    builder.corrects("FR/USD/1", date(2026, 2, 1), reason="Korekta rozliczenia")
+    found = _fa_elements(
+        _scale_settlement_invoice(builder).to_xml(xsd_validate=True)
+    )
+
+    assert found["PrzyczynaKorekty"] == "Korekta rozliczenia"
+    assert found["P_15"] == "307635.00"
+    assert abs(Decimal(found["P_14_2W"]) - Decimal(found["P_14_2"]) * 4) <= Decimal("0.01")
+    assert found["P_14_2W"] != "98400.00"
+
+
+def test_settlement_in_pln_emits_no_foreign_mirror_fields() -> None:
+    """Kontrola: ROZ w PLN (próbka MF 14) bez zmian — pól `P_14_xW` nie ma wcale."""
+    found = _fa_elements(
+        _scale_settlement_invoice(
+            FA3Invoice.settlement("FR/PLN/SCALE"),
+            currency="PLN",
+            rate=None,
+        ).to_xml(xsd_validate=True)
+    )
+
+    assert found["P_13_1"] == "4100.16"
+    assert found["P_14_1"] == "943.04"
+    assert found["P_13_2"] == "280177.59"
+    assert found["P_14_2"] == "22414.21"
+    assert found["P_15"] == "307635.00"
+    assert not [tag for tag in found if tag.startswith("P_14_") and tag.endswith("W")]
+
+
+def _settlement_draft(
+    kind: FA3InvoiceKind,
+    settlement_amount: str,
+    *,
+    advance_reference: bool = True,
+) -> FA3Draft:
+    """Szkic rozliczeniowy/zaliczkowy: wiersze 200@23% + 50@8% (brutto 300.00)."""
+    draft = FA3Draft(
+        invoice_number=f"FV/DRAFT/{kind.xml_code}",
+        issue_date=date(2026, 3, 1),
+        seller=FA3Party(name="S", tax_id="1111111111", address="ul. T 1"),
+        buyer=FA3Party(name="N", tax_id="2222222222", address="ul. K 2"),
+        lines=[
+            FA3Line(
+                description="A",
+                quantity=Decimal("1"),
+                unit="szt",
+                unit_net_price=Decimal("200"),
+                vat_rate=Decimal("23"),
+                vat_code="23",
+            ),
+            FA3Line(
+                description="B",
+                quantity=Decimal("1"),
+                unit="szt",
+                unit_net_price=Decimal("50"),
+                vat_rate=Decimal("8"),
+                vat_code="8",
+            ),
+        ],
+        kind=kind,
+        settlement_amount=Decimal(settlement_amount),
+    )
+    if kind is FA3InvoiceKind.SETTLEMENT_CORRECTION:
+        # Rodzaj korygujący wymaga kompletu danych korekty (`_validate_kind_specific`).
+        draft = replace(
+            draft,
+            correction_reason="Korekta rozliczenia",
+            corrected_invoice_number="FR/1",
+            corrected_invoice_date=date(2026, 2, 1),
+        )
+    if advance_reference:
+        return replace(draft, advance_invoice_number="FZ/1")
+    return draft
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [FA3InvoiceKind.SETTLEMENT, FA3InvoiceKind.SETTLEMENT_CORRECTION],
+)
+def test_draft_settlement_takes_p15_from_the_amount_due(kind: FA3InvoiceKind) -> None:
+    """Szkic ROZ/KOR_ROZ: `P_15` == `DoZaplaty`, a koszyki są proporcją tej kwoty.
+
+    Przed naprawą `_draft_tax_summary` brało `P_15` z samych wierszy (300.00),
+    a `DoZaplaty` z `settlement_amount` (100.00), więc dokument przeczył sam
+    sobie (reguła [ROZ-15]), a `validate()` o tym milczał (audyt `p13_confirm` Z2).
+    """
+    draft = _settlement_draft(kind, "100.00")
+
+    assert draft.validate()[0] == []
+    assert draft.total_gross == Decimal("300.00")
+    found = _fa_elements(draft.to_xml(xsd_validate=True))
+
+    assert found["P_15"] == "100.00"
+    assert found["DoZaplaty"] == "100.00"
+    baskets = sum(
+        (Decimal(found[tag]) for tag in ("P_13_1", "P_14_1", "P_13_2", "P_14_2")),
+        Decimal("0.00"),
+    )
+    assert baskets == Decimal(found["P_15"])
+
+
+def test_draft_settlement_amount_equal_to_gross_keeps_the_baskets() -> None:
+    """Zgodna kwota do zapłaty nie zmienia koszyków ani `P_15`."""
+    draft = _settlement_draft(FA3InvoiceKind.SETTLEMENT, "300.00")
+    found = _fa_elements(draft.to_xml(xsd_validate=True))
+
+    assert found["P_15"] == found["DoZaplaty"] == "300.00"
+    assert found["P_13_1"] == "200.00"
+    assert found["P_14_1"] == "46.00"
+    assert found["P_13_2"] == "50.00"
+    assert found["P_14_2"] == "4.00"
+
+
+def test_draft_settlement_amount_mismatch_is_reported_for_advance_kind() -> None:
+    """`ZAL` z `settlement_amount` różnym od `P_15` musi zostać zgłoszony.
+
+    `Rozliczenie/DoZaplaty` jest wtedy sprzeczne z `P_15` liczoną z wierszy,
+    więc reguła [ROZ-15] nie ma jak zachodzić — ścieżka typowana zgłasza to samo
+    (`FA3Invoice._validate_settlement_proportion`).
+    """
+    draft = _settlement_draft(FA3InvoiceKind.ADVANCE, "100.00", advance_reference=False)
+    errors, _warnings = draft.validate()
+
+    assert any("Rozliczenie niespójne" in issue.message for issue in errors)
+    with pytest.raises(FA3XmlValidationError, match="Rozliczenie niespójne"):
+        draft.to_xml()
+
+
+def test_draft_advance_with_consistent_settlement_amount_is_accepted() -> None:
+    """`ZAL`, w którym `DoZaplaty` zgadza się z `P_15`, nadal się buduje."""
+    draft = _settlement_draft(FA3InvoiceKind.ADVANCE, "300.00", advance_reference=False)
+
+    assert draft.validate()[0] == []
+    found = _fa_elements(draft.to_xml(xsd_validate=True))
+    assert found["P_15"] == found["DoZaplaty"] == "300.00"
+
+
+def _basic_invoice_for_correction() -> FA3Invoice:
+    seller, buyer = _invoice_parties()
+    builder = FA3Invoice.basic("FV/KOR-NA-VAT")
+    builder.issued_on(date(2026, 3, 1)).seller(seller).buyer(buyer)
+    builder.add_goods_line("A", quantity="1", unit_net_price="100", tax=VatClass.standard_23())
+    return builder.build()
+
+
+def test_correction_fields_are_emitted_for_a_basic_invoice() -> None:
+    """Pola korekty nie mogą ginąć przy rodzaju innym niż KOR/KOR_ZAL/KOR_ROZ.
+
+    Schemat FA(3) nie warunkuje ich rodzajem faktury, a serializator wychodził
+    po samym `kind`: `validate().ok` było `True`, a w XML nie było ani
+    `PrzyczynaKorekty`, ani `DaneFaKorygowanej`, ani `P_15ZK`, ani
+    `NrFaKorygowany` (audyt `p17_correction_fields`).
+    """
+    invoice = replace(
+        _basic_invoice_for_correction(),
+        correction_reason="Korekta ceny",
+        corrected_invoices=(CorrectionReference("FV/1", date(2026, 2, 1)),),
+        corrected_advance_state=CorrectedAdvanceState.create("1230.00"),
+        corrected_invoice_number_override="FV/0",
+    )
+
+    assert invoice.kind is FA3InvoiceKind.BASIC
+    assert invoice.validate().ok
+    found = _fa_elements(invoice.to_xml(xsd_validate=True))
+
+    assert found["RodzajFaktury"] == "VAT"
+    assert found["PrzyczynaKorekty"] == "Korekta ceny"
+    assert found["NrFaKorygowany"] == "FV/0"
+    assert found["P_15ZK"] == "1230.00"
+    assert "DaneFaKorygowanej" in found
+
+
+def test_correction_fields_are_emitted_through_the_v2_builder_for_a_basic_kind() -> None:
+    """`FA3InvoiceBuilderV2.corrects(...)` przy rodzaju VAT też trafia do XML."""
+    seller, buyer = _invoice_parties()
+    builder = FA3InvoiceBuilderV2(invoice_number="FV/KOR-V2", kind=FA3InvoiceKind.BASIC)
+    builder.issued_on(date(2026, 3, 1)).seller(seller).buyer(buyer)
+    builder.add_line("A", quantity="1", unit_net_price="100", tax=VatClass.standard_23())
+    builder.corrects("FV/1", date(2026, 2, 1), reason="Korekta ceny")
+
+    invoice = builder.build()
+    assert invoice.correction_reason == "Korekta ceny"
+    found = _fa_elements(builder.to_xml(xsd_validate=True))
+
+    assert found["PrzyczynaKorekty"] == "Korekta ceny"
+    assert "DaneFaKorygowanej" in found
+
+
+def test_correction_fields_without_a_corrected_invoice_are_reported() -> None:
+    """Bez `corrected_invoices` grupy korekty nie da się wypisać — musi być błąd.
+
+    `DaneFaKorygowanej` jest w tej samej `xsd:sequence` WYMAGANE, więc emisja
+    samego `PrzyczynaKorekty` dałaby dokument odrzucany przez schemat
+    (`SCHEMAV_ELEMENT_CONTENT`). Zamiast cichej utraty danych `validate()`
+    zgłasza błąd, a serializator bez walidacji nie wypisuje tej grupy.
+    """
+    invoice = replace(_basic_invoice_for_correction(), correction_reason="Korekta ceny")
+    errors = invoice.validate().errors
+
+    assert any("invoice.correction_reason" in issue.message for issue in errors)
+    assert any("corrected_invoices" in issue.message for issue in errors)
+    with pytest.raises(FA3XmlValidationError, match="bez faktury korygowanej"):
+        invoice.to_xml()
+    assert "PrzyczynaKorekty" not in _fa_elements(invoice.to_xml(validate=False))
+
+
+def _correction_kind_builder(kind: FA3InvoiceKind) -> Any:
+    seller, buyer = _invoice_parties()
+    if kind is FA3InvoiceKind.CORRECTION:
+        builder: Any = FA3Invoice.correction("KOR/REG/1")
+    elif kind is FA3InvoiceKind.ADVANCE_CORRECTION:
+        builder = FA3Invoice.advance_correction("KOR_ZAL/REG/1")
+    else:
+        builder = FA3Invoice.settlement_correction("KOR_ROZ/REG/1")
+    builder.issued_on(date(2026, 3, 1)).seller(seller).buyer(buyer)
+    builder.corrects("FV/1", date(2026, 2, 1), reason="Korekta ceny")
+    builder.corrected_period("2026-01")
+    builder.corrected_invoice_number_override("FV/0")
+    if kind is FA3InvoiceKind.SETTLEMENT_CORRECTION:
+        builder.corrected_advance_state("1230.00", currency_rate="4.123456")
+        builder.settles_advance(invoice_number="FZ/1").remaining_to_pay("123.00")
+    else:
+        builder.add_service_line("A", quantity="1", unit_net_price="100")
+    return builder
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        FA3InvoiceKind.CORRECTION,
+        FA3InvoiceKind.ADVANCE_CORRECTION,
+        FA3InvoiceKind.SETTLEMENT_CORRECTION,
+    ],
+)
+def test_correction_kinds_still_emit_correction_fields(kind: FA3InvoiceKind) -> None:
+    """KOR/KOR_ZAL/KOR_ROZ emitują pola korekty tak jak dotąd."""
+    builder = _correction_kind_builder(kind)
+    found = _fa_elements(builder.to_xml(xsd_validate=True))
+
+    assert found["PrzyczynaKorekty"] == "Korekta ceny"
+    assert found["OkresFaKorygowanej"] == "2026-01"
+    assert found["NrFaKorygowany"] == "FV/0"
+    assert "DaneFaKorygowanej" in found
+    if kind is FA3InvoiceKind.SETTLEMENT_CORRECTION:
+        assert found["P_15ZK"] == "1230.00"
+        assert found["KursWalutyZK"] == "4.123456"
+
+
+def test_draft_correction_group_follows_the_data_not_the_kind() -> None:
+    """Szkic wypisuje grupę korekty z danych, a bez kompletu zgłasza utratę.
+
+    `xml._correction` działa teraz jak `_domain_correction`: komplet danych
+    (przyczyna + data + numer) wystarcza niezależnie od `RodzajFaktury`, a gdy
+    kompletu nie ma, `validate()` mówi wprost, że grupy nie da się wypisać.
+    """
+    complete = replace(
+        _settlement_draft(FA3InvoiceKind.BASIC, "300.00", advance_reference=False),
+        correction_reason="Korekta ceny",
+        corrected_invoice_number="FV/1",
+        corrected_invoice_date=date(2026, 2, 1),
+    )
+    found = _fa_elements(complete.to_xml(xsd_validate=True))
+    assert found["RodzajFaktury"] == "VAT"
+    assert found["PrzyczynaKorekty"] == "Korekta ceny"
+    assert found["NrFaKorygowanej"] == "FV/1"
+
+    incomplete = replace(complete, corrected_invoice_date=None)
+    errors, _warnings = incomplete.validate()
+    assert any("grupy korekty nie da się wypisać" in issue.message for issue in errors)
+    with pytest.raises(FA3XmlValidationError, match="grupy korekty nie da się wypisać"):
+        incomplete.to_xml()
+    assert "PrzyczynaKorekty" not in _fa_elements(incomplete.to_xml(validate=False))
+

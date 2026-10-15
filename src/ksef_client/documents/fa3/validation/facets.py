@@ -49,8 +49,11 @@ class FacetKind(str, Enum):
 #: ``-?([1-9]\d{0,N}|0)(\.\d{1,M})?`` — bez separatorów tysięcy i bez wykładnika.
 _DECIMAL_TEXT = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?")
 
-#: Wzorzec liczby całkowitej (schemat używa ``xsd:integer``/``xsd:byte``).
-_INTEGER_TEXT = re.compile(r"-?\d+")
+#: Wzorzec liczby całkowitej — dokładnie przestrzeń leksykalna ``xsd:integer``:
+#: opcjonalny znak i co najmniej jedna cyfra ASCII (``007`` i ``+1`` są w XSD
+#: poprawne, ``30.0`` już nie). ``\d`` nie może tu wystąpić, bo dopuszcza cyfry
+#: spoza ASCII, których schemat nie przyjmuje (``xsd:integer`` to nie ``\d+``).
+_INTEGER_TEXT = re.compile(r"[+-]?[0-9]+")
 
 #: Od ilu wartości słownik przestajemy wypisywać w komunikacie walidacji.
 _MAX_LISTED_ALLOWED = 32

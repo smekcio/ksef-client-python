@@ -23,6 +23,11 @@ from ksef_client.utils.datetime_parsing import (
 
 #: Znacznik, jaki zwraca API KSeF — 7 cyfr części ułamkowej.
 KSEF_TIMESTAMP = "2025-10-11T12:23:56.0154302+00:00"
+
+#: Poprawny hash faktury dla linków weryfikacyjnych: Base64Url z SHA-256
+#: (`sha256(b"invoice")`, 32 bajty). Krótsze wartości są odrzucane przez
+#: `VerificationLinkService` — bez tego link nie niósłby żadnego hasha.
+_INVOICE_HASH = "Utbj3k-g3MKZRmlfk5QMPn8m8w4eOfSxpJrZiDkRJ4Y"
 #: Ten sam znacznik z ``Z`` zamiast offsetu.
 KSEF_TIMESTAMP_Z = "2025-10-11T12:23:56.0154302Z"
 #: Okno ważności certyfikatu z oficjalnego przykładu API (7 cyfr ułamka).
@@ -1159,21 +1164,21 @@ class TestVerificationLinkInputValidation:
 
         service = self._service()
         assert "/invoice/123/01-02-2026/" in service.build_invoice_verification_url(
-            "123", "01-02-2026", "YQ=="
+            "123", "01-02-2026", _INVOICE_HASH
         )
         assert "/invoice/123/01-02-2026/" in service.build_invoice_verification_url(
-            "123", date(2026, 2, 1), "YQ=="
+            "123", date(2026, 2, 1), _INVOICE_HASH
         )
         # ISO-8601 jest wygodnym wejściem i musi zostać przekonwertowany.
         assert "/invoice/123/01-02-2026/" in service.build_invoice_verification_url(
-            "123", "2026-02-01", "YQ=="
+            "123", "2026-02-01", _INVOICE_HASH
         )
 
     def test_malformed_invoice_date_is_reported(self):
         service = self._service()
         for value in ("2026/02/01", "1 lutego 2026", "01.02.2026"):
             with pytest.raises(ValueError, match="Invalid invoice issue date"):
-                service.build_invoice_verification_url("123", value, "YQ==")
+                service.build_invoice_verification_url("123", value, _INVOICE_HASH)
 
 
 class TestArchiveEntryNames:
@@ -2253,7 +2258,9 @@ class TestVerificationLinkSegments:
         from ksef_client.services.verification_link import VerificationLinkService
 
         service = VerificationLinkService(self._options())
-        url = service.build_invoice_verification_url("1111111111/evil", "01-02-2026", "YWJj")
+        url = service.build_invoice_verification_url(
+            "1111111111/evil", "01-02-2026", _INVOICE_HASH
+        )
         assert "/evil" not in url
         assert "1111111111%2Fevil" in url
 
@@ -2262,9 +2269,9 @@ class TestVerificationLinkSegments:
 
         service = VerificationLinkService(self._options())
         with pytest.raises(ValueError, match="nip"):
-            service.build_invoice_verification_url("  ", "01-02-2026", "YWJj")
+            service.build_invoice_verification_url("  ", "01-02-2026", _INVOICE_HASH)
         with pytest.raises(ValueError, match="nip is required"):
-            service.build_invoice_verification_url("", "01-02-2026", "YWJj")
+            service.build_invoice_verification_url("", "01-02-2026", _INVOICE_HASH)
 
 
 class TestExportArchiveLimits:
@@ -2327,3 +2334,129 @@ class TestExportArchiveLimits:
         over = _package(EXPORT_MAX_INVOICES + 1, metadata=False)
         with pytest.raises(ValueError, match="contract limit is 10000"):
             _unpack_export_archive(over, compression_type=CompressionType.ZIP)
+
+
+class TestFa3PublicErrorsAreReadable:
+    """Błędy wartości FA(3) muszą być błędami walidacji, nie wyjątkami STDLIB.
+
+    `decimal.InvalidOperation` uciekał z publicznego API (`FA3Draft.to_xml`,
+    `money`, `_rate6`) dla wartości dłuższych niż precyzja kontekstu `decimal`
+    (28 cyfr) oraz dla `NaN`/`Infinity` — użytkownik dostawał wyjątek biblioteki
+    standardowej bez nazwy pola i bez wskazania wartości.
+    """
+
+    def test_draft_rejects_values_beyond_decimal_precision(self):
+        from ksef_client.documents.fa3 import BasicInvoiceBuilder, InvoiceParty
+
+        for value in ("1E+26", "1E+40", "1" * 27):
+            builder = BasicInvoiceBuilder(invoice_number="FV/PREC")
+            builder.seller(
+                InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+            )
+            builder.buyer(
+                InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+            )
+            builder.add_service_line("Usługa", quantity="1", unit_net_price=value)
+            with pytest.raises(ValueError, match="(?i)nie jest poprawną liczbą") as caught:
+                builder.build().to_xml()
+            assert not isinstance(caught.value, ArithmeticError)
+
+    def test_draft_rejects_non_finite_values(self):
+        """`NaN`/`Infinity` konstruują się w `Decimal` bez błędu, więc trzeba je odrzucić."""
+        from ksef_client.documents.fa3 import BasicInvoiceBuilder, InvoiceParty
+
+        for value in ("NaN", "Infinity", "-Infinity"):
+            builder = BasicInvoiceBuilder(invoice_number="FV/NAN")
+            builder.seller(
+                InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1")
+            )
+            builder.buyer(
+                InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2")
+            )
+            with pytest.raises(ValueError, match="(?i)nie jest poprawną liczbą"):
+                builder.add_service_line("Usługa", quantity="1", unit_net_price=value)
+
+    def test_invoice_number_field_is_named_in_the_error(self):
+        """Komunikat wskazuje pole i wartość — bez tego diagnoza jest zgadywaniem."""
+        from ksef_client.documents.fa3.models import decimal_from_value
+
+        with pytest.raises(ValueError) as caught:
+            decimal_from_value("NaN", field_name="cena_netto")
+        assert "cena_netto" in str(caught.value)
+        assert "NaN" in str(caught.value)
+
+
+class TestFa3UnicodeWhitespaceMatchesTheSchema:
+    """`whiteSpace=collapse` zwija tylko ``#x9``/``#xA``/``#xD``/``#x20``.
+
+    Biblioteka traktowała jako białe znaki całą klasę Unicode (`str.split()` bez
+    argumentu), więc ``600×NBSP + "A"`` malało do jednego znaku, przechodziło
+    fasety, a KSeF odrzucał dokument przez `maxLength` (601 > 256).
+    """
+
+    def _draft_xml(self, name: str) -> bytes:
+        from datetime import date
+        from decimal import Decimal
+
+        from ksef_client.documents.fa3.models import FA3Draft, FA3Line, FA3Party
+
+        draft = FA3Draft(
+            invoice_number="FV/NBSP",
+            issue_date=date(2026, 4, 1),
+            seller=FA3Party(name="Sprzedawca", tax_id="1111111111", address="ul. A 1"),
+            buyer=FA3Party(name=name, tax_id="2222222222", address="ul. B 2"),
+            lines=[
+                FA3Line(
+                    description="Usługa",
+                    quantity=Decimal(1),
+                    unit="szt",
+                    unit_net_price=Decimal(100),
+                    vat_rate=Decimal(23),
+                )
+            ],
+        )
+        return draft.to_xml()
+
+    def test_nbsp_padding_reaches_the_length_check(self):
+        """Dowód audytora: ``600×NBSP + "A"`` przechodziło `to_xml()` i łamało XSD."""
+        with pytest.raises(ValueError, match="przekracza maksimum 512"):
+            self._draft_xml("\u00a0" * 600 + "A")
+
+    @pytest.mark.parametrize("space", ["\u00a0", "\u3000", "\u0085", "\u2028"])
+    def test_every_unicode_space_keeps_the_length(self, space: str):
+        with pytest.raises(ValueError, match="(?i)przekracza maksimum"):
+            self._draft_xml(space * 600 + "A")
+
+    def test_ascii_padding_is_still_collapsed(self):
+        """Kontrola: ``#x20`` jest białym znakiem, więc 600 spacji to nie 600 znaków."""
+        from xml.etree import ElementTree as ET
+
+        from ksef_client.documents.fa3.validation import validate_xml_facets
+
+        xml = self._draft_xml(" " * 600 + "A")
+
+        assert validate_xml_facets(ET.fromstring(xml)) == []
+
+
+class TestFa3DeepDocumentsDoNotRecurse:
+    """Rekurencja w walidatorze i audycie wywracała się na głębokim dokumencie."""
+
+    def test_facet_validation_and_path_audit_handle_1500_levels(self):
+        from xml.etree import ElementTree as ET
+
+        from ksef_client.documents.fa3 import xsd_audit
+        from ksef_client.documents.fa3.validation import validate_xml_facets
+
+        depth = 1500
+        body = "<FaWiersz><NrWierszaFa>1</NrWierszaFa>" * depth
+        body += "</FaWiersz>" * depth
+        xml = f'<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">{body}</Faktura>'
+        document = ET.fromstring(xml)
+
+        # Płaski wynik bez zmian: zgłaszane są wyłącznie braki wymagane w korzeniu,
+        # a samo zagnieżdżenie nie dokłada ani jednego zgłoszenia.
+        issues = validate_xml_facets(document)
+        assert {issue.element for issue in issues} == {"Naglowek", "Podmiot1", "Podmiot2", "Fa"}
+        # `ET.tostring` sam jest rekurencyjny, więc audyt dostaje oryginalny tekst.
+        deepest = "/Faktura/" + "/".join(["FaWiersz"] * depth) + "/NrWierszaFa"
+        assert deepest in xsd_audit.extract_xml_paths(xml)
