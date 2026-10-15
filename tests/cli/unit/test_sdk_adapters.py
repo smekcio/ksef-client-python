@@ -2311,6 +2311,72 @@ def test_save_bytes_accepts_xml_and_binary_payloads(tmp_path) -> None:
     assert bin_path.read_bytes() == b"%PDF-1.7"
 
 
+def test_save_bytes_reports_write_failure(tmp_path, monkeypatch) -> None:
+    """Błąd samego zapisu (np. za długa nazwa) też musi być `IO_ERROR`, nie UNEXPECTED."""
+    target = tmp_path / "upo-1.xml"
+
+    def _fail(*_args, **_kwargs):
+        raise OSError(206, "Filename too long")
+
+    monkeypatch.setattr(Path, "write_bytes", _fail)
+
+    with pytest.raises(CliError) as exc:
+        adapters._save_bytes(target, b"<upo/>", overwrite=False)
+
+    assert exc.value.code == ExitCode.IO_ERROR
+    assert "Cannot write output file" in exc.value.message
+    assert isinstance(exc.value.__cause__, OSError)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"<!-- komentarz -->\n<!DOCTYPE html><html><body>portal</body></html>",
+        b"<!-- captive portal --><!DOCTYPE html>",
+        b"<?xml version='1.0'?><html xmlns='http://www.w3.org/1999/xhtml'></html>",
+        b"<head><meta http-equiv='refresh' content='0;url=http://portal.local'></head>",
+        b"<meta http-equiv=refresh content=0>",
+        b"<script>window.location='http://portal.local'</script>",
+        b"\xef\xbb\xbf\n  <!-- x -->\n  <HTML lang='pl'>",
+        b"<title>Login</title>",
+        b"<body onload='x()'>",
+    ],
+)
+def test_save_bytes_rejects_html_shapes(tmp_path, payload: bytes) -> None:
+    """Kształty captive portalu (komentarz, `<?xml`, `head`/`meta`/`script`) też są blokowane."""
+    target = tmp_path / "upo-portal.xml"
+
+    with pytest.raises(CliError) as exc:
+        adapters._save_bytes(target, payload, overwrite=False)
+
+    assert exc.value.code == ExitCode.API_ERROR
+    assert not target.exists()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"<?xml version='1.0' encoding='UTF-8'?><Faktura xmlns='http://crd.gov.pl/wzor/2025/06/25/13775/'/>",
+        b"<!-- wygenerowane -->\n<Faktura><Naglowek/></Faktura>",
+        b"\xef\xbb\xbf  <UPO><Dokument/></UPO>",
+        b"%PDF-1.7\n%\xe2\xe3\xcf\xd3",
+        b"PK\x03\x04zip",
+        b"\x89PNG\r\n\x1a\n",
+        b"",
+        b"plain text without markup",
+        # Niedomknięty komentarz/instrukcja nie może wywracać sniffingu: treść nie
+        # zawiera znaczników HTML, więc traktujemy ją jak zwykły dokument.
+        b"<!-- nie zamkniety komentarz",
+        b"<?xml version='1.0'",
+    ],
+)
+def test_save_bytes_accepts_documents_that_only_look_similar(tmp_path, payload: bytes) -> None:
+    """Legalne dokumenty (XML faktury, UPO, PDF, archiwum, obraz, pusty plik) przechodzą."""
+    target = adapters._save_bytes(tmp_path / "document.bin", payload, overwrite=False)
+
+    assert target.read_bytes() == payload
+
+
 def test_build_form_code_validation() -> None:
     with pytest.raises(CliError) as exc:
         adapters._build_form_code(" ", "1", "FA")

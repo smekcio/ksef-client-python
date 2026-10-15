@@ -16,8 +16,10 @@ Ten moduł jest jednym miejscem, w którym normalizacja się odbywa. Każdy uła
 sekundy jest sprowadzany do **dokładnie 6 cyfr** (dłuższy obcinany, krótszy
 dopełniany zerami), dzięki czemu wynik nie zależy od wersji Pythona ani od
 liczby cyfr w odpowiedzi API. Obsługiwany jest format rozszerzony ISO-8601
-(``YYYY-MM-DDTHH:MM:SS[.frakcja][Z|±HH:MM]``) oraz sama data; format podstawowy
-(``20250101T000000Z``) nie jest wspierany przez API i nie jest parsowany.
+(``YYYY-MM-DDTHH:MM:SS[.frakcja][Z|±HH:MM]``) oraz sama data. Format podstawowy
+(``20250101T000000Z``) nie występuje w API; jego obsługa zależy od interpretera —
+``datetime.fromisoformat`` przyjmuje go od Pythona 3.11, na 3.10 kończy się
+``ValueError`` (patrz ``docs/utils/datetime-parsing.md``).
 """
 
 from __future__ import annotations

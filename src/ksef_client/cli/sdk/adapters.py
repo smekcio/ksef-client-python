@@ -61,9 +61,24 @@ _COMPRESSION_TYPE_BY_CLI_VALUE = {
 }
 #: Znaki dozwolone w domyślnej nazwie pliku (bez separatorów ścieżki i dwukropka dysku).
 _SAFE_FILENAME_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]")
-_HTML_DOCUMENT_PREFIXES = (b"<!doctype html", b"<html")
+#: Znaczniki dokumentu HTML. Sprawdzamy je po odrzuceniu BOM-u, białych znaków,
+#: komentarzy i instrukcji przetwarzania (`<?xml …?>`), bo captive portal potrafi
+#: zacząć stronę od `<!-- … -->` albo `<?xml`, a dopiero potem od `<!DOCTYPE html>`.
+_HTML_DOCUMENT_PREFIXES = (
+    b"<!doctype html",
+    b"<html",
+    b"<head",
+    b"<meta",
+    b"<script",
+    b"<body",
+    b"<title",
+    b"<frameset",
+    b"<iframe",
+)
 _HTML_SNIFF_STRIP_BYTES = b"\xef\xbb\xbf \t\r\n"
-_HTML_SNIFF_LIMIT = 512
+_HTML_SNIFF_LIMIT = 4096
+_HTML_COMMENT_END = b"-->"
+_HTML_PROCESSING_INSTRUCTION_END = b"?>"
 
 
 @dataclass(frozen=True)
@@ -203,15 +218,38 @@ def _resolve_output_path(
     return path
 
 
+def _html_sniff_head(content: bytes) -> bytes:
+    """Początek treści bez BOM-u, białych znaków, komentarzy i instrukcji `<?…?>`."""
+    head = content.lstrip(_HTML_SNIFF_STRIP_BYTES)[:_HTML_SNIFF_LIMIT]
+    while True:
+        if head.startswith(b"<!--"):
+            end = head.find(_HTML_COMMENT_END)
+            if end == -1:
+                return head
+            head = head[end + len(_HTML_COMMENT_END) :].lstrip(_HTML_SNIFF_STRIP_BYTES)
+            continue
+        if head.startswith(b"<?"):
+            end = head.find(_HTML_PROCESSING_INSTRUCTION_END)
+            if end == -1:
+                return head
+            head = head[end + len(_HTML_PROCESSING_INSTRUCTION_END) :].lstrip(
+                _HTML_SNIFF_STRIP_BYTES
+            )
+            continue
+        return head
+
+
 def _reject_html_payload(content: bytes, *, path: Path) -> None:
     """Blokuje zapis strony HTML w miejscu dokumentu KSeF.
 
     Captive portal albo proxy potrafi odpowiedzieć kodem 200 i treścią ``text/html``;
     zapisana jako ``upo-*.xml`` strona była raportowana jako sukces, choć nie zawierała
-    UPO. Legalne odpowiedzi (XML faktury, UPO XML, PDF, ``application/octet-stream``)
-    nie zaczynają się od ``<!DOCTYPE html``/``<html``, więc nie są odrzucane.
+    UPO. Odrzucamy zarówno ``<!DOCTYPE html>``/``<html>``, jak i strony zaczynające się
+    od ``<!-- komentarz -->``, ``<?xml``, ``<head>``, ``<meta http-equiv=refresh>``
+    czy ``<script>`` — te kształty są typowe dla portali przechwytujących, a żaden
+    legalny dokument KSeF (XML faktury, UPO XML, PDF, archiwum, obraz) tak nie wygląda.
     """
-    head = content.lstrip(_HTML_SNIFF_STRIP_BYTES)[:_HTML_SNIFF_LIMIT].lower()
+    head = _html_sniff_head(content).lower()
     if head.startswith(_HTML_DOCUMENT_PREFIXES):
         raise CliError(
             f"Expected a KSeF document but received an HTML page: {path}",
@@ -238,7 +276,16 @@ def _save_bytes(path: Path, content: bytes, *, overwrite: bool) -> Path:
             ExitCode.IO_ERROR,
             "Use --overwrite to replace existing file.",
         )
-    path.write_bytes(content)
+    try:
+        path.write_bytes(content)
+    except OSError as exc:
+        # Sam zapis też musi być mapowany: zbyt długa nazwa (`WinError 206`),
+        # brak miejsca albo brak praw dawały UNEXPECTED/6 zamiast IO_ERROR/8.
+        raise CliError(
+            f"Cannot write output file: {path}",
+            ExitCode.IO_ERROR,
+            "Check the target path length, free space and write permissions.",
+        ) from exc
     return path
 
 

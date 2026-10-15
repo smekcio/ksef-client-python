@@ -270,6 +270,42 @@ def test_online_session_state_roundtrip_and_validation() -> None:
         OnlineSessionState.from_dict(state.to_dict() | {"symmetric_key_base64": "???"})
 
 
+def test_session_states_keep_the_key_out_of_repr() -> None:
+    """Stan sesji trafia do logów i komunikatów, więc `repr` nie może nieść klucza AES."""
+    online = OnlineSessionState(
+        reference_number="SES-REPR",
+        form_code=_form_code(),
+        valid_until="2026-04-01T12:30:00Z",
+        symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        iv_base64="AgICAgICAgICAgICAgICAg==",
+    )
+    batch = BatchSessionState(
+        reference_number="SES-BATCH-REPR",
+        form_code=_form_code(),
+        batch_file=m.BatchFileInfo.from_dict(
+            {
+                "fileSize": 10,
+                "fileHash": "hash",
+                "fileParts": [{"ordinalNumber": 1, "fileSize": 10, "fileHash": "hash-part"}],
+            }
+        ),
+        part_upload_requests=[],
+        symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        iv_base64="AgICAgICAgICAgICAgICAg==",
+    )
+
+    for state in (online, batch):
+        rendered = repr(state)
+        assert state.symmetric_key_base64 not in rendered
+        assert "symmetric_key_base64=" not in rendered
+        assert state.iv_base64 in rendered  # IV nie jest tajny i pomaga w diagnostyce
+        assert state.reference_number in rendered
+
+    # Serializacja nadal niesie oba pola — ukrycie dotyczy wyłącznie `repr`.
+    assert online.to_dict()["symmetric_key_base64"] == online.symmetric_key_base64
+    assert batch.to_dict()["symmetric_key_base64"] == batch.symmetric_key_base64
+
+
 def test_batch_session_state_roundtrip_and_validation() -> None:
     batch_file = m.BatchFileInfo.from_dict(
         {

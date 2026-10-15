@@ -4,7 +4,7 @@ import base64
 import binascii
 import json
 from collections.abc import Callable, Collection, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from .. import models as m
@@ -247,7 +247,10 @@ class OnlineSessionState:
     reference_number: str
     form_code: m.FormCode
     valid_until: str | None
-    symmetric_key_base64: str
+    #: Klucz AES-256 w Base64 — poza `repr()`, bo stan trafia do logów i komunikatów
+    #: błędów. IV zostaje widoczny: nie jest tajny (jedzie jawnie w `EncryptionInfo`),
+    #: a pomaga w diagnostyce. Serializacja (`to_dict`) obejmuje oba pola.
+    symmetric_key_base64: str = field(repr=False)
     iv_base64: str
     upo_v43: bool = False
     schema_version: int = _SESSION_STATE_SCHEMA_VERSION
@@ -342,7 +345,8 @@ class BatchSessionState:
     form_code: m.FormCode
     batch_file: m.BatchFileInfo
     part_upload_requests: list[m.PartUploadRequest]
-    symmetric_key_base64: str
+    #: Klucz AES-256 w Base64 — poza `repr()` (patrz `OnlineSessionState`).
+    symmetric_key_base64: str = field(repr=False)
     iv_base64: str
     upo_v43: bool = False
     offline_mode: bool | None = None
