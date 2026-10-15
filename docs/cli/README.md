@@ -159,6 +159,10 @@ Options:
   --help
 ```
 
+Opcje globalne podaje się **przed** nazwą komendy: `ksef --json invoice list` działa,
+a `ksef invoice list --json` kończy się błędem `No such option: --json`. Dotyczy to także
+`--profile`, `-v/--verbose` i `--no-color`.
+
 Zachowanie profilu:
 - gdy podasz `--profile`, CLI uzywa tej nazwy,
 - gdy podasz nieistniejacy `--profile`, CLI zwraca blad walidacji (exit code `2`),
@@ -173,7 +177,8 @@ Brak aktywnego profilu:
 - jesli profil nie jest ustawiony, CLI zwraca czytelny blad z podpowiedzia:
   - `ksef init --set-active`
   - `ksef profile use --name <name>`
-  - albo uruchomienie komendy z `--profile <name>`.
+  - albo uruchomienie komendy z opcją globalną przed nazwą komendy:
+    `ksef --profile <name> <komenda>`.
 - komendy onboardingu (`init`, `profile ...`) dzialaja bez aktywnego profilu.
 
 Srodowiska i `base_url` (aby uniknac przypadkowego DEMO):
@@ -465,14 +470,14 @@ Uwagi:
 - podanie `--subject-type` zachowuje poprzednie, jawne filtrowanie do jednego kontekstu podmiotu.
 - zakres `--from/--to` nie moze przekraczac 100 dni.
 
-Kontrakt `data` dla `ksef invoice list --json`:
+Kontrakt `data` dla `ksef --json invoice list`:
 - `count`: liczba rekordow w biezacej stronie po filtracji,
 - `from`, `to`: efektywny zakres dat wykorzystany w zapytaniu,
 - `items`: lista rekordow faktur,
 - `has_more`: czy API sygnalizuje kolejne dane do pobrania,
 - `is_truncated`: czy API zwrocilo odpowiedz obcieta po stronie serwera,
-- `permanent_storage_hwm_date`: znacznik HWM z API (dla synchronizacji przyrostowej),
-- `continuation_token`: pole kompatybilnosciowe; CLI nie generuje sztucznej wartosci i moze byc `null`.
+- `permanent_storage_hwm_date`: znacznik HWM z API (dla synchronizacji przyrostowej); pusty string, gdy API go nie zwrocilo,
+- `continuation_token`: pole kompatybilnosciowe; CLI nie generuje sztucznej wartosci i podstawia pusty string, gdy API nie zwrocilo tokenu.
 
 ## `ksef invoice download`
 
@@ -850,7 +855,9 @@ Uwagi:
 - `4` retry exhausted / rate-limit
 - `5` blad API KSeF
 - `6` blad konfiguracji/srodowiska
-- `7` circuit breaker open
+- `7` `CIRCUIT_OPEN` — **zarezerwowany, nieużywany**: żadna komenda CLI go nie podnosi
+  (polityka z `cli/policies/circuit_breaker.py` nie jest podłączona do kodów wyjścia,
+  a wartość jest utrwalona w `cli/exit_codes.py` i w `tests/cli/unit/test_exit_codes.py`)
 - `8` blad I/O
 
 ## Bezpieczenstwo tokenow
@@ -876,11 +883,18 @@ KSEF_CLI_ALLOW_INSECURE_TOKEN_STORE=1
 - Gdy CLI faktycznie uzyje plaintext fallback, wypisuje jawne ostrzezenie o niezabezpieczonym zapisie tokenow.
 - Na Windows plaintext fallback jest zablokowany nawet po ustawieniu tej zmiennej; uzyj keyringa albo fallbacku szyfrowanego.
 - Gdy keyring jest obecny, ale backend zwraca blad, CLI automatycznie przechodzi na dostepny fallback (`KSEF_CLI_TOKEN_STORE_KEY` lub awaryjny plaintext poza Windows).
-- `ksef health check` oraz diagnostyka preflight pokazuja aktualny tryb polityki token-store jako jedno z:
+- `ksef health check` dopisuje do wyniku check `token_store` z aktualnym trybem polityki
+  token-store jako jedno z:
   - `keyring`
   - `encrypted-fallback`
   - `plaintext-fallback`
   - `unavailable`
+  Tryby `plaintext-fallback` i `unavailable` dają status `WARN`, pozostałe `PASS`.
+- Funkcja `run_preflight()` z `ksef_client.cli.diagnostics.checks` zwraca ten sam tryb
+  w checku `token_store` (tam zawsze ze statusem `PASS`), ale **nie jest wywoływana
+  z żadnej komendy CLI** — jest dostępna tylko dla kodu Pythona (np. własnego skryptu
+  diagnostycznego). Za `ksef health check` odpowiada `run_health_check`
+  z `ksef_client.cli.sdk.adapters`.
 
 Lokalizacja token fallback:
 - Windows: `%LOCALAPPDATA%/ksef-cli/tokens.json`
@@ -889,7 +903,14 @@ Lokalizacja token fallback:
 ## Odporność configu
 
 - Zapis `config.json` jest atomowy (tmp + rename), aby ograniczyc ryzyko uszkodzenia pliku.
-- Gdy `config.json` jest uszkodzony (np. niepoprawny JSON), CLI przenosi go do pliku `config.corrupt-<timestamp>.json` i startuje z pustym configiem.
+- Gdy `config.json` jest uszkodzony (niepoprawny JSON albo korzeń nie jest obiektem JSON),
+  CLI przenosi go do pliku `config.corrupt-<timestamp>.json` i startuje z pustym configiem.
+- Analogicznie traktowany jest cache metadanych tokenow (`cache.json`): przy niepoprawnym
+  JSON-ie albo nieoczekiwanym kształcie (brak słownika `profiles`) CLI przenosi go do
+  `cache.corrupt-<timestamp>.json` i dalej pracuje z pustym cache metadanych. Operacja
+  wypisuje ostrzeżenie runtime zamiast po cichu ignorowac uszkodzony plik.
+- `config.corrupt-...` trafia do katalogu konfiguracji, a `cache.corrupt-...` do katalogu
+  cache (patrz „Lokalizacje plikow CLI”); znacznik czasu jest w UTC (`%Y%m%dT%H%M%SZ`).
 
 ## Lokalizacje plikow CLI
 
@@ -907,6 +928,8 @@ Lokalizacja token fallback:
   - Linux/macOS: `~/.cache/ksef-cli/tokens.json`
 - Kopia uszkodzonego configu:
   - `config.corrupt-<timestamp>.json` w tym samym katalogu co `config.json`.
+- Kopia uszkodzonego cache metadanych:
+  - `cache.corrupt-<timestamp>.json` w tym samym katalogu co `cache.json`.
 
 Uwagi:
 - checkpointy sesji sa zapisywane atomowo,

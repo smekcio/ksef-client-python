@@ -49,27 +49,47 @@ odpowiada wzorowi MF. Są też dobrym materiałem na fixtures dla testów.
 
 ## Odstępstwa od oryginału
 
-Treść schematów jest zgodna ze źródłem; różnice są **wyłącznie formatujące** i zostały
-zweryfikowane wobec oryginałów:
+Treść schematów odpowiada źródłu, ale **nie wszystkie różnice są formatujące** — stan
+zweryfikowano bajtowo wobec oryginałów z `CIRFMF/ksef-api` (porównanie `git-blob-SHA1`,
+nie tylko po normalizacji końcówek linii):
 
 | Plik | Różnica wobec źródła |
 | --- | --- |
-| `schemat_FA(3)_v1-0E.xsd` | Jedna linia (2258) bez końcowego whitespace. W źródle `CIRFMF/ksef-api` linia ta ma 18 spacji na końcu. |
-| `KodyKrajow_v10-0E.xsd` | Tylko końcówki linii (`CRLF` → `LF`). Treść bajtowo identyczna po normalizacji. |
-| `ElementarneTypyDanych_v10-0E.xsd` | Tylko końcówki linii (samotny `CR` → `LF`). Treść identyczna po normalizacji. |
-| `StrukturyDanych_v10-0E.xsd` | Tylko końcówki linii (samotny `CR` → `LF`). Treść identyczna po normalizacji. |
+| `schemat_FA(3)_v1-0E.xsd` | Usunięty końcowy whitespace w linii 2258 (w źródle 18 spacji). Poza tym plik identyczny; `schemaLocation` bez zmian. |
+| `KodyKrajow_v10-0E.xsd` | Brak różnic — plik jest bajtowo identyczny ze źródłem. |
+| `ElementarneTypyDanych_v10-0E.xsd` | Końcówki linii (samotny `CR` → `LF`; 360 wystąpień) oraz **zmienione** `schemaLocation` (ścieżka relatywna → absolutny URL). |
+| `StrukturyDanych_v10-0E.xsd` | Końcówki linii (samotny `CR` → `LF`; 845 wystąpień) oraz **zmienione** `schemaLocation` (ścieżka relatywna → absolutny URL). |
 
-Źródła MF używają niespójnych końcówek linii (jeden plik `CRLF`, dwa samotny `CR`), więc
+Źródła MF używają niespójnych końcówek linii (dwa pliki: samotny `CR`, dwa: `LF`), więc
 w repo ujednolicono je do `LF`. **Nie należy wprowadzać tu zmian merytorycznych** —
 schemat musi odwzorowywać kontrakt produkcyjny KSeF.
 
 ### Adresy `schemaLocation`
 
-Wszystkie kopie zachowują oryginalne `schemaLocation` wskazujące **adresy URL** do
-`crd.gov.pl`. Walidacja działa offline nie dzięki zmodyfikowanym ścieżkom, lecz dlatego,
-że `_schema_resolver` w `xml.py` przechwytuje żądania zasobów i podstawia pliki z tego
-katalogu (dopasowanie po nazwie pliku). Zmiana tych adresów na relatywne nie jest
-konieczna.
+Rzeczywisty stan kopii w tym katalogu (nie „wszystkie wskazują URL”):
+
+| Plik | `schemaLocation` w kopii | W oryginale MF |
+| --- | --- | --- |
+| `schemat_FA(3)_v1-0E.xsd` | absolutny URL do `StrukturyDanych_v10-0E.xsd` | tak samo (URL) |
+| `ElementarneTypyDanych_v10-0E.xsd` | absolutny URL do `KodyKrajow_v10-0E.xsd` | `KodyKrajow_v10-0E.xsd` (ścieżka relatywna) |
+| `StrukturyDanych_v10-0E.xsd` | absolutny URL do `ElementarneTypyDanych_v10-0E.xsd` | `ElementarneTypyDanych_v10-0E.xsd` (ścieżka relatywna) |
+| `KodyKrajow_v10-0E.xsd` | brak | brak |
+
+Skutki, które trzeba znać:
+
+- walidacja w SDK działa bez sieci nie dzięki tym adresom, lecz dlatego, że
+  `_schema_resolver` w `xml.py` przechwytuje żądania zasobów i podstawia pliki z tego
+  katalogu, dopasowując je po nazwie pliku (`Path(url).name`),
+- XSD **wyjęty z paczki** i użyty w narzędziu bez własnego resolvera i bez sieci nie
+  skompiluje się: `ElementarneTypyDanych` i `StrukturyDanych` każą wtedy pobrać plik
+  z `crd.gov.pl` zamiast wziąć ten leżący obok (`XMLSchemaParseError` przy `include`),
+- dotyczy to także `schemat_FA(3)_v1-0E.xsd` — jego `import` do `crd.gov.pl` jest
+  absolutny już w źródle MF, więc również oryginał wymaga sieci albo resolvera;
+  `KodyKrajow_v10-0E.xsd` nie ma zależności i kompiluje się offline.
+
+Zmiana tych adresów (np. na ścieżki relatywne, tak jak w źródle MF dla
+`ElementarneTypyDanych` i `StrukturyDanych`) wymaga świadomej decyzji i aktualizacji tego
+README oraz `tests/test_fa3_schemas_integrity.py`, który utrwala obecny stan.
 
 ## Rozjazd słowników walut (OpenAPI ↔ XSD)
 

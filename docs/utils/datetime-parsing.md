@@ -60,13 +60,32 @@ assert try_parse_api_datetime("nie-data") is None
 
 ## Obsługiwane zapisy
 
-| Zapis | Obsługa |
-| --- | --- |
-| `YYYY-MM-DDTHH:MM:SS+HH:MM` | tak |
-| `YYYY-MM-DDTHH:MM:SSZ` (także małe `z`) | tak |
-| `YYYY-MM-DDTHH:MM:SS.fff…` (3–9+ cyfr, dowolna długość) | tak (normalizacja do 6 cyfr) |
-| `YYYY-MM-DDTHH:MM:SS` (bez strefy → UTC) | tak |
-| `YYYY-MM-DD` (sama data) | tak |
-| format podstawowy `20250101T000000Z` | nie (API go nie zwraca) |
+Kolumny pokazują zachowanie `parse_api_datetime` na najniższej wspieranej wersji
+(`requires-python = ">=3.10"`) i na nowszych interpreterach — różnica nie wynika z tego
+modułu, lecz z `datetime.fromisoformat`.
+
+| Zapis | 3.10 | ≥ 3.11 |
+| --- | --- | --- |
+| `YYYY-MM-DDTHH:MM:SS+HH:MM` | tak | tak |
+| `YYYY-MM-DDTHH:MM:SSZ` (także małe `z`) | tak (normalizacja `Z` → `+00:00`) | tak |
+| `YYYY-MM-DDTHH:MM:SS.fff…` (3–9+ cyfr, dowolna długość) | tak (normalizacja do 6 cyfr) | tak |
+| `YYYY-MM-DDTHH:MM:SS` (bez strefy → UTC) | tak | tak |
+| `YYYY-MM-DD` (sama data) | tak | tak |
+| format podstawowy `20250101T000000Z` | **nie** — `ValueError` | tak (patrz uwagi) |
+
+Uwagi:
+
+- `normalize_api_timestamp` zamienia wyłącznie ułamek sekundy i końcowe `Z`/`z`; formatu
+  podstawowego **nie** przepisuje na rozszerzony, bo API KSeF go nie zwraca.
+- Dlatego wynik dla `20250101T000000Z` zależy od interpretera: na 3.10.11 to `ValueError`
+  (`Invalid isoformat string`), a na 3.12.2 `datetime(2025, 1, 1, 0, 0, tzinfo=utc)`.
+  Przyczyna jest w `datetime.fromisoformat`, które od Pythona 3.11 przyjmuje większość
+  zapisów ISO 8601 (w tym podstawowy) — [What's New In Python 3.11][whatsnew311].
+  Moduł nie ma na to żadnego własnego obejścia.
+- Jeśli potrzebujesz formatu podstawowego niezależnie od wersji Pythona, sparsuj go przed
+  wywołaniem `parse_api_datetime` (np. `datetime.strptime(value, "%Y%m%dT%H%M%SZ")`
+  i `replace(tzinfo=timezone.utc)`).
+
+[whatsnew311]: https://docs.python.org/3/whatsnew/3.11.html#datetime
 
 Powiązane: [Identyfikator zbiorczy](collective-identifier.md), [HWM](../services/hwm.md).

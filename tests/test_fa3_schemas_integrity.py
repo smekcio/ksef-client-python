@@ -1,11 +1,16 @@
 """Niezmienniki plików XSD FA(3) dołączonych do pakietu.
 
-README w katalogu `schemas/` deklaruje, że kopie różnią się od źródeł MF wyłącznie
-formatowaniem. Ten moduł pilnuje cech możliwych do sprawdzenia offline:
+README w katalogu `schemas/` opisuje różnice wobec źródeł MF (końcówki linii, końcowy
+whitespace, zmienione `schemaLocation`). Ten moduł pilnuje cech możliwych do sprawdzenia
+offline:
 
 - wszystkie pliki używają `LF` (brak `CR`/`CRLF`), więc walidacja jest niezależna
   od platformy i od `git autocrlf`,
-- brak końcowego whitespace poza jednym udokumentowanym wyjątkiem,
+- brak końcowego whitespace (w źródle MF jedno wystąpienie w linii 2258 zostało usunięte),
+- `schemaLocation` w kopiach to absolutne URL-e do `crd.gov.pl` — walidacja offline działa
+  dzięki `_schema_resolver` dopasowującemu zasoby po nazwie pliku, więc zmiana tych
+  adresów (np. na ścieżki relatywne ze źródła) wymaga świadomej decyzji i aktualizacji
+  README,
 - schemat FA(3) definiuje oczekiwane typy i liczbę kodów walut.
 
 Zmiana tych niezmienników wymaga świadomej aktualizacji README, a nie cichego
@@ -30,9 +35,20 @@ SCHEMA_NAMES = (
 # w oryginale MF ma końcowy whitespace, którego kopia lokalna nie zawiera.
 ALLOWED_TRAILING_WHITESPACE: dict[str, set[int]] = {}
 
-# `schemaLocation` celowo wskazuje URL do crd.gov.pl - walidacja offline opiera się
-# na `_schema_resolver`, nie na relatywnych ścieżkach.
-EXPECTED_SCHEMA_LOCATION_HOST = "crd.gov.pl"
+# Pliki, które w tej kopii mają niepuste `schemaLocation` (KodyKrajow nie ma zależności).
+SCHEMAS_WITH_SCHEMA_LOCATION = frozenset(
+    {
+        "schemat_FA(3)_v1-0E.xsd",
+        "ElementarneTypyDanych_v10-0E.xsd",
+        "StrukturyDanych_v10-0E.xsd",
+    }
+)
+
+# `schemaLocation` w kopii jest absolutnym URL-em do crd.gov.pl (w oryginałach MF dwa
+# z tych plików mają ścieżki relatywne). Walidacja offline opiera się na
+# `_schema_resolver`, który dopasowuje zasoby po nazwie pliku — zmiana tych adresów
+# wymaga świadomej decyzji, a nie przypadkowej edycji.
+EXPECTED_SCHEMA_LOCATION_PREFIX = "http://crd.gov.pl/"
 
 
 def _schema_bytes(name: str) -> bytes:
@@ -71,14 +87,19 @@ def test_schemas_have_no_unexpected_trailing_whitespace(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", SCHEMA_NAMES)
-def test_schemas_keep_original_schema_location_urls(name: str) -> None:
-    """README deklaruje, że adresy URL zostają - walidacja offline działa przez resolver."""
+def test_schemas_use_absolute_schema_location_urls(name: str) -> None:
+    """Kopie wskazują absolutne URL-e do crd.gov.pl — tak działa resolve offline w SDK."""
     locations = re.findall(r'schemaLocation="([^"]+)"', _schema_text(name))
 
+    if name in SCHEMAS_WITH_SCHEMA_LOCATION:
+        assert locations, f"{name}: brak `schemaLocation`, choć plik ma zależność"
+    else:
+        assert locations == [], f"{name}: nieoczekiwany `schemaLocation` {locations}"
+
     for location in locations:
-        assert EXPECTED_SCHEMA_LOCATION_HOST in location, (
-            f"{name}: `schemaLocation` {location!r} nie wskazuje na "
-            f"{EXPECTED_SCHEMA_LOCATION_HOST}; jeśli zmieniono to świadomie, "
+        assert location.startswith(EXPECTED_SCHEMA_LOCATION_PREFIX), (
+            f"{name}: `schemaLocation` {location!r} nie jest absolutnym URL-em do "
+            f"{EXPECTED_SCHEMA_LOCATION_PREFIX}; jeśli zmieniono to świadomie, "
             f"zaktualizuj README w katalogu schemas/"
         )
 
