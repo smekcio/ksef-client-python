@@ -31,7 +31,10 @@ def _load_toml_parser() -> Callable[[str], dict[str, Any]] | None:
 
     ``tomllib`` istnieje dopiero od 3.11, a projekt wspiera 3.10, więc import
     jest rozwiązywany w runtime — inaczej ``mypy`` (target py310) zgłasza brak
-    modułu.
+    modułu. Na 3.10 parsera dostarcza ``tomli``, zadeklarowane w
+    ``requirements-dev.txt`` (``tomli; python_version < "3.11"``); bez tej
+    deklaracji pętla poniżej nie znajduje żadnego parsera i trzy testy
+    deklaracji zależności były po cichu pomijane (``skipif``).
     """
     for module_name in ("tomllib", "tomli"):
         try:
@@ -70,10 +73,6 @@ OPTIONAL_DEPENDENCIES = {
     "rich",
     "keyring",
 }
-
-REQUIRES_TOML_PARSER = pytest.mark.skipif(
-    _TOML_LOADS is None, reason="brak parsera TOML (tomllib/tomli)"
-)
 
 
 def _read_pyproject() -> str:
@@ -195,6 +194,21 @@ def test_runtime_typing_extensions_importers_exist() -> None:
         assert "sys.version_info" in source, (
             f"{relative} importuje typing_extensions bez warunku wersji"
         )
+
+
+def test_toml_parser_is_available_on_every_supported_python() -> None:
+    """Brak parsera TOML nie może być cichym pominięciem strażników.
+
+    Na Pythonie 3.10 nie ma ``tomllib``, więc parser pochodzi z ``tomli``
+    (``requirements-dev.txt``: ``tomli; python_version < "3.11"``). Gdyby tej
+    zależności zabrakło, trzy testy deklaracji zależności poniżej zamieniłyby się
+    w ``skipped`` i regresja w ``pyproject.toml`` przeszłaby niezauważona — ten
+    test zamienia takie pominięcie na widoczny błąd.
+    """
+    assert _TOML_LOADS is not None, (
+        "brak parsera TOML (tomllib/tomli): na Pythonie < 3.11 zainstaluj zależności "
+        "deweloperskie (`pip install -r requirements-dev.txt`)"
+    )
 
 
 @REQUIRES_TOML_PARSER

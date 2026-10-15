@@ -255,6 +255,91 @@ class ClientsTests(unittest.TestCase):
             self.assertEqual(request_model.call_args.kwargs["params"], {"sessionType": "online"})
             self.assertIsNone(request_model.call_args.kwargs["headers"])
 
+    def test_sessions_client_upo_v43_false_omits_feature_header(self):
+        """``upo_v43`` wyłączone (domyślnie) nie negocjuje wersji UPO v4.3.
+
+        Gałąź ``if upo_v43:`` z ``clients/sessions.py`` przy ``False`` nie miała
+        testu — każde wywołanie w tym pliku podawało ``upo_v43=True``, więc brak
+        nagłówka ``X-KSeF-Feature`` nie był nigdzie sprawdzany.
+        """
+        payload: Any = object()
+        client = SessionsClient(self.http)
+        with patch.object(client, "_request_model", Mock(return_value=object())) as request_model:
+            client.open_online_session(payload, access_token="token", upo_v43=False)
+            client.open_batch_session(payload, access_token="token", upo_v43=False)
+            # Wartość domyślna parametru musi zachowywać się tak samo jak jawne False.
+            client.open_online_session(payload, access_token="token")
+            client.open_batch_session(payload, access_token="token")
+
+            self.assertEqual(
+                [call.args[:2] for call in request_model.call_args_list],
+                [
+                    ("POST", "/sessions/online"),
+                    ("POST", "/sessions/batch"),
+                    ("POST", "/sessions/online"),
+                    ("POST", "/sessions/batch"),
+                ],
+            )
+            self.assertEqual(
+                [call.kwargs["headers"] for call in request_model.call_args_list],
+                [None, None, None, None],
+            )
+            self.assertEqual(
+                [call.kwargs["expected_status"] for call in request_model.call_args_list],
+                [{201}, {201}, {201}, {201}],
+            )
+
+        with patch.object(client, "_request_model", Mock(return_value=object())) as request_model:
+            client.open_online_session(payload, access_token="token", upo_v43=True)
+            client.open_batch_session(payload, access_token="token", upo_v43=True)
+            # Kontrast: to samo wywołanie z ``upo_v43=True`` wysyła nagłówek.
+            self.assertEqual(
+                [call.kwargs["headers"] for call in request_model.call_args_list],
+                [{"X-KSeF-Feature": "upo-v4-3"}, {"X-KSeF-Feature": "upo-v4-3"}],
+            )
+
+    def test_sessions_client_single_page_pagination_omits_continuation_header(self):
+        """Pojedyncza strona paginacji nie wysyła nagłówka kontynuacji."""
+        client = SessionsClient(self.http)
+        with patch.object(client, "_request_model", Mock(return_value=object())) as request_model:
+            client.get_sessions(session_type="online", page_size=1, access_token="token")
+            client.get_session_invoices("ref", page_size=1, access_token="token")
+            client.get_session_failed_invoices("ref", page_size=1, access_token="token")
+
+            self.assertEqual(
+                [call.args[:2] for call in request_model.call_args_list],
+                [
+                    ("GET", "/sessions"),
+                    ("GET", "/sessions/ref/invoices"),
+                    ("GET", "/sessions/ref/invoices/failed"),
+                ],
+            )
+            self.assertEqual(
+                [call.kwargs["params"] for call in request_model.call_args_list],
+                [
+                    {"sessionType": "online", "pageSize": 1},
+                    {"pageSize": 1},
+                    {"pageSize": 1},
+                ],
+            )
+            self.assertEqual(
+                [call.kwargs["headers"] for call in request_model.call_args_list],
+                [None, None, None],
+            )
+
+        with patch.object(client, "_request_model", Mock(return_value=object())) as request_model:
+            # Kolejna strona (z tokenem kontynuacji) wysyła nagłówek paginacji.
+            client.get_sessions(
+                session_type="online",
+                page_size=1,
+                continuation_token="next-page",
+                access_token="token",
+            )
+            self.assertEqual(
+                request_model.call_args.kwargs["headers"],
+                {"x-continuation-token": "next-page"},
+            )
+
     def test_invoices_client_and_helpers(self):
         client = InvoicesClient(self.http)
         with (
@@ -955,6 +1040,67 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
             )
         with self.assertRaisesRegex(TypeError, "typed model payload"):
             await invoices.export_invoices(cast(Any, {"filters": {}}), access_token="token")
+
+    async def test_async_sessions_client_upo_v43_false_and_single_page_pagination(self):
+        """Wariant asynchroniczny: ``upo_v43=False`` i pojedyncza strona paginacji.
+
+        Ten sam kontrakt co w ``SessionsClient``: brak nagłówka
+        ``X-KSeF-Feature`` oraz brak nagłówka kontynuacji, gdy strona jest
+        pierwsza i jedyna.
+        """
+        payload: Any = object()
+        sessions = AsyncSessionsClient(self.http)
+        with patch.object(
+            sessions, "_request_model", AsyncMock(return_value=object())
+        ) as request_model:
+            await sessions.open_online_session(payload, access_token="token", upo_v43=False)
+            await sessions.open_batch_session(payload, access_token="token", upo_v43=False)
+            await sessions.open_online_session(payload, access_token="token")
+            await sessions.get_sessions(session_type="online", page_size=5, access_token="token")
+            await sessions.get_session_invoices("ref", page_size=5, access_token="token")
+
+            self.assertEqual(
+                [call.args[:2] for call in request_model.call_args_list],
+                [
+                    ("POST", "/sessions/online"),
+                    ("POST", "/sessions/batch"),
+                    ("POST", "/sessions/online"),
+                    ("GET", "/sessions"),
+                    ("GET", "/sessions/ref/invoices"),
+                ],
+            )
+            self.assertEqual(
+                [call.kwargs["headers"] for call in request_model.call_args_list],
+                [None, None, None, None, None],
+            )
+            self.assertEqual(
+                [call.kwargs["params"] for call in request_model.call_args_list[3:]],
+                [{"sessionType": "online", "pageSize": 5}, {"pageSize": 5}],
+            )
+
+        with patch.object(
+            sessions, "_request_model", AsyncMock(return_value=object())
+        ) as request_model:
+            await sessions.open_online_session(payload, access_token="token", upo_v43=True)
+            await sessions.open_batch_session(payload, access_token="token", upo_v43=True)
+            self.assertEqual(
+                [call.kwargs["headers"] for call in request_model.call_args_list],
+                [{"X-KSeF-Feature": "upo-v4-3"}, {"X-KSeF-Feature": "upo-v4-3"}],
+            )
+
+        with patch.object(
+            sessions, "_request_model", AsyncMock(return_value=object())
+        ) as request_model:
+            await sessions.get_sessions(
+                session_type="online",
+                page_size=5,
+                continuation_token="next-page",
+                access_token="token",
+            )
+            self.assertEqual(
+                request_model.call_args.kwargs["headers"],
+                {"x-continuation-token": "next-page"},
+            )
 
     async def test_async_invoices_client_query_metadata_serializes_typed_payload_once(self):
         response = HttpResponse(

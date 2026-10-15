@@ -9,3 +9,6 @@ ruff>=0.6.0
 mypy>=1.10.0
 pytest-mock>=3.14.0
 lxml>=5.0.0
+# `tomllib` istnieje dopiero od 3.11; bez `tomli` strażnicy deklaracji zależności
+# w `tests/test_packaging_dependencies.py` byli po cichu pomijani na Pythonie 3.10.
+tomli>=2.0.0; python_version < "3.11"
