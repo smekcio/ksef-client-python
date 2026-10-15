@@ -971,9 +971,9 @@ class CollectiveIdentifierInvoicesQueryResponse(OpenApiModel):
 
 @dataclass(frozen=True)
 class CollectiveIdentifierInvoicesQueryResponseItem(OpenApiModel):
-    collective_identifier_number: str = field(metadata={"json_key": "collectiveIdentifierNumber"})
     details_hidden: bool = field(metadata={"json_key": "detailsHidden"})
     ksef_number: KsefNumber = field(metadata={"json_key": "ksefNumber"})
+    collective_identifier_number: Optional[str] = field(default=None, metadata={"json_key": "collectiveIdentifierNumber"})
     description: Optional[str] = None
     payment: Optional[CollectiveIdentifierInvoicesQueryResponseItemPayment] = None
 

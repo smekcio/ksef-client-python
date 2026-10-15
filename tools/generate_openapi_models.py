@@ -56,6 +56,29 @@ def _ref_name(ref: str) -> str:
     return ref.rsplit("/", 1)[-1]
 
 
+#: Pola, które kontrakt oznacza jako wymagane, ale oficjalny przykład odpowiedzi
+#: ich nie zawiera — API potrafi przysłać taki obiekt, a wtedy `from_dict`
+#: kończyłoby się `TypeError: missing 1 required positional argument`.
+#:
+#: `POST /collective-identifiers/invoices` (200) ma w specyfikacji przykład
+#: pozycji złożonej wyłącznie z `ksefNumber`, `payment`, `description`
+#: i `detailsHidden`, choć schemat `CollectiveIdentifierInvoicesQueryResponseItem`
+#: wymienia `collectiveIdentifierNumber` w `required`. Bez tego wyjątku
+#: `list_invoices()`/`iter_invoices()` wywracały się na odpowiedzi zgodnej
+#: z własnym przykładem kontraktu (przykład w `docs/api/collective-identifiers.md`
+#: pokazuje pozycje z `collectiveIdentifierNumber`, więc pole zostaje w modelu —
+#: jako opcjonalne).
+OPTIONAL_DESPITE_REQUIRED: dict[str, frozenset[str]] = {
+    "CollectiveIdentifierInvoicesQueryResponseItem": frozenset({"collectiveIdentifierNumber"}),
+}
+
+
+def _is_required_field(model_name: str, prop_name: str, required: set[str]) -> bool:
+    if prop_name in OPTIONAL_DESPITE_REQUIRED.get(model_name, frozenset()):
+        return False
+    return prop_name in required
+
+
 def _schema_type(schema: dict) -> str:
     if "oneOf" in schema:
         items = schema.get("oneOf") or []
@@ -138,7 +161,7 @@ def _generate_object(name: str, schema: dict) -> list[str]:
     for prop_name, prop_schema in props.items():
         field_name = _sanitize_field_name(prop_name, used_names)
         type_name = _schema_type(prop_schema)
-        is_required = prop_name in required
+        is_required = _is_required_field(name, prop_name, required)
         is_nullable = bool(prop_schema.get("nullable"))
         if is_nullable or not is_required:
             type_name = _optional_type(type_name)

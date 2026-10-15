@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import unittest
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 from ksef_client import models as m
@@ -175,6 +177,56 @@ class CollectiveIdentifierDomainTests(unittest.TestCase):
         value = "2026-01-01T12:00:00Z"
         self.assertEqual(expand_query_date_bound(value, end_of_day=True), value)
         self.assertEqual(expand_query_date_bound(value, end_of_day=False), value)
+
+
+class CollectiveIdentifierContractExampleTests(unittest.TestCase):
+    """Odpowiedź zgodna z przykładem kontraktu nie może wywracać modelu.
+
+    `POST /collective-identifiers/invoices` (200) ma w snapshocie OpenAPI przykład
+    pozycji bez `collectiveIdentifierNumber`, choć schemat
+    `CollectiveIdentifierInvoicesQueryResponseItem` wymienia to pole w `required`.
+    Model wymagał go bez wartości domyślnej, więc `from_dict` kończył się
+    `TypeError: ... missing 1 required positional argument: 'collective_identifier_number'`
+    — czyli `list_invoices()`/`iter_invoices()` wywracały się na odpowiedzi, którą
+    sam kontrakt pokazuje jako poprawną.
+    """
+
+    SNAPSHOT_PATH = Path(__file__).resolve().parents[1] / "specs" / "ksef-openapi.snapshot.json"
+
+    def _example(self) -> dict:
+        spec = json.loads(self.SNAPSHOT_PATH.read_text(encoding="utf-8"))
+        operation = spec["paths"]["/collective-identifiers/invoices"]["post"]
+        return operation["responses"]["200"]["content"]["application/json"]["example"]
+
+    def test_contract_example_omits_the_required_field(self) -> None:
+        """Przesłanka znaleziska: przykład kontraktu nie ma `collectiveIdentifierNumber`."""
+        item = self._example()["invoices"][0]
+
+        self.assertNotIn("collectiveIdentifierNumber", item)
+        self.assertIn("ksefNumber", item)
+
+    def test_model_parses_the_contract_example(self) -> None:
+        example = self._example()
+
+        response = m.CollectiveIdentifierInvoicesQueryResponse.from_dict(example)
+
+        self.assertEqual(len(response.invoices), len(example["invoices"]))
+        first = response.invoices[0]
+        self.assertIsNone(first.collective_identifier_number)
+        self.assertEqual(first.ksef_number, example["invoices"][0]["ksefNumber"])
+        self.assertFalse(first.details_hidden)
+
+    def test_list_invoices_accepts_the_contract_example(self) -> None:
+        client = CollectiveIdentifiersClient(http_client=Mock())
+        response = Mock()
+        response.content = b"{}"
+        response.json.return_value = self._example()
+
+        with patch.object(client._http, "request", Mock(return_value=response)):
+            result = client.list_invoices(_IZ, access_token="token")
+
+        self.assertIsInstance(result, m.CollectiveIdentifierInvoicesQueryResponse)
+        self.assertIsNone(result.invoices[0].collective_identifier_number)
 
 
 class CollectiveIdentifiersClientTests(unittest.TestCase):
