@@ -36,8 +36,8 @@ def _online_checkpoint() -> OnlineSessionCheckpoint:
             reference_number="SES-ONLINE-1",
             form_code=_form_code(),
             valid_until="2026-04-01T12:30:00Z",
-            symmetric_key_base64="AQID",
-            iv_base64="BAUG",
+            symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            iv_base64="AgICAgICAgICAgICAgICAg==",
         ),
     )
 
@@ -68,8 +68,8 @@ def _batch_checkpoint() -> BatchSessionCheckpoint:
                     }
                 )
             ],
-            symmetric_key_base64="AQID",
-            iv_base64="BAUG",
+            symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            iv_base64="AgICAgICAgICAgICAgICAg==",
         ),
         payload_source=BatchPayloadSource(
             kind="zip",

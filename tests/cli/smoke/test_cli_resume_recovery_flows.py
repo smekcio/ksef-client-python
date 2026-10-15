@@ -52,8 +52,8 @@ def _online_state(reference_number: str) -> OnlineSessionState:
         reference_number=reference_number,
         form_code=_form_code(),
         valid_until="2026-04-01T12:30:00Z",
-        symmetric_key_base64="AQID",
-        iv_base64="BAUG",
+        symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        iv_base64="AgICAgICAgICAgICAgICAg==",
     )
 
 
@@ -89,8 +89,8 @@ def _batch_state(reference_number: str) -> BatchSessionState:
                 }
             ),
         ],
-        symmetric_key_base64="AQID",
-        iv_base64="BAUG",
+        symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        iv_base64="AgICAgICAgICAgICAgICAg==",
     )
 
 

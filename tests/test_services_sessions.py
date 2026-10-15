@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import base64
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
@@ -253,8 +254,8 @@ def test_online_session_state_roundtrip_and_validation() -> None:
         reference_number="SES-1",
         form_code=_form_code(),
         valid_until="2026-04-01T12:30:00Z",
-        symmetric_key_base64="AQID",
-        iv_base64="BAUG",
+        symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        iv_base64="AgICAgICAgICAgICAgICAg==",
         upo_v43=True,
     )
     restored = OnlineSessionState.from_dict(state.to_dict())
@@ -290,8 +291,8 @@ def test_batch_session_state_roundtrip_and_validation() -> None:
         form_code=_form_code(),
         batch_file=batch_file,
         part_upload_requests=[request],
-        symmetric_key_base64="AQID",
-        iv_base64="BAUG",
+        symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        iv_base64="AgICAgICAgICAgICAgICAg==",
         upo_v43=False,
         offline_mode=True,
     )
@@ -313,8 +314,8 @@ def test_session_states_cover_validation_error_paths() -> None:
             reference_number="SES-1",
             form_code=_form_code(),
             valid_until="2026-04-01T12:30:00Z",
-            symmetric_key_base64="AQID",
-            iv_base64="BAUG",
+            symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            iv_base64="AgICAgICAgICAgICAgICAg==",
             schema_version=2,
         )
     with pytest.raises(ValueError):
@@ -322,8 +323,8 @@ def test_session_states_cover_validation_error_paths() -> None:
             reference_number="SES-1",
             form_code=_form_code(),
             valid_until="2026-04-01T12:30:00Z",
-            symmetric_key_base64="AQID",
-            iv_base64="BAUG",
+            symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            iv_base64="AgICAgICAgICAgICAgICAg==",
             kind="batch",
         )
 
@@ -331,8 +332,8 @@ def test_session_states_cover_validation_error_paths() -> None:
         reference_number="SES-1",
         form_code=_form_code(),
         valid_until="2026-04-01T12:30:00Z",
-        symmetric_key_base64="AQID",
-        iv_base64="BAUG",
+        symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        iv_base64="AgICAgICAgICAgICAgICAg==",
     )
     with pytest.raises(ValueError):
         OnlineSessionState.from_dict(online_state.to_dict() | {"reference_number": " "})
@@ -363,8 +364,8 @@ def test_session_states_cover_validation_error_paths() -> None:
                 }
             )
         ],
-        symmetric_key_base64="AQID",
-        iv_base64="BAUG",
+        symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        iv_base64="AgICAgICAgICAgICAgICAg==",
     )
     with pytest.raises(ValueError):
         BatchSessionState(
@@ -396,6 +397,67 @@ def test_session_states_cover_validation_error_paths() -> None:
         BatchSessionState.from_dict(batch_state.to_dict() | {"offline_mode": "yes"})
     with pytest.raises(ValueError):
         BatchSessionState.from_dict(batch_state.to_dict() | {"part_upload_requests": {}})
+
+
+def test_session_states_reject_wrong_key_and_iv_lengths() -> None:
+    """Stan sesji niesie klucz AES-256 (32 B) i IV (16 B) — inny rozmiar to błąd."""
+    symmetric_key_base64 = base64.b64encode(b"\x01" * 32).decode("ascii")
+    iv_base64 = base64.b64encode(b"\x02" * 16).decode("ascii")
+    state = OnlineSessionState(
+        reference_number="SES-1",
+        form_code=_form_code(),
+        valid_until="2026-04-01T12:30:00Z",
+        symmetric_key_base64=symmetric_key_base64,
+        iv_base64=iv_base64,
+    )
+    assert (len(state.symmetric_key), len(state.iv)) == (32, 16)
+    assert OnlineSessionState.from_dict(state.to_dict()) == state
+
+    with pytest.raises(ValueError) as short_key:
+        OnlineSessionState(
+            reference_number="SES-1",
+            form_code=_form_code(),
+            valid_until=None,
+            symmetric_key_base64=base64.b64encode(b"\x01" * 3).decode("ascii"),
+            iv_base64=iv_base64,
+        )
+    assert str(short_key.value) == "Invalid symmetric_key_base64: expected 32 bytes, got 3 bytes."
+
+    for field_name, wrong_value, expected_bytes in (
+        ("symmetric_key_base64", b"\x01" * 31, 32),
+        ("symmetric_key_base64", b"\x01" * 33, 32),
+        ("iv_base64", b"\x02" * 15, 16),
+        ("iv_base64", b"\x02" * 17, 16),
+    ):
+        changes: dict[str, Any] = {field_name: base64.b64encode(wrong_value).decode("ascii")}
+        with pytest.raises(ValueError) as wrong_length:
+            replace(state, **changes)
+        assert str(wrong_length.value) == (
+            f"Invalid {field_name}: expected {expected_bytes} bytes, "
+            f"got {len(wrong_value)} bytes."
+        )
+
+    batch_state = BatchSessionState(
+        reference_number="SES-BATCH-1",
+        form_code=_form_code(),
+        batch_file=m.BatchFileInfo.from_dict(
+            {
+                "fileSize": 10,
+                "fileHash": "hash",
+                "fileParts": [{"ordinalNumber": 1, "fileSize": 10, "fileHash": "hash-part"}],
+            }
+        ),
+        part_upload_requests=[],
+        symmetric_key_base64=symmetric_key_base64,
+        iv_base64=iv_base64,
+    )
+    assert BatchSessionState.from_dict(batch_state.to_dict()) == batch_state
+    with pytest.raises(ValueError) as batch_key:
+        replace(batch_state, symmetric_key_base64=base64.b64encode(b"\x01" * 33).decode("ascii"))
+    assert str(batch_key.value) == "Invalid symmetric_key_base64: expected 32 bytes, got 33 bytes."
+    with pytest.raises(ValueError) as batch_iv:
+        replace(batch_state, iv_base64=base64.b64encode(b"\x02" * 15).decode("ascii"))
+    assert str(batch_iv.value) == "Invalid iv_base64: expected 16 bytes, got 15 bytes."
 
 
 def test_online_workflow_returns_handle_and_resume_supports_status_methods() -> None:
@@ -536,8 +598,8 @@ def test_batch_handle_from_state_without_zip_covers_error_and_status_methods() -
                 }
             )
         ],
-        symmetric_key_base64="AQID",
-        iv_base64="BAUG",
+        symmetric_key_base64="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        iv_base64="AgICAgICAgICAgICAgICAg==",
     )
 
     handle = BatchSessionHandle.from_state(

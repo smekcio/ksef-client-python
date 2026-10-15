@@ -156,6 +156,16 @@ class XadesTests(unittest.TestCase):
         pem_from_der = xades._ensure_pem_certificate(b64)
         self.assertIn("BEGIN CERTIFICATE", pem_from_der)
 
+    def test_xades_key_pair_repr_hides_the_private_key(self):
+        pair = xades.XadesKeyPair(
+            certificate_pem="CERTIFICATE-PUBLIC-PEM",
+            private_key_pem="SUPERSECRETKEY",
+        )
+        rendered = repr(pair)
+        self.assertNotIn("SUPERSECRETKEY", rendered)
+        self.assertIn("CERTIFICATE-PUBLIC-PEM", rendered)
+        self.assertEqual(pair.private_key_pem, "SUPERSECRETKEY")
+
     def test_sign_xades_with_stubs(self):
         rsa_cert = generate_rsa_cert()
         ec_cert = generate_ec_cert()
