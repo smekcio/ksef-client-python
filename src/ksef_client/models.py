@@ -811,5 +811,11 @@ __all__ = [
     *dict.fromkeys([*_OPENAPI_EXPORTS, *_WRAPPER_EXPORTS]),
 ]
 
-for _name in ("Any", "Enum", "annotations", "dataclass", "field"):
+# `Any` celowo ZOSTAJE w przestrzeni nazw modułu: adnotacje są tu łańcuchami
+# (`from __future__ import annotations`), więc `typing.get_type_hints()` — wołane
+# m.in. przez narzędzia do introspekcji i serializacji — rozwiązywałoby
+# `dict[str, Any]` i kończyło się `NameError: name 'Any' is not defined`
+# (dotyczyło `StatusInfo` i `UnknownApiProblem`). Pozostałe nazwy pomocnicze
+# w adnotacjach nie występują, więc mogą zniknąć.
+for _name in ("Enum", "annotations", "dataclass", "field"):
     globals().pop(_name, None)

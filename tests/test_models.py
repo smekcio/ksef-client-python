@@ -4,6 +4,7 @@ import sys
 import textwrap
 import unittest
 from pathlib import Path
+from typing import get_type_hints
 
 from ksef_client import models
 
@@ -15,7 +16,6 @@ class ModelsTests(unittest.TestCase):
         self.assertIn("QueryInvoicesMetadataResponse", models.__all__)
 
         unexpected = {
-            "Any",
             "Enum",
             "JsonValue",
             "OpenApiEnum",
@@ -32,6 +32,21 @@ class ModelsTests(unittest.TestCase):
         }
         for name in unexpected:
             self.assertFalse(hasattr(models, name), msg=f"{name} leaked from ksef_client.models")
+
+    def test_models_annotations_resolve_with_get_type_hints(self):
+        """`Any` zostaje w przestrzeni nazw modułu, więc adnotacje się rozwiązują.
+
+        Adnotacje są łańcuchami (`from __future__ import annotations`), a
+        `get_type_hints()` rozwiązuje je w `vars(module)`. Gdy `Any` było
+        usuwane, `StatusInfo` i `UnknownApiProblem` kończyły się
+        `NameError: name 'Any' is not defined`, co psuło introspekcję
+        (pydantic, FastAPI, generatory dokumentacji).
+        """
+        self.assertIn("Any", dir(models))
+        for name in models.__all__:
+            exported = getattr(models, name)
+            if isinstance(exported, type) and exported.__module__ == "ksef_client.models":
+                get_type_hints(exported)
 
     def test_serialize_model_value_returns_plain_values_unchanged(self):
         serialize_model_value = models.__dict__["_serialize_model_value"]
