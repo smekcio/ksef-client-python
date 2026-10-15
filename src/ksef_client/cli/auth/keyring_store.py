@@ -196,7 +196,11 @@ def _save_fallback_tokens(payload: dict[str, dict[str, Any]]) -> None:
     data = json.dumps(payload, ensure_ascii=True, indent=2)
     temp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
-        with temp_path.open("w", encoding="utf-8") as handle:
+        # Prawa 0600 już przy tworzeniu pliku: fallback niesie tokeny, a `open("w")`
+        # dawał 0644 (typowy umask 022), a `chmod` szedł dopiero po `os.replace`,
+        # więc przerwanie procesu w tym oknie zostawiało czytelny plik z tokenami.
+        descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(data)
             handle.flush()
             with suppress(OSError):

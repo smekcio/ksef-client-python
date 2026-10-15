@@ -63,7 +63,12 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     data = json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True)
     try:
-        with tmp_path.open("w", encoding="utf-8") as handle:
+        # Plik tymczasowy powstaje z prawami 0600 JUŻ przy tworzeniu: checkpoint
+        # niesie klucz sesji, a `open("w")` dawał 0644 (przy typowym umask 022)
+        # i `chmod` następował dopiero po `os.replace` — przerwanie procesu
+        # w tym oknie zostawiało czytelny dla wszystkich plik z kluczem.
+        descriptor = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(data)
             handle.flush()
             with suppress(OSError):

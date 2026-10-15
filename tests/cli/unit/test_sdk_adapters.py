@@ -2340,10 +2340,18 @@ def test_save_bytes_reports_write_failure(tmp_path, monkeypatch) -> None:
         b"\xef\xbb\xbf\n  <!-- x -->\n  <HTML lang='pl'>",
         b"<title>Login</title>",
         b"<body onload='x()'>",
+        # Długi komentarz (> 4096 B) przed znacznikiem HTML.
+        b"<!-- " + b"x" * 6000 + b" --><!DOCTYPE html><html>portal</html>",
+        # UTF-16/32 z BOM-em — bajty przeplatane zerami.
+        "<!DOCTYPE html><html><body>portal</body></html>".encode("utf-16"),
+        "<html><body>portal</body></html>".encode("utf-16-be"),
+        "<html><body>portal</body></html>".encode("utf-32"),
+        # UTF-16 bez BOM-u (znaki ASCII poprzedzane zerem).
+        b"<\x00h\x00t\x00m\x00l\x00>\x00",
     ],
 )
 def test_save_bytes_rejects_html_shapes(tmp_path, payload: bytes) -> None:
-    """Kształty captive portalu (komentarz, `<?xml`, `head`/`meta`/`script`) też są blokowane."""
+    """Kształty portalu (komentarz, `<?xml`, `head`/`meta`/`script`, UTF-16) są blokowane."""
     target = tmp_path / "upo-portal.xml"
 
     with pytest.raises(CliError) as exc:
@@ -2368,6 +2376,10 @@ def test_save_bytes_rejects_html_shapes(tmp_path, payload: bytes) -> None:
         # zawiera znaczników HTML, więc traktujemy ją jak zwykły dokument.
         b"<!-- nie zamkniety komentarz",
         b"<?xml version='1.0'",
+        # Legalny dokument w UTF-16 z deklaracją XML — po dekodowaniu to `Faktura`.
+        "<?xml version='1.0' encoding='utf-16'?><Faktura><Naglowek/></Faktura>".encode(
+            "utf-16"
+        ),
     ],
 )
 def test_save_bytes_accepts_documents_that_only_look_similar(tmp_path, payload: bytes) -> None:

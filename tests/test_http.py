@@ -15,6 +15,7 @@ from ksef_client.http import (
     HttpResponse,
     _host_allowed,
     _is_json_content_type,
+    _loggable_url,
     _merge_headers,
     _parse_api_problem,
     _parse_retry_after,
@@ -344,6 +345,52 @@ class HttpTests(unittest.TestCase):
             client.request("GET", "https://10.1.2.3/upload", skip_auth=True)
             _, kwargs = request_mock.call_args
             self.assertEqual(kwargs["url"], "https://10.1.2.3/upload")
+
+    def test_loggable_url_strips_credentials_and_query(self):
+        self.assertEqual(
+            _loggable_url("https://user:SECRET@api-test.ksef.mf.gov.pl/v2/x?sig=SECRET#frag"),
+            "https://api-test.ksef.mf.gov.pl/v2/x",
+        )
+        self.assertEqual(
+            _loggable_url("https://storage.example.com/part?sv=1&sig=SECRET"),
+            "https://storage.example.com/part",
+        )
+        self.assertEqual(_loggable_url("https://host:8443/a/b"), "https://host:8443/a/b")
+        self.assertEqual(_loggable_url("https://[::1]:8443/a"), "https://[::1]:8443/a")
+        self.assertEqual(_loggable_url("/relative/path?x=1"), "/relative/path")
+
+    def test_skip_auth_presigned_url_rejects_credentials_in_url(self):
+        """Userinfo nie może wyciec do logu diagnostycznego."""
+        self.assertNotIn(
+            "pw", _loggable_url("https://user:pw@uploads.example.com/x?sig=SECRET")
+        )
+        self.assertEqual(
+            _loggable_url("https://user:pw@uploads.example.com/x?sig=SECRET"),
+            "https://uploads.example.com/x",
+        )
+
+    def test_skip_auth_presigned_url_rejects_ipv4_mapped_loopback(self):
+        """`[::ffff:127.0.0.1]` to loopback — nawet przy zgodzie na sieci prywatne."""
+        for allow_private in (False, True):
+            options = KsefClientOptions(
+                base_url="https://api-test.ksef.mf.gov.pl",
+                allow_private_network_presigned_urls=allow_private,
+            )
+            with self.assertRaisesRegex(ValueError, "loopback"):
+                _validate_presigned_url_security(options, "https://[::ffff:127.0.0.1]/x")
+
+        default_options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        with self.assertRaisesRegex(ValueError, "private, link-local"):
+            _validate_presigned_url_security(
+                default_options, "https://[::ffff:169.254.169.254]/x"
+            )
+
+    def test_skip_auth_presigned_url_rejects_ambiguous_numeric_hosts(self):
+        """Zapisy, które resolvery rozumieją jako IP, a `ipaddress` już nie."""
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        for host in ("2130706433", "0x7f000001", "127.1", "0177.0.0.1"):
+            with self.assertRaisesRegex(ValueError, "ambiguous numeric host"):
+                _validate_presigned_url_security(options, f"https://{host}/x")
 
     def test_skip_auth_presigned_url_allowlist_exact_and_subdomain(self):
         options = KsefClientOptions(

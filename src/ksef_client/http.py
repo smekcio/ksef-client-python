@@ -4,6 +4,7 @@ import contextlib
 import ipaddress
 import logging
 import math
+import re
 from dataclasses import MISSING, dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -30,15 +31,21 @@ logger = logging.getLogger(__name__)
 
 
 def _loggable_url(url: str) -> str:
-    """Adres do logu diagnostycznego — bez parametrów zapytania.
+    """Adres do logu diagnostycznego — bez danych dostępowych.
 
     Pre-signed URL niesie w query podpis i dane dostępowe, więc do logu trafia
-    tylko schemat, host i ścieżka.
+    tylko schemat, host, port i ścieżka. Username i hasło z części ``userinfo``
+    też są usuwane: ``base_url`` z poświadczeniami nie może wyciec do logu.
     """
     parsed = urlparse(url)
     if not parsed.scheme:
-        return url.split("?", 1)[0]
-    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        return url.split("?", 1)[0].split("#", 1)[0]
+    host = parsed.hostname or ""
+    if ":" in host:  # IPv6 w nawiasach
+        host = f"[{host}]"
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    return f"{parsed.scheme}://{host}{parsed.path}"
 
 
 
@@ -57,6 +64,12 @@ def _is_absolute_http_url(url: str) -> bool:
 def _is_json_content_type(content_type: str) -> bool:
     media_type = content_type.split(";", 1)[0].strip().lower()
     return media_type == "application/json" or media_type.endswith("+json")
+
+
+#: Hosty, które wyglądają na adres IP zapisany niekanonicznie (sam licznik, hex,
+#: skrócona notacja IPv4). `ipaddress` ich nie parsuje, ale resolvery systemowe
+#: potrafią zinterpretować je jako adres — dlatego są odrzucane.
+_AMBIGUOUS_NUMERIC_HOST = re.compile(r"^(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:\.[0-9]+)*$")
 
 
 def _host_allowed(host: str, allowed_hosts: list[str]) -> bool:
@@ -100,7 +113,21 @@ def _validate_presigned_url_security(options: KsefClientOptions, url: str) -> No
     except ValueError:
         host_ip = None
 
+    if host_ip is None and _AMBIGUOUS_NUMERIC_HOST.match(normalized_host):
+        # `inet_aton`/glibc rozumieją `2130706433`, `0x7f000001`, `127.1` czy
+        # `0177.0.0.1` jako adresy IP, a `ipaddress` ich nie parsuje — host
+        # przeszedłby więc obok kontroli loopback/prywatnych adresów.
+        raise ValueError(
+            "Rejected insecure presigned URL: ambiguous numeric host is not allowed "
+            "for skip_auth requests."
+        )
+
     if host_ip is not None:
+        # `[::ffff:127.0.0.1]` to technicznie IPv6, którego `is_loopback` jest
+        # fałszywe — bez rozwinięcia mapowania reguła loopback dałaby się obejść.
+        mapped = getattr(host_ip, "ipv4_mapped", None)
+        if mapped is not None:
+            host_ip = mapped
         if host_ip.is_loopback:
             raise ValueError(
                 "Rejected insecure presigned URL: loopback addresses are not allowed "

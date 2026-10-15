@@ -87,6 +87,22 @@ def test_verbose_flag_configures_logging(runner) -> None:
     assert logging.getLogger("ksef_client").level == logging.DEBUG
 
 
+def test_verbose_flag_silences_third_party_http_loggers(runner) -> None:
+    """`-v` nie może wypuszczać logów `httpx`/`httpcore`.
+
+    `logging.basicConfig` podnosi poziom roota, a `httpx` loguje PEŁNY adres żądania
+    (pre-signed URL niesie w query podpis), `httpcore` potrafi wypisać nagłówki
+    odpowiedzi — redakcja `_loggable_url` byłaby wtedy obchodzona.
+    """
+    import logging
+
+    result = runner.invoke(app, ["-vv", "--json", "session", "list"])
+
+    assert result.exit_code == 0
+    for noisy in ("httpx", "httpcore", "urllib3", "keyring"):
+        assert logging.getLogger(noisy).level >= logging.WARNING, noisy
+
+
 def test_session_list_command_uses_selected_profile(runner, monkeypatch) -> None:
     seen: dict[str, str] = {}
 

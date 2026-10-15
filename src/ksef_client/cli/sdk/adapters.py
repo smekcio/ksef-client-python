@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import json
 import re
 import time
@@ -65,20 +66,32 @@ _SAFE_FILENAME_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]")
 #: komentarzy i instrukcji przetwarzania (`<?xml …?>`), bo captive portal potrafi
 #: zacząć stronę od `<!-- … -->` albo `<?xml`, a dopiero potem od `<!DOCTYPE html>`.
 _HTML_DOCUMENT_PREFIXES = (
-    b"<!doctype html",
-    b"<html",
-    b"<head",
-    b"<meta",
-    b"<script",
-    b"<body",
-    b"<title",
-    b"<frameset",
-    b"<iframe",
+    "<!doctype html",
+    "<html",
+    "<head",
+    "<meta",
+    "<script",
+    "<body",
+    "<title",
+    "<frameset",
+    "<iframe",
 )
-_HTML_SNIFF_STRIP_BYTES = b"\xef\xbb\xbf \t\r\n"
-_HTML_SNIFF_LIMIT = 4096
-_HTML_COMMENT_END = b"-->"
-_HTML_PROCESSING_INSTRUCTION_END = b"?>"
+#: Kodowania rozpoznawane po BOM-ie: portal potrafi odpowiedzieć UTF-16/32,
+#: a wtedy znaczniki są przeplatane zerami i porównanie bajt po bajcie ich nie widzi.
+#: Używamy kodeków konsumujących BOM (`utf-16`/`utf-32`), żeby znak BOM nie został
+#: na początku tekstu i nie przesłonił znacznika.
+_HTML_SNIFF_BOMS: tuple[tuple[bytes, str], ...] = (
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+    (codecs.BOM_UTF8, "utf-8-sig"),
+)
+_HTML_SNIFF_WINDOW_BYTES = 65536
+_HTML_SNIFF_TEXT_LIMIT = 4096
+_HTML_SNIFF_MAX_STRIPS = 32
+_HTML_COMMENT_END = "-->"
+_HTML_PROCESSING_INSTRUCTION_END = "?>"
 
 
 @dataclass(frozen=True)
@@ -218,25 +231,43 @@ def _resolve_output_path(
     return path
 
 
-def _html_sniff_head(content: bytes) -> bytes:
+def _decode_for_html_sniff(content: bytes) -> str:
+    """Dekoduje początek treści, rozpoznając BOM (UTF-8/16/32) i UTF-16 bez BOM-u."""
+    window = content[:_HTML_SNIFF_WINDOW_BYTES]
+    for bom, encoding in _HTML_SNIFF_BOMS:
+        if window.startswith(bom):
+            return window.decode(encoding, errors="replace")
+    sample = window[:64]
+    if len(sample) >= 4:
+        # UTF-16 bez BOM-u: znaki ASCII poprzedzane zerem (`<\x00h\x00t\x00…`).
+        if sample[1::2].strip(b"\x00") == b"":
+            return window.decode("utf-16-le", errors="replace")
+        if sample[0::2].strip(b"\x00") == b"":
+            return window.decode("utf-16-be", errors="replace")
+    return window.decode("utf-8", errors="replace")
+
+
+def _html_sniff_head(content: bytes) -> str:
     """Początek treści bez BOM-u, białych znaków, komentarzy i instrukcji `<?…?>`."""
-    head = content.lstrip(_HTML_SNIFF_STRIP_BYTES)[:_HTML_SNIFF_LIMIT]
-    while True:
-        if head.startswith(b"<!--"):
-            end = head.find(_HTML_COMMENT_END)
+    text = _decode_for_html_sniff(content).replace("\x00", "")
+    # `utf-16-le`/`utf-16-be` (ścieżka bez BOM-u) zostawiają ewentualny BOM jako
+    # znak U+FEFF, a `str.lstrip()` go nie usuwa — zdejmujemy go jawnie.
+    text = text.lstrip("\ufeff").lstrip()
+    for _ in range(_HTML_SNIFF_MAX_STRIPS):
+        if text.startswith("<!--"):
+            end = text.find(_HTML_COMMENT_END)
             if end == -1:
-                return head
-            head = head[end + len(_HTML_COMMENT_END) :].lstrip(_HTML_SNIFF_STRIP_BYTES)
+                return text[:_HTML_SNIFF_TEXT_LIMIT]
+            text = text[end + len(_HTML_COMMENT_END) :].lstrip()
             continue
-        if head.startswith(b"<?"):
-            end = head.find(_HTML_PROCESSING_INSTRUCTION_END)
+        if text.startswith("<?"):
+            end = text.find(_HTML_PROCESSING_INSTRUCTION_END)
             if end == -1:
-                return head
-            head = head[end + len(_HTML_PROCESSING_INSTRUCTION_END) :].lstrip(
-                _HTML_SNIFF_STRIP_BYTES
-            )
+                return text[:_HTML_SNIFF_TEXT_LIMIT]
+            text = text[end + len(_HTML_PROCESSING_INSTRUCTION_END) :].lstrip()
             continue
-        return head
+        break
+    return text[:_HTML_SNIFF_TEXT_LIMIT]
 
 
 def _reject_html_payload(content: bytes, *, path: Path) -> None:
@@ -248,6 +279,7 @@ def _reject_html_payload(content: bytes, *, path: Path) -> None:
     od ``<!-- komentarz -->``, ``<?xml``, ``<head>``, ``<meta http-equiv=refresh>``
     czy ``<script>`` — te kształty są typowe dla portali przechwytujących, a żaden
     legalny dokument KSeF (XML faktury, UPO XML, PDF, archiwum, obraz) tak nie wygląda.
+    Treść jest najpierw dekodowana (UTF-8/16/32), więc oba warianty kodowania są widziane.
     """
     head = _html_sniff_head(content).lower()
     if head.startswith(_HTML_DOCUMENT_PREFIXES):

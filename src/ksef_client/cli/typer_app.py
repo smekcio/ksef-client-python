@@ -76,13 +76,15 @@ def main(
     # logowania SDK (`logging.getLogger("ksef_client...")`), więc diagnostyka
     # faktycznie trafia na stderr. Powtarzalne: `-v` = INFO, `-vv` = DEBUG.
     if verbose:
-        logging.basicConfig(
-            level=logging.DEBUG if verbose > 1 else logging.INFO,
-            format="%(levelname)s %(name)s: %(message)s",
-        )
-        logging.getLogger("ksef_client").setLevel(
-            logging.DEBUG if verbose > 1 else logging.INFO
-        )
+        level = logging.DEBUG if verbose > 1 else logging.INFO
+        logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
+        # `basicConfig` ustawia poziom roota, więc do logu weszłyby też biblioteki
+        # trzecie. `httpx` loguje PEŁNY adres żądania (pre-signed URL niesie
+        # w query podpis), a `httpcore` potrafi wypisać nagłówki odpowiedzi
+        # (ciasteczka sesji) — czyli redakcja `_loggable_url` byłaby obchodzona.
+        for noisy in ("httpx", "httpcore", "urllib3", "keyring"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
+        logging.getLogger("ksef_client").setLevel(level)
     ctx.obj = CliContext(
         profile=selected_profile,
         json_output=json_output,
