@@ -859,7 +859,11 @@ class FA3BatchDraft:
         }
         data = json.dumps(payload, ensure_ascii=False, indent=2)
         if path is not None:
-            Path(path).write_text(data, encoding="utf-8")
+            # Spójnie z `to_xml_zip`: dokumentowany przykład zapisuje do
+            # `artifacts/...`, więc brakujący katalog tworzymy sami.
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(data, encoding="utf-8")
         return data
 
     @classmethod

@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 
+from ..domain import PAYMENT_LINK_PATTERN
+
 # ---------------------------------------------------------------------------
 # Rodzaje ograniczeń
 # ---------------------------------------------------------------------------
@@ -750,7 +752,19 @@ ELEMENT_FACETS: dict[str, ElementFacet] = {
     "OpisRachunku": ElementFacet(TZN),
     "WarunkiSkonta": ElementFacet(TZN),
     "WysokoscSkonta": ElementFacet(TZN),
-    "LinkDoPlatnosci": ElementFacet(TZN512),
+    # Schemat deklaruje tu inline wzorzec adresu z parametrem `IPKSeF`
+    # (schemat_FA(3), element `LinkDoPlatnosci`). Wzorzec bierzemy z walidacji
+    # domenowej, żeby reguła miała JEDNO źródło — wcześniej mieszkał wyłącznie
+    # w `FA3Invoice.validate()` i dokument z ręcznie podstawionym linkiem
+    # (np. `to_xml(validate=False)`) przechodził fasety, a odrzucał go dopiero XSD.
+    "LinkDoPlatnosci": ElementFacet(
+        TZN512,
+        pattern=PAYMENT_LINK_PATTERN,
+        pattern_hint=(
+            "adres http(s) z parametrem 'IPKSeF=' (3 cyfry i 10 znaków "
+            "alfanumerycznych), np. https://pay.example.com/i?IPKSeF=123abc456DEFG"
+        ),
+    ),
     "IPKSeF": ElementFacet(
         Facet(FacetKind.STRING, None, lengths=frozenset({13}), whitespace=_WS_COLLAPSE),
         pattern=re.compile(r"[0-9]{3}[a-zA-Z0-9]{10}"),

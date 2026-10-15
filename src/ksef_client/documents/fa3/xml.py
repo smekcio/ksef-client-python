@@ -848,7 +848,9 @@ def _domain_line(fa: ET.Element, index: int, line: InvoiceLine) -> None:
     # `P_9B`, `P_11A` i `GTU`; wcześniejsza wersja dokładała `P_9A`, `P_11`
     # i `P_12="np I"`, czyli ujawniała netto i deklarowała dostawę poza krajem.
     # `P_11A` (brutto) emitujemy tylko wtedy, gdy wiersz je niesie — schemat czyni
-    # to pole opcjonalnym, a `FA3Line.validate` ostrzega, gdy marży go brakuje.
+    # to pole opcjonalnym także w wierszu marży, więc jego brak nie jest ani
+    # błędem, ani ostrzeżeniem: walidacja pozycji sprawdza wyłącznie zgodność
+    # kwoty podanej z wyliczoną, a nie obecność `P_11A`.
     margin_procedure = line.tax.kind is TaxCategoryKind.MARGIN
     ET.SubElement(row, _q("P_8A")).text = line.unit
     ET.SubElement(row, _q("P_8B")).text = _rate6(line.quantity)

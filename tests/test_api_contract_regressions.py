@@ -1872,6 +1872,26 @@ class TestTransportMeansValidation:
         messages = [issue.message for issue in broken.validate().errors]
         assert any("new_transport_means" in message for message in messages)
 
+    def test_intra_eu_flag_without_the_transport_flag_is_reported(self):
+        """`P_42_5` bez `P_22` ginie po cichu — serializer wypisuje wtedy `P_22N`.
+
+        Flaga trafiała do XML tylko w gałęzi `new_transport or new_transport_means`,
+        więc ustawienie jej samodzielnie nie dawało żadnego sygnału: znacznik
+        procedury intra-EU (art. 42 ust. 5) po prostu nie pojawiał się w dokumencie.
+        """
+        from dataclasses import replace
+
+        invoice = self._invoice()
+        broken = replace(
+            invoice,
+            annotations=replace(invoice.annotations, new_transport_intra_eu=True),
+        )
+        messages = [issue.message for issue in broken.validate().errors]
+        assert any(
+            "new_transport_intra_eu" in message and "new_transport=True" in message
+            for message in messages
+        ), messages
+
     def test_error_severity_issues_land_in_errors_not_warnings(self):
         """Zgłoszenia `NewTransportMeans` muszą trafiać do właściwej listy."""
         from dataclasses import replace
@@ -2176,6 +2196,44 @@ class TestBatchPartCountLimit:
             split_bytes(b"x", max_part_size=0)
         with pytest.raises(ValueError, match="max_parts must be positive"):
             split_bytes(b"x" * 10, max_part_size=1, max_parts=0)
+
+
+class TestBatchDraftJsonTargetDirectory:
+    """`FA3BatchDraft.to_json` tworzy katalog tak samo jak `to_xml_zip`.
+
+    Dokumentowany przykład (`docs/fa3-sdk.md`) zapisuje draft do
+    `artifacts/fa3-json/draft.json`, więc brakujący katalog nie może kończyć się
+    `FileNotFoundError` — `to_xml_zip` od początku robi `mkdir(parents=True)`.
+    """
+
+    def _batch(self):
+        from datetime import date
+
+        from ksef_client.documents.fa3 import FA3BatchDraft, FA3InvoiceBuilder, FA3Party
+
+        draft = (
+            FA3InvoiceBuilder(
+                invoice_number="FV/JSON/DIR",
+                issue_date=date(2026, 5, 16),
+                seller=FA3Party(name="Sprzedawca", tax_id="1234567890", address="ul. A 1"),
+                buyer=FA3Party(name="Nabywca", tax_id="1111111111", address="ul. B 2"),
+            )
+            .add_line("Usługa", quantity="1", unit_net_price="100", vat_rate="23")
+            .build()
+        )
+        return FA3BatchDraft((draft,))
+
+    def test_json_is_written_into_a_missing_directory(self, tmp_path):
+        from ksef_client.documents.fa3 import FA3BatchDraft
+
+        batch = self._batch()
+        target = tmp_path / "artifacts" / "fa3-json" / "draft.json"
+        assert not target.parent.exists()
+
+        text = batch.to_json(target)
+
+        assert target.read_text(encoding="utf-8") == text
+        assert FA3BatchDraft.from_json(target) == batch
 
 
 class TestVerificationLinkSegments:

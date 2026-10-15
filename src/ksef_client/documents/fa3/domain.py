@@ -1279,6 +1279,18 @@ class FA3Invoice:
                     "pomijane bez `new_transport=True` — ustaw znacznik albo usuń wiersze."
                 )
             )
+        # `P_42_5` (obowiązek z art. 42 ust. 5) jest emitowane wyłącznie razem
+        # z `P_22=1`, czyli wtedy, gdy ustawiono `new_transport` — bez tego
+        # znacznika serializer wypisuje `P_22N=1` i flaga intra-EU cicho ginie.
+        if self.annotations.new_transport_intra_eu and not self.annotations.new_transport:
+            errors.append(
+                FA3ValidationIssue(
+                    "invoice.annotations.new_transport_intra_eu: flaga procedury "
+                    "intra-EU (`P_42_5`) wymaga `new_transport=True` — bez niego "
+                    "`NoweSrodkiTransportu` dostaje `P_22N=1`, a znacznik intra-EU "
+                    "jest pomijany. Ustaw `new_transport` albo zdejmij flagę."
+                )
+            )
         for index, means in enumerate(self.annotations.new_transport_means, start=1):
             # Zgłoszenia z `severity="warning"` (np. pola spoza schematu FA(3))
             # muszą trafić do ostrzeżeń, nie do błędów — inaczej dokument, który

@@ -48,6 +48,9 @@ XSD_FILES = (
 
 _XSD = "{http://www.w3.org/2001/XMLSchema}"
 
+#: Poprawny `LinkDoPlatnosci` — schemat wymaga tu adresu z parametrem `IPKSeF`.
+_VALID_PAYMENT_LINK = "https://pay.example.com/invoice?IPKSeF=123abc456DEFG"
+
 
 # ---------------------------------------------------------------------------
 # 1. Spójność tabeli ograniczeń ze schematem
@@ -655,6 +658,37 @@ def test_pattern_violation_is_reported() -> None:
     nip.text = "123"
     issues = validate_xml_facets(root)
     assert any("nie pasuje do formatu" in issue.message for issue in issues)
+
+
+def test_payment_link_is_validated_by_facets() -> None:
+    """`LinkDoPlatnosci` ma wzorzec w tabeli, więc fasety łapią zły link same.
+
+    Ograniczenie mieszkało wyłącznie w `FA3Invoice.validate()`, więc dokument
+    z ręcznie podstawionym linkiem (edycja drzewa, `to_xml(validate=False)`)
+    przechodził `validate_xml_facets` i `to_xml(facets=True)` bez sygnału —
+    odrzucał go dopiero schemat (a w produkcji KSeF).
+    """
+    from ksef_client.documents.fa3.validation import FacetIssue
+
+    def _issues(payment_link: str) -> list[FacetIssue]:
+        root = _tree()
+        fa = root.find(_q("Fa"))
+        assert fa is not None
+        payment = ET.SubElement(fa, _q("Platnosc"))
+        ET.SubElement(payment, _q("LinkDoPlatnosci")).text = payment_link
+        return validate_xml_facets(root)
+
+    assert _issues(_VALID_PAYMENT_LINK) == []
+    for broken in (
+        # Adres http(s), ale bez parametru `IPKSeF`.
+        "https://pay.example.com/invoice",
+        "http://pay.example.com/invoice",
+        # Inny schemat niż `https?` dopuszczony przez wzorzec schematu.
+        "ftp://pay.example.com/invoice?IPKSeF=123abc456DEFG",
+        # Identyfikator krótszy niż 3 cyfry + 10 znaków alfanumerycznych.
+        "https://pay.example.com/invoice?IPKSeF=123",
+    ):
+        assert any(issue.element == "LinkDoPlatnosci" for issue in _issues(broken)), broken
 
 
 def test_invalid_date_is_reported() -> None:
@@ -1561,6 +1595,13 @@ _PATTERN_MUST_REJECT: dict[str, tuple[str, ...]] = {
         "1111111111-20260101-AAAAAA-BBBBBB-0G",
         "0111111111-20260101-AAAAAA-BBBBBB-01",
     ),
+    "LinkDoPlatnosci": (
+        "https://pay.example.com/invoice",
+        "http://pay.example.com/invoice",
+        "ftp://pay.example.com/invoice?IPKSeF=123abc456DEFG",
+        "https://pay.example.com/invoice?IPKSeF=123",
+        "https://pay.example.com/invoice?IPKSeF=123abc456DEFGH",
+    ),
 }
 
 
@@ -1576,6 +1617,18 @@ def test_ksef_number_elements_share_the_schema_pattern() -> None:
     assert correcting.pattern is not None
     assert advance.facet == correcting.facet
     assert advance.pattern.pattern == correcting.pattern.pattern
+
+
+def test_payment_link_pattern_has_a_single_source() -> None:
+    """Wzorzec `LinkDoPlatnosci` ma jedno źródło, a nie kopię literału.
+
+    Tabela faset i `FA3Invoice.validate()` muszą egzekwować dokładnie ten sam
+    wzorzec — kopia rozjechałaby oba poziomy walidacji przy pierwszej zmianie.
+    """
+    from ksef_client.documents.fa3.domain import PAYMENT_LINK_PATTERN
+
+    entry = ELEMENT_FACETS["LinkDoPlatnosci"]
+    assert entry.pattern is PAYMENT_LINK_PATTERN
 
 
 def test_patterns_reject_values_the_schema_rejects() -> None:
@@ -1607,6 +1660,7 @@ def test_patterns_accept_values_the_schema_accepts() -> None:
         "IPKSeF": "123abc456DEFG",
         "NrKSeFFaKorygowanej": "1111111111-20260101-AAAAAA-BBBBBB-01",
         "NrKSeFFaZaliczkowej": "1111111111-20260101-AAAAAABBBBBB-01",
+        "LinkDoPlatnosci": _VALID_PAYMENT_LINK,
     }
     problems: list[str] = []
     for element, value in sorted(valid.items()):
@@ -1724,9 +1778,10 @@ def test_inline_patterns_match_the_element_declaration() -> None:
                 problems.append(
                     f"{element}: {sample!r} tabela={table_ok} schemat={schema_ok}"
                 )
-    # Tylko `IPKSeF` ma wzorzec wpisany wprost w deklarację elementu; `SWIFT`
-    # i `LinkDoPlatnosci` używają typów nazwanych (patrz test niżej).
-    assert checked >= 1, f"test sprawdził tylko {checked} elementów z inline wzorcem"
+    # `IPKSeF` i `LinkDoPlatnosci` mają wzorzec wpisany wprost w deklarację
+    # elementu; `SWIFT` używa typu nazwanego (patrz test niżej), więc wypada
+    # z porównania.
+    assert checked >= 2, f"test sprawdził tylko {checked} elementów z inline wzorcem"
     assert not problems, "\n".join(problems)
 
 
