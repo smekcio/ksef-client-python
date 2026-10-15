@@ -28,6 +28,23 @@
 
 ### Bug Fixes
 
+* **services:** the session state (`OnlineSessionState`, `BatchSessionState`) keeps the AES key out
+  of `repr()`. The object ends up in logs and error messages, and `repr()` printed
+  `symmetric_key_base64` in full; the IV stays visible (it is not a secret) and serialisation
+  (`to_dict`/`to_json`) still carries both fields
+* **cli:** HTML pages are rejected in the shapes a captive portal actually produces — not only
+  `<!DOCTYPE html>`/`<html>` at the very start, but also after a leading comment, an `<?xml`
+  declaration (XHTML), or when the page starts with `head`/`meta`/`script`/`body`/`title`. Six of
+  the sampled portal shapes used to be saved as `upo-*.xml` and reported as success
+* **cli:** a failed file write is reported as `IO_ERROR` (exit 8) instead of `UNEXPECTED` (exit 6) —
+  the `mkdir` guard covered only the directory, so e.g. a too-long file name still escaped as a raw
+  `OSError`
+* **test:** `requirements-dev.txt` declares `qrcode[pil]` and `pillow`, so the QR tests (which cover
+  `services/qr.py` for the 100% gate) actually run in the configuration CI installs; one of them was
+  not guarded at all and failed without the `qr` extras
+* **packaging:** the sdist check requires the package modules (`src/ksef_client/__init__.py`,
+  `models.py`) instead of any path under `src/ksef_client/` — an archive with only the XSD files
+  used to pass
 * **cli:** `session show` redacts the session key and IV (`symmetric_key_base64`, `iv_base64`)
   by default — the full checkpoint used to be printed to stdout, including JSON mode, so key
   material ended up in terminals, CI logs and screenshots. `--show-secrets` returns the full
@@ -68,9 +85,11 @@
   the documented example in `docs/fa3-sdk.md` runs as written instead of raising `FileNotFoundError`
 * **fa3:** `xsd_audit` derives what the serializer emits from the emission sites in `xml.py`
   (AST) instead of matching path prefixes, and derives the handler from the code:
-  `WarunkiTransakcji` no longer reports `_domain_invoice` (248/402 paths), the tag set is exactly
-  the 288 element names of the schema, and a dropped emission shows up as `UNSUPPORTED` in the
-  report
+  `WarunkiTransakcji` no longer reports `_domain_invoice` (248/402 paths) and the tag set is
+  exactly the 288 element names of the schema. The status distribution itself is unchanged
+  (`partially_supported` = "the serializer can emit it, no test evidence") — that is a
+  measurement of the SDK's completeness, not a defect; what changed is that a dropped emission
+  now shows up as `UNSUPPORTED` in the report
 * **test:** the Lighthouse OpenAPI coverage test actually runs (it looked for an external checkout
   and always skipped); the contract used by the client is pinned in the test with a negative control
   for drift, while a full external spec still takes precedence
