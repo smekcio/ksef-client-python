@@ -31,7 +31,15 @@ from .domain import (
     Settlement,
     TaxCategoryKind,
 )
-from .models import FA3Draft, FA3InvoiceKind, FA3Line, FA3Party, decimal_from_value, money
+from .models import (
+    FA3Draft,
+    FA3InvoiceKind,
+    FA3Line,
+    FA3Party,
+    FA3ValidationIssue,
+    decimal_from_value,
+    money,
+)
 from .sections import (
     AdditionalDescription,
     AdvancePayment,
@@ -124,6 +132,44 @@ class FA3XmlValidationError(ValueError):
     pass
 
 
+def _draft_root(draft: FA3Draft) -> ET.Element:
+    """Buduje drzewo XML draftu (bez walidacji i bez serializacji)."""
+    ET.register_namespace("", FA3_NAMESPACE)
+    ET.register_namespace("etd", ETD_NAMESPACE)
+    ET.register_namespace("xsi", XSI_NAMESPACE)
+    root = ET.Element(_q("Faktura"))
+    root.set(f"{{{XSI_NAMESPACE}}}schemaLocation", f"{FA3_NAMESPACE} schemat_FA(3)_v1-0E.xsd")
+    _header(root)
+    _party(root, "Podmiot1", draft.seller)
+    _party(root, "Podmiot2", draft.buyer)
+    _invoice(root, draft)
+    return root
+
+
+def draft_facet_issues(draft: FA3Draft) -> list[FA3ValidationIssue]:
+    """Ograniczenia schematu, które `to_xml()` zgłosiłby jako wyjątek.
+
+    `FA3Draft.validate()` sprawdza reguły biznesowe, a ograniczenia schematu
+    (długości, wzorce, słowniki, liczność) egzekwuje warstwa XML — wcześniej
+    `validate()` milczało, a `to_xml()` rzucało `FA3XmlValidationError`. Ten
+    helper pokazuje te same problemy bez budowania pliku (kształt dokumentu
+    sprawdza `_validate_xml_shape`, który `validate()` już woła).
+    """
+    try:
+        root = _draft_root(draft)
+    except (FA3XmlValidationError, ValueError) as exc:
+        # `validate()` nie może rzucać: serializator zgłasza część problemów
+        # wyjątkiem (np. nieznany kod stawki, brak adresu korekty sprzedawcy),
+        # więc zamieniamy je na zgłoszenie walidacyjne.
+        message = getattr(exc, "message", None) or str(exc)
+        return [FA3ValidationIssue(str(message))]
+    issues = validate_xml_facets(root)
+    return [
+        FA3ValidationIssue(f"{issue.path}: {issue.message}", column=issue.element)
+        for issue in issues
+    ]
+
+
 def draft_to_xml(
     draft: FA3Draft,
     *,
@@ -139,15 +185,7 @@ def draft_to_xml(
         if errors:
             raise FA3XmlValidationError("; ".join(issue.message for issue in errors))
 
-    ET.register_namespace("", FA3_NAMESPACE)
-    ET.register_namespace("etd", ETD_NAMESPACE)
-    ET.register_namespace("xsi", XSI_NAMESPACE)
-    root = ET.Element(_q("Faktura"))
-    root.set(f"{{{XSI_NAMESPACE}}}schemaLocation", f"{FA3_NAMESPACE} schemat_FA(3)_v1-0E.xsd")
-    _header(root)
-    _party(root, "Podmiot1", draft.seller)
-    _party(root, "Podmiot2", draft.buyer)
-    _invoice(root, draft)
+    root = _draft_root(draft)
     _basic_xml_validation(root)
     if facets:
         _raise_on_facet_issues(root)
@@ -425,7 +463,11 @@ def _third_party_role(node: ET.Element, party: InvoiceParty) -> None:
 
 def _domain_invoice(root: ET.Element, invoice: FA3Invoice) -> None:
     fa = ET.SubElement(root, _q("Fa"))
-    ET.SubElement(fa, _q("KodWaluty")).text = invoice.currency
+    # Builder normalizuje kod waluty (`currency.upper()`), ale `FA3Invoice`
+    # zbudowany ręcznie mógł nieść `eur` — słownik jest sprawdzany bez
+    # rozróżniania wielkości liter, a enumeracja w schemacie już nie, więc taki
+    # dokument przechodził walidację i dopiero KSeF go odrzucał.
+    ET.SubElement(fa, _q("KodWaluty")).text = invoice.currency.upper()
     ET.SubElement(fa, _q("P_1")).text = invoice.issue_date.isoformat()
     if invoice.issue_place:
         ET.SubElement(fa, _q("P_1M")).text = invoice.issue_place
@@ -805,6 +847,8 @@ def _domain_line(fa: ET.Element, index: int, line: InvoiceLine) -> None:
     # Oficjalne `FA_3_Przykład_8.xml` i `_19.xml` mają wyłącznie `P_8A`, `P_8B`,
     # `P_9B`, `P_11A` i `GTU`; wcześniejsza wersja dokładała `P_9A`, `P_11`
     # i `P_12="np I"`, czyli ujawniała netto i deklarowała dostawę poza krajem.
+    # `P_11A` (brutto) emitujemy tylko wtedy, gdy wiersz je niesie — schemat czyni
+    # to pole opcjonalnym, a `FA3Line.validate` ostrzega, gdy marży go brakuje.
     margin_procedure = line.tax.kind is TaxCategoryKind.MARGIN
     ET.SubElement(row, _q("P_8A")).text = line.unit
     ET.SubElement(row, _q("P_8B")).text = _rate6(line.quantity)
@@ -1181,7 +1225,7 @@ def _domain_footer(root: ET.Element, footer: Footer) -> None:
 
 def _invoice(root: ET.Element, draft: FA3Draft) -> None:
     fa = ET.SubElement(root, _q("Fa"))
-    ET.SubElement(fa, _q("KodWaluty")).text = draft.currency
+    ET.SubElement(fa, _q("KodWaluty")).text = draft.currency.upper()
     ET.SubElement(fa, _q("P_1")).text = draft.issue_date.isoformat()
     if draft.issue_place:
         ET.SubElement(fa, _q("P_1M")).text = draft.issue_place

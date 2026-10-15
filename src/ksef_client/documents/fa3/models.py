@@ -533,6 +533,11 @@ class FA3Draft:
         errors.extend(self._validate_vat_rates())
         errors.extend(self._validate_kind_specific())
         errors.extend(self._validate_xml_shape())
+        # Ograniczenia schematu sprawdza warstwa XML; bez tego `validate()` milczało,
+        # a `to_xml()` rzucało `FA3XmlValidationError` (np. dla złego NIP-u).
+        from .xml import draft_facet_issues
+
+        errors.extend(draft_facet_issues(self))
         numbered_errors = [self._tag_issue(issue) for issue in errors]
         numbered_warnings = [self._tag_issue(issue) for issue in warnings]
         return numbered_errors, numbered_warnings

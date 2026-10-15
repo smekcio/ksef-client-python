@@ -161,6 +161,22 @@ class NewTransportMeans:
                     column=f"{path}.row_number",
                 )
             )
+        # `NowySrodkiTransportu` w schemacie FA(3) nie ma pól na wartość pojazdu,
+        # kwotę podatku ani podstawę — te trzy pola nie trafiają do dokumentu.
+        # Wcześniej znikały bez słowa, więc wołający mógł sądzić, że deklaruje
+        # podatek od importu środka transportu.
+        for field_name in ("value", "tax_amount", "taxable_base"):
+            raw = str(getattr(self, field_name) or "").strip()
+            if raw not in {"", "0", "0.0", "0.00"}:
+                issues.append(
+                    FA3ValidationIssue(
+                        f"{path}.{field_name}: pole nie występuje w schemacie FA(3) "
+                        f"(NowySrodkiTransportu nie ma wartości, kwoty podatku ani "
+                        f"podstawy) — wartość {raw!r} nie trafi do dokumentu.",
+                        column=f"{path}.{field_name}",
+                        severity="warning",
+                    )
+                )
         return issues
 
 

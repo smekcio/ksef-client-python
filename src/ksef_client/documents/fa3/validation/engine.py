@@ -373,6 +373,17 @@ def _check_value(element: Element, name: str, path: str) -> list[FacetIssue]:
     # Pusty tekst nie jest „brakiem wartości": schemat wymaga `minLength=1`,
     # więc `<Klucz/>` musi zostać zgłoszony, a nie pominięty.
     issues = _check_text(value, entry.facet, path, name)
+    if (
+        entry.facet.date_format is not None
+        and value
+        # Gdy wartość nie jest datą w ogóle, `_check_date_range` już to zgłosił —
+        # drugi komunikat o formacie tylko zaciemnia obraz.
+        and not any("nie jest poprawną datą" in issue.message for issue in issues)
+    ):
+        # `date_format` był w tabeli faset zadeklarowany, ale nigdy sprawdzany:
+        # `2026-4-1` albo `20260401` przechodziło kontrolę typu DATA (parser API
+        # jest tolerancyjny), a odrzucał je dopiero schemat/KSeF.
+        issues.extend(_check_date_format(value, entry.facet, path, name))
     if entry.pattern is not None and not entry.pattern.fullmatch(value):
         issues.append(
             FacetIssue(
@@ -382,6 +393,35 @@ def _check_value(element: Element, name: str, path: str) -> list[FacetIssue]:
             )
         )
     return issues
+
+
+def _check_date_format(value: str, facet: Facet, path: str, name: str) -> list[FacetIssue]:
+    """Sprawdza wartość typu data/data-czas zgodnie z `date_format` fasetu.
+
+    `TDataCzas` to w schemacie `xsd:dateTime`, w którym offset strefy jest
+    OPCJONALNY — dlatego format z `%z` traktujemy jako „offset dozwolony", a nie
+    wymagany. Wartości spoza kalendarza (`2026-4-1`, `2026-13-45`) odrzuca
+    wcześniej `_check_date_range` przez wspólny parser API; tutaj domykamy
+    przypadki, które ten parser przyjmuje, a schemat nie (`20260401`,
+    `2026-04-01 08:30:00`).
+    """
+    assert facet.date_format is not None
+    candidates = [facet.date_format]
+    if facet.date_format.endswith("%z"):
+        candidates.append(facet.date_format.replace("%z", ""))
+    for candidate in candidates:
+        try:
+            datetime.strptime(value, candidate)
+        except ValueError:
+            continue
+        return []
+    return [
+        FacetIssue(
+            path,
+            name,
+            f"wartość {value!r} nie jest poprawną datą w formacie {facet.date_format}",
+        )
+    ]
 
 
 def _check_occurrences(

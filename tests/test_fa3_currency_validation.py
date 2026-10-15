@@ -162,7 +162,10 @@ def test_validator_accepts_exactly_what_xsd_accepts() -> None:
     for currency in ["PLN", "eur", " eur ", "CNH", " XYZ"]:
         try:
             build = _invoice_xml(currency, xsd_validate=True)
-        except FA3XmlValidationError:
+        except (FA3XmlValidationError, ValueError):
+            # `build()` waliduje draft, a ten sprawdza teraz także ograniczenia
+            # schematu (m.in. długość `KodWaluty`) — wartość odrzucona na tym
+            # etapie też nie jest akceptowana przez XSD.
             xsd_ok = False
         else:
             xsd_ok = b"KodWaluty" in build

@@ -1280,7 +1280,14 @@ class FA3Invoice:
                 )
             )
         for index, means in enumerate(self.annotations.new_transport_means, start=1):
-            errors.extend(means.validate(f"invoice.annotations.new_transport_means[{index}]"))
+            # Zgłoszenia z `severity="warning"` (np. pola spoza schematu FA(3))
+            # muszą trafić do ostrzeżeń, nie do błędów — inaczej dokument, który
+            # schemat akceptuje, nie dałby się zbudować.
+            for issue in means.validate(f"invoice.annotations.new_transport_means[{index}]"):
+                if issue.severity == "warning":
+                    warnings.append(issue)
+                else:
+                    errors.append(issue)
         if self.payment_terms is not None:
             errors.extend(self.payment_terms.validate("invoice.payment_terms"))
         for index, line in enumerate(self.lines, start=1):
@@ -1549,7 +1556,7 @@ class FA3Invoice:
             issues.append(
                 FA3ValidationIssue(
                     "invoice.payment_terms.ipksef: identyfikator IPKSeF musi mieć "
-                    "postaċ 3 cyfr i 10 znaków alfanumerycznych (np. '123abc456DEF')."
+                    "postaċ 3 cyfr i 10 znaków alfanumerycznych (np. '123abc456DEF7')."
                 )
             )
         if terms.payment_link and not PAYMENT_LINK_PATTERN.fullmatch(terms.payment_link):

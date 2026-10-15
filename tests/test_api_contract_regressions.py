@@ -1872,6 +1872,25 @@ class TestTransportMeansValidation:
         messages = [issue.message for issue in broken.validate().errors]
         assert any("new_transport_means" in message for message in messages)
 
+    def test_error_severity_issues_land_in_errors_not_warnings(self):
+        """Zgłoszenia `NewTransportMeans` muszą trafiać do właściwej listy."""
+        from dataclasses import replace
+
+        invoice = self._invoice()
+        broken = replace(
+            invoice,
+            annotations=replace(
+                invoice.annotations,
+                new_transport=True,
+                new_transport_means=(self._means(kind="sea"),),
+            ),
+        )
+
+        result = broken.validate()
+
+        assert any("kind" in issue.message for issue in result.errors)
+        assert not any("kind" in issue.message for issue in result.warnings)
+
     def test_unknown_kind_is_reported(self):
         issues = self._means(kind="sea").validate("means")
         assert any("kind" in issue.message for issue in issues)
@@ -1887,6 +1906,65 @@ class TestTransportMeansValidation:
     def test_non_positive_row_number_is_reported(self):
         issues = self._means(row_number=0).validate("means")
         assert any("row_number" in issue.message for issue in issues)
+
+
+class TestTransportMeansUnsupportedFields:
+    """Pola spoza schematu FA(3) nie mogą znikać bez słowa."""
+
+    def _means(self, **kwargs):
+        from datetime import date
+
+        from ksef_client.documents.fa3.sections import NewTransportMeans
+
+        base = {"allowed_date": date(2026, 4, 1), "row_number": 1, "kind": "land"}
+        return NewTransportMeans(**{**base, **kwargs})
+
+    def test_unsupported_fields_are_reported_as_warnings(self):
+        issues = self._means(value="50000", tax_amount="11500", taxable_base="50000").validate(
+            "means"
+        )
+
+        assert len(issues) == 3
+        assert {issue.severity for issue in issues} == {"warning"}
+        assert all("nie występuje w schemacie FA(3)" in issue.message for issue in issues)
+
+    def test_default_values_are_silent(self):
+        assert self._means().validate("means") == []
+        assert self._means(value="0.00", tax_amount="0", taxable_base="0").validate("means") == []
+
+    def test_document_with_unsupported_fields_still_builds(self):
+        """Ostrzeżenie nie może blokować dokumentu, który schemat akceptuje."""
+        from dataclasses import replace
+        from datetime import date
+
+        from ksef_client.documents.fa3 import FA3Invoice, InvoiceParty, NewTransportMeans, VatClass
+
+        invoice = (
+            FA3Invoice.basic("FV/NST/1")
+            .issued_on(date(2026, 4, 1))
+            .seller(InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1"))
+            .buyer(InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2"))
+            .add_service_line(
+                "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+            )
+            .build()
+        )
+        means = NewTransportMeans(
+            allowed_date=date(2026, 4, 1), row_number=1, kind="land", value="50000"
+        )
+        invoice = replace(
+            invoice,
+            annotations=replace(
+                invoice.annotations, new_transport=True, new_transport_means=(means,)
+            ),
+        )
+
+        result = invoice.validate()
+        assert not result.errors
+        assert any(
+            "nie występuje w schemacie FA(3)" in issue.message for issue in result.warnings
+        )
+        assert b"P_22B" in invoice.to_xml()
 
 
 class TestPaymentDueDatesAreMerged:
@@ -1944,6 +2022,138 @@ class TestPaymentDueDatesAreMerged:
         )
         issues = payment.validate("payment")
         assert any("paid_date" in issue.message for issue in issues)
+
+
+class TestCurrencyCodeIsNormalized:
+    """Kod waluty musi trafić do dokumentu w formie, którą przyjmuje schemat."""
+
+    def _invoice(self, currency: str):
+        from datetime import date
+
+        from ksef_client.documents.fa3 import FA3Invoice, InvoiceParty, VatClass
+
+        return (
+            FA3Invoice.basic("FV/CUR/1")
+            .issued_on(date(2026, 4, 1))
+            .seller(InvoiceParty.polish_company(nip="1111111111", name="S", address="ul. A 1"))
+            .buyer(InvoiceParty.polish_company(nip="2222222222", name="B", address="ul. B 2"))
+            .currency(currency)
+            .add_service_line(
+                "Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23()
+            )
+            .build()
+        )
+
+    def test_lowercase_currency_is_uppercased_in_the_xml(self):
+        """Słownik jest sprawdzany bez wielkości liter, a enumeracja XSD — z nią.
+
+        Dokument z `eur` przechodził walidację SDK i dopiero KSeF go odrzucał.
+        """
+        invoice = self._invoice("eur")
+
+        assert "<KodWaluty>EUR</KodWaluty>" in invoice.to_xml(xsd_validate=True).decode("utf-8")
+
+    def test_supported_currency_is_untouched(self):
+        invoice = self._invoice("PLN")
+        assert "<KodWaluty>PLN</KodWaluty>" in invoice.to_xml().decode("utf-8")
+
+
+class TestDraftValidateMatchesToXml:
+    """`FA3Draft.validate()` nie może milczeć, gdy `to_xml()` rzuca wyjątek."""
+
+    def _draft(self):
+        from datetime import date
+        from decimal import Decimal
+
+        from ksef_client.documents.fa3.models import FA3Draft, FA3Line, FA3Party
+
+        return FA3Draft(
+            invoice_number="FV/1",
+            issue_date=date(2026, 4, 1),
+            seller=FA3Party(name="S", tax_id="1111111111", address="ul. A 1"),
+            buyer=FA3Party(name="B", tax_id="2222222222", address="ul. B 2"),
+            lines=[
+                FA3Line(
+                    description="X",
+                    quantity=Decimal(1),
+                    unit="szt",
+                    unit_net_price=Decimal(100),
+                    vat_rate=Decimal(23),
+                )
+            ],
+        )
+
+    def test_shape_and_facets_are_reported_by_validate(self):
+        from dataclasses import replace
+
+        from ksef_client.documents.fa3.models import FA3Party
+
+        draft = self._draft()
+        assert draft.validate()[0] == []
+
+        broken = replace(draft, seller=FA3Party(name="S", tax_id="111", address="ul. A 1"))
+        messages = [issue.message for issue in broken.validate()[0]]
+
+        assert any("NIP" in message for message in messages)
+        with pytest.raises(ValueError, match="NIP"):
+            broken.to_xml()
+
+    def test_serializer_error_is_reported_instead_of_raised(self):
+        """`validate()` nie może rzucać wyjątkiem z serializatora."""
+        from decimal import Decimal
+
+        from ksef_client.documents.fa3.models import FA3Line
+
+        draft = self._draft()
+        broken = draft.__class__(
+            **{
+                **{field: getattr(draft, field) for field in draft.__dataclass_fields__},
+                "lines": [
+                    FA3Line(
+                        description="X",
+                        quantity=Decimal(1),
+                        unit="szt",
+                        unit_net_price=Decimal(100),
+                        vat_rate=Decimal("-23"),
+                    )
+                ],
+            }
+        )
+
+        errors, _warnings = broken.validate()
+
+        assert errors, "validate() musi zgłosić problem zamiast rzucać ValueError"
+
+
+class TestDateFacetsAreEnforced:
+    """`date_format` z tabeli faset musi być sprawdzany, nie tylko deklarowany."""
+
+    def _issues(self, value: str, tag: str = "P_1"):
+        from xml.etree import ElementTree as ET
+
+        from ksef_client.documents.fa3.validation import validate_xml_facets
+
+        namespace = "http://crd.gov.pl/wzor/2025/06/25/13775/"
+        root = ET.fromstring(
+            f'<Faktura xmlns="{namespace}"><Fa><{tag}>{value}</{tag}></Fa></Faktura>'
+        )
+        return [
+            str(issue) for issue in validate_xml_facets(root) if f"/{tag}:" in str(issue)
+        ]
+
+    def test_compact_date_is_rejected(self):
+        assert self._issues("20260401"), "data bez myślników musi być zgłoszona"
+
+    def test_valid_date_is_accepted(self):
+        assert self._issues("2026-04-01") == []
+
+    def test_datetime_accepts_an_optional_offset(self):
+        """`TDataCzas` to `xsd:dateTime` — offset strefy jest opcjonalny."""
+        assert self._issues("2026-04-01T08:30:00", "DataWytworzeniaFa") == []
+        assert self._issues("2026-04-01T08:30:00+02:00", "DataWytworzeniaFa") == []
+
+    def test_datetime_with_a_space_is_rejected(self):
+        assert self._issues("2026-04-01 08:30:00", "DataWytworzeniaFa")
 
 
 class TestBatchPartCountLimit:
