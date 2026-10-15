@@ -1,3 +1,5 @@
+import binascii
+import struct
 import tarfile
 import tracemalloc
 import unittest
@@ -18,11 +20,61 @@ from ksef_client.utils.zip_utils import (
 
 
 def _zip_with_entry_name(name: str, payload: bytes) -> bytes:
-    """Zip z nazwą wpisu zapisaną dosłownie (`zipfile` ucina tylko NUL)."""
-    buffer = BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(name, payload)
-    return buffer.getvalue()
+    """Zip z nazwą wpisu zapisaną dosłownie.
+
+    Nagłówki składamy ręcznie, bo ``zipfile.writestr("")`` wywraca się na Pythonie
+    3.10/3.11 na ``IndexError: string index out of range`` (błąd standardowej
+    biblioteki, naprawiony w 3.12) — test walidacji nazw nie miałby szansy
+    wykonać się na tych interpreterach, a to właśnie one pilnują zgodności
+    z najniższą wspieraną wersją.
+    """
+    encoded = name.encode("utf-8")
+    crc = binascii.crc32(payload) & 0xFFFFFFFF
+    local_header = (
+        b"PK\x03\x04"
+        + struct.pack(
+            "<HHHHHIIIHH",
+            20,
+            0,
+            0,
+            0,
+            0,
+            crc,
+            len(payload),
+            len(payload),
+            len(encoded),
+            0,
+        )
+        + encoded
+        + payload
+    )
+    central_header = (
+        b"PK\x01\x02"
+        + struct.pack(
+            "<HHHHHHIIIHHHHHII",
+            20,
+            20,
+            0,
+            0,
+            0,
+            0,
+            crc,
+            len(payload),
+            len(payload),
+            len(encoded),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+        + encoded
+    )
+    end_of_directory = b"PK\x05\x06" + struct.pack(
+        "<HHHHIIH", 0, 0, 1, 1, len(central_header), len(local_header), 0
+    )
+    return local_header + central_header + end_of_directory
 
 
 def _tar_with_entry_name(name: str) -> bytes:
