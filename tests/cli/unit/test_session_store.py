@@ -488,6 +488,39 @@ def test_delete_all_checkpoints_reports_a_locked_file(monkeypatch, tmp_path: Pat
         session_store.delete_all_checkpoints("demo")
 
 
+def test_write_json_atomic_reports_a_directory_failure(monkeypatch, tmp_path: Path) -> None:
+    """`mkdir` poza `try` dawał surowy OSError (nieoczekiwany kod wyjścia CLI)."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+
+    def _denied(*args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "mkdir", _denied)
+
+    with pytest.raises(CliError, match="Cannot create the checkpoint directory"):
+        save_checkpoint(_online_checkpoint())
+
+
+def test_list_checkpoints_reports_broken_files_on_demand(monkeypatch, tmp_path: Path) -> None:
+    """`include_broken=True` zgłasza uszkodzony plik zamiast go pomijać."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    save_checkpoint(_online_checkpoint())
+    broken = session_store._profile_dir("demo") / "broken.json"
+    broken.write_text("{nie-json", encoding="utf-8")
+
+    # Domyślnie uszkodzone pliki są pomijane (lista działa dalej)…
+    assert len(list_checkpoints("demo")) == 1
+    # …a `list_unreadable_checkpoints` pozwala je pokazać.
+    assert session_store.list_unreadable_checkpoints("demo") == ["broken.json"]
+    with pytest.raises(CliError, match="Cannot read session checkpoint"):
+        list_checkpoints("demo", include_broken=True)
+
+
+def test_list_unreadable_checkpoints_without_directory(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    assert session_store.list_unreadable_checkpoints("nie-ma") == []
+
+
 def test_delete_all_checkpoints_removes_the_profile_directory(
     monkeypatch, tmp_path: Path
 ) -> None:

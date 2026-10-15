@@ -50,7 +50,16 @@ def _checkpoint_path(profile: str, session_id: str) -> Path:
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # `mkdir` poza `try` uciekał jako surowy OSError, więc CLI kończyło się
+        # nieoczekiwanym kodem wyjścia (UNEXPECTED/6) zamiast CONFIG_ERROR.
+        raise CliError(
+            "Cannot create the checkpoint directory.",
+            ExitCode.CONFIG_ERROR,
+            "Grant write access to the cache directory or update its location settings.",
+        ) from exc
     tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     data = json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True)
     try:
@@ -375,7 +384,13 @@ def load_checkpoint(profile: str, session_id: str) -> SessionCheckpoint:
     return checkpoint_from_dict(_read_json(path))
 
 
-def list_checkpoints(profile: str) -> list[SessionCheckpoint]:
+def list_checkpoints(profile: str, *, include_broken: bool = False) -> list[SessionCheckpoint]:
+    """Checkpointy profilu; uszkodzone pliki nie znikają bez śladu.
+
+    `include_broken=True` zgłasza błąd zamiast pomijać plik — `session list`
+    pokazuje wtedy, że w katalogu leży coś, czego nie da się odczytać (wcześniej
+    lista wyglądała na kompletną, choć część plików była pomijana).
+    """
     directory = _profile_dir(profile)
     if not directory.exists():
         return []
@@ -383,9 +398,29 @@ def list_checkpoints(profile: str) -> list[SessionCheckpoint]:
     for path in sorted(directory.glob("*.json")):
         try:
             checkpoints.append(checkpoint_from_dict(_read_json(path)))
-        except CliError:
+        except CliError as exc:
+            if include_broken:
+                raise CliError(
+                    f"Cannot read session checkpoint '{path.name}': {exc.message}",
+                    ExitCode.CONFIG_ERROR,
+                    "Remove or fix the file, then run the command again.",
+                ) from exc
             continue
     return checkpoints
+
+
+def list_unreadable_checkpoints(profile: str) -> list[str]:
+    """Nazwy plików checkpointów, których nie da się odczytać (do ostrzeżenia)."""
+    directory = _profile_dir(profile)
+    if not directory.exists():
+        return []
+    broken: list[str] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            checkpoint_from_dict(_read_json(path))
+        except CliError:
+            broken.append(path.name)
+    return broken
 
 
 def delete_all_checkpoints(profile: str) -> int:
@@ -575,5 +610,6 @@ __all__ = [
     "export_checkpoint",
     "import_checkpoint",
     "delete_all_checkpoints",
+    "list_unreadable_checkpoints",
     "require_matching_base_url",
 ]

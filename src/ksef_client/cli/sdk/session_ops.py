@@ -21,6 +21,7 @@ from ..session_store import (
     export_checkpoint,
     import_checkpoint,
     list_checkpoints,
+    list_unreadable_checkpoints,
     load_checkpoint,
     require_matching_base_url,
     save_checkpoint,
@@ -171,10 +172,19 @@ def _checkpoint_summary(checkpoint: SessionCheckpoint) -> dict[str, Any]:
 
 def list_saved_sessions(*, profile: str) -> dict[str, Any]:
     checkpoints = list_checkpoints(profile)
-    return {
+    # Uszkodzone pliki były po cichu pomijane, więc lista wyglądała na kompletną.
+    unreadable = list_unreadable_checkpoints(profile)
+    result: dict[str, Any] = {
         "count": len(checkpoints),
         "items": [_checkpoint_summary(checkpoint) for checkpoint in checkpoints],
     }
+    if unreadable:
+        result["unreadable"] = unreadable
+        result["warning"] = (
+            f"{len(unreadable)} checkpoint file(s) could not be read: "
+            f"{', '.join(unreadable)}"
+        )
+    return result
 
 
 def show_saved_session(*, profile: str, session_id: str) -> dict[str, Any]:

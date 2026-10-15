@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from importlib import metadata
 
 import typer
@@ -71,6 +72,17 @@ def main(
     selected_profile = profile
     if selected_profile is None:
         selected_profile = config.active_profile
+    # `-v/--verbose` było zbierane, ale nic nie robiło: teraz podnosi poziom
+    # logowania SDK (`logging.getLogger("ksef_client...")`), więc diagnostyka
+    # faktycznie trafia na stderr. Powtarzalne: `-v` = INFO, `-vv` = DEBUG.
+    if verbose:
+        logging.basicConfig(
+            level=logging.DEBUG if verbose > 1 else logging.INFO,
+            format="%(levelname)s %(name)s: %(message)s",
+        )
+        logging.getLogger("ksef_client").setLevel(
+            logging.DEBUG if verbose > 1 else logging.INFO
+        )
     ctx.obj = CliContext(
         profile=selected_profile,
         json_output=json_output,

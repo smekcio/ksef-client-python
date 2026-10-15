@@ -686,6 +686,48 @@ class AsyncRedirectHandlingTests(unittest.IsolatedAsyncioTestCase):
             await client.request("GET", "/path")
 
 
+class VerboseLoggingTests(unittest.TestCase):
+    """`-v/--verbose` ma realny efekt: żądania trafiają do logu bez sekretów."""
+
+    def test_request_is_logged_without_query_parameters(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(200)
+        with (
+            patch.object(client._client, "request", Mock(return_value=response)),
+            self.assertLogs("ksef_client.http", level="DEBUG") as captured,
+        ):
+            client.request("GET", "https://storage.example.com/package?sig=SEKRET")
+
+        joined = "\n".join(captured.output)
+        assert "-> 200" in joined
+        assert "storage.example.com/package" in joined
+        assert "SEKRET" not in joined, "podpis presigned URL nie może trafiać do logu"
+
+    def test_relative_path_is_logged_without_the_query(self):
+        options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+        client = BaseHttpClient(options, access_token="token")
+        response = httpx.Response(200)
+        with (
+            patch.object(client._client, "request", Mock(return_value=response)),
+            self.assertLogs("ksef_client.http", level="DEBUG") as captured,
+        ):
+            client.request("GET", "/invoices?secret=SEKRET")
+
+        joined = "\n".join(captured.output)
+        assert "/invoices" in joined
+        assert "SEKRET" not in joined
+
+    def test_loggable_url_handles_a_relative_path(self):
+        from ksef_client.http import _loggable_url
+
+        assert _loggable_url("invoices/1?sig=SEKRET") == "invoices/1"
+        assert (
+            _loggable_url("https://host.example/path?sig=SEKRET")
+            == "https://host.example/path"
+        )
+
+
 class PresignedUrlRedirectTests(unittest.TestCase):
     """Presigned URL nie może podążać za przekierowaniem.
 

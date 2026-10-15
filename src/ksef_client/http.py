@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import ipaddress
+import logging
 import math
 from dataclasses import MISSING, dataclass
 from datetime import datetime, timezone
@@ -24,6 +25,21 @@ from .models import (
     UnauthorizedProblemDetails,
     UnknownApiProblem,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _loggable_url(url: str) -> str:
+    """Adres do logu diagnostycznego — bez parametrów zapytania.
+
+    Pre-signed URL niesie w query podpis i dane dostępowe, więc do logu trafia
+    tylko schemat, host i ścieżka.
+    """
+    parsed = urlparse(url)
+    if not parsed.scheme:
+        return url.split("?", 1)[0]
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+
 
 
 def _merge_headers(base: dict[str, str], extra: dict[str, str] | None) -> dict[str, str]:
@@ -629,6 +645,9 @@ class BaseHttpClient:
             # niezależnie od `options.follow_redirects`.
             follow_redirects=False if skip_auth else self._options.follow_redirects,
         )
+        logger.debug(
+            "HTTP %s %s -> %s", method, _loggable_url(url), response.status_code
+        )
         _handle_system_warning(self._options, response)
 
         if (
@@ -753,6 +772,7 @@ class AsyncBaseHttpClient:
             # przekierowaniem, bo walidacja dotyczy tylko adresu początkowego.
             follow_redirects=False if skip_auth else self._options.follow_redirects,
         )
+        logger.debug("HTTP %s %s -> %s", method, _loggable_url(url), response.status_code)
         _handle_system_warning(self._options, response)
 
         if (

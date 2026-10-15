@@ -38,6 +38,33 @@ def test_session_export_command_passes_the_overwrite_flag(runner, monkeypatch) -
     assert seen["overwrite"] is False
 
 
+def test_session_list_warns_about_unreadable_checkpoints(runner, monkeypatch) -> None:
+    """Uszkodzony plik nie może zniknąć z listy bez śladu."""
+    from ksef_client.cli.sdk import session_ops
+
+    monkeypatch.setattr(session_ops, "list_checkpoints", lambda profile: [])
+    monkeypatch.setattr(
+        session_ops, "list_unreadable_checkpoints", lambda profile: ["broken.json"]
+    )
+
+    result = runner.invoke(app, ["--json", "session", "list"])
+
+    assert result.exit_code == 0
+    data = _payload(result.stdout)["data"]
+    assert data["unreadable"] == ["broken.json"]
+    assert "could not be read" in data["warning"]
+
+
+def test_verbose_flag_configures_logging(runner) -> None:
+    """`-v/--verbose` musi mieć realny efekt (wcześniej było zbierane i ignorowane)."""
+    import logging
+
+    result = runner.invoke(app, ["-vv", "--json", "session", "list"])
+
+    assert result.exit_code == 0
+    assert logging.getLogger("ksef_client").level == logging.DEBUG
+
+
 def test_session_list_command_uses_selected_profile(runner, monkeypatch) -> None:
     seen: dict[str, str] = {}
 

@@ -534,8 +534,15 @@ def revoke_self_token(*, profile: str, base_url: str) -> dict[str, Any]:
 
 
 def logout(profile: str) -> dict[str, Any]:
-    clear_tokens(profile)
-    clear_cached_metadata(profile)
+    """Usuwa tokeny i metadane profilu.
+
+    Metadane czyścimy w `finally`: gdy magazyn tokenów odmówi usunięcia (np. brak
+    praw do `tokens.json`), wpis w cache nie może zostać i udawać aktywnej sesji.
+    """
+    try:
+        clear_tokens(profile)
+    finally:
+        clear_cached_metadata(profile)
     return {
         "profile": profile,
         "logged_out": True,
