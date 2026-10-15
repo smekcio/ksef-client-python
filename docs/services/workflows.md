@@ -107,6 +107,11 @@ Lekki, wersjonowany stan JSON przeznaczony do resume:
 - `iv_base64`
 - `upo_v43`
 
+Odtworzenie stanu (`from_dict`/`from_json`, a przez to wczytanie checkpointu) sprawdza długości
+materiału klucza: `symmetric_key_base64` musi mieć 32 bajty (AES-256), a `iv_base64` — 16 bajtów.
+Skrócona wartość kończy się `ValueError` z nazwą pola, zamiast błędem z `cryptography` dopiero
+przy szyfrowaniu.
+
 Nie zawiera:
 - tokenów,
 - XML faktur,

@@ -385,7 +385,9 @@ Uwagi:
 - komenda korzysta z publicznego API Latarni (bez tokenu dostepowego),
 - domyslnie base URL Latarni mapowany jest z profilu KSeF (`TEST`/`DEMO` -> latarnia TEST, `PROD` -> latarnia PROD),
 - gdy brak profilu i brak override (`--base-url`/`KSEF_LIGHTHOUSE_BASE_URL`), uzywana jest domyslnie **latarnia test**: `https://api-latarnia-test.ksef.mf.gov.pl`,
-- `--base-url` lub `KSEF_LIGHTHOUSE_BASE_URL` pozwala nadpisac endpoint Latarni.
+- `--base-url` lub `KSEF_LIGHTHOUSE_BASE_URL` pozwala nadpisac endpoint Latarni,
+- profil z nieznanym `base_url` (spoza TEST/DEMO/PRD) daje `CONFIG_ERROR` z podpowiedzia, zeby podac
+  `--base-url`/`KSEF_LIGHTHOUSE_BASE_URL` — wczesniej CLI po cichu pokazywalo statusy latarni TEST.
 
 ## `ksef lighthouse messages`
 

@@ -44,6 +44,12 @@ Parametry:
 - `get_file_metadata(data: bytes) -> FileMetadata` (rozmiar + SHA-256 base64)
 - `get_stream_metadata(stream) -> FileMetadata` (to samo, ale dla strumienia; przywraca pozycję, jeśli się da)
 
+`get_stream_metadata` opisuje **cały** strumień, więc strumień nieprzewijalny (`seekable()`
+fałszywe lub rzucające) jest przyjmowany tylko wtedy, gdy sam raportuje pozycję `0` przez `tell()`.
+W przeciwnym razie funkcja rzuca `ValueError` — wcześniej liczyła rozmiar i hash od bieżącej
+pozycji i zwracała metadane reszty danych jako metadane całości. Dla bajtów użyj
+`get_file_metadata`.
+
 ## Szyfrowanie tokena KSeF (niskopoziomowe)
 
 Dostępne są również funkcje niskopoziomowe zwracające bajty zamiast Base64:
