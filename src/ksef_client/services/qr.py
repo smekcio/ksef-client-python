@@ -23,10 +23,19 @@ def generate_qr_png(payload_url: str, *, box_size: int = 10, border: int = 4) ->
 
 
 def resize_png(png_bytes: bytes, width: int, height: int) -> bytes:
+    """Skaluje obraz PNG zachowując charakter kodu QR.
+
+    Domyślny filtr `Image.resize` interpoluje, więc na krawędziach modułów
+    powstawały szare piksele — kod QR jest obrazem dwupoziomowym, a rozmyte
+    krawędzie obniżają kontrast, na którym binaryzują skanery. Używamy więc
+    `NEAREST` (bez interpolacji) i odrzucamy rozmiar niedodatni.
+    """
     qrcode, Image, ImageDraw, ImageFont = _require_qr()
+    if width <= 0 or height <= 0:
+        raise ValueError("width and height must be positive")
     with _bytes_io(png_bytes) as buf:
         img = Image.open(buf)
-        img = img.resize((width, height))
+        img = img.resize((width, height), Image.Resampling.NEAREST)
         with _bytes_io() as out:
             img.save(out, format="PNG")
             return out.getvalue()

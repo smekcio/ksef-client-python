@@ -2027,3 +2027,35 @@ class TestExportArchiveLimits:
         )
         assert len(unpacked) == EXPORT_MAX_ARCHIVE_ENTRIES
         assert "_metadata.json" in unpacked
+
+    def test_invoice_count_limit_is_enforced_without_the_metadata_file(self):
+        """Limit dotyczy FAKTUR, nie wpisów archiwum.
+
+        Limit wpisów (10 001) liczy też `_metadata.json`, więc paczka bez tego
+        pliku mogłaby nieść 10 001 faktur — o jedną ponad kontraktowe 10 000.
+        """
+        import io
+        import zipfile
+
+        from ksef_client.services.workflows import _unpack_export_archive
+        from ksef_client.utils.zip_utils import EXPORT_MAX_INVOICES
+
+        def _package(count: int, *, metadata: bool) -> bytes:
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for index in range(count):
+                    archive.writestr(f"{index}.xml", b"<Faktura/>")
+                if metadata:
+                    archive.writestr("_metadata.json", b"{}")
+            return buffer.getvalue()
+
+        from ksef_client.models import CompressionType
+
+        full = _package(EXPORT_MAX_INVOICES, metadata=True)
+        assert len(_unpack_export_archive(full, compression_type=CompressionType.ZIP)) == (
+            EXPORT_MAX_INVOICES + 1
+        )
+
+        over = _package(EXPORT_MAX_INVOICES + 1, metadata=False)
+        with pytest.raises(ValueError, match="contract limit is 10000"):
+            _unpack_export_archive(over, compression_type=CompressionType.ZIP)

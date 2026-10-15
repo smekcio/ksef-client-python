@@ -1,4 +1,5 @@
 import builtins
+import io
 import sys
 import types
 import unittest
@@ -18,8 +19,9 @@ class DummyImage:
     def save(self, buf, format="PNG"):
         buf.write(b"PNG")
 
-    def resize(self, size):
+    def resize(self, size, resample=None):
         self.size = size
+        self.resample = resample
         return self
 
     def paste(self, img, box):
@@ -43,6 +45,9 @@ class DummyQrCode:
 
 
 class DummyImageModule:
+    class Resampling:
+        NEAREST = "nearest"
+
     @staticmethod
     def open(buf):
         return DummyImage()
@@ -73,6 +78,37 @@ class DummyImageFontModule:
     @staticmethod
     def load_default():
         return object()
+
+
+class QrResamplingTests(unittest.TestCase):
+    """`resize_png` nie może interpolować obrazu kodu QR.
+
+    Domyślny filtr `Image.resize` wygładza krawędzie modułów (szare piksele),
+    a skanery binaryzują obraz na podstawie kontrastu — rozmyty kod QR bywa
+    nieczytelny.
+    """
+
+    def test_resize_keeps_the_image_bilevel(self):
+        try:
+            from PIL import Image
+        except ImportError:  # pragma: no cover - brak extras 'qr'
+            self.skipTest("Pillow nie jest zainstalowane")
+
+        from ksef_client.services.qr import generate_qr_png, resize_png
+
+        png = generate_qr_png("https://qr-test.ksef.mf.gov.pl/invoice/1111111111/x/YQ", box_size=4)
+        resized = resize_png(png, 250, 250)
+
+        image = Image.open(io.BytesIO(resized)).convert("L")
+        levels = set(image.getdata())
+        self.assertLessEqual(len(levels), 2, f"obraz nie jest dwupoziomowy: {sorted(levels)}")
+
+    def test_resize_rejects_non_positive_size(self):
+        from ksef_client.services.qr import generate_qr_png, resize_png
+
+        png = generate_qr_png("https://example.com")
+        with self.assertRaisesRegex(ValueError, "must be positive"):
+            resize_png(png, 0, 100)
 
 
 class QrServiceTests(unittest.TestCase):

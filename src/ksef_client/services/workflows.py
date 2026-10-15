@@ -33,6 +33,7 @@ from ..models import (
 )
 from ..utils.zip_utils import (
     EXPORT_MAX_ARCHIVE_ENTRIES,
+    EXPORT_MAX_INVOICES,
     untar_gz_bytes_safe,
     unzip_bytes_safe,
 )
@@ -1193,10 +1194,20 @@ def _unpack_export_archive(
     # nie wlicza pliku metadanych do limitów paczki, a domyślny limit 10 000
     # wpisów odrzucał legalną paczkę maksymalną.
     if compression_type is CompressionType.ZIP:
-        return unzip_bytes_safe(archive_bytes, max_files=EXPORT_MAX_ARCHIVE_ENTRIES)
-    if compression_type is CompressionType.TARGZ:
-        return untar_gz_bytes_safe(archive_bytes, max_files=EXPORT_MAX_ARCHIVE_ENTRIES)
-    raise ValueError("Unsupported compression type. Use Zip or TarGz.")
+        entries = unzip_bytes_safe(archive_bytes, max_files=EXPORT_MAX_ARCHIVE_ENTRIES)
+    elif compression_type is CompressionType.TARGZ:
+        entries = untar_gz_bytes_safe(archive_bytes, max_files=EXPORT_MAX_ARCHIVE_ENTRIES)
+    else:
+        raise ValueError("Unsupported compression type. Use Zip or TarGz.")
+    # Limit archiwum liczy WSZYSTKIE wpisy, więc paczka bez `_metadata.json`
+    # mogłaby nieść 10 001 faktur, choć kontrakt ogranicza liczbę faktur do 10 000.
+    invoices = [name for name in entries if name.lower() != "_metadata.json"]
+    if len(invoices) > EXPORT_MAX_INVOICES:
+        raise ValueError(
+            f"export package contains {len(invoices)} invoices, "
+            f"the contract limit is {EXPORT_MAX_INVOICES}"
+        )
+    return entries
 
 
 def _resolve_export_part_hash_requirement(
