@@ -14,6 +14,7 @@ from .currency import (
     validate_fa3_currency,
 )
 from .domain import (
+    SETTLEMENT_SCALE_KINDS,
     Address,
     AnnotationSet,
     Attachment,
@@ -498,6 +499,49 @@ def _add_advance_summary(
                 )
 
 
+def _scale_settlement_summary(
+    invoice: FA3Invoice,
+    summary: dict[str, Decimal],
+    vat_summary: dict[str, Decimal],
+) -> None:
+    """Dla ROZ/KOR_ROZ przelicza koszyki na proporcję kwoty pozostałej do zapłaty.
+
+    Wiersze faktury rozliczającej niosą **pełną wartość zamówienia**, a
+    `P_13_x`/`P_14_x` są proporcją kwoty pozostałej do zapłaty (art. 106f ust. 3).
+    Oficjalny `FA_3_Przykład_14.xml` potwierdza, że to jednorodne skalowanie:
+    wiersze 307500@8% + 4500@23% (brutto 337635) przy `P_15` = 307635 dają
+    `P_13_2` = 280177.59, `P_14_2` = 22414.21 oraz `P_13_1` = 4100.16,
+    `P_14_1` = 943.04 — czyli dokładnie wartości wierszy × 307635/337635.
+    """
+    if invoice.kind not in SETTLEMENT_SCALE_KINDS:
+        return
+
+    def _total() -> Decimal:
+        return money(
+            sum(summary.values(), Decimal("0.00"))
+            + sum(vat_summary.values(), Decimal("0.00"))
+        )
+
+    total = _total()
+    target = money(invoice.summary_gross)
+    if total == 0 or target == 0 or total == target:
+        return
+    factor = target / total
+    if factor <= 0:
+        return
+    for tag, value in list(summary.items()):
+        summary[tag] = money(value * factor)
+    for tag, value in list(vat_summary.items()):
+        vat_summary[tag] = money(value * factor)
+    # Po zaokrągleniu do groszy suma może różnić się od `P_15` o 1–2 grosze;
+    # resztę dokładamy do największego koszyka, żeby `P_15 = ΣP_13_x + ΣP_14_x`
+    # zachodziło co do grosza.
+    residual = money(target - _total())
+    if residual != 0 and summary:
+        largest = max(summary, key=lambda tag: summary[tag])
+        summary[largest] = money(summary[largest] + residual)
+
+
 def _tax_summary(fa: ET.Element, invoice: FA3Invoice) -> None:
     summary: dict[str, Decimal] = {}
     vat_summary: dict[str, Decimal] = {}
@@ -527,6 +571,7 @@ def _tax_summary(fa: ET.Element, invoice: FA3Invoice) -> None:
     # łamało tożsamość `P_15 = ΣP_13_x + ΣP_14_x` — np. dla `KOR_ZAL`
     # z zaliczką dokument nie deklarował żadnej podstawy opodatkowania.
     _add_advance_summary(invoice, summary, vat_summary, foreign_vat_summary)
+    _scale_settlement_summary(invoice, summary, vat_summary)
     for net_tag, vat_tag, _vat_w_tag in _TAX_SUMMARY_ORDER:
         if net_tag in summary:
             ET.SubElement(fa, _q(net_tag)).text = _amount(summary[net_tag])

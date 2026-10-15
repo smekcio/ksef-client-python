@@ -544,14 +544,17 @@ class TestFa3SchemaContract:
             issue.message for issue in errors
         ]
 
-    def test_settlement_with_unsupported_proportion_is_rejected(self):
-        """SDK nie wyprowadza proporcji `P_13_x` z pełnej wartości zamówienia."""
+    def test_settlement_scales_the_baskets_like_the_official_sample(self):
+        """ROZ: `P_13_x`/`P_14_x` to proporcja kwoty pozostałej do zapłaty.
+
+        Odtwarzamy oficjalny `FA_3_Przykład_14.xml`: wiersze 307500@8% + 4500@23%
+        (brutto 337635), `P_15` = 307635, a koszyki = wartości wierszy ×
+        307635/337635 → `P_13_2` = 280177.59, `P_14_2` = 22414.21,
+        `P_13_1` = 4100.16, `P_14_1` = 943.04.
+        """
         from datetime import date
 
-        from ksef_client.documents.fa3 import (
-            SettlementInvoiceBuilder,
-            VatClass,
-        )
+        from ksef_client.documents.fa3 import SettlementInvoiceBuilder, VatClass
 
         builder = SettlementInvoiceBuilder(invoice_number="ROZ/1")
         builder.issued_on(date(2026, 3, 1))
@@ -560,10 +563,96 @@ class TestFa3SchemaContract:
         builder.add_service_line(
             "Dostawa 8%", quantity="1", unit_net_price="307500", tax=VatClass.reduced_8()
         )
+        builder.add_service_line(
+            "Usługa 23%", quantity="1", unit_net_price="4500", tax=VatClass.standard_23()
+        )
         builder.settles_advance(ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01")
         builder.remaining_to_pay(Decimal("307635"))
-        with pytest.raises(ValueError, match="(?i)proporcj|pozostałej"):
+
+        xml = builder.build().to_xml(xsd_validate=True).decode("utf-8")
+
+        assert "<P_15>307635.00</P_15>" in xml
+        assert "<P_13_2>280177.59</P_13_2>" in xml
+        assert "<P_14_2>22414.21</P_14_2>" in xml
+        assert "<P_13_1>4100.16</P_13_1>" in xml
+        assert "<P_14_1>943.04</P_14_1>" in xml
+
+    def test_settlement_due_above_the_order_value_is_rejected(self):
+        """Kwota do zapłaty nie może przekraczać wartości zamówienia."""
+        from datetime import date
+
+        from ksef_client.documents.fa3 import SettlementInvoiceBuilder, VatClass
+
+        builder = SettlementInvoiceBuilder(invoice_number="ROZ/2")
+        builder.issued_on(date(2026, 3, 1))
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line(
+            "Dostawa 8%", quantity="1", unit_net_price="100", tax=VatClass.reduced_8()
+        )
+        builder.settles_advance(ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01")
+        builder.remaining_to_pay(Decimal("9999"))
+        with pytest.raises(ValueError, match="przekracza wartość zamówienia"):
             builder.build()
+
+    def test_settlement_with_negative_due_is_rejected(self):
+        from datetime import date
+
+        from ksef_client.documents.fa3 import SettlementInvoiceBuilder, VatClass
+
+        builder = SettlementInvoiceBuilder(invoice_number="ROZ/3")
+        builder.issued_on(date(2026, 3, 1))
+        builder.seller(self._seller())
+        builder.buyer(self._buyer())
+        builder.add_service_line(
+            "Dostawa 8%", quantity="1", unit_net_price="100", tax=VatClass.reduced_8()
+        )
+        builder.settles_advance(ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01")
+        builder.remaining_to_pay(Decimal("-5"))
+        with pytest.raises(ValueError, match="ujemnej kwoty"):
+            builder.build()
+
+    def test_settlement_correction_with_flipped_signs_keeps_the_baskets(self):
+        """KOR_ROZ z ujemnymi wierszami i dodatnią kwotą do zapłaty nie skaluje na minus.
+
+        Współczynnik `P_15 / wartość zamówienia` byłby wtedy ujemny, więc
+        odwróciłby znaki koszyków; serializator zostawia w takim przypadku
+        wartości z wierszy (a nie deklaruje podatku z odwróconym znakiem).
+        """
+        from dataclasses import replace
+        from datetime import date
+
+        from ksef_client.documents.fa3 import FA3Invoice, InvoiceParty, VatClass
+
+        builder = FA3Invoice.settlement_correction("KOR_ROZ/1")
+        builder.issued_on(date(2026, 3, 1))
+        builder.seller(
+            InvoiceParty.polish_company(
+                nip="1111111111", name="Sprzedawca", address="ul. Testowa 1"
+            )
+        )
+        builder.buyer(
+            InvoiceParty.polish_company(nip="2222222222", name="Nabywca", address="ul. Testowa 2")
+        )
+        builder.add_service_line(
+            "Korekta", quantity="1", unit_net_price="100", tax=VatClass.reduced_8()
+        )
+        builder.corrects_invoice(
+            number="FV/ROZ/1", issue_date=date(2026, 1, 1), reason="korekta rozliczenia"
+        )
+        builder.settles_advance(ksef_number="1111111111-20260101-AAAAAA-BBBBBB-01")
+        builder.remaining_to_pay(Decimal("50"))
+        invoice = builder.build()
+        flipped = replace(
+            invoice, lines=(replace(invoice.lines[0], before_correction=True),)
+        )
+
+        xml = flipped.to_xml(validate=False).decode("utf-8")
+
+        # Wiersz „przed korektą” daje ujemną podstawę i znak zostaje ujemny —
+        # ujemny współczynnik nie odwraca koszyków.
+        assert "<P_13_2>-100.00</P_13_2>" in xml
+        assert "<P_15>50.00</P_15>" in xml
 
 
 class TestRemainingBranches:
