@@ -150,8 +150,14 @@ def _check_sdist_contents(sdist: Path) -> None:
     if missing_schemas:
         raise AssertionError(f"sdist bez plików XSD: {missing_schemas}")
 
-    if not any("/src/ksef_client/" in name for name in names):
-        raise AssertionError("sdist bez źródeł pakietu")
+    # Samo `src/ksef_client/...` nie wystarcza: archiwum z XSD i katalogiem pakietu,
+    # ale bez modułów, przechodziło tę kontrolę (dowód z weryfikacji obalającej).
+    required_modules = ("/src/ksef_client/__init__.py", "/src/ksef_client/models.py")
+    missing_modules = [
+        module for module in required_modules if not any(name.endswith(module) for name in names)
+    ]
+    if missing_modules:
+        raise AssertionError(f"sdist bez modułów pakietu: {missing_modules}")
 
 
 def _check_base_install(wheel: Path) -> None:

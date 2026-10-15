@@ -104,11 +104,21 @@ class QrResamplingTests(unittest.TestCase):
         self.assertLessEqual(len(levels), 2, f"obraz nie jest dwupoziomowy: {sorted(levels)}")
 
     def test_resize_rejects_non_positive_size(self):
+        # Ten test nie może failować w środowisku bez extras `qr` (CI instaluje
+        # `requirements-dev.txt`) — `generate_qr_png` rzuca wtedy RuntimeError.
+        self._skip_without_qr_extras()
         from ksef_client.services.qr import generate_qr_png, resize_png
 
         png = generate_qr_png("https://example.com")
         with self.assertRaisesRegex(ValueError, "must be positive"):
             resize_png(png, 0, 100)
+
+    def _skip_without_qr_extras(self) -> None:
+        try:
+            import PIL  # noqa: F401
+            import qrcode  # noqa: F401
+        except ImportError:  # pragma: no cover - brak extras 'qr'
+            self.skipTest("brak extras 'qr' (qrcode/Pillow)")
 
 
 def _ink_bbox(image):
