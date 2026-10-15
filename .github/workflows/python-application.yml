@@ -80,7 +80,9 @@ jobs:
             .coverage
 
   test-matrix:
-    if: github.event_name != 'pull_request'
+    # Macierz biegnie także na PR-ach: bez tego różnice między interpreterami
+    # (np. `zipfile.writestr("")` na 3.10/3.11) wychodziły dopiero po merge'u,
+    # gdy `main` był już czerwony.
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental || false }}
     strategy:

@@ -250,7 +250,12 @@ def unzip_bytes_safe(
     total_uncompressed = 0
     with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
         for info in zf.infolist():
-            if info.is_dir():
+            # NIE `info.is_dir()`: na Pythonie 3.10 to `self.filename[-1] == '/'`,
+            # więc wpis z pustą nazwą wywracał odczyt `IndexError`-em zamiast
+            # naszym `ValueError` (kontrakt mówi o `ValueError`). `endswith` ma
+            # identyczną semantykę jak `is_dir()` od 3.11 i nie indeksuje pustego
+            # łańcucha, dzięki czemu walidacja nazwy niżej zawsze ma szansę zadziałać.
+            if info.filename.endswith("/"):
                 continue
 
             if len(result) >= max_files:
