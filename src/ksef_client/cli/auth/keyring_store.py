@@ -34,6 +34,11 @@ try:
     _keyring = importlib.import_module("keyring")
     _keyring_errors = importlib.import_module("keyring.errors")
     KeyringErrorType = cast(type[Exception], _keyring_errors.KeyringError)
+    #: `NoKeyringError` oznacza, że żaden backend nie jest dostępny (np. headless
+    #: Linux/CI) — w przeciwieństwie do błędu operacji na istniejącym wpisie.
+    NoKeyringErrorType = cast(
+        type[Exception], getattr(_keyring_errors, "NoKeyringError", _keyring_errors.KeyringError)
+    )
 
     _KEYRING_AVAILABLE = True
 except Exception:  # pragma: no cover - import fallback path
@@ -41,9 +46,11 @@ except Exception:  # pragma: no cover - import fallback path
         pass
 
     KeyringErrorType = _KeyringError
+    NoKeyringErrorType = _KeyringError
     _KEYRING_AVAILABLE = False
 
 KeyringError = KeyringErrorType
+NoKeyringError = NoKeyringErrorType
 
 _SERVICE_NAME = "ksef-client-python-cli"
 _ACCESS_KEY = "access_token"
@@ -358,6 +365,13 @@ def clear_tokens(profile: str) -> None:
             try:
                 keyring_backend.delete_password(_SERVICE_NAME, _token_key(profile, key))
             except KeyringError as exc:
+                if isinstance(exc, NoKeyringError):
+                    # Brak działającego backendu (np. headless Linux/CI): keyring
+                    # nie jest w użyciu, więc nie ma czego kasować ani weryfikować
+                    # — tokeny żyją w magazynie fallbacku. Traktowanie tego jak
+                    # nieudane usunięcie blokowałoby `auth logout` na takich
+                    # maszynach (błąd zgłoszony przez CI na Linuksie).
+                    break
                 # Brak wpisu jest w porządku, ale NIEUDANE usunięcie nie może
                 # udawać wylogowania: wcześniej pętla szła dalej (`continue`),
                 # a `logout` raportował „Stored tokens removed.", zostawiając

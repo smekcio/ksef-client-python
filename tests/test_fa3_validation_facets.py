@@ -331,10 +331,28 @@ _NON_XML_SPACES = ("\u00a0", "\u3000", "\u0085", "\u2028")
 
 @functools.lru_cache(maxsize=1)
 def _fa3_xsd_schema() -> Any:
-    """Skompilowany, bundlowany schemat FA(3) — wzorzec werdyktu dla faset."""
+    """Skompilowany, bundlowany schemat FA(3) — wzorzec werdyktu dla faset.
+
+    Schemat importuje typy z ``http://crd.gov.pl/...`` (adresy absolutne są w oryginale
+    MF), więc kompilacja musi rozwiązywać je do plików z tego katalogu — dokładnie tak
+    jak ``_schema_resolver`` w SDK. Bez tego lxml próbuje pobrać zasób z sieci: na
+    maszynie z internetem przechodzi, a w CI (Linux, brak dostępu do ``crd.gov.pl``)
+    kończy się ``XMLSchemaParseError: ... 'TDataCzas' does not resolve``.
+    """
     from lxml import etree
 
-    return etree.XMLSchema(etree.parse(str(SCHEMAS / "schemat_FA(3)_v1-0E.xsd")))
+    class _BundledSchemas(etree.Resolver):
+        def resolve(self, url: str, public_id: str | None, context: Any) -> Any:
+            _ = public_id
+            candidate = SCHEMAS / url.rsplit("/", 1)[-1]
+            if candidate.is_file():
+                return self.resolve_filename(str(candidate), context)
+            return None
+
+    parser = etree.XMLParser()
+    parser.resolvers.add(_BundledSchemas())
+    schema_path = SCHEMAS / "schemat_FA(3)_v1-0E.xsd"
+    return etree.XMLSchema(etree.parse(str(schema_path), parser))
 
 
 def _xsd_accepts(root: ET.Element) -> bool:

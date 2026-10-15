@@ -1,23 +1,37 @@
 from __future__ import annotations
 
 import json
+import re
 
 from ksef_client.cli import app
 from ksef_client.cli.commands import export_cmd
 from ksef_client.cli.errors import CliError
 from ksef_client.cli.exit_codes import ExitCode
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
 
 def _json_output(text: str) -> dict:
     return json.loads(text.strip().splitlines()[-1])
 
 
+def _plain_help(text: str) -> str:
+    """Pomoc bez sekwencji ANSI i bez łamania linii.
+
+    Rich koloruje nazwy opcji i łamie tekst wg szerokości terminala, więc surowe
+    `"--overwrite" in result.stdout` przechodziło lokalnie (brak kolorów, szeroki
+    terminal), a w CI na Linuksie padało.
+    """
+    return _ANSI.sub("", text).replace("\n", "")
+
+
 def test_export_run_help(runner) -> None:
     result = runner.invoke(app, ["export", "run", "--help"])
     assert result.exit_code == 0
-    assert "--sort-order" not in result.stdout
+    help_text = _plain_help(result.stdout)
+    assert "--sort-order" not in help_text
     # Bez tego użytkownik nie wie, jak nadpisać pliki z poprzedniego eksportu.
-    assert "--overwrite" in result.stdout.replace("\n", "")
+    assert "--overwrite" in help_text
 
 
 def test_export_run_success(runner, monkeypatch, tmp_path) -> None:

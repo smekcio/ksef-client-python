@@ -17,6 +17,44 @@ from ksef_client.cli.errors import CliError
 from ksef_client.cli.exit_codes import ExitCode
 
 
+def test_keyring_store_clear_tokens_tolerates_a_missing_backend(monkeypatch, tmp_path) -> None:
+    """Brak backendu keyringa (headless Linux/CI) nie może blokować `auth logout`.
+
+    `NoKeyringError` znaczy „keyring nie jest w użyciu", a nie „nie udało się usunąć
+    wpisu" — na takiej maszynie tokeny żyją w magazynie fallbacku, więc `clear_tokens`
+    ma je wyczyścić i zakończyć się sukcesem. Traktowanie tego jak błędu wywracało
+    `auth logout`, `profile delete` i smoke testy CLI w CI (Linux).
+    """
+    keyring_errors = pytest.importorskip("keyring.errors")
+    missing_backend_error = keyring_errors.NoKeyringError
+
+    class _Backend:
+        def set_password(self, service: str, key: str, value: str) -> None:
+            _ = (service, key, value)
+            raise missing_backend_error("no backend")
+
+        def get_password(self, service: str, key: str) -> str | None:
+            _ = (service, key)
+            raise missing_backend_error("no backend")
+
+        def delete_password(self, service: str, key: str) -> None:
+            _ = (service, key)
+            raise missing_backend_error("no backend")
+
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", True)
+    monkeypatch.setattr(keyring_store, "_keyring", _Backend())
+    monkeypatch.setattr(keyring_store, "cache_dir", lambda: tmp_path)
+
+    fallback = tmp_path / "tokens.json"
+    fallback.write_text(
+        json.dumps({"demo": {"access_token": "acc", "refresh_token": "ref"}}), encoding="utf-8"
+    )
+
+    keyring_store.clear_tokens("demo")
+
+    assert json.loads(fallback.read_text(encoding="utf-8")) == {}
+
+
 def test_keyring_store_clear_reports_a_failed_delete(monkeypatch, tmp_path) -> None:
     """Nieudane usunięcie wpisu nie może udawać wylogowania.
 
