@@ -28,6 +28,104 @@
 
 ### Bug Fixes
 
+* **cli:** `ksef lighthouse` reports an unknown profile `base_url` as `CONFIG_ERROR` instead of
+  silently showing the TEST environment's statuses. `--base-url`/`KSEF_LIGHTHOUSE_BASE_URL` still
+  takes precedence over the profile, and the DEMO→TEST mapping is unchanged
+* **cli:** default output file names built from API identifiers are sanitised. A crafted
+  `ksefNumber`/reference such as `..\..\escaped` used to write the file outside `--out` (the
+  identifier became a path); characters outside `[A-Za-z0-9._-]` are replaced and `.`/`..` fall back
+  to `_`, centrally for all eight call sites
+* **cli:** a 200 response carrying an HTML page (proxy, captive portal) is rejected before it is
+  written, instead of being saved as `upo-*.xml` and reported as success — this covered
+  `upo get`/`upo wait`/`session online send`/`batch close` and `invoice download --as bytes`
+* **services:** the session state validates the key and IV length (32 B AES-256 key, 16 B IV) with
+  a message naming the field. A truncated key used to pass state validation and fail later inside
+  `cryptography`; `from_dict`/`from_json`/`load_checkpoint` inherit the check
+* **services:** `XadesKeyPair` and `EncryptionData` keep the private key out of `repr()` — printing
+  the objects leaked key material into logs. The IV stays visible (it is not a secret)
+* **services:** `add_label_to_qr` honours `font_size` (it always used the default bitmap font) and
+  never clips the label: the font shrinks down to 6 px, and if the text is still wider than the code
+  the canvas grows by exactly the text width and the QR code is centred. Pillow < 10.1 (no `size`
+  parameter) falls back to `truetype` and then to the bitmap default
+* **services:** `get_stream_metadata` refuses a non-seekable stream unless it reports position 0.
+  It used to hash only the remaining bytes while claiming to describe the whole stream — the size
+  and hash were silently wrong
+* **fa3:** the payment link (`LinkDoPlatnosci`) is checked by the facet table, not only by
+  `FA3Invoice.validate()` — a document with a hand-placed link passed `validate_xml_facets()` and
+  was rejected by the XSD only. The pattern comes from a single source (`PAYMENT_LINK_PATTERN`)
+* **fa3:** `new_transport_intra_eu=True` without `new_transport=True` is reported as an error
+  instead of being dropped: `P_42_5` is only emitted together with `P_22=1`, so the document declared
+  `P_22N=1` and lost the intra-EU marker without a word
+* **fa3:** `FA3BatchDraft.to_json` creates the target directory (like `to_xml_zip` already did), so
+  the documented example in `docs/fa3-sdk.md` runs as written instead of raising `FileNotFoundError`
+* **fa3:** `xsd_audit` derives what the serializer emits from the emission sites in `xml.py`
+  (AST) instead of matching path prefixes, and derives the handler from the code:
+  `WarunkiTransakcji` no longer reports `_domain_invoice` (248/402 paths), the tag set is exactly
+  the 288 element names of the schema, and a dropped emission shows up as `UNSUPPORTED` in the
+  report
+* **test:** the Lighthouse OpenAPI coverage test actually runs (it looked for an external checkout
+  and always skipped); the contract used by the client is pinned in the test with a negative control
+  for drift, while a full external spec still takes precedence
+* **test:** `requirements-dev.txt` declares `tomli` for Python < 3.11, so the dependency
+  declaration guards stop being silently skipped on the lowest supported interpreter
+* **cli:** `-v/--verbose` finally does something. The flag was collected into the CLI context and
+  ignored — there was not a single `logger.*` call in `src/`. `-v` sets INFO and `-vv` DEBUG for
+  `ksef_client`, and the HTTP layer logs every request (`HTTP GET https://host/v2/invoices -> 200`)
+  without the query string, because a pre-signed URL carries its signature there
+* **cli:** `session list` no longer hides unreadable checkpoints. A directory with three JSON files
+  used to report `count: 1` without a word; the response now carries `unreadable` and `warning`, and
+  `list_checkpoints(include_broken=True)` reports an error instead of skipping the file
+* **cli:** a failing `mkdir` while writing a checkpoint, a UPO or an invoice is reported as
+  `CONFIG_ERROR`/`IO_ERROR` instead of escaping as a raw `OSError`, which the CLI answered with
+  `UNEXPECTED` and exit code 6
+* **cli:** `auth logout` clears the cached token metadata even when the token store refuses to
+  remove the tokens (`finally`) — the stale cache entry made the profile look like an active session
+* **services:** `resize_png` keeps a QR code two-tone (`Image.Resampling.NEAREST`). The default
+  BICUBIC filter produced 253 grey levels instead of 2 and for 16 of the swept sizes the code
+  stopped decoding; a non-positive target size is now a `ValueError` instead of a Pillow exception
+* **fa3:** `FA3Draft.validate()` reports the same schema constraints as `to_xml()`. It used to stay
+  silent (e.g. for a 3-character NIP) while serialisation raised `FA3XmlValidationError`; the new
+  `draft_facet_issues()` shares the tree building with `draft_to_xml`, and serialiser errors land in
+  the report instead of being raised
+* **fa3:** `KodWaluty`/`WalutaUmowna` are upper-cased before serialisation — `eur` passed the
+  case-insensitive dictionary check, but the schema's enumeration is case-sensitive, so only KSeF
+  rejected the document
+* **fa3:** the facet engine enforces the declared `date_format` (`20260401` and
+  `2026-04-01 08:30:00` used to pass the type check because the shared API parser is tolerant), and
+  `TDataCzas` accepts an optional timezone offset as the schema allows
+* **fa3:** `NewTransportMeans.value`/`tax_amount`/`taxable_base` are reported as warnings — the
+  schema has no amount element in `NowySrodekTransportu`, so the values disappeared without a word
+* **http:** `Retry-After` is clamped to `0..300 s` (one constant shared by the SDK and the CLI retry
+  policy). A server-supplied `Retry-After: 31536000` set `retry_after` to a year and `ksef export`
+  summed 730 days of pauses; negative values produced a negative wait. `retry_after_raw` still
+  carries the raw header for a caller with its own policy
+* **http:** a request with both `json` and `data` raises `ValueError` before anything is sent.
+  `httpx` silently picked one of them (`content`) while `Content-Type` announced JSON, so the caller
+  could not tell what reached KSeF
+* **clients:** a non-JSON body on a JSON endpoint (200 + HTML from a proxy or captive portal) is
+  reported as `KsefHttpError` with the path, `Content-Type` and a body preview, instead of a bare
+  `json.JSONDecodeError` with no context
+* **models:** `Any` stays in the `ksef_client.models` namespace so `typing.get_type_hints()` can
+  resolve the string annotations — `StatusInfo` and `UnknownApiProblem` raised
+  `NameError: name 'Any' is not defined`, which broke introspection (`openapi_models` kept `Any`
+  all along)
+* **openapi:** `list_invoices()`/`iter_invoices()` accept a response without
+  `collectiveIdentifierNumber`. The contract's own example for `POST /collective-identifiers/invoices`
+  omits the field although the schema marks it required, so the generated model raised
+  `TypeError: missing 1 required positional argument`
+* **packaging:** the sdist no longer ships tests that cannot run from it (`MANIFEST.in` prunes
+  `tests/`; unpacking the archive used to end with `12 errors during collection`). The documented
+  build tool now verifies the artefacts instead of just the wheel's stubs: four XSD files in the
+  wheel, `to_xml(xsd_validate=True)` from the installed wheel, `ksef` with and without the `cli`
+  extra, and no `tests/` in the sdist
+* **docs:** the FA(3) schema README describes the real differences from the MF sources (line endings,
+  the trailing whitespace in line 2258, and the **changed** `schemaLocation` in two files), and the
+  integrity test pins that invariant instead of claiming the copies kept "original URLs"; the CLI
+  documentation stops promising a `preflight` command (the function is not wired to any command),
+  documents `cache.corrupt-<timestamp>.json` next to `config.corrupt-…`, marks exit code 7 as
+  reserved, and uses the working global-option syntax (`ksef --json invoice list`); the
+  datetime-parsing table is split by interpreter version (the basic `20250101T000000Z` format only
+  parses from 3.11)
 * **fa3:** a settlement invoice (`ROZ`/`KOR_ROZ`) is calculated like the official `FA_3_Przykład_14.xml`:
   `P_15` is the amount still to pay (`amount_due − charges + deductions`) and `P_13_x`/`P_14_x` are the
   line values scaled by `P_15 / order value` (the rounding remainder goes to the largest bucket, so
@@ -69,9 +167,11 @@
 * **cli:** `auth logout` fails loudly when the fallback token store cannot be rewritten. The error
   used to be swallowed, so the command reported "Stored tokens removed." and `logged_out: true`
   while a valid refresh token stayed in `tokens.json`
-* **packaging:** `requirements.txt` lists `typing-extensions`, which `documents/fa3` imports
-  unconditionally — installing from the documented requirements file ended with
-  `ModuleNotFoundError: No module named 'typing_extensions'`
+* **packaging:** `requirements.txt` declares `typing-extensions` instead of leaving it to a
+  transitive dependency. `documents/fa3` imports `Self` from `typing_extensions` on Python < 3.11
+  (`from typing import Self` exists only from 3.11), and `requirements.txt` is a documented
+  installation path — the dependency was declared in `pyproject.toml` only, so a bare
+  `pip install -r requirements.txt` worked by accident (`anyio`/`cryptography` pull it in)
 * **utils:** `fast_extract_ksef_metadata` reports order rows separately: invoice rows (`FaWiersz`)
   keep `total_netto`/`total_brutto`/`item_count`, while `ZamowienieWiersz` rows land in
   `order_netto`/`order_brutto`/`order_item_count` (gross = `P_11NettoZ + P_11VatZ`) and `StanPrzedZ`
@@ -107,7 +207,8 @@
   advance — a document without a tax base for that amount. The schema describes `P_15` as
   containing `P_15Z`, so `P_15 = ΣP_13_x + ΣP_14_x` must hold for all kinds
 * **fa3:** `ZamowienieWiersz` has no discount field, so `P_9AZ` now carries the price **after** the
-  discount: `P_8BZ × P_9AZ == P_11NettoZ` (official `FA_3_Przykład_29.xml`). A 100 zł discount on
+  discount: the schema's identity `P_8BZ × P_9AZ == P_11NettoZ` holds that way in every official
+  sample that carries `P_9AZ` (`FA_3_Przykład_10.xml`–`_13.xml`). A 100 zł discount on
   20 × 1000 zł used to emit `P_9AZ=1000` with `P_11NettoZ=18000`
 * **fa3:** `TaxCategory.from_vat_rate()` keeps the rate code — `0 WDT`/`0 EX` no longer collapse to
   `0 KR`, and `oo`/`np I`/`np II` are no longer declared as tax-exempt
