@@ -28,6 +28,76 @@
 
 ### Bug Fixes
 
+* **security:** `-v/--verbose` no longer leaks pre-signed URL signatures. `logging.basicConfig`
+  raises the root level, so the `httpx` logger printed the full request URL (the signature lives in
+  the query string) and `httpcore` could print response headers — the HTTP layer's own redaction was
+  bypassed. Third-party loggers (`httpx`, `httpcore`, `urllib3`, `keyring`) are clamped to `WARNING`
+* **security:** the diagnostic URL no longer carries credentials (`https://user:password@host/...`
+  was logged verbatim) and pre-signed validation rejects ambiguous numeric hosts (`2130706433`,
+  `0x7f000001`, `127.1`, `0177.0.0.1`) that system resolvers read as IPs, plus IPv4-mapped IPv6
+  loopback (`[::ffff:127.0.0.1]`), which slipped past the always-on loopback rule
+* **security:** checkpoint and fallback-token files are created with `0600` from the start
+  (`open("w")` gave `0644` under the usual umask and the `chmod` ran only after `os.replace`, so a
+  crash in that window left a readable file holding the session key or tokens)
+* **security:** the FA(3) facet engine applies `xsd:whiteSpace` with XML semantics — `collapse` no
+  longer treats NBSP/U+3000/U+0085/… as whitespace. A 600-character NBSP name passed the facets and
+  `to_xml()` while the XSD (and KSeF) rejected it; the same hole covered `KodWaluty` lookups
+* **security:** `tools/generate_openapi_models.py` escapes every string interpolated into the
+  generated module and validates schema/property/alias names as Python identifiers, so a crafted
+  OpenAPI document can no longer inject code that runs on `import ksef_client`
+* **security:** the XSD resolver fails closed — an unknown `schemaLocation` name raises instead of
+  returning `None`, which let `lxml` fetch the resource over the network (`no_network` does not
+  cover `xsd:include`)
+* **security:** private keys and tokens stay out of `repr()` — `TokenInfo.token`, the generated
+  `access_token`/`refresh_token` fields, `XadesKeyPair.private_key_pem`, `EncryptionData.key` and
+  the session state's `symmetric_key_base64`
+* **http:** SDK exceptions can be pickled and copied again (`KsefApiError.__init__() missing 2
+  required positional arguments` broke `ProcessPoolExecutor`/`multiprocessing` error transport),
+  `Retry-After` is honoured for 502/503/504 (the CLI retried after 0.25 s instead of the requested
+  30 s), network errors and timeouts are wrapped in `KsefHttpError` (original in `__cause__`)
+  instead of leaking raw `httpx` exceptions, `skip_auth` strips `Authorization` coming from
+  `custom_headers`, and a 429 fills `exception_response` like other statuses do
+* **clients:** a non-JSON body on the XAdES init endpoint is reported as `KsefHttpError` with the
+  path and `Content-Type` (the fix for the JSON endpoints missed this hand-written `json.loads`)
+* **utils:** `fast_extract_ksef_metadata` no longer degrades to O(n²) (a 1.2 MB document with
+  64 000 `<NIP>` took 30 s; now 0.1 s) and archive unpacking reads entries in chunks with its own
+  byte budget — a 220-byte zip bomb that declared 1 KB used to materialise 256 MB before the limit
+  kicked in
+* **utils:** archive entry names with control characters (including NUL in a tar PAX `path`) are
+  rejected with a clear error instead of failing later on `stat`, and the verification-link hash must
+  decode to exactly 32 bytes — an empty or 1-byte value produced a link with no hash at all
+* **fa3:** `decimal.InvalidOperation` no longer escapes the public API (`1E+26`, `NaN`, `Infinity`
+  raise a readable validation error), deeply nested documents no longer hit `RecursionError` in the
+  facet engine or the XSD audit, and `Ilosc`/`NrWiersza*` enforce the `xsd:integer` lexical space
+  (`30.0` is reported instead of producing a document the XSD rejects, while `007`/`+1` stop being
+  false positives)
+* **fa3:** a settlement invoice in a foreign currency scales the mirrored VAT (`P_14_xW`) with the
+  same proportion as the PLN buckets — it used to stay at the full order value while `P_14_x` was
+  scaled, so the two fields contradicted each other in one document
+* **fa3:** the draft path derives `P_15` from the settlement amount for `ROZ`/`KOR_ROZ` (the draft
+  emitted `P_15` = full gross with `DoZaplaty` = the amount still to pay, breaking rule ROZ-15 while
+  the typed path was consistent), and reports a mismatch for kinds that do not scale
+* **fa3:** correction fields (`PrzyczynaKorekty`, `DaneFaKorygowanej`, `P_15ZK`, `NrFaKorygowany`)
+  are emitted from the data instead of being silently dropped for `RodzajFaktury != KOR*`; fields
+  the schema cannot carry next to the current data are reported as a validation error instead of
+  disappearing
+* **cli:** one malformed checkpoint no longer breaks `session list` (`"form_code": {}` raised
+  `TypeError` and the whole command exited 6) — it lands in `unreadable` with a warning; `auth
+  logout` fails loudly when the keyring raises on both delete *and* verify; `export run` reports IO
+  problems as `IO_ERROR` instead of `UNEXPECTED`, refuses to overwrite without the new `--overwrite`,
+  detects case-insensitive name collisions, keeps `_metadata.json` byte-for-byte and reports
+  `is_truncated`/`permanent_storage_hwm_date` with a warning; async `open_upload_and_close` honours
+  `parallelism`
+* **models:** an unknown or missing Lighthouse status maps to the new `LighthouseKsefStatus.UNKNOWN`
+  instead of `AVAILABLE` (a fail-open default reported a broken API as healthy)
+* **packaging:** the sdist carries the source tree again (specs, tools, docs and `requirements*.txt`
+  — 189 of 306 files were missing), `THIRD_PARTY_NOTICES.md` ships with the license files in the
+  wheel and the sdist, the FA(3) schema README is packaged, and the API-version test reads the
+  expected version from `README.md` instead of a hard-coded literal that blocked a spec sync
+* **test:** the dependency guards catch an unconditional optional import in the core
+  (`import lxml.etree` in `config.py` passed both guards while `import ksef_client` failed), and the
+  `clients/invoices.py` timestamp-offset normalisation has an assertion that fails when the fix is
+  reverted
 * **services:** the session state (`OnlineSessionState`, `BatchSessionState`) keeps the AES key out
   of `repr()`. The object ends up in logs and error messages, and `repr()` printed
   `symmetric_key_base64` in full; the IV stays visible (it is not a secret) and serialisation
