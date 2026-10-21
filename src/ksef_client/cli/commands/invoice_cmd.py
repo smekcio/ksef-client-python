@@ -97,7 +97,7 @@ def invoice_list(
         0,
         "--page-offset",
         min=0,
-        help="Pagination offset (0 or greater).",
+        help="Page number to return (0 = first page).",
     ),
     sort_order: SortOrder = typer.Option(  # noqa: B008
         SortOrder.DESC,

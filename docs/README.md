@@ -77,9 +77,15 @@ Biblioteka udostępnia trzy poziomy użycia:
 - [Sesja wsadowa (batch)](workflows/batch-session.md)
 - [Eksport (pobieranie paczek)](workflows/export.md)
 
+**Konfiguracja i magazyny:**
+
+- [Profile klienta (`ksef_client.profiles`)](profiles.md)
+- [Magazyn certyfikatów (`ksef_client.certificates`)](certificate-store.md)
+
 **Dokumenty FA(3):**
 
 - [FA(3) SDK: klasy, metody i XSD](fa3-sdk.md)
+- [Odczyt FA(3): XML → model](fa3-parsing.md)
 - [Schematy XSD i dokumentacja MF (broszura FA(3), przykładowe pliki)](../src/ksef_client/documents/fa3/schemas/README.md)
 
 **CLI:**

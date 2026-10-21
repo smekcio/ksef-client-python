@@ -4,6 +4,25 @@
 
 ### Features
 
+* **sdk:** odczyt FA(3) — nowy moduł `ksef_client.documents.fa3.parse` z `parse_invoice_xml()`
+  i `FA3Invoice.from_xml()` zamienia dokument FA(3) na model domenowy. Parser pokrywa wszystkie
+  rodzaje faktur, adnotacje, zaliczki, korekty, rozliczenie, płatność, warunki transakcji,
+  zamówienie, stopkę i załącznik; elementy spoza modelu trafiają do `warnings` (nigdy po cichu),
+  a dokumenty z `DOCTYPE`/`ENTITY` są odrzucane. Stawka VAT zaliczki jest wnioskowana
+  z podsumowania, a gdy to niemożliwe — jawnie ostrzega i przyjmuje 23% (jak builder). Roundtrip
+  `parse → to_xml` jest testowany dla wszystkich rodzajów faktur
+* **sdk:** paginacja metadanych faktur — `iter_invoice_metadata_pages()`, `iter_invoice_metadata()`
+  i `iter_invoice_metadata_by_date_range()` w `InvoicesClient` i `AsyncInvoicesClient`. Iteratory
+  respektują `hasMore`, kończą pracę na limicie 10 000 wyników (`isTruncated`) i na pustej stronie
+  z `hasMore=true`, emitując `KsefPaginationWarning`. Nowy moduł `ksef_client.pagination` zawiera
+  walidację `pageSize` (10–250) i `pageOffset` oraz stałe kontraktu
+* **sdk:** profile klienta i magazyn certyfikatów dostępne bez CLI. `ksef_client.profiles`
+  (`ProfileStore`, `Profile`) czyta i zapisuje ten sam `config.json` co `ksef` (z zachowaniem
+  nieznanych kluczy i atomowym zapisem `0600`), a `KsefClientOptions.from_profile()` buduje opcje
+  z profilu. `ksef_client.certificates` (`FileCertificateStore`) przechowuje parę certyfikat + klucz
+  jako PEM, waliduje dopasowanie klucza do certyfikatu i obsługuje klucze szyfrowane hasłem
+* **docs:** nowe strony `docs/profiles.md`, `docs/certificate-store.md`, `docs/fa3-parsing.md`
+  oraz sekcja paginacji w `docs/api/invoices.md`
 * **api:** align with KSeF API 2.9.0 — the OpenAPI snapshot, generated models and the documented
   compatibility level move from 2.8.1 to 2.9.0. New surface: `OwnerPermissionScope` and the optional
   `ownerPermissions` field in the response of `POST /permissions/query/personal/grants` (owner
@@ -37,6 +56,70 @@
 
 ### Bug Fixes
 
+* **pagination:** `pageOffset` is a **page number**, not a record offset. The iterators and
+  `ksef invoice list` incremented it by `page_size`, so with the default `pageSize` they requested
+  pages 0, 100, 200... and silently skipped 99 pages of results between them; now the next page is
+  always the previous number + 1. `--page-offset` in the merged (all subject types) CLI listing is
+  a page number too, consistently with the single-subject-type request
+* **certificates:** names equal to `.` or ending with a dot are rejected. `Path(".")` pointed at
+  the store directory itself — `delete(".")` removed the store's files and the directory, and
+  `save(".", ...)` wrote the key into its root. A corrupt `meta.json` (invalid JSON or non-UTF-8
+  bytes) no longer escapes as `UnicodeDecodeError` from `list()`/`record()`/`load()`; metadata is
+  optional and falls back to defaults. Passing a password for an unencrypted key now says the key
+  is *not* encrypted instead of claiming it is
+* **profiles:** profile names `.` and names with a trailing dot are rejected (the name is a
+  directory under `sessions/`), and `active()` reads the configuration once, so a profile deleted
+  by the CLI between two reads can no longer surface as `KeyError`
+* **fa3:** an advance payment whose amount lands in the `P_13_5` basket (procedure XII) used to
+  crash the parser with `KeyError`; it now warns and falls back to 23% like other ambiguous cases.
+  A `str` document whose XML declaration still says e.g. `encoding="windows-1250"` is no longer
+  decoded twice (mojibake); `xs:date` values carrying a timezone (`2026-03-01Z`) are accepted, and
+  the number of collected warnings is capped (`MAX_PARSE_WARNINGS`) so a document with millions of
+  unknown elements cannot exhaust memory
+* **security:** FA(3) elements are matched by their full namespace-qualified tag. A document
+  with `<P_2 xmlns="urn:evil">` no longer supplies a value just because the local name matches;
+  unknown foreign elements are reported in `invoice.warnings`
+* **security:** parser error messages show a sanitized preview of untrusted values (control
+  characters become `?`, length is capped), so logging an exception cannot inject terminal
+  sequences into logs
+* **certificates:** `FileCertificateStore(require_password=True)` refuses to store a plaintext
+  key; symlinked entries are rejected by `save/load/delete/record`, `exists()` reports them as
+  absent and `list()` skips them; `list()` no longer shows entries without `key.pem`; store
+  directories are created with `0700` and file contents are `fsync`-ed before `os.replace`
+* **profiles:** writes detect a concurrent modification (SHA-256 of the file captured at read
+  time) and raise `ProfileError` instead of silently overwriting another process's change;
+  `update(env=None)` clears the environment label without replacing the URL with DEMO;
+  the config directory is created with `0700` and the file is `fsync`-ed before replacement
+* **fa3:** an order line without `P_12Z`/`P_12Z_XII` keeps `tax=None` instead of silently
+  defaulting to 23% — the schema marks the element optional, so the parser must not invent a
+  tax rate
+* **security:** the FA(3) parser blocks DTD in every encoding. The old byte-level
+  guard looked for `<!DOCTYPE`/`<!ENTITY`, so a document encoded as UTF-16 slipped
+  past it and `ElementTree` expanded internal entities — an attacker could inflate
+  the file ("billion laughs") or inject content into parsed fields. The check now
+  parses the document with `expat`, which detects encoding itself and aborts on the
+  first DTD declaration, before any entity is expanded. A comment containing the
+  literal text `<!DOCTYPE` no longer triggers a false positive
+* **security:** `StoredCertificate.__repr__` no longer prints the private key.
+  The dataclass default included `private_key_pem` in full, so logging the object
+  or an exception holding it leaked the key. The representation now shows
+  `<redacted>` for key material, matching the SDK rule that secrets stay out of
+  `repr`
+* **fa3:** the parser rejects exponent notation (`1e5`) in decimal fields. `Decimal`
+  accepts it, but XSD `decimal` does not, and a value such as `1e999999999` could
+  later raise `decimal.Overflow` inside advance-payment arithmetic instead of a
+  clear parse error
+* **fa3:** `Podmiot3/RolaInna` without `OpisRoli` is rejected while parsing. The
+  schema requires both, and the old parser produced an invoice that could not be
+  serialized again
+* **profiles:** `active_name()` validates the profile payload instead of only
+  checking that it is a dict — a corrupted active profile no longer yields a name
+  that `active()` cannot resolve
+* **profiles:** deleting the active profile promotes the first *valid* remaining
+  profile; an invalid entry is no longer selected as active
+* **certificates:** a failed `save(overwrite=True)` restores the previous
+  certificate, key and metadata instead of leaving a mixed pair, and `delete()`
+  checks for subdirectories before removing any file
 * **security:** `-v/--verbose` no longer leaks pre-signed URL signatures. `logging.basicConfig`
   raises the root level, so the `httpx` logger printed the full request URL (the signature lives in
   the query string) and `httpcore` could print response headers — the HTTP layer's own redaction was

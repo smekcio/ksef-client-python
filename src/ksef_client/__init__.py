@@ -1,5 +1,12 @@
 """KSeF Python SDK."""
 
+from .certificates import (
+    CertificateRecord,
+    CertificateStore,
+    CertificateStoreError,
+    FileCertificateStore,
+    StoredCertificate,
+)
 from .client import AsyncKsefClient, KsefClient
 from .config import KsefClientOptions, KsefEnvironment, KsefLighthouseEnvironment
 from .exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
@@ -19,6 +26,7 @@ from .models import (
     StatusInfo,
     TokenInfo,
 )
+from .profiles import Profile, ProfileError, ProfileStore
 
 __all__ = [
     "KsefClientOptions",
@@ -29,6 +37,14 @@ __all__ = [
     "KsefApiError",
     "KsefRateLimitError",
     "KsefHttpError",
+    "Profile",
+    "ProfileError",
+    "ProfileStore",
+    "CertificateRecord",
+    "CertificateStore",
+    "CertificateStoreError",
+    "FileCertificateStore",
+    "StoredCertificate",
     "AuthenticationChallengeResponse",
     "AuthenticationInitResponse",
     "AuthenticationTokensResponse",

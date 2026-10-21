@@ -2111,7 +2111,7 @@ def test_query_all_invoice_subject_types_has_more_false_when_followup_pages_only
             ],
             "hasMore": True,
         },
-        ("Subject1", 2): {
+        ("Subject1", 1): {
             "invoices": [
                 {"ksefNumber": "KSEF-1", "issueDate": "2026-01-01T00:00:00Z"},
             ],
@@ -2142,7 +2142,8 @@ def test_query_all_invoice_subject_types_has_more_false_when_followup_pages_only
     )
 
     assert [item["ksefNumber"] for item in result["items"]] == ["KSEF-1", "KSEF-2"]
-    assert ("Subject1", 2) in seen_calls
+    # `pageOffset` to numer strony: po stronie 0 kolejne żądanie to strona 1.
+    assert ("Subject1", 1) in seen_calls
     assert result["has_more"] is False
 
 

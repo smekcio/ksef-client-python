@@ -1084,6 +1084,25 @@ class FA3Invoice:
 
         return SettlementCorrectionInvoiceBuilder(invoice_number=invoice_number)
 
+    @classmethod
+    def from_xml(cls, xml: bytes | bytearray | str) -> FA3Invoice:
+        """Buduje fakturę z dokumentu FA(3) (odwrotność :meth:`to_xml`).
+
+        Args:
+            xml: Treść dokumentu FA(3) — bajty albo tekst.
+
+        Returns:
+            Faktura z wypełnionymi polami modelu.
+
+        Raises:
+            FA3ParseError: Gdy dokument jest niepoprawny albo brakuje w nim
+                wymaganego pola. Elementy nieobsługiwane przez SDK trafiają do
+                ``warnings`` faktury, a nie są pomijane po cichu.
+        """
+        from .parse import parse_invoice_xml
+
+        return parse_invoice_xml(xml)
+
     @property
     def line_gross_total(self) -> Decimal:
         """Suma brutto samych pozycji (bez zaliczek)."""

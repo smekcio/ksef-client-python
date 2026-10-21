@@ -52,6 +52,7 @@ Częsty scenariusz: `403` po nadaniu uprawnienia wynika z tego, że operacja nie
 ## Zapytania (query)
 
 Wszystkie query wspierają `page_offset` i `page_size` (stronicowanie offsetowe).
+`page_offset` to **numer strony** (0 = pierwsza), a `page_size` — liczba wyników na stronie.
 
 ### `query_authorizations_grants(request_payload, ..., access_token)`
 Endpoint: `POST /permissions/query/authorizations/grants`
