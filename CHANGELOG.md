@@ -534,6 +534,17 @@
   enforces per pre-encryption part; `build_zip` sanitises entry names like `build_tar_gz`, and both
   readers reject duplicate entry names instead of silently dropping content
 
+## 0.20.0 (2026-10-21)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* feat(sdk): odczyt FA(3), profile, magazyn certyfikatów i paginacja metadanych by @smekcio in https://github.com/smekcio/ksef-client-python/pull/99
+
+
+**Full Changelog**: https://github.com/smekcio/ksef-client-python/compare/v0.19.0...v0.20.0
+
 ## 0.19.0 (2026-10-15)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
