@@ -291,15 +291,29 @@ class FileCertificateStore:
     Args:
         directory: Katalog magazynu. ``None`` oznacza
             :func:`ksef_client.paths.certificates_dir`.
+        require_password: Gdy ``True``, :meth:`save` odmawia zapisu klucza bez
+            hasła. Domyślnie ``False`` (klucz chroniony ACL systemu plików),
+            ale w środowisku produkcyjnym warto włączyć ten tryb.
     """
 
-    def __init__(self, directory: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        directory: str | Path | None = None,
+        *,
+        require_password: bool = False,
+    ) -> None:
         self._directory = Path(directory) if directory is not None else paths.certificates_dir()
+        self._require_password = require_password
 
     @property
     def directory(self) -> Path:
         """Katalog, w którym magazyn trzyma wpisy."""
         return self._directory
+
+    @property
+    def require_password(self) -> bool:
+        """Czy magazyn wymaga hasła do klucza prywatnego."""
+        return self._require_password
 
     @classmethod
     def default(cls) -> FileCertificateStore:
@@ -308,6 +322,21 @@ class FileCertificateStore:
 
     def _entry_dir(self, name: str) -> Path:
         return self._directory / name
+
+    @staticmethod
+    def _reject_symlink(name: str, entry: Path) -> None:
+        """Odmawia operacji na wpisie będącym dowiązaniem symbolicznym.
+
+        Nazwa jest walidowana, więc nie da się wyjść poza katalog nazwą, ale
+        podstawiony symlink ``<katalog>/<nazwa>`` przekierowałby zapis i odczyt
+        poza magazyn. Wymaga to prawa zapisu w katalogu konfiguracji, czyli
+        zwykle tych samych uprawnień co dostęp do klucza — mimo to lepiej
+        odmówić niż pisać przez link.
+        """
+        if entry.is_symlink():
+            raise CertificateStoreError(
+                f"Wpis '{name}' jest dowiązaniem symbolicznym — operacja odmówiona."
+            )
 
     def _read_meta(self, entry: Path) -> dict[str, object]:
         meta_path = entry / _META_FILE
@@ -328,6 +357,8 @@ class FileCertificateStore:
             temp_path = Path(temp_name)
             with os.fdopen(descriptor, "wb") as handle:
                 handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
             with suppress(OSError):
                 os.chmod(temp_path, 0o600)
             os.replace(temp_path, path)
@@ -367,11 +398,17 @@ class FileCertificateStore:
         """
         normalized = _validate_name(name)
         entry = self._entry_dir(normalized)
+        self._reject_symlink(normalized, entry)
         if entry.exists() and not overwrite:
             raise CertificateStoreError(
                 f"Certyfikat '{normalized}' już istnieje. Użyj overwrite=True, aby go nadpisać."
             )
         password_bytes = _password_bytes(password)
+        if self._require_password and password_bytes is None:
+            raise CertificateStoreError(
+                f"Magazyn wymaga hasła do klucza: zapis '{normalized}' bez password "
+                "jest zablokowany (require_password=True)."
+            )
         parsed_certificate = _coerce_certificate(certificate)
         parsed_key = _coerce_private_key(private_key, password=password_bytes)
         _ensure_pair(parsed_certificate, parsed_key)
@@ -416,7 +453,8 @@ class FileCertificateStore:
             if existing.is_file():
                 backups[file_name] = existing.read_bytes()
         try:
-            entry.mkdir(parents=True, exist_ok=True)
+            self._directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            entry.mkdir(parents=True, exist_ok=True, mode=0o700)
             self._write_file(entry / _CERT_FILE, certificate_pem)
             self._write_file(entry / _KEY_FILE, private_key_pem)
             self._write_file(
@@ -476,6 +514,7 @@ class FileCertificateStore:
         """
         normalized = _validate_name(name)
         entry = self._entry_dir(normalized)
+        self._reject_symlink(normalized, entry)
         if not entry.is_dir():
             raise CertificateStoreError(f"Certyfikat '{normalized}' nie istnieje.")
         certificate_path = entry / _CERT_FILE
@@ -529,10 +568,21 @@ class FileCertificateStore:
             return ()
         records: list[CertificateRecord] = []
         for entry in sorted(self._directory.iterdir(), key=lambda path: path.name):
-            if not entry.is_dir() or not _NAME_RE.fullmatch(entry.name) or ".." in entry.name:
+            if not entry.is_dir() or entry.is_symlink():
+                continue
+            if not _NAME_RE.fullmatch(entry.name) or ".." in entry.name:
                 continue
             certificate_path = entry / _CERT_FILE
             if not certificate_path.is_file():
+                continue
+            if not (entry / _KEY_FILE).is_file():
+                # Wpis bez klucza nie jest użytecznym certyfikatem — pokazujemy
+                # tylko kompletne pary, ale nie ukrywamy problemu po cichu.
+                warnings.warn(
+                    f"Pomijam niekompletny certyfikat '{entry.name}': brak key.pem.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
                 continue
             try:
                 certificate = x509.load_pem_x509_certificate(certificate_path.read_bytes())
@@ -554,6 +604,7 @@ class FileCertificateStore:
         """
         normalized = _validate_name(name)
         entry = self._entry_dir(normalized)
+        self._reject_symlink(normalized, entry)
         if not entry.is_dir():
             raise CertificateStoreError(f"Certyfikat '{normalized}' nie istnieje.")
         children = list(entry.iterdir())
@@ -575,9 +626,10 @@ class FileCertificateStore:
             ) from exc
 
     def exists(self, name: str) -> bool:
-        """Czy wpis o podanej nazwie istnieje."""
+        """Czy wpis o podanej nazwie istnieje (symlink nie liczy się jako wpis)."""
         normalized = _validate_name(name)
-        return self._entry_dir(normalized).is_dir()
+        entry = self._entry_dir(normalized)
+        return entry.is_dir() and not entry.is_symlink()
 
     def _read_certificate(self, name: str, entry: Path) -> x509.Certificate:
         try:
@@ -597,6 +649,7 @@ class FileCertificateStore:
         """Metadane wpisu — bez wczytywania i odszyfrowywania klucza."""
         normalized = _validate_name(name)
         entry = self._entry_dir(normalized)
+        self._reject_symlink(normalized, entry)
         if not entry.is_dir():
             raise CertificateStoreError(f"Certyfikat '{normalized}' nie istnieje.")
         return self._record_for(normalized, entry, self._read_certificate(normalized, entry))

@@ -355,15 +355,25 @@ class InvoicesClient(BaseApiClient):
             TypeError: Gdy któryś z parametrów liczbowych nie jest liczbą
                 całkowitą.
         """
-        for page in self.iter_invoice_metadata_pages(
-            request_payload,
-            access_token=access_token,
+        validate_page_size(page_size)
+        for offset in iter_page_offsets(
             page_size=page_size,
-            page_offset=page_offset,
+            start_offset=page_offset,
             max_pages=max_pages,
-            sort_order=sort_order,
         ):
+            page = self.query_invoice_metadata(
+                request_payload,
+                access_token=access_token,
+                page_offset=offset,
+                page_size=page_size,
+                sort_order=sort_order,
+            )
+            warning = pagination_warning(page, page_size=page_size, page_offset=offset)
+            if warning is not None:
+                warnings.warn(warning, KsefPaginationWarning, stacklevel=2)
             yield from page.invoices
+            if not page_should_continue(page):
+                return
 
     def iter_invoice_metadata_by_date_range(
         self,
@@ -402,19 +412,31 @@ class InvoicesClient(BaseApiClient):
             TypeError: Gdy któryś z parametrów liczbowych nie jest liczbą
                 całkowitą.
         """
-        yield from self.iter_invoice_metadata(
-            _build_invoice_query_filters(
-                subject_type=subject_type,
-                date_type=date_type,
-                date_from=date_from,
-                date_to=date_to,
-            ),
-            access_token=access_token,
-            page_size=page_size,
-            page_offset=page_offset,
-            max_pages=max_pages,
-            sort_order=sort_order,
+        request_payload = _build_invoice_query_filters(
+            subject_type=subject_type,
+            date_type=date_type,
+            date_from=date_from,
+            date_to=date_to,
         )
+        validate_page_size(page_size)
+        for offset in iter_page_offsets(
+            page_size=page_size,
+            start_offset=page_offset,
+            max_pages=max_pages,
+        ):
+            page = self.query_invoice_metadata(
+                request_payload,
+                access_token=access_token,
+                page_offset=offset,
+                page_size=page_size,
+                sort_order=sort_order,
+            )
+            warning = pagination_warning(page, page_size=page_size, page_offset=offset)
+            if warning is not None:
+                warnings.warn(warning, KsefPaginationWarning, stacklevel=2)
+            yield from page.invoices
+            if not page_should_continue(page):
+                return
 
     def export_invoices(
         self, request_payload: InvoiceExportRequest, *, access_token: str
@@ -603,16 +625,26 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             TypeError: Gdy któryś z parametrów liczbowych nie jest liczbą
                 całkowitą.
         """
-        async for page in self.iter_invoice_metadata_pages(
-            request_payload,
-            access_token=access_token,
+        validate_page_size(page_size)
+        for offset in iter_page_offsets(
             page_size=page_size,
-            page_offset=page_offset,
+            start_offset=page_offset,
             max_pages=max_pages,
-            sort_order=sort_order,
         ):
+            page = await self.query_invoice_metadata(
+                request_payload,
+                access_token=access_token,
+                page_offset=offset,
+                page_size=page_size,
+                sort_order=sort_order,
+            )
+            warning = pagination_warning(page, page_size=page_size, page_offset=offset)
+            if warning is not None:
+                warnings.warn(warning, KsefPaginationWarning, stacklevel=2)
             for invoice in page.invoices:
                 yield invoice
+            if not page_should_continue(page):
+                return
 
     async def iter_invoice_metadata_by_date_range(
         self,
@@ -648,20 +680,32 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             TypeError: Gdy któryś z parametrów liczbowych nie jest liczbą
                 całkowitą.
         """
-        async for invoice in self.iter_invoice_metadata(
-            _build_invoice_query_filters(
-                subject_type=subject_type,
-                date_type=date_type,
-                date_from=date_from,
-                date_to=date_to,
-            ),
-            access_token=access_token,
+        request_payload = _build_invoice_query_filters(
+            subject_type=subject_type,
+            date_type=date_type,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        validate_page_size(page_size)
+        for offset in iter_page_offsets(
             page_size=page_size,
-            page_offset=page_offset,
+            start_offset=page_offset,
             max_pages=max_pages,
-            sort_order=sort_order,
         ):
-            yield invoice
+            page = await self.query_invoice_metadata(
+                request_payload,
+                access_token=access_token,
+                page_offset=offset,
+                page_size=page_size,
+                sort_order=sort_order,
+            )
+            warning = pagination_warning(page, page_size=page_size, page_offset=offset)
+            if warning is not None:
+                warnings.warn(warning, KsefPaginationWarning, stacklevel=2)
+            for invoice in page.invoices:
+                yield invoice
+            if not page_should_continue(page):
+                return
 
     async def export_invoices(
         self, request_payload: InvoiceExportRequest, *, access_token: str

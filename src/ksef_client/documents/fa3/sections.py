@@ -212,7 +212,11 @@ class OrderLine:
     description: str
     quantity: Decimal
     unit_net_price: Decimal
-    tax: TaxCategory
+    #: Stawka podatku dla pozycji zamówienia. Schemat FA(3) czyni `P_12Z`
+    #: opcjonalnym, więc `None` znaczy „dokument nie podaje stawki” — wtedy
+    #: serializator nie emituje `P_12Z`/`P_12Z_XII`. `OrderLine.create()`
+    #: zachowuje historyczny default 23% dla wygody builderów.
+    tax: TaxCategory | None = None
     unit: str = "szt"
     discount: Discount | None = None
     gtu: str | None = None
@@ -294,7 +298,7 @@ class OrderLine:
 
     @property
     def effective_vat_amount(self) -> Decimal:
-        if self.tax.vat_rate is None:
+        if self.tax is None or self.tax.vat_rate is None:
             return Decimal("0.00")
         return money(self.effective_net_amount * self.tax.vat_rate / Decimal("100"))
 

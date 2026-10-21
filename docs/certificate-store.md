@@ -102,6 +102,19 @@ store.load("prod")                    # CertificateStoreError: podaj hasło
 store.load("prod", password="sekret") # OK
 ```
 
+Jeśli klucze **muszą** być szyfrowane, utwórz magazyn w trybie wymuszającym:
+
+```python
+from ksef_client.certificates import FileCertificateStore
+
+store = FileCertificateStore(require_password=True)
+store.save("prod", certificate=cert, private_key=key)   # CertificateStoreError
+store.save("prod", certificate=cert, private_key=key, password="sekret")  # OK
+```
+
+Tryb `require_password=True` jest zalecany dla środowisk produkcyjnych i automatów, w których
+klucz nie może leżeć na dysku jawnym tekstem.
+
 ## Bezpieczeństwo
 
 - nazwa wpisu jest walidowana (`[A-Za-z0-9._-]{1,64}`, bez `..`) — nie da się wyjść poza katalog,
@@ -114,7 +127,12 @@ store.load("prod", password="sekret") # OK
   zostawiać nowy certyfikat ze starym kluczem,
 - `delete()` najpierw sprawdza, czy katalog wpisu nie zawiera podkatalogów — nie usuwa
   plików „w połowie”,
-- `list()` pomija uszkodzone wpisy z `RuntimeWarning`, zamiast blokować odczyt pozostałych.
+- `list()` pokazuje wyłącznie kompletne pary (certyfikat + klucz); wpis bez `key.pem` jest
+  pomijany z `RuntimeWarning`, podobnie jak uszkodzony `cert.pem`,
+- operacje na wpisie, który jest dowiązaniem symbolicznym, są **odrzucane** (nazwa jest
+  walidowana, więc to jedyna droga wyjścia poza magazyn),
+- katalogi magazynu powstają z uprawnieniami `0700`, a pliki są zapisywane z `fsync` przed
+  `os.replace` (zawartość jest na dysku, zanim podmieni się nazwę).
 
 Domyślnie klucz jest zapisywany **bez hasła** — jeśli nośnik nie jest szyfrowany, podaj
 `password`, aby zaszyfrować klucz w PEM (hasło nie jest nigdzie zapisywane).

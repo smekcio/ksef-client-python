@@ -21,6 +21,7 @@ nie kasuje ustawień, które doda przyszła wersja CLI. Zapis jest atomowy
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -195,18 +196,26 @@ class ProfileStore:
 
     # --- odczyt ---------------------------------------------------------
 
-    def _read_document(self) -> dict[str, Any]:
-        if not self._path.exists():
-            return {"version": _CONFIG_VERSION, "active_profile": None, "profiles": {}}
+    def _read_state(self) -> tuple[dict[str, Any], str | None]:
+        """Zwraca dokument i odcisk jego bajtów (``None`` dla braku pliku).
+
+        Odcisk służy do wykrycia równoległej zmiany między odczytem a zapisem:
+        bez niego dwa procesy (SDK + CLI albo dwa skrypty) nadpisywały się
+        nawzajem i jedna zmiana ginęła bez śladu.
+        """
         try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
+            data = self._path.read_bytes()
+        except FileNotFoundError:
+            return {"version": _CONFIG_VERSION, "active_profile": None, "profiles": {}}, None
+        except OSError as exc:
+            raise ProfileError(f"Nie można odczytać pliku profili {self._path}: {exc}") from exc
+        try:
+            raw = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ProfileError(
                 f"Plik profili {self._path} nie jest poprawnym JSON-em: {exc}. "
                 "Popraw plik albo usuń go, aby zacząć od zera."
             ) from exc
-        except OSError as exc:
-            raise ProfileError(f"Nie można odczytać pliku profili {self._path}: {exc}") from exc
         if not isinstance(raw, dict):
             raise ProfileError(
                 f"Plik profili {self._path} musi zawierać obiekt JSON, "
@@ -214,12 +223,34 @@ class ProfileStore:
             )
         if not isinstance(raw.get("profiles"), dict):
             raw["profiles"] = {}
-        return raw
+        return raw, hashlib.sha256(data).hexdigest()
 
-    def _write_document(self, document: dict[str, Any]) -> None:
+    def _read_document(self) -> dict[str, Any]:
+        return self._read_state()[0]
+
+    def _fingerprint(self) -> str | None:
+        try:
+            return hashlib.sha256(self._path.read_bytes()).hexdigest()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise ProfileError(f"Nie można odczytać pliku profili {self._path}: {exc}") from exc
+
+    def _write_document(
+        self,
+        document: dict[str, Any],
+        *,
+        expected_fingerprint: str | None,
+    ) -> None:
+        current = self._fingerprint()
+        if current != expected_fingerprint:
+            raise ProfileError(
+                f"Plik profili {self._path} został zmieniony przez inny proces. "
+                "Odczytaj konfigurację ponownie i powtórz operację."
+            )
         parent = self._path.parent
         try:
-            parent.mkdir(parents=True, exist_ok=True)
+            parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         except OSError as exc:
             raise ProfileError(
                 f"Nie można utworzyć katalogu profili {parent}: {exc}."
@@ -235,6 +266,8 @@ class ProfileStore:
             temp_path = Path(temp_name)
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
             with suppress(OSError):
                 os.chmod(temp_path, 0o600)
             os.replace(temp_path, self._path)
@@ -342,7 +375,7 @@ class ProfileStore:
                 dane są niekompletne.
         """
         normalized = normalize_profile_name(name)
-        document = self._read_document()
+        document, fingerprint = self._read_state()
         profiles = document["profiles"]
         if normalized in profiles:
             raise ProfileError(
@@ -365,7 +398,7 @@ class ProfileStore:
         if activate:
             document["active_profile"] = normalized
         document["version"] = _CONFIG_VERSION
-        self._write_document(document)
+        self._write_document(document, expected_fingerprint=fingerprint)
         return profile
 
     def update(
@@ -397,7 +430,7 @@ class ProfileStore:
                 lub sprzeczna.
         """
         normalized = normalize_profile_name(name)
-        document = self._read_document()
+        document, fingerprint = self._read_state()
         payload = document["profiles"].get(normalized)
         if not isinstance(payload, dict):
             raise ProfileError(f"Profil '{normalized}' nie istnieje.")
@@ -415,7 +448,13 @@ class ProfileStore:
                 base_url=base_url,
             )
         elif env is not _UNSET:
-            new_base_url, new_env = _resolve_base_url(env=env, base_url=None)
+            if env is None:
+                # `env=None` czyści etykietę środowiska, ale nie zmienia adresu.
+                # Wcześniej trafiało do `_resolve_base_url` i cicho ustawiało DEMO,
+                # czyli podmieniało środowisko zamiast je wyczyścić.
+                new_env = None
+            else:
+                new_base_url, new_env = _resolve_base_url(env=env, base_url=None)
 
         updated = Profile(
             name=normalized,
@@ -443,7 +482,7 @@ class ProfileStore:
         )
         document["profiles"][normalized] = merged
         document["version"] = _CONFIG_VERSION
-        self._write_document(document)
+        self._write_document(document, expected_fingerprint=fingerprint)
         return updated
 
     def set_active(self, name: str) -> Profile:
@@ -453,11 +492,13 @@ class ProfileStore:
             ProfileError: Gdy profil nie istnieje.
         """
         normalized = normalize_profile_name(name)
-        profile = self.get(normalized)
-        document = self._read_document()
+        document, fingerprint = self._read_state()
+        profile = _parse_profile(normalized, document["profiles"].get(normalized))
+        if profile is None:
+            raise ProfileError(f"Profil '{normalized}' nie istnieje.")
         document["active_profile"] = normalized
         document["version"] = _CONFIG_VERSION
-        self._write_document(document)
+        self._write_document(document, expected_fingerprint=fingerprint)
         return profile
 
     def delete(self, name: str) -> None:
@@ -470,7 +511,7 @@ class ProfileStore:
             ProfileError: Gdy profil nie istnieje.
         """
         normalized = normalize_profile_name(name)
-        document = self._read_document()
+        document, fingerprint = self._read_state()
         profiles = document["profiles"]
         if normalized not in profiles:
             raise ProfileError(f"Profil '{normalized}' nie istnieje.")
@@ -483,7 +524,7 @@ class ProfileStore:
             )
             document["active_profile"] = remaining[0] if remaining else None
         document["version"] = _CONFIG_VERSION
-        self._write_document(document)
+        self._write_document(document, expected_fingerprint=fingerprint)
 
 
 __all__ = [

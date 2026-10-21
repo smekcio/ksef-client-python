@@ -834,12 +834,14 @@ def test_parse_order() -> None:
 
     assert order is not None
     assert order.total_gross == Decimal("5000.00")
+    assert order.lines[0].tax is not None
     assert order.lines[0].tax.kind is TaxCategory.xii("12").kind
     assert order.lines[0].identifiers is not None
     assert order.lines[0].identifiers.pkwiu == "62.01"
     assert order.lines[0].gtu == "GTU_12"
     assert order.lines[0].annex_15 is True
     assert order.lines[0].before_correction is True
+    assert order.lines[1].tax is not None
     assert order.lines[1].tax.vat_rate == Decimal("23")
 
 

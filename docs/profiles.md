@@ -101,10 +101,12 @@ podaje ścieżkę pliku do naprawy.
 
 ## Współbieżność
 
-Zapis jest atomowy (żaden czytelnik nie zobaczy połowy pliku), ale **nie ma blokady
-międzyprocesowej**: dwa równoległe zapisy (np. CLI i skrypt SDK) rozstrzyga „ostatni wygrywa”.
-Do jednoczesnej edycji profili z wielu procesów używaj jednego z nich jako właściciela
-konfiguracji albo own synchronizacji po stronie aplikacji.
+Zapis jest atomowy (żaden czytelnik nie zobaczy połowy pliku) i **wykrywa równoległą zmianę**:
+przed zapisem SDK porównuje odcisk SHA-256 pliku z odciskiem z momentu odczytu. Jeśli plik
+zmienił się w międzyczasie (np. zadziałało CLI albo drugi skrypt), operacja kończy się
+`ProfileError` z prośbą o ponowne odczytanie konfiguracji — zamiast po cichu nadpisać cudzą
+zmianę. Nie ma blokady międzyprocesowej, więc po takim błędzie wystarczy powtórzyć operację
+(odczyta świeży stan i ponownie sprawdzi odcisk).
 
 ## Zgodność z CLI
 

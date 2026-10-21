@@ -70,6 +70,25 @@ for warning in invoice.warnings:
 Parser **nie** jest odwzorowaniem bezstratnym: `raw_extensions` nie jest odtwarzane przez
 serializator, więc elementów spoza modelu nie da się z powrotem wyemitować.
 
+### Przestrzeń nazw
+
+Elementy są dopasowywane po **pełnym tagu** w przestrzeni FA(3), nie po samej nazwie lokalnej.
+Dokument, w którym `<P_2>` (albo inny element) leży w obcej przestrzeni nazw, nie przemyci
+wartości: parser zgłosi brak wymaganego elementu i doda ostrzeżenie o nieobsługiwanym tagu.
+
+### Zamówienie bez stawki
+
+`P_12Z` jest w schemacie opcjonalne. Gdy dokument go nie podaje, `OrderLine.tax` ma wartość
+`None` — parser **nie wymyśla** stawki 23%. Ponowna serializacja również nie dodaje wtedy
+`P_12Z`, więc dokument pozostaje zgodny z wejściem.
+
+### Terminy płatności
+
+`PaymentTerms.due_dates` to skrót dla terminów bez opisu. Parser zapisuje **wszystkie** terminy
+w `due_terms` (z `term_description=None` dla samych dat), bo tylko tak da się zachować kolejność
+mieszanych terminów z XML. `due_dates` pozostaje puste; serializator i tak łączy oba źródła,
+więc XML roundtrip jest identyczny.
+
 ### Zaliczki — stawka VAT
 
 XML `ZaliczkaCzesciowa` nie zawiera stawki VAT; trafia ona tylko do `P_13_x`/`P_14_x`.
@@ -105,6 +124,8 @@ tekst.
 - obowiązuje limit rozmiaru `MAX_XML_BYTES` (20 MiB),
 - liczby muszą być zapisane dziesiętnie — notacja wykładnicza (`1e5`) jest odrzucana,
   tak jak wymaga tego XSD `decimal`,
+- komunikaty błędów pokazują oczyszczony podgląd wartości (znaki sterujące → `?`, długość
+  ograniczona), więc logowanie wyjątku nie przenosi surowych sekwencji terminala do logów,
 - parser nie pobiera niczego z sieci i nie rozwiązuje zewnętrznych encji.
 
 ## Błędy

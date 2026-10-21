@@ -1135,9 +1135,9 @@ def _domain_order_line(parent: ET.Element, index: int, line: OrderLine) -> None:
     ET.SubElement(row, _q("P_9AZ")).text = _amount2(line.effective_unit_net_price)
     ET.SubElement(row, _q("P_11NettoZ")).text = _amount(line.effective_net_amount)
     ET.SubElement(row, _q("P_11VatZ")).text = _amount(line.effective_vat_amount)
-    if line.tax.xml_rate:
+    if line.tax is not None and line.tax.xml_rate:
         ET.SubElement(row, _q("P_12Z")).text = line.tax.xml_rate
-    if line.tax.xii_rate is not None:
+    if line.tax is not None and line.tax.xii_rate is not None:
         ET.SubElement(row, _q("P_12Z_XII")).text = _rate6(line.tax.xii_rate)
     if line.annex_15:
         ET.SubElement(row, _q("P_12Z_Zal_15")).text = "1"

@@ -776,7 +776,7 @@ def test_parse_rejects_order_line_without_price() -> None:
         _parse(xml)
 
 
-def test_parse_order_line_without_vat_code_defaults_to_23() -> None:
+def test_parse_order_line_without_vat_code_keeps_tax_unknown() -> None:
     invoice = (
         FA3Invoice.advance("FV/ORDER/MARGIN")
         .issued_on(date(2026, 2, 1))
@@ -786,11 +786,16 @@ def test_parse_order_line_without_vat_code_defaults_to_23() -> None:
         .order_line("Pozycja", quantity="1", unit_net_price="100", tax=VatClass.margin())
         .build()
     )
+    xml = invoice.to_xml()
 
-    parsed = _parse(invoice.to_xml())
+    parsed = _parse(xml)
 
     assert parsed.order is not None
-    assert parsed.order.lines[0].tax.vat_rate == Decimal("23")
+    # XML nie niesie P_12Z, więc parser nie może wymyślić stawki — zapisuje None,
+    # a ponowna serializacja nie dodaje brakującego elementu.
+    assert parsed.order.lines[0].tax is None
+    assert "P_12Z" not in parsed.to_xml().decode("utf-8")
+    assert parsed.to_xml().count(b"P_12Z") == xml.count(b"P_12Z")
 
 
 def test_parse_order_line_with_xii_rate() -> None:
@@ -807,6 +812,7 @@ def test_parse_order_line_with_xii_rate() -> None:
     parsed = _parse(invoice.to_xml())
 
     assert parsed.order is not None
+    assert parsed.order.lines[0].tax is not None
     assert parsed.order.lines[0].tax.xii_rate == Decimal("12")
 
 
@@ -1078,3 +1084,33 @@ def test_parse_rejects_rola_inna_without_description() -> None:
 
     with pytest.raises(FA3ParseError, match="OpisRoli"):
         _parse(xml)
+
+
+# --- review 2: namespace, sanityzacja komunikatów -------------------------
+
+
+def test_parse_ignores_elements_in_foreign_namespace() -> None:
+    root = ET.fromstring(_base())
+    element = root.find("fa:Fa/fa:P_2", NS)
+    assert element is not None
+    element.tag = "{urn:evil}P_2"
+
+    with pytest.raises(FA3ParseError, match="P_2"):
+        _parse(ET.tostring(root, encoding="utf-8"))
+
+
+def test_parse_error_sanitizes_untrusted_value() -> None:
+    bad = "1'\t" + "9" * 80
+    xml = _mutate(
+        _base(),
+        lambda root: _set(root, "fa:Faktura/fa:Fa/fa:FaWiersz/fa:P_8B", bad),
+    )
+
+    with pytest.raises(FA3ParseError) as excinfo:
+        _parse(xml)
+    message = str(excinfo.value)
+
+    assert "\t" not in message
+    assert "?" in message
+    assert "…" in message
+    assert "`" in message

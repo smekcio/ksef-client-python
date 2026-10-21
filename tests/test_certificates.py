@@ -619,3 +619,130 @@ def test_delete_wraps_os_error(
 
     with pytest.raises(CertificateStoreError, match="Nie można usunąć"):
         store.delete("prod")
+
+
+# --- review 2: hasło, symlinki, kompletność wpisów, uprawnienia -----------
+
+
+def _fake_symlink(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    original = Path.is_symlink
+
+    def _is_symlink(self: Path) -> bool:
+        return self.name == name or original(self)
+
+    monkeypatch.setattr(Path, "is_symlink", _is_symlink)
+
+
+def test_require_password_blocks_plaintext_key(
+    tmp_path: Path, rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey]
+) -> None:
+    certificate, key = rsa_pair
+    store = FileCertificateStore(tmp_path / "certs", require_password=True)
+
+    assert store.require_password is True
+    with pytest.raises(CertificateStoreError, match="wymaga hasła"):
+        store.save("prod", certificate=certificate, private_key=key)
+
+    record = store.save("prod", certificate=certificate, private_key=key, password="secret")
+
+    assert record.has_password is True
+    assert store.load("prod", password="secret").certificate == certificate
+
+
+def test_save_rejects_symlinked_entry(
+    store: FileCertificateStore,
+    rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    certificate, key = rsa_pair
+    _fake_symlink(monkeypatch, "prod")
+
+    with pytest.raises(CertificateStoreError, match="dowiązaniem symbolicznym"):
+        store.save("prod", certificate=certificate, private_key=key)
+
+
+def test_load_rejects_symlinked_entry(
+    store: FileCertificateStore,
+    rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    certificate, key = rsa_pair
+    store.save("prod", certificate=certificate, private_key=key)
+    _fake_symlink(monkeypatch, "prod")
+
+    with pytest.raises(CertificateStoreError, match="dowiązaniem symbolicznym"):
+        store.load("prod")
+
+
+def test_delete_rejects_symlinked_entry(
+    store: FileCertificateStore,
+    rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    certificate, key = rsa_pair
+    store.save("prod", certificate=certificate, private_key=key)
+    _fake_symlink(monkeypatch, "prod")
+
+    with pytest.raises(CertificateStoreError, match="dowiązaniem symbolicznym"):
+        store.delete("prod")
+
+
+def test_record_rejects_symlinked_entry(
+    store: FileCertificateStore,
+    rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    certificate, key = rsa_pair
+    store.save("prod", certificate=certificate, private_key=key)
+    _fake_symlink(monkeypatch, "prod")
+
+    with pytest.raises(CertificateStoreError, match="dowiązaniem symbolicznym"):
+        store.record("prod")
+
+
+def test_exists_returns_false_for_symlinked_entry(
+    store: FileCertificateStore,
+    rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    certificate, key = rsa_pair
+    store.save("prod", certificate=certificate, private_key=key)
+    _fake_symlink(monkeypatch, "prod")
+
+    assert store.exists("prod") is False
+
+
+def test_list_skips_symlinked_entry(
+    store: FileCertificateStore,
+    rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    certificate, key = rsa_pair
+    store.save("prod", certificate=certificate, private_key=key)
+    _fake_symlink(monkeypatch, "prod")
+
+    assert store.list() == ()
+
+
+def test_list_skips_entry_without_key(
+    store: FileCertificateStore, rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey]
+) -> None:
+    certificate, key = rsa_pair
+    store.save("prod", certificate=certificate, private_key=key)
+    (store.directory / "prod" / "key.pem").unlink()
+
+    with pytest.warns(RuntimeWarning, match="brak key.pem"):
+        records = store.list()
+
+    assert records == ()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uprawnienia POSIX nie dotyczą Windows")
+def test_store_directories_are_owner_only(
+    store: FileCertificateStore, rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey]
+) -> None:
+    certificate, key = rsa_pair
+    store.save("prod", certificate=certificate, private_key=key)
+
+    assert store.directory.stat().st_mode & 0o777 == 0o700
+    assert (store.directory / "prod").stat().st_mode & 0o777 == 0o700

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import warnings
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -478,3 +479,73 @@ def test_async_iter_pages_honours_max_pages() -> None:
 
     assert len(pages) == 2
     assert len(client.calls) == 2
+
+
+# --- review 2: atrybucja ostrzeżeń do kodu wołającego ----------------------
+
+
+def test_pages_warning_points_to_caller() -> None:
+    client = _RecordingInvoicesClient([_page(1, has_more=True, is_truncated=True)])
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        list(client.iter_invoice_metadata_pages(_filters(), access_token="token"))
+
+    assert len(caught) == 1
+    assert Path(caught[0].filename).name == "test_pagination.py"
+
+
+def test_items_warning_points_to_caller() -> None:
+    client = _RecordingInvoicesClient([_page(1, has_more=True, is_truncated=True)])
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        list(client.iter_invoice_metadata(_filters(), access_token="token"))
+
+    assert len(caught) == 1
+    assert Path(caught[0].filename).name == "test_pagination.py"
+
+
+def test_date_range_warning_points_to_caller() -> None:
+    client = _RecordingInvoicesClient([_page(1, has_more=True, is_truncated=True)])
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        list(
+            client.iter_invoice_metadata_by_date_range(
+                subject_type=InvoiceQuerySubjectType.SUBJECT1,
+                date_type=InvoiceQueryDateType.ISSUE,
+                date_from="2026-01-01T00:00:00Z",
+                access_token="token",
+            )
+        )
+
+    assert len(caught) == 1
+    assert Path(caught[0].filename).name == "test_pagination.py"
+
+
+def test_async_items_warn_on_truncation() -> None:
+    client = _RecordingAsyncInvoicesClient([_page(1, has_more=True, is_truncated=True)])
+
+    with pytest.warns(KsefPaginationWarning, match="isTruncated"):
+        invoices = _collect_async(client.iter_invoice_metadata(_filters(), access_token="token"))
+
+    assert len(invoices) == 1
+    assert len(client.calls) == 1
+
+
+def test_async_date_range_warns_on_truncation() -> None:
+    client = _RecordingAsyncInvoicesClient([_page(1, has_more=True, is_truncated=True)])
+
+    with pytest.warns(KsefPaginationWarning, match="isTruncated"):
+        invoices = _collect_async(
+            client.iter_invoice_metadata_by_date_range(
+                subject_type=InvoiceQuerySubjectType.SUBJECT1,
+                date_type=InvoiceQueryDateType.ISSUE,
+                date_from="2026-01-01T00:00:00Z",
+                access_token="token",
+            )
+        )
+
+    assert len(invoices) == 1
+    assert len(client.calls) == 1

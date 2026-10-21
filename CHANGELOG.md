@@ -56,6 +56,23 @@
 
 ### Bug Fixes
 
+* **security:** FA(3) elements are matched by their full namespace-qualified tag. A document
+  with `<P_2 xmlns="urn:evil">` no longer supplies a value just because the local name matches;
+  unknown foreign elements are reported in `invoice.warnings`
+* **security:** parser error messages show a sanitized preview of untrusted values (control
+  characters become `?`, length is capped), so logging an exception cannot inject terminal
+  sequences into logs
+* **certificates:** `FileCertificateStore(require_password=True)` refuses to store a plaintext
+  key; symlinked entries are rejected by `save/load/delete/record`, `exists()` reports them as
+  absent and `list()` skips them; `list()` no longer shows entries without `key.pem`; store
+  directories are created with `0700` and file contents are `fsync`-ed before `os.replace`
+* **profiles:** writes detect a concurrent modification (SHA-256 of the file captured at read
+  time) and raise `ProfileError` instead of silently overwriting another process's change;
+  `update(env=None)` clears the environment label without replacing the URL with DEMO;
+  the config directory is created with `0700` and the file is `fsync`-ed before replacement
+* **fa3:** an order line without `P_12Z`/`P_12Z_XII` keeps `tax=None` instead of silently
+  defaulting to 23% — the schema marks the element optional, so the parser must not invent a
+  tax rate
 * **security:** the FA(3) parser blocks DTD in every encoding. The old byte-level
   guard looked for `<!DOCTYPE`/`<!ENTITY`, so a document encoded as UTF-16 slipped
   past it and `ElementTree` expanded internal entities — an attacker could inflate

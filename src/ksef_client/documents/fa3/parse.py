@@ -171,14 +171,19 @@ def _local(element: ET.Element) -> str:
 
 
 def _child(node: ET.Element, name: str) -> ET.Element | None:
+    # Dopasowanie po pełnym tagu (przestrzeń nazw FA(3)), nie po samej nazwie
+    # lokalnej: dokument z `<P_2 xmlns="urn:evil">` nie może podać numeru
+    # faktury tylko dlatego, że element nazywa się tak samo.
+    expected = _tag(name)
     for candidate in node:
-        if _local(candidate) == name:
+        if candidate.tag == expected:
             return candidate
     return None
 
 
 def _children(node: ET.Element, name: str) -> list[ET.Element]:
-    return [candidate for candidate in node if _local(candidate) == name]
+    expected = _tag(name)
+    return [candidate for candidate in node if candidate.tag == expected]
 
 
 def _attr(element: ET.Element, name: str) -> str | None:
@@ -192,6 +197,20 @@ def _text(node: ET.Element, name: str) -> str | None:
         return None
     value = element.text.strip()
     return value or None
+
+
+def _preview(value: str, *, limit: int = 60) -> str:
+    """Bezpieczny fragment wartości do komunikatu błędu.
+
+    Wartości pochodzą z niezaufanego dokumentu, a komunikaty często trafiają do
+    logów. Znaki sterujące (np. sekwencje terminala) są zamieniane na ``?``,
+    apostrof na backtick (żeby nie psuł cytowania), a długość jest ograniczona.
+    """
+    cleaned = "".join(char if char.isprintable() else "?" for char in value)
+    cleaned = cleaned.replace("'", "`")
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[:limit] + "…"
 
 
 def _required_child(node: ET.Element, name: str, path: str) -> ET.Element:
@@ -215,13 +234,13 @@ def _decimal(value: str, path: str) -> Decimal:
     # a późniejsze działania na zaliczkach mogłyby zakończyć się wyjątkiem
     # `decimal.Overflow` — zamiast czytelnego błędu parsowania.
     if "e" in normalized.lower():
-        raise FA3ParseError(f"{path}: '{value}' nie jest liczbą.")
+        raise FA3ParseError(f"{path}: '{_preview(value)}' nie jest liczbą.")
     try:
         parsed = Decimal(normalized)
     except (InvalidOperation, AttributeError) as exc:
-        raise FA3ParseError(f"{path}: '{value}' nie jest liczbą.") from exc
+        raise FA3ParseError(f"{path}: '{_preview(value)}' nie jest liczbą.") from exc
     if not parsed.is_finite():
-        raise FA3ParseError(f"{path}: '{value}' nie jest skończoną liczbą.")
+        raise FA3ParseError(f"{path}: '{_preview(value)}' nie jest skończoną liczbą.")
     return parsed
 
 
@@ -236,7 +255,9 @@ def _date(value: str, path: str) -> date:
     try:
         return date.fromisoformat(value.strip())
     except ValueError as exc:
-        raise FA3ParseError(f"{path}: '{value}' nie jest poprawną datą (YYYY-MM-DD).") from exc
+        raise FA3ParseError(
+            f"{path}: '{_preview(value)}' nie jest poprawną datą (YYYY-MM-DD)."
+        ) from exc
 
 
 def _date_opt(node: ET.Element, name: str, path: str) -> date | None:
@@ -254,7 +275,7 @@ def _datetime_opt(node: ET.Element, name: str, path: str) -> datetime | None:
         return parse_api_datetime(value)
     except ValueError as exc:
         raise FA3ParseError(
-            f"{path}/{name}: '{value}' nie jest poprawnym znacznikiem czasu."
+            f"{path}/{name}: '{_preview(value)}' nie jest poprawnym znacznikiem czasu."
         ) from exc
 
 
@@ -417,14 +438,18 @@ def _third_party_role(value: str, path: str) -> ThirdPartyRole:
     try:
         return ThirdPartyRole(value)
     except ValueError as exc:
-        raise FA3ParseError(f"{path}: nieznana rola podmiotu trzeciego: {value!r}.") from exc
+        raise FA3ParseError(
+            f"{path}: nieznana rola podmiotu trzeciego: '{_preview(value)}'."
+        ) from exc
 
 
 def _authorized_role(value: str, path: str) -> AuthorizedPartyRole:
     try:
         return AuthorizedPartyRole(value)
     except ValueError as exc:
-        raise FA3ParseError(f"{path}: nieznana rola podmiotu upoważnionego: {value!r}.") from exc
+        raise FA3ParseError(
+            f"{path}: nieznana rola podmiotu upoważnionego: '{_preview(value)}'."
+        ) from exc
 
 
 # --- adnotacje ------------------------------------------------------------
@@ -471,7 +496,9 @@ def _parse_new_transport_means(node: ET.Element, path: str) -> NewTransportMeans
     try:
         row_number = int(row_number_text)
     except ValueError as exc:
-        raise FA3ParseError(f"{path}/P_NrWierszaNST: '{row_number_text}' nie jest liczbą.") from exc
+        raise FA3ParseError(
+            f"{path}/P_NrWierszaNST: '{_preview(row_number_text)}' nie jest liczbą."
+        ) from exc
     if _text(node, "P_22C") is not None or _text(node, "P_22C1") is not None:
         kind = "water"
         hours_used = _text(node, "P_22C")
@@ -566,7 +593,7 @@ def _line_tax(node: ET.Element, annotations: AnnotationSet, path: str) -> TaxCat
         try:
             tax = TaxCategory.from_rate_code(code)
         except ValueError as exc:
-            raise FA3ParseError(f"{path}/P_12: {exc}") from exc
+            raise FA3ParseError(f"{path}/P_12: {_preview(str(exc), limit=120)}") from exc
         if tax.kind is TaxCategoryKind.EXEMPT and annotations.exemption_basis:
             return TaxCategory.exempt(
                 annotations.exemption_basis,
@@ -928,7 +955,7 @@ def _parse_due_term(node: ET.Element, path: str) -> PaymentDue:
             amount = int(amount_text)
         except ValueError as exc:
             raise FA3ParseError(
-                f"{path}/TerminOpis/Ilosc: '{amount_text}' nie jest liczbą."
+                f"{path}/TerminOpis/Ilosc: '{_preview(amount_text)}' nie jest liczbą."
             ) from exc
         description = PaymentDueDescription(
             amount=amount,
@@ -1041,17 +1068,23 @@ def _parse_transaction_terms(node: ET.Element | None, path: str) -> TransactionT
     )
 
 
-def _order_line_tax(node: ET.Element, path: str) -> TaxCategory:
+def _order_line_tax(node: ET.Element, path: str) -> TaxCategory | None:
+    """Stawka pozycji zamówienia albo ``None``, gdy dokument jej nie podaje.
+
+    ``P_12Z`` jest w schemacie opcjonalne, więc brak obu pól nie jest błędem.
+    Wcześniejsza wersja podstawiała wtedy 23% — czyli wymyślała stawkę
+    podatkową, której w dokumencie nie ma.
+    """
     xii = _text(node, "P_12Z_XII")
     if xii is not None:
         return TaxCategory.xii(_decimal(xii, f"{path}/P_12Z_XII"))
     code = _text(node, "P_12Z")
     if code is None:
-        return TaxCategory.standard_23()
+        return None
     try:
         return TaxCategory.from_rate_code(code)
     except ValueError as exc:
-        raise FA3ParseError(f"{path}/P_12Z: {exc}") from exc
+        raise FA3ParseError(f"{path}/P_12Z: {_preview(str(exc), limit=120)}") from exc
 
 
 def _parse_order_line(node: ET.Element, index: int, path: str) -> OrderLine:
@@ -1502,7 +1535,7 @@ def _int_opt(node: ET.Element, name: str, path: str) -> int | None:
     try:
         return int(value)
     except ValueError as exc:
-        raise FA3ParseError(f"{path}/{name}: '{value}' nie jest liczbą.") from exc
+        raise FA3ParseError(f"{path}/{name}: '{_preview(value)}' nie jest liczbą.") from exc
 
 
 def _reject_dtd(data: bytes) -> None:

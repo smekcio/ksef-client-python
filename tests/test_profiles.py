@@ -524,8 +524,26 @@ def test_write_failure_raises_profile_error(tmp_path: Path) -> None:
     blocker.write_text("file", encoding="utf-8")
     store = ProfileStore(blocker / "config.json")
 
-    with pytest.raises(ProfileError, match="Nie można utworzyć katalogu"):
+    # Windows zgłasza brak ścieżki (FileNotFoundError) i błąd pojawia się dopiero
+    # na mkdir; POSIX zwraca ENOTDIR już przy odczycie. Oba warianty to
+    # ProfileError, więc test akceptuje oba komunikaty.
+    with pytest.raises(ProfileError, match="Nie można (odczytać|utworzyć katalogu)"):
         store.create("demo", env="DEMO", context_type="nip", context_value="1")
+
+
+def test_write_document_reports_mkdir_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    store.create("demo", env="DEMO", context_type="nip", context_value="1")
+
+    def _denied(*_args: object, **_kwargs: object) -> None:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(Path, "mkdir", _denied)
+
+    with pytest.raises(ProfileError, match="Nie można utworzyć katalogu"):
+        store.create("other", env="DEMO", context_type="nip", context_value="1")
 
 
 def test_write_failure_cleans_temporary_file(
@@ -624,3 +642,55 @@ def test_delete_promotes_first_valid_profile_skipping_invalid(tmp_path: Path) ->
 
     assert store.active_name() == "a"
     assert store.active() is not None
+
+
+# --- review 2: współbieżność, env=None, uprawnienia, dekodowanie -----------
+
+
+def test_update_env_none_clears_label_without_changing_url(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    created = store.create("demo", env="TEST", context_type="nip", context_value="1")
+
+    updated = store.update("demo", env=None)
+
+    assert updated.env is None
+    assert updated.base_url == created.base_url
+    assert store.get("demo").env is None
+
+
+def test_write_detects_concurrent_modification(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.create("demo", env="DEMO", context_type="nip", context_value="1")
+    document, fingerprint = store._read_state()
+
+    payload = json.loads(store.path.read_text(encoding="utf-8"))
+    payload["active_profile"] = "demo"
+    _write(store.path, payload)
+
+    with pytest.raises(ProfileError, match="zmieniony przez inny proces"):
+        store._write_document(document, expected_fingerprint=fingerprint)
+
+
+def test_read_state_rejects_invalid_utf8(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_bytes(b"\xff\xfe\x00")
+
+    with pytest.raises(ProfileError, match="nie jest poprawnym JSON-em"):
+        store.list()
+
+
+def test_fingerprint_wraps_os_error(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.path.mkdir(parents=True)
+
+    with pytest.raises(ProfileError, match="Nie można odczytać"):
+        store._fingerprint()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uprawnienia POSIX nie dotyczą Windows")
+def test_config_directory_is_owner_only(tmp_path: Path) -> None:
+    store = ProfileStore(tmp_path / "config-dir" / "config.json")
+    store.create("demo", env="DEMO", context_type="nip", context_value="1")
+
+    assert (tmp_path / "config-dir").stat().st_mode & 0o777 == 0o700
