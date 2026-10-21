@@ -35,7 +35,10 @@ Iterator stron — pobiera kolejne strony, dopóki KSeF deklaruje `hasMore`.
 
 - `page_size` musi mieścić się w **10–250** (kontrakt OpenAPI 2.9.0); wartość jest sprawdzana
   lokalnie, przed pierwszym żądaniem (`ValueError`/`TypeError`).
-- `page_offset` to indeks pierwszej strony (0 = początek).
+- `page_offset` to **numer strony** (0 = pierwsza strona), a nie przesunięcie w rekordach:
+  przy `page_size=250` kolejne żądania to `pageOffset=0, 1, 2...`. Starsza wersja zwiększała
+  `pageOffset` o `page_size`, przez co iterator pobierał strony 0, 250, 500... i po cichu
+  pomijał wyniki.
 - `max_pages` to opcjonalny bezpiecznik liczby stron.
 - Po osiągnięciu limitu **10 000** wyników (`isTruncated`) iterator kończy pracę i emituje
   `ksef_client.pagination.KsefPaginationWarning` — dalsze strony nie zawierają brakujących

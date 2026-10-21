@@ -117,7 +117,8 @@ klucz nie może leżeć na dysku jawnym tekstem.
 
 ## Bezpieczeństwo
 
-- nazwa wpisu jest walidowana (`[A-Za-z0-9._-]{1,64}`, bez `..`) — nie da się wyjść poza katalog,
+- nazwa wpisu jest walidowana (`[A-Za-z0-9._-]{1,64}`, bez `..`, bez kropki na końcu) —
+  nie da się wyjść poza katalog ani wskazać `Path(".")` (czyli samego katalogu magazynu),
 - pliki powstają atomowo i z uprawnieniami `0600` (na Windows `chmod` nie steruje ACL —
   klucz chroni dziedziczony ACL katalogu użytkownika),
 - zapis odrzuca parę, w której klucz nie pasuje do certyfikatu (ochrona przed pomyleniem plików),

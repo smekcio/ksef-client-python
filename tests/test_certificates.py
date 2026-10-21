@@ -170,6 +170,27 @@ def test_load_with_wrong_password_fails(
         store.load("secure", password="wrong")
 
 
+def test_load_rejects_password_for_unencrypted_key(
+    store: FileCertificateStore, rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey]
+) -> None:
+    certificate, key = rsa_pair
+    store.save("plain", certificate=certificate, private_key=key)
+
+    # Klucz jest jawny, więc hasło jest błędem wywołania — komunikat nie może
+    # twierdzić, że klucz jest zaszyfrowany (tak było wcześniej).
+    with pytest.raises(CertificateStoreError, match="nie jest zaszyfrowany"):
+        store.load("plain", password="secret")
+
+
+def test_save_rejects_password_for_unencrypted_pem_key(
+    store: FileCertificateStore, rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey]
+) -> None:
+    certificate, key = rsa_pair
+
+    with pytest.raises(CertificateStoreError, match="nie jest zaszyfrowany"):
+        store.save("plain", certificate=certificate, private_key=_pem_key(key), password="secret")
+
+
 def test_record_does_not_require_password_for_encrypted_key(
     store: FileCertificateStore, rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey]
 ) -> None:
@@ -189,6 +210,26 @@ def test_save_rejects_duplicate_without_overwrite(
 
     with pytest.raises(CertificateStoreError, match="już istnieje"):
         store.save("prod", certificate=certificate, private_key=key)
+
+
+def test_save_wraps_backup_read_error(
+    store: FileCertificateStore,
+    rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    certificate, key = rsa_pair
+    store.save("prod", certificate=certificate, private_key=key)
+    original = Path.read_bytes
+
+    def failing_read(path: Path) -> bytes:
+        if path.name == "cert.pem":
+            raise OSError("plik zablokowany")
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", failing_read)
+
+    with pytest.raises(CertificateStoreError, match="Nie można odczytać poprzedniego wpisu"):
+        store.save("prod", certificate=certificate, private_key=key, overwrite=True)
 
 
 def test_save_overwrites_when_requested(
@@ -220,10 +261,20 @@ def test_save_rejects_mismatched_pair(
         store.save("bad", certificate=certificate, private_key=other_key)
 
 
-@pytest.mark.parametrize("name", ["", "  ", "..", "a/b", "a\\b", "x" * 65, "zażółć"])
+@pytest.mark.parametrize("name", ["", "  ", ".", "..", "prod.", "a/b", "a\\b", "x" * 65, "zażółć"])
 def test_save_rejects_invalid_names(store: FileCertificateStore, name: str) -> None:
     with pytest.raises(CertificateStoreError):
         store.save(name, certificate=b"x", private_key=b"y")
+
+
+def test_dot_name_cannot_target_store_directory(store: FileCertificateStore) -> None:
+    # `Path(".")` wskazuje katalog magazynu — `delete(".")` usuwało jego pliki
+    # i sam katalog, a `save(".")` pisało klucz do katalogu głównego.
+    with pytest.raises(CertificateStoreError, match="Niepoprawna nazwa"):
+        store.delete(".")
+    with pytest.raises(CertificateStoreError, match="Niepoprawna nazwa"):
+        store.exists(".")
+    assert not store.directory.exists()
 
 
 def test_save_rejects_non_string_name(store: FileCertificateStore) -> None:
@@ -375,6 +426,25 @@ def test_list_warns_and_skips_corrupt_certificate(
         records = store.list()
 
     assert records == ()
+
+
+@pytest.mark.parametrize("payload", [b"{not json", b"\xff\xfe\x00"])
+def test_corrupt_metadata_does_not_break_reading(
+    store: FileCertificateStore,
+    rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey],
+    payload: bytes,
+) -> None:
+    certificate, key = rsa_pair
+    store.save("prod", certificate=certificate, private_key=key, environment="PROD")
+    (store.directory / "prod" / "meta.json").write_bytes(payload)
+
+    # meta.json jest opcjonalny: uszkodzony plik nie może wywracać `list()`
+    # ani `record()` (wcześniej leciał `UnicodeDecodeError`).
+    records = store.list()
+    assert [record.name for record in records] == ["prod"]
+    assert records[0].environment is None
+    assert store.record("prod").environment is None
+    assert store.load("prod").certificate == certificate
 
 
 def test_load_missing_entry_fails(store: FileCertificateStore) -> None:

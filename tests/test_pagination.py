@@ -187,25 +187,26 @@ def test_validate_max_pages_rejects_non_integers(value: Any) -> None:
 
 
 def test_iter_page_offsets_without_limit_is_infinite() -> None:
-    offsets = iter_page_offsets(page_size=100)
-    assert [next(offsets) for _ in range(4)] == [0, 100, 200, 300]
+    offsets = iter_page_offsets()
+    assert [next(offsets) for _ in range(4)] == [0, 1, 2, 3]
 
 
 def test_iter_page_offsets_honours_start_and_max_pages() -> None:
-    assert list(iter_page_offsets(page_size=50, start_offset=150, max_pages=2)) == [150, 200]
+    # pageOffset to numer strony: krok to 1, nie page_size.
+    assert list(iter_page_offsets(start_offset=150, max_pages=2)) == [150, 151]
 
 
 def test_iter_page_offsets_stops_at_max_pages_zero_pages() -> None:
     # max_pages jest walidowane, więc 0 jest odrzucane, a nie „puste”.
     with pytest.raises(ValueError):
-        list(iter_page_offsets(page_size=50, max_pages=0))
+        list(iter_page_offsets(max_pages=0))
 
 
 def test_iter_page_offsets_validates_inputs() -> None:
     with pytest.raises(ValueError):
-        list(iter_page_offsets(page_size=1))
-    with pytest.raises(ValueError):
-        list(iter_page_offsets(page_size=50, start_offset=-1))
+        list(iter_page_offsets(start_offset=-1))
+    with pytest.raises(TypeError):
+        list(iter_page_offsets(start_offset="1"))  # type: ignore[arg-type]
 
 
 # --- warunki zakończenia --------------------------------------------------
@@ -258,7 +259,7 @@ def test_iter_pages_walks_all_pages_and_stops_on_has_more_false() -> None:
     )
 
     assert [len(page.invoices) for page in pages] == [2, 1, 0]
-    assert [call["page_offset"] for call in client.calls] == [0, 50, 100]
+    assert [call["page_offset"] for call in client.calls] == [0, 1, 2]
     assert {call["page_size"] for call in client.calls} == {50}
     assert {call["sort_order"] for call in client.calls} == {"Desc"}
     assert {call["access_token"] for call in client.calls} == {"token"}
@@ -302,7 +303,7 @@ def test_iter_metadata_honours_page_offset_and_max_pages() -> None:
     )
 
     assert len(invoices) == 4
-    assert [call["page_offset"] for call in client.calls] == [30, 40]
+    assert [call["page_offset"] for call in client.calls] == [30, 31]
 
 
 def test_iter_metadata_by_date_range_builds_filters_and_iterates() -> None:
@@ -389,7 +390,7 @@ def test_async_iter_pages_walks_all_pages() -> None:
     )
 
     assert [len(page.invoices) for page in pages] == [1, 2]
-    assert [call["page_offset"] for call in client.calls] == [0, 250]
+    assert [call["page_offset"] for call in client.calls] == [0, 1]
 
 
 def test_async_iter_metadata_flattens_pages() -> None:

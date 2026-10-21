@@ -21,6 +21,7 @@ from ksef_client.documents.fa3 import (
     VatClass,
     parse_invoice_xml,
 )
+from ksef_client.documents.fa3.parse import MAX_PARSE_WARNINGS
 from ksef_client.documents.fa3.sections import PaymentDue
 from ksef_client.documents.fa3.xml import FA3_NAMESPACE
 
@@ -1114,3 +1115,78 @@ def test_parse_error_sanitizes_untrusted_value() -> None:
     assert "?" in message
     assert "…" in message
     assert "`" in message
+
+
+# --- review 3: koszyk XII, kodowanie wejścia, limit ostrzeżeń, strefy -----
+
+
+def _add_advance_in_xii_basket(root: ET.Element) -> None:
+    _add(root, "fa:Faktura/fa:Fa", "ZaliczkaCzesciowa")
+    _add(root, "fa:Faktura/fa:Fa/fa:ZaliczkaCzesciowa", "P_15Z", "123.00")
+    _add(root, "fa:Faktura/fa:Fa", "P_13_5", "100.00")
+
+
+def test_parse_advance_in_xii_basket_warns_instead_of_crashing() -> None:
+    # Wcześniej brak wpisu `P_13_5` w mapie stawek kończył się `KeyError`,
+    # czyli wyjątkiem spoza kontraktu `FA3ParseError`.
+    invoice = _parse(_mutate(_base(), _add_advance_in_xii_basket))
+
+    assert [payment.amount for payment in invoice.advance_payments] == [Decimal("123.00")]
+    assert invoice.advance_payments[0].tax == TaxCategory.standard_23()
+    assert any("P_13_5" in warning.message for warning in invoice.warnings)
+
+
+def test_parse_str_ignores_stale_encoding_declaration() -> None:
+    # `str` jest już zdekodowany, więc deklaracja `iso-8859-2` nie może
+    # spowodować odczytania bajtów UTF-8 jako Latin-2 (wcześniej: mojibake).
+    xml = _base().decode("utf-8")
+    stale = xml.replace("encoding='utf-8'", "encoding='iso-8859-2'", 1)
+    assert stale != xml
+
+    invoice = parse_invoice_xml(stale)
+
+    assert invoice.lines[0].description == "Usługa"
+    assert invoice.lines[0].description.encode("utf-8") in invoice.to_xml()
+
+
+def test_parse_str_with_bom_and_stale_encoding_declaration() -> None:
+    stale = _base().decode("utf-8").replace("encoding='utf-8'", "encoding='windows-1250'", 1)
+
+    invoice = parse_invoice_xml("\ufeff" + stale)
+
+    assert invoice.invoice_number == "FV/ERR"
+    assert invoice.lines[0].description == "Usługa"
+
+
+@pytest.mark.parametrize("value", ["2026-03-01Z", "2026-03-01+02:00", "2026-03-01-05:00"])
+def test_parse_accepts_xs_date_with_timezone(value: str) -> None:
+    # `xs:date` dopuszcza strefę czasową; `date.fromisoformat` jej nie przyjmuje.
+    invoice = _parse(
+        _mutate(_base(), lambda root: _set(root, "fa:Faktura/fa:Fa/fa:P_1", value))
+    )
+
+    assert invoice.issue_date == date(2026, 3, 1)
+
+
+def test_parse_rejects_date_with_invalid_timezone_suffix() -> None:
+    with pytest.raises(FA3ParseError, match="nie jest poprawną datą"):
+        _parse(
+            _mutate(
+                _base(),
+                lambda root: _set(root, "fa:Faktura/fa:Fa/fa:P_1", "2026-03-01+2:00"),
+            )
+        )
+
+
+def test_parse_limits_number_of_warnings() -> None:
+    def add_unknown(root: ET.Element) -> None:
+        fa = _find(root, "fa:Faktura/fa:Fa")
+        for index in range(MAX_PARSE_WARNINGS + 25):
+            ET.SubElement(fa, f"{{{FA3_NAMESPACE}}}Nieznany{index}")
+
+    invoice = _parse(_mutate(_base(), add_unknown))
+
+    # Limit + jedno ostrzeżenie o obcięciu — dokument z milionem nieznanych
+    # elementów nie może zbudować miliona obiektów.
+    assert len(invoice.warnings) == MAX_PARSE_WARNINGS + 1
+    assert "limit" in invoice.warnings[-1].message

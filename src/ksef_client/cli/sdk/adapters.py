@@ -737,12 +737,19 @@ def _query_all_invoice_subject_types(
     sort_order: str,
 ) -> dict[str, Any]:
     normalized_offset = max(page_offset, 0)
-    limit = None if page_size <= 0 else normalized_offset + page_size + 1
+    # `--page-offset` to numer strony (tak samo jak `pageOffset` w KSeF), więc
+    # początek wycinka to numer strony razy rozmiar strony. Wcześniej traktowano
+    # go jak przesunięcie w rekordach, a do API wysyłano numer strony równy
+    # przesunięciu — czyli `--page-offset 10` pobierało 11. stronę zamiast
+    # jedenastej dziesiątki rekordów.
+    item_offset = normalized_offset * page_size if page_size > 0 else normalized_offset
+    limit = None if page_size <= 0 else item_offset + page_size + 1
     reverse_order = sort_order.casefold() == "desc"
 
     stream_states: list[dict[str, Any]] = [
         {
             "subject_type": subject_type,
+            # Numer strony API (`pageOffset`), nie przesunięcie w rekordach.
             "next_offset": 0,
             "invoices": [],
             "index": 0,
@@ -778,7 +785,7 @@ def _query_all_invoice_subject_types(
         _, is_truncated, hwm_date, _ = _extract_invoice_query_metadata(response)
         state["invoices"] = invoices
         state["index"] = 0
-        state["next_offset"] += max(page_size, 0)
+        state["next_offset"] += 1
 
         aggregated_is_truncated = aggregated_is_truncated or is_truncated
         permanent_storage_hwm_date = _merge_permanent_storage_hwm_date(
@@ -838,11 +845,11 @@ def _query_all_invoice_subject_types(
         aggregated.append(invoice)
 
     if page_size <= 0:
-        items = aggregated[normalized_offset:]
+        items = aggregated[item_offset:]
         has_more = False
     else:
-        page_end = normalized_offset + page_size
-        items = aggregated[normalized_offset:page_end]
+        page_end = item_offset + page_size
+        items = aggregated[item_offset:page_end]
         has_more = len(aggregated) > page_end
 
     return {

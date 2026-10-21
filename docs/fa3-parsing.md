@@ -70,6 +70,10 @@ for warning in invoice.warnings:
 Parser **nie** jest odwzorowaniem bezstratnym: `raw_extensions` nie jest odtwarzane przez
 serializator, więc elementów spoza modelu nie da się z powrotem wyemitować.
 
+Liczba ostrzeżeń jest ograniczona do `MAX_PARSE_WARNINGS` (100). Dokument z milionem
+nieznanych elementów nie zbuduje miliona obiektów — po przekroczeniu limitu `invoice.warnings`
+zawiera 100 wpisów i jedno ostrzeżenie o obcięciu.
+
 ### Przestrzeń nazw
 
 Elementy są dopasowywane po **pełnym tagu** w przestrzeni FA(3), nie po samej nazwie lokalnej.
@@ -109,9 +113,10 @@ są zaliczki marży, ich kwota jest już częścią `P_13_11` i wiersze nie są 
 
 ### Daty i czasy
 
-Daty (`P_1`, `P_6`, `P_6A`, `P_22A`, terminy płatności) są odczytywane jako `date`. Znaczniki
-czasu (transport) są normalizowane do UTC — `2026-01-01T10:00:00+02:00` i `...08:00Z` dadzą
-ten sam `datetime`, więc ponowna serializacja może zapisać równoważny, ale nie identyczny
+Daty (`P_1`, `P_6`, `P_6A`, `P_22A`, terminy płatności) są odczytywane jako `date`. `xs:date`
+dopuszcza strefę czasową, więc `2026-03-01Z` i `2026-03-01+02:00` dają `date(2026, 3, 1)`.
+Znaczniki czasu (transport) są normalizowane do UTC — `2026-01-01T10:00:00+02:00` i `...08:00Z`
+dadzą ten sam `datetime`, więc ponowna serializacja może zapisać równoważny, ale nie identyczny
 tekst.
 
 ## Bezpieczeństwo
@@ -122,6 +127,11 @@ tekst.
 - komentarz zawierający literalny tekst `<!DOCTYPE` nie jest błędem (kontrola działa na
   poziomie parsera, nie na bajtach),
 - obowiązuje limit rozmiaru `MAX_XML_BYTES` (20 MiB),
+- liczba ostrzeżeń jest ograniczona (`MAX_PARSE_WARNINGS`), więc dokument z milionem
+  nieznanych elementów nie wyczerpie pamięci,
+- dla wejścia `str` deklaracja kodowania z prologu jest ignorowana — tekst jest już
+  zdekodowany, więc parser koduje go do UTF-8 i nie odczytuje go ponownie jako Latin-2
+  (wejście `bytes` nadal jest dekodowane zgodnie z deklaracją),
 - liczby muszą być zapisane dziesiętnie — notacja wykładnicza (`1e5`) jest odrzucana,
   tak jak wymaga tego XSD `decimal`,
 - komunikaty błędów pokazują oczyszczony podgląd wartości (znaki sterujące → `?`, długość

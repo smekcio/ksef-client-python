@@ -56,6 +56,26 @@
 
 ### Bug Fixes
 
+* **pagination:** `pageOffset` is a **page number**, not a record offset. The iterators and
+  `ksef invoice list` incremented it by `page_size`, so with the default `pageSize` they requested
+  pages 0, 100, 200... and silently skipped 99 pages of results between them; now the next page is
+  always the previous number + 1. `--page-offset` in the merged (all subject types) CLI listing is
+  a page number too, consistently with the single-subject-type request
+* **certificates:** names equal to `.` or ending with a dot are rejected. `Path(".")` pointed at
+  the store directory itself — `delete(".")` removed the store's files and the directory, and
+  `save(".", ...)` wrote the key into its root. A corrupt `meta.json` (invalid JSON or non-UTF-8
+  bytes) no longer escapes as `UnicodeDecodeError` from `list()`/`record()`/`load()`; metadata is
+  optional and falls back to defaults. Passing a password for an unencrypted key now says the key
+  is *not* encrypted instead of claiming it is
+* **profiles:** profile names `.` and names with a trailing dot are rejected (the name is a
+  directory under `sessions/`), and `active()` reads the configuration once, so a profile deleted
+  by the CLI between two reads can no longer surface as `KeyError`
+* **fa3:** an advance payment whose amount lands in the `P_13_5` basket (procedure XII) used to
+  crash the parser with `KeyError`; it now warns and falls back to 23% like other ambiguous cases.
+  A `str` document whose XML declaration still says e.g. `encoding="windows-1250"` is no longer
+  decoded twice (mojibake); `xs:date` values carrying a timezone (`2026-03-01Z`) are accepted, and
+  the number of collected warnings is capped (`MAX_PARSE_WARNINGS`) so a document with millions of
+  unknown elements cannot exhaust memory
 * **security:** FA(3) elements are matched by their full namespace-qualified tag. A document
   with `<P_2 xmlns="urn:evil">` no longer supplies a value just because the local name matches;
   unknown foreign elements are reported in `invoice.warnings`

@@ -282,7 +282,7 @@ class InvoicesClient(BaseApiClient):
             request_payload: Filtry zapytania (``InvoiceQueryFilters``).
             access_token: Token dostępu.
             page_size: Rozmiar strony (10–250). Domyślnie 100.
-            page_offset: Indeks pierwszej strony (0 = początek).
+            page_offset: Numer pierwszej strony (0 = pierwsza strona).
             max_pages: Opcjonalny bezpiecznik liczby stron.
             sort_order: Kolejność sortowania (``Asc``/``Desc``).
 
@@ -305,7 +305,6 @@ class InvoicesClient(BaseApiClient):
         """
         validate_page_size(page_size)
         for offset in iter_page_offsets(
-            page_size=page_size,
             start_offset=page_offset,
             max_pages=max_pages,
         ):
@@ -343,7 +342,7 @@ class InvoicesClient(BaseApiClient):
             request_payload: Filtry zapytania (``InvoiceQueryFilters``).
             access_token: Token dostępu.
             page_size: Rozmiar strony (10–250). Domyślnie 100.
-            page_offset: Indeks pierwszej strony (0 = początek).
+            page_offset: Numer pierwszej strony (0 = pierwsza strona).
             max_pages: Opcjonalny bezpiecznik liczby stron.
             sort_order: Kolejność sortowania (``Asc``/``Desc``).
 
@@ -357,7 +356,6 @@ class InvoicesClient(BaseApiClient):
         """
         validate_page_size(page_size)
         for offset in iter_page_offsets(
-            page_size=page_size,
             start_offset=page_offset,
             max_pages=max_pages,
         ):
@@ -400,7 +398,7 @@ class InvoicesClient(BaseApiClient):
             date_to: Koniec zakresu; ``None`` znaczy „do teraz”.
             access_token: Token dostępu.
             page_size: Rozmiar strony (10–250). Domyślnie 100.
-            page_offset: Indeks pierwszej strony (0 = początek).
+            page_offset: Numer pierwszej strony (0 = pierwsza strona).
             max_pages: Opcjonalny bezpiecznik liczby stron.
             sort_order: Kolejność sortowania (``Asc``/``Desc``).
 
@@ -420,7 +418,6 @@ class InvoicesClient(BaseApiClient):
         )
         validate_page_size(page_size)
         for offset in iter_page_offsets(
-            page_size=page_size,
             start_offset=page_offset,
             max_pages=max_pages,
         ):
@@ -565,7 +562,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             request_payload: Filtry zapytania (``InvoiceQueryFilters``).
             access_token: Token dostępu.
             page_size: Rozmiar strony (10–250). Domyślnie 100.
-            page_offset: Indeks pierwszej strony (0 = początek).
+            page_offset: Numer pierwszej strony (0 = pierwsza strona).
             max_pages: Opcjonalny bezpiecznik liczby stron.
             sort_order: Kolejność sortowania (``Asc``/``Desc``).
 
@@ -579,7 +576,6 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         """
         validate_page_size(page_size)
         for offset in iter_page_offsets(
-            page_size=page_size,
             start_offset=page_offset,
             max_pages=max_pages,
         ):
@@ -613,7 +609,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             request_payload: Filtry zapytania (``InvoiceQueryFilters``).
             access_token: Token dostępu.
             page_size: Rozmiar strony (10–250). Domyślnie 100.
-            page_offset: Indeks pierwszej strony (0 = początek).
+            page_offset: Numer pierwszej strony (0 = pierwsza strona).
             max_pages: Opcjonalny bezpiecznik liczby stron.
             sort_order: Kolejność sortowania (``Asc``/``Desc``).
 
@@ -627,7 +623,6 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         """
         validate_page_size(page_size)
         for offset in iter_page_offsets(
-            page_size=page_size,
             start_offset=page_offset,
             max_pages=max_pages,
         ):
@@ -668,7 +663,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             date_to: Koniec zakresu; ``None`` znaczy „do teraz”.
             access_token: Token dostępu.
             page_size: Rozmiar strony (10–250). Domyślnie 100.
-            page_offset: Indeks pierwszej strony (0 = początek).
+            page_offset: Numer pierwszej strony (0 = pierwsza strona).
             max_pages: Opcjonalny bezpiecznik liczby stron.
             sort_order: Kolejność sortowania (``Asc``/``Desc``).
 
@@ -688,7 +683,6 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         )
         validate_page_size(page_size)
         for offset in iter_page_offsets(
-            page_size=page_size,
             start_offset=page_offset,
             max_pages=max_pages,
         ):

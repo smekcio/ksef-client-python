@@ -477,6 +477,8 @@ Options:
 ```
 
 Uwagi:
+- `--page-offset` to **numer strony** (0 = pierwsza), a nie przesunięcie w rekordach; `--page-size`
+  określa wyłącznie długość strony,
 - bez `--subject-type` CLI agreguje wyniki dla wszystkich typów (`Subject1`, `Subject2`, `Subject3`, `SubjectAuthorized`),
 - podanie `--subject-type` zachowuje poprzednie, jawne filtrowanie do jednego kontekstu podmiotu.
 - zakres `--from/--to` nie moze przekraczac 100 dni.

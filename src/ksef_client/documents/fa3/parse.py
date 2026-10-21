@@ -16,7 +16,8 @@ Czego ten parser **nie** robi:
 * nie waliduje biznesowo dokumentu (``FA3Invoice.validate()`` bywa surowsze niż
   XSD — np. dla faktury uproszczonej bez nazwy nabywcy),
 * nie jest odwzorowaniem bezstratnym: elementy spoza modelu trafiają do
-  ``warnings``, a nie do ``raw_extensions`` (serializator ich nie odtwarza),
+  ``warnings``, a nie do ``raw_extensions`` (serializator ich nie odtwarza);
+  liczba ostrzeżeń jest ograniczona przez :data:`MAX_PARSE_WARNINGS`,
 * nie odtwarza stawek zaliczek, których XML nie zawiera — dla
   ``ZaliczkaCzesciowa`` stawka jest wnioskowana z pól podsumowania, a gdy to
   się nie uda, parser używa stawki 23% (tak jak builder) i dodaje ostrzeżenie.
@@ -27,6 +28,7 @@ ekspansją encji) i ma limit rozmiaru dokumentu. Nie pobiera niczego z sieci.
 
 from __future__ import annotations
 
+import re
 import xml.parsers.expat as _expat
 from dataclasses import replace
 from datetime import date, datetime
@@ -90,6 +92,15 @@ _DTD_ERROR = (
     "XML zawiera deklarację DTD (DOCTYPE/ENTITY) — parsowanie takich dokumentów "
     "jest zablokowane (ochrona przed ekspansją encji)."
 )
+
+#: Deklaracja `encoding="..."` w prologu XML, np. `<?xml version="1.0" encoding="windows-1250"?>`.
+_XML_ENCODING_RE = re.compile(
+    r"^(?P<prolog>\s*<\?xml[^>]*?)\s+encoding\s*=\s*(?P<quote>['\"])[^'\"]*(?P=quote)"
+)
+
+#: `xs:date` dopuszcza strefę czasową (`2026-03-01Z`, `2026-03-01+02:00`).
+#: KSeF wysyła daty bez strefy, ale dokument z innego generatora może ją mieć.
+_DATE_WITH_ZONE_RE = re.compile(r"(?P<date>\d{4}-\d{2}-\d{2})(?:Z|[+-]\d{2}:\d{2})")
 
 #: Rodzaje faktur, w których wiersz przed korektą ma ujemną wartość w podsumowaniu.
 _CORRECTION_KINDS = frozenset(
@@ -252,8 +263,14 @@ def _decimal_opt(node: ET.Element, name: str, path: str) -> Decimal | None:
 
 
 def _date(value: str, path: str) -> date:
+    text = value.strip()
+    zoned = _DATE_WITH_ZONE_RE.fullmatch(text)
+    if zoned is not None:
+        # `date.fromisoformat` odrzuca strefę, choć `xs:date` ją dopuszcza.
+        # Data kalendarzowa jest tu tym, o co chodzi (P_1, P_6, terminy).
+        text = zoned.group("date")
     try:
-        return date.fromisoformat(value.strip())
+        return date.fromisoformat(text)
     except ValueError as exc:
         raise FA3ParseError(
             f"{path}: '{_preview(value)}' nie jest poprawną datą (YYYY-MM-DD)."
@@ -291,6 +308,30 @@ def _warning(message: str) -> FA3ValidationIssue:
     return FA3ValidationIssue(message, severity="warning")
 
 
+#: Górny limit ostrzeżeń zwracanych dla jednego dokumentu.
+#:
+#: Dokument z milionem nieznanych elementów generowałby milion obiektów
+#: ``FA3ValidationIssue`` (setki megabajtów) — czyli wektor wyczerpania pamięci
+#: przy parsowaniu niezaufanego XML-a. Po przekroczeniu limitu parser dopisuje
+#: jedno ostrzeżenie o obcięciu i przestaje zbierać kolejne.
+MAX_PARSE_WARNINGS = 100
+
+
+class _ParseWarnings(list[FA3ValidationIssue]):
+    """Lista ostrzeżeń z twardym limitem (patrz :data:`MAX_PARSE_WARNINGS`)."""
+
+    def append(self, item: FA3ValidationIssue) -> None:
+        if len(self) < MAX_PARSE_WARNINGS:
+            list.append(self, item)
+        elif len(self) == MAX_PARSE_WARNINGS:
+            list.append(
+                self,
+                _warning(
+                    f"Pominięto dalsze ostrzeżenia parsera (limit {MAX_PARSE_WARNINGS})."
+                ),
+            )
+
+
 def _warn_unknown(
     node: ET.Element,
     known: frozenset[str],
@@ -298,6 +339,10 @@ def _warn_unknown(
     warnings: list[FA3ValidationIssue],
 ) -> None:
     for candidate in node:
+        # Lista jest już pełna (łącznie z ostrzeżeniem o obcięciu): dalsze
+        # iterowanie i budowanie komunikatów tylko zużywałoby CPU i pamięć.
+        if len(warnings) > MAX_PARSE_WARNINGS:
+            return
         name = _local(candidate)
         if name not in known:
             warnings.append(
@@ -307,7 +352,13 @@ def _warn_unknown(
 
 def _as_bytes(xml: bytes | bytearray | str) -> bytes:
     if isinstance(xml, str):
-        return xml.encode("utf-8")
+        # Tekst jest już zdekodowany, więc deklaracja kodowania z pliku (np.
+        # `windows-1250`) nie pasuje do bajtów UTF-8, które tworzymy. `expat`
+        # i `ElementTree` honorują deklarację, więc polskie znaki zamieniłyby
+        # się na mojibake (albo parsowanie skończyłoby się błędem). Usuwamy
+        # wyłącznie atrybut `encoding` z prologu.
+        text = _XML_ENCODING_RE.sub(r"\g<prolog>", xml.lstrip("\ufeff"), count=1)
+        return text.encode("utf-8")
     if isinstance(xml, (bytes, bytearray)):
         return bytes(xml)
     raise FA3ParseError(
@@ -729,13 +780,27 @@ def _infer_advance_tax(
         return TaxCategory.reverse_charge()
     if tag == "P_13_11":
         return TaxCategory.margin()
+    if tag == "P_13_5":
+        # Koszyk XII: XML nie niesie stawki, a procedura dopuszcza wiele
+        # stawek (m.in. OSS), więc nie da się jej odtworzyć. Wcześniej ten
+        # przypadek kończył się `KeyError`, bo mapa stawek miała tylko
+        # koszyki 23/8/5/4 — czyli wyjątkiem zamiast ostrzeżenia.
+        warnings.append(
+            _warning(
+                f"{path}: zaliczka w koszyku XII (P_13_5) — stawka VAT nie jest "
+                "odwracalna z XML; przyjęto 23%."
+            )
+        )
+        return default
     total_gross = sum((payment.amount for payment in payments), Decimal("0.00"))
     if total_gross <= 0:
         warnings.append(
             _warning(f"{path}: zaliczka o nie dodatniej kwocie — nie da się wnioskować stawki.")
         )
         return default
-    candidates = _ADVANCE_RATE_CANDIDATES[tag]
+    # `.get` zamiast `[...]`: gdyby w przyszłości doszedł kolejny koszyk,
+    # parser ma dodać ostrzeżenie, a nie wywrócić się `KeyError`.
+    candidates = _ADVANCE_RATE_CANDIDATES.get(tag, ())
     matches = [
         rate
         for rate in candidates
@@ -1381,7 +1446,7 @@ def _parse_root(root: ET.Element) -> FA3Invoice:
             f"Oczekiwano elementu głównego 'Faktura' w przestrzeni {FA3_NAMESPACE}, "
             f"otrzymano {root.tag!r}."
         )
-    warnings: list[FA3ValidationIssue] = []
+    warnings: list[FA3ValidationIssue] = _ParseWarnings()
     _warn_unknown(root, _ROOT_KNOWN, "Faktura", warnings)
 
     header = _child(root, "Naglowek")
@@ -1572,12 +1637,16 @@ def parse_invoice_xml(xml: bytes | bytearray | str) -> FA3Invoice:
     """Parsuje dokument FA(3) i zwraca model domenowy.
 
     Args:
-        xml: Treść dokumentu FA(3) (bajty albo tekst).
+        xml: Treść dokumentu FA(3) (bajty albo tekst). Dla ``str`` deklaracja
+            kodowania z prologu jest ignorowana — tekst jest już zdekodowany,
+            więc parser koduje go do UTF-8.
 
     Returns:
         Faktura z wypełnionymi polami modelu. Elementy, których SDK nie
         obsługuje, są wymienione w ``warnings`` (``severity='warning'``), a nie
-        pomijane po cichu.
+        pomijane po cichu. Liczba ostrzeżeń jest ograniczona do
+        :data:`MAX_PARSE_WARNINGS`; po przekroczeniu limitu ostatni wpis
+        informuje o obcięciu.
 
     Raises:
         FA3ParseError: Gdy XML jest niepoprawny, ma zły element główny,
@@ -1597,4 +1666,4 @@ def parse_invoice_xml(xml: bytes | bytearray | str) -> FA3Invoice:
     return _parse_root(root)
 
 
-__all__ = ["FA3ParseError", "MAX_XML_BYTES", "parse_invoice_xml"]
+__all__ = ["FA3ParseError", "MAX_PARSE_WARNINGS", "MAX_XML_BYTES", "parse_invoice_xml"]

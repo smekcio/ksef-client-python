@@ -162,10 +162,20 @@ def _validate_name(name: str) -> str:
     normalized = name.strip()
     if not normalized:
         raise CertificateStoreError("Nazwa certyfikatu nie może być pusta.")
-    if not _NAME_RE.fullmatch(normalized) or ".." in normalized:
+    # Nazwa jest segmentem ścieżki. Sama kropka (`.`) przechodziła regex
+    # `[A-Za-z0-9._-]+`, a `Path(".")` wskazuje katalog magazynu — zapis
+    # trafiałby do jego katalogu głównego, a `delete(".")` usuwał pliki
+    # magazynu i sam katalog. Kropka na końcu jest też niebezpieczna na
+    # Windows: system obcina ją, więc `prod.` i `prod` to ten sam wpis.
+    if (
+        not _NAME_RE.fullmatch(normalized)
+        or ".." in normalized
+        or normalized.endswith(".")
+    ):
         raise CertificateStoreError(
             f"Niepoprawna nazwa certyfikatu: {name!r}. "
-            "Dozwolone są litery, cyfry, '_', '-' i '.' (bez '..'), np. 'prod-2026'."
+            "Dozwolone są litery, cyfry, '_', '-' i '.' (bez '..' i bez kropki "
+            "na końcu), np. 'prod-2026'."
         )
     return normalized
 
@@ -227,8 +237,18 @@ def _coerce_private_key(
     try:
         loaded = load_pem_private_key(data, password=password)
     except TypeError as exc:
+        # `TypeError` oznacza niezgodność „hasło vs. szyfrowanie”, a nie złe
+        # hasło (to daje `ValueError`). Komunikat musi więc zależeć od tego,
+        # czy hasła w ogóle podano — wcześniej oba przypadki dostawały ten sam
+        # tekst „klucz jest zaszyfrowany — podaj hasło”, także wtedy, gdy klucz
+        # był jawny, a hasło podano niepotrzebnie.
+        if password is None:
+            raise CertificateStoreError(
+                "Klucz prywatny jest zaszyfrowany — podaj hasło w parametrze 'password'."
+            ) from exc
         raise CertificateStoreError(
-            "Klucz prywatny jest zaszyfrowany — podaj hasło w parametrze 'password'."
+            "Klucz prywatny nie jest zaszyfrowany, a podano hasło. "
+            "Pomiń parametr 'password' albo użyj zaszyfrowanego klucza."
         ) from exc
     except ValueError as exc:
         raise CertificateStoreError(f"Nie można sparsować klucza prywatnego PEM: {exc}") from exc
@@ -342,7 +362,10 @@ class FileCertificateStore:
         meta_path = entry / _META_FILE
         try:
             raw = json.loads(meta_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, ValueError):
+            # `ValueError` obejmuje `JSONDecodeError` i `UnicodeDecodeError`:
+            # plik meta.json uszkodzony bajtowo nie może wywracać `list()`,
+            # `load()` ani `record()` — metadane są opcjonalne.
             return {}
         return raw if isinstance(raw, dict) else {}
 
@@ -448,10 +471,18 @@ class FileCertificateStore:
         # po kolei, więc błąd zapisu w środku zostawiłby nowy certyfikat ze starym
         # kluczem (albo odwrotnie) i bezpowrotnie zgubił poprzednią parę.
         backups: dict[str, bytes] = {}
-        for file_name in (_CERT_FILE, _KEY_FILE, _META_FILE):
-            existing = entry / file_name
-            if existing.is_file():
-                backups[file_name] = existing.read_bytes()
+        try:
+            for file_name in (_CERT_FILE, _KEY_FILE, _META_FILE):
+                existing = entry / file_name
+                if existing.is_file():
+                    backups[file_name] = existing.read_bytes()
+        except OSError as exc:
+            # Odczyt kopii może się nie udać (blokada pliku, ACL), a `save()`
+            # obiecuje `CertificateStoreError` — nie surowe `OSError`.
+            raise CertificateStoreError(
+                f"Nie można odczytać poprzedniego wpisu '{normalized}' przed "
+                f"nadpisaniem: {exc}."
+            ) from exc
         try:
             self._directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             entry.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -536,8 +567,13 @@ class FileCertificateStore:
         try:
             private_key = load_pem_private_key(private_key_pem, password=password_bytes)
         except TypeError as exc:
+            if password_bytes is None:
+                raise CertificateStoreError(
+                    f"Klucz certyfikatu '{normalized}' jest zaszyfrowany — podaj hasło."
+                ) from exc
             raise CertificateStoreError(
-                f"Klucz certyfikatu '{normalized}' jest zaszyfrowany — podaj hasło."
+                f"Klucz certyfikatu '{normalized}' nie jest zaszyfrowany, a podano "
+                "hasło. Pomiń parametr 'password'."
             ) from exc
         except ValueError as exc:
             raise CertificateStoreError(

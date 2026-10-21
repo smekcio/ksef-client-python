@@ -3,7 +3,9 @@
 KSeF paginuje część kolekcji offsetowo (``pageOffset``/``pageSize``), a część
 kursorowo (``continuationToken``). Ten moduł zawiera wyłącznie elementy wspólne
 dla paginacji offsetowej, żeby iteratory w klientach nie powtarzały walidacji
-i logiki wyznaczania kolejnych stron.
+i logiki wyznaczania kolejnych stron. Warto pamiętać, że ``pageOffset`` to
+numer strony, a nie przesunięcie w rekordach — patrz
+:func:`iter_page_offsets`.
 
 Moduł jest niezależny od warstwy HTTP — można go użyć do własnych zapytań,
 które nie przechodzą przez :class:`ksef_client.KsefClient`.
@@ -151,37 +153,43 @@ def validate_max_pages(max_pages: int | None) -> int | None:
 
 def iter_page_offsets(
     *,
-    page_size: int,
     start_offset: int = 0,
     max_pages: int | None = None,
 ) -> Iterator[int]:
-    """Generuje kolejne wartości ``pageOffset`` dla paginacji offsetowej.
+    """Generuje kolejne numery stron (``pageOffset``) dla paginacji offsetowej.
+
+    W KSeF ``pageOffset`` to **numer strony** (indeks od zera), a nie indeks
+    rekordu: ``pageSize`` określa wyłącznie długość strony i nie wpływa na
+    numerację. Kolejne żądania to więc ``pageOffset=0, 1, 2, ...`` niezależnie
+    od ``pageSize``. Wcześniejsza wersja dodawała do ``pageOffset`` wartość
+    ``pageSize``, czyli przy ``pageSize=250`` pobierała strony 0, 250, 500...
+    i po cichu pomijała 249 stron między nimi — użytkownik dostawał niepełny
+    zbiór faktur bez żadnego błędu.
 
     Funkcja nie zna odpowiedzi serwera — kończy się po ``max_pages`` stronach
     albo wtedy, gdy wołający przerwie iterację (``return``/``break``). Dzięki
     temu tę samą pętlę wykorzystują klient synchroniczny i asynchroniczny.
 
     Args:
-        page_size: Rozmiar strony (już zwalidowany).
-        start_offset: Indeks pierwszej strony.
+        start_offset: Numer pierwszej strony (``0`` = pierwsza strona).
         max_pages: Opcjonalny bezpiecznik liczby stron.
 
     Yields:
-        Kolejne wartości ``pageOffset``.
+        Kolejne wartości ``pageOffset`` (numery stron).
 
     Raises:
-        ValueError: Gdy ``page_size`` jest poza zakresem albo ``start_offset``
-            jest ujemny.
+        TypeError: Gdy parametr nie jest liczbą całkowitą.
+        ValueError: Gdy ``start_offset`` jest ujemny albo ``max_pages`` jest
+            mniejsze od 1.
     """
-    validate_page_size(page_size)
     validate_page_offset(start_offset)
     validate_max_pages(max_pages)
 
-    offset = start_offset
+    page = start_offset
     pages = 0
     while max_pages is None or pages < max_pages:
-        yield offset
-        offset += page_size
+        yield page
+        page += 1
         pages += 1
 
 

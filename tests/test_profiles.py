@@ -79,7 +79,7 @@ def test_normalize_profile_name_strips_whitespace() -> None:
     assert normalize_profile_name("  demo  ") == "demo"
 
 
-@pytest.mark.parametrize("name", ["", "   ", "..", "a/b", "a\\b", "x" * 65, "zażółć"])
+@pytest.mark.parametrize("name", ["", "   ", ".", "..", "prod.", "a/b", "a\\b", "x" * 65, "zażółć"])
 def test_normalize_profile_name_rejects_unsafe_names(name: str) -> None:
     with pytest.raises(ProfileError):
         normalize_profile_name(name)
@@ -215,6 +215,26 @@ def test_active_returns_profile(tmp_path: Path) -> None:
         context_value="123",
         env="DEMO",
     )
+
+
+def test_active_reads_configuration_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    store.create("demo", env="DEMO", context_type="nip", context_value="123", activate=True)
+    calls: list[int] = []
+    original = store._read_document
+
+    def counting_read() -> dict[str, object]:
+        calls.append(1)
+        return original()
+
+    monkeypatch.setattr(store, "_read_document", counting_read)
+
+    # `active()` czytało plik dwa razy (przez `active_name()`), więc zmiana
+    # wykonana przez CLI między odczytami kończyła się `KeyError`.
+    assert store.active_name() == "demo"
+    assert len(calls) == 1
 
 
 def test_active_is_none_for_orphaned_pointer(tmp_path: Path) -> None:

@@ -30,11 +30,19 @@ def normalize_profile_name(name: str | None) -> str:
     if name is None or name.strip() == "":
         return DEFAULT_PROFILE
     normalized = name.strip()
-    if not _PROFILE_NAME_RE.fullmatch(normalized) or ".." in normalized:
+    # Sama kropka wskazywałaby katalog `sessions/` (a nie podkatalog profilu),
+    # a Windows obcina kropkę na końcu nazwy, więc `prod.` i `prod` to ten sam
+    # katalog.
+    if (
+        not _PROFILE_NAME_RE.fullmatch(normalized)
+        or ".." in normalized
+        or normalized.endswith(".")
+    ):
         raise CliError(
             f"Invalid profile name: {name!r}.",
             ExitCode.VALIDATION_ERROR,
-            "Use letters, digits, '_', '-' and '.' (without '..'), e.g. 'prod' or 'demo-2'.",
+            "Use letters, digits, '_', '-' and '.' (without '..' and without a "
+            "trailing dot), e.g. 'prod' or 'demo-2'.",
         )
     return normalized
 

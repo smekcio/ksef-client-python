@@ -119,10 +119,18 @@ def normalize_profile_name(name: str) -> str:
     normalized = name.strip()
     if not normalized:
         raise ProfileError("Nazwa profilu nie może być pusta.")
-    if not _PROFILE_NAME_RE.fullmatch(normalized) or ".." in normalized:
+    # Nazwa trafia do katalogu `sessions/<profil>/` w CLI, więc sama kropka
+    # (`.`) wskazywałaby katalog nadrzędny, a kropka na końcu jest obcinana
+    # przez Windows (`prod.` == `prod`).
+    if (
+        not _PROFILE_NAME_RE.fullmatch(normalized)
+        or ".." in normalized
+        or normalized.endswith(".")
+    ):
         raise ProfileError(
             f"Niepoprawna nazwa profilu: {name!r}. "
-            "Dozwolone są litery, cyfry, '_', '-' i '.' (bez '..'), np. 'prod' lub 'demo-2'."
+            "Dozwolone są litery, cyfry, '_', '-' i '.' (bez '..' i bez kropki "
+            "na końcu), np. 'prod' lub 'demo-2'."
         )
     return normalized
 
@@ -301,25 +309,26 @@ class ProfileStore:
         osierocony wpis (np. po ręcznej edycji pliku) jest traktowany jak brak
         aktywnego profilu, tak samo jak w CLI.
         """
+        profile = self.active()
+        return None if profile is None else profile.name
+
+    def active(self) -> Profile | None:
+        """Aktywny profil albo ``None``.
+
+        Odczyt pliku jest pojedynczy. Wcześniej `active()` wołało
+        `active_name()` (pierwszy odczyt) i czytało plik ponownie (drugi
+        odczyt), więc gdy CLI usunęło profil między odczytami, zamiast `None`
+        leciał `KeyError`.
+        """
         document = self._read_document()
         active = document.get("active_profile")
         if not isinstance(active, str):
             return None
-        payload = document["profiles"].get(active)
-        # Wpis musi się jeszcze parsować: sam `dict` nie wystarczy. Wcześniej
-        # uszkodzony profil (np. bez `context_value`) dawał `active_name()`
-        # różne od `active()`, więc wołający zobaczył nazwę profilu, którego
-        # nie dało się użyć.
-        if _parse_profile(active, payload) is None:
-            return None
-        return active
-
-    def active(self) -> Profile | None:
-        """Aktywny profil albo ``None``."""
-        name = self.active_name()
-        if name is None:
-            return None
-        return _parse_profile(name, self._read_document()["profiles"][name])
+        # Wpis musi się jeszcze parsować: sam `dict` nie wystarczy. Uszkodzony
+        # profil (np. bez `context_value`) dawał `active_name()` różne od
+        # `active()`, więc wołający zobaczył nazwę profilu, którego nie dało
+        # się użyć.
+        return _parse_profile(active, document["profiles"].get(active))
 
     def find(self, name: str) -> Profile | None:
         """Profil o podanej nazwie albo ``None`` (bez wyjątku)."""
