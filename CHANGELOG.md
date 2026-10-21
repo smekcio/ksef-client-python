@@ -56,6 +56,33 @@
 
 ### Bug Fixes
 
+* **security:** the FA(3) parser blocks DTD in every encoding. The old byte-level
+  guard looked for `<!DOCTYPE`/`<!ENTITY`, so a document encoded as UTF-16 slipped
+  past it and `ElementTree` expanded internal entities — an attacker could inflate
+  the file ("billion laughs") or inject content into parsed fields. The check now
+  parses the document with `expat`, which detects encoding itself and aborts on the
+  first DTD declaration, before any entity is expanded. A comment containing the
+  literal text `<!DOCTYPE` no longer triggers a false positive
+* **security:** `StoredCertificate.__repr__` no longer prints the private key.
+  The dataclass default included `private_key_pem` in full, so logging the object
+  or an exception holding it leaked the key. The representation now shows
+  `<redacted>` for key material, matching the SDK rule that secrets stay out of
+  `repr`
+* **fa3:** the parser rejects exponent notation (`1e5`) in decimal fields. `Decimal`
+  accepts it, but XSD `decimal` does not, and a value such as `1e999999999` could
+  later raise `decimal.Overflow` inside advance-payment arithmetic instead of a
+  clear parse error
+* **fa3:** `Podmiot3/RolaInna` without `OpisRoli` is rejected while parsing. The
+  schema requires both, and the old parser produced an invoice that could not be
+  serialized again
+* **profiles:** `active_name()` validates the profile payload instead of only
+  checking that it is a dict — a corrupted active profile no longer yields a name
+  that `active()` cannot resolve
+* **profiles:** deleting the active profile promotes the first *valid* remaining
+  profile; an invalid entry is no longer selected as active
+* **certificates:** a failed `save(overwrite=True)` restores the previous
+  certificate, key and metadata instead of leaving a mixed pair, and `delete()`
+  checks for subdirectories before removing any file
 * **security:** `-v/--verbose` no longer leaks pre-signed URL signatures. `logging.basicConfig`
   raises the root level, so the `httpx` logger printed the full request URL (the signature lives in
   the query string) and `httpcore` could print response headers — the HTTP layer's own redaction was

@@ -84,7 +84,7 @@ class CertificateRecord:
     has_password: bool = False
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class StoredCertificate:
     """Certyfikat wraz z kluczem prywatnym odczytany z magazynu.
 
@@ -101,6 +101,20 @@ class StoredCertificate:
     private_key: PrivateKey
     certificate_pem: bytes
     private_key_pem: bytes
+
+    def __repr__(self) -> str:
+        """Reprezentacja bez materiału klucza.
+
+        Domyślny ``repr`` dataclass wypisywał ``private_key_pem`` w całości,
+        więc jedno ``print(credentials)`` albo log wyjątku z obiektem w danych
+        wynosił klucz prywatny do logów. Ten sam standard stosuje reszta SDK
+        (tokeny i klucze są poza ``repr``).
+        """
+        return (
+            f"StoredCertificate(record={self.record!r}, "
+            "certificate=<x509.Certificate>, private_key=<redacted>, "
+            "private_key_pem=<redacted>)"
+        )
 
     def key_pair(self) -> tuple[x509.Certificate, PrivateKey]:
         """Zwraca parę ``(certyfikat, klucz)`` do podpisu XAdES."""
@@ -393,6 +407,14 @@ class FileCertificateStore:
             "has_password": record.has_password,
         }
         created_directory = not entry.exists()
+        # Kopia poprzedniego wpisu: `save(overwrite=True)` zastępuje trzy pliki
+        # po kolei, więc błąd zapisu w środku zostawiłby nowy certyfikat ze starym
+        # kluczem (albo odwrotnie) i bezpowrotnie zgubił poprzednią parę.
+        backups: dict[str, bytes] = {}
+        for file_name in (_CERT_FILE, _KEY_FILE, _META_FILE):
+            existing = entry / file_name
+            if existing.is_file():
+                backups[file_name] = existing.read_bytes()
         try:
             entry.mkdir(parents=True, exist_ok=True)
             self._write_file(entry / _CERT_FILE, certificate_pem)
@@ -407,6 +429,10 @@ class FileCertificateStore:
                     for child in entry.iterdir():
                         child.unlink(missing_ok=True)
                     entry.rmdir()
+            else:
+                for file_name, data in backups.items():
+                    with suppress(OSError):
+                        self._write_file(entry / file_name, data)
             raise CertificateStoreError(
                 f"Nie można zapisać certyfikatu '{normalized}' w {entry}: {exc}."
             ) from exc
@@ -530,10 +556,18 @@ class FileCertificateStore:
         entry = self._entry_dir(normalized)
         if not entry.is_dir():
             raise CertificateStoreError(f"Certyfikat '{normalized}' nie istnieje.")
+        children = list(entry.iterdir())
+        # Najpierw sprawdzenie, potem usuwanie: wcześniej pliki ginęły, a
+        # `rmdir` wywalał się na podkatalogu, zostawiając wpis w połowie
+        # usunięty.
+        if any(child.is_dir() for child in children):
+            raise CertificateStoreError(
+                f"Nie można usunąć certyfikatu '{normalized}': katalog wpisu "
+                "zawiera podkatalogi."
+            )
         try:
-            for child in entry.iterdir():
-                if child.is_file():
-                    child.unlink(missing_ok=True)
+            for child in children:
+                child.unlink(missing_ok=True)
             entry.rmdir()
         except OSError as exc:
             raise CertificateStoreError(

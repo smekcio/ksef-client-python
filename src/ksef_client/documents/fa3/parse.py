@@ -27,7 +27,7 @@ ekspansją encji) i ma limit rozmiaru dokumentu. Nie pobiera niczego z sieci.
 
 from __future__ import annotations
 
-import re
+import xml.parsers.expat as _expat
 from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -86,7 +86,10 @@ from .xml import FA3_NAMESPACE
 #: Limit chroni przed przypadkowym podaniem ogromnego pliku (np. archiwum ZIP).
 MAX_XML_BYTES = 20 * 1024 * 1024
 
-_DECLARATION_RE = re.compile(rb"<!\s*(?:DOCTYPE|ENTITY)", re.IGNORECASE)
+_DTD_ERROR = (
+    "XML zawiera deklarację DTD (DOCTYPE/ENTITY) — parsowanie takich dokumentów "
+    "jest zablokowane (ochrona przed ekspansją encji)."
+)
 
 #: Rodzaje faktur, w których wiersz przed korektą ma ujemną wartość w podsumowaniu.
 _CORRECTION_KINDS = frozenset(
@@ -206,8 +209,15 @@ def _required_text(node: ET.Element, name: str, path: str) -> str:
 
 
 def _decimal(value: str, path: str) -> Decimal:
+    normalized = value.strip().replace(",", ".")
+    # XSD `decimal` nie dopuszcza notacji wykładniczej, a `Decimal` przyjmuje ją
+    # bez oporu. Wartość typu "1e999999999" przeszłaby więc walidację formatu,
+    # a późniejsze działania na zaliczkach mogłyby zakończyć się wyjątkiem
+    # `decimal.Overflow` — zamiast czytelnego błędu parsowania.
+    if "e" in normalized.lower():
+        raise FA3ParseError(f"{path}: '{value}' nie jest liczbą.")
     try:
-        parsed = Decimal(value.strip().replace(",", "."))
+        parsed = Decimal(normalized)
     except (InvalidOperation, AttributeError) as exc:
         raise FA3ParseError(f"{path}: '{value}' nie jest liczbą.") from exc
     if not parsed.is_finite():
@@ -371,6 +381,10 @@ def _parse_party(node: ET.Element, *, role: str, path: str) -> InvoiceParty:
         role_value = _text(node, "Rola")
         other_description = _text(node, "OpisRoli")
         if other_description is not None or _flag(node, "RolaInna"):
+            if other_description is None:
+                # Schemat wymaga `OpisRoli` razem z `RolaInna`; bez tego
+                # odczytana faktura nie dałaby się ponownie zserializować.
+                raise FA3ParseError(f"{path}: RolaInna wymaga elementu OpisRoli.")
             party = _replace_party(
                 party,
                 role=ThirdPartyRole.OTHER,
@@ -1491,6 +1505,36 @@ def _int_opt(node: ET.Element, name: str, path: str) -> int | None:
         raise FA3ParseError(f"{path}/{name}: '{value}' nie jest liczbą.") from exc
 
 
+def _reject_dtd(data: bytes) -> None:
+    """Blokuje DTD niezależnie od kodowania dokumentu.
+
+    Wcześniejsza wersja szukała ``<!DOCTYPE``/``<!ENTITY`` w bajtach, więc
+    dokument zakodowany w UTF-16 (albo innym kodowaniu ze znakami NUL) omijał
+    kontrolę, a ``ElementTree`` rozwijał encje — czyli działał atak typu
+    „billion laughs" i podmiana treści przez encję. Tutaj dokument parsuje
+    ``expat``, który sam rozpoznaje kodowanie, a każda deklaracja DTD kończy
+    pracę wyjątkiem **przed** rozwinięciem encji.
+
+    Args:
+        data: Bajty dokumentu.
+
+    Raises:
+        FA3ParseError: Gdy dokument deklaruje DTD albo nie jest poprawnym XML-em.
+    """
+
+    parser = _expat.ParserCreate()
+
+    def _forbid(*_args: object) -> None:
+        raise FA3ParseError(_DTD_ERROR)
+
+    parser.StartDoctypeDeclHandler = _forbid
+    parser.EntityDeclHandler = _forbid
+    try:
+        parser.Parse(data, True)
+    except _expat.ExpatError as exc:
+        raise FA3ParseError(f"Nieprawidłowy XML: {exc}") from exc
+
+
 def parse_invoice_xml(xml: bytes | bytearray | str) -> FA3Invoice:
     """Parsuje dokument FA(3) i zwraca model domenowy.
 
@@ -1504,19 +1548,15 @@ def parse_invoice_xml(xml: bytes | bytearray | str) -> FA3Invoice:
 
     Raises:
         FA3ParseError: Gdy XML jest niepoprawny, ma zły element główny,
-            zawiera deklarację ``DOCTYPE``/``ENTITY``, przekracza limit
-            rozmiaru albo brakuje w nim wymaganego pola.
+            zawiera deklarację ``DOCTYPE``/``ENTITY`` (w dowolnym kodowaniu),
+            przekracza limit rozmiaru albo brakuje w nim wymaganego pola.
     """
     data = _as_bytes(xml)
     if len(data) > MAX_XML_BYTES:
         raise FA3ParseError(
             f"XML ma {len(data)} bajtów, limit to {MAX_XML_BYTES}."
         )
-    if _DECLARATION_RE.search(data):
-        raise FA3ParseError(
-            "XML zawiera deklarację DOCTYPE/ENTITY — parsowanie takich dokumentów "
-            "jest zablokowane (ochrona przed ekspansją encji)."
-        )
+    _reject_dtd(data)
     try:
         root = ET.fromstring(data)
     except ET.ParseError as exc:

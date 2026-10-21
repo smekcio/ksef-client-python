@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -125,16 +126,18 @@ def test_parse_rejects_oversized_document(monkeypatch: pytest.MonkeyPatch) -> No
         parse_invoice_xml(b"<Faktura/>" + b" " * 20)
 
 
-@pytest.mark.parametrize(
-    "xml",
-    [
-        b'<?xml version="1.0"?><!DOCTYPE Faktura [<!ENTITY x "y">]><Faktura/>',
-        b"<!ENTITY x 'y'><Faktura/>",
-    ],
-)
-def test_parse_rejects_doctype_and_entity(xml: bytes) -> None:
+def test_parse_rejects_doctype_with_entity() -> None:
+    xml = b'<?xml version="1.0"?><!DOCTYPE Faktura [<!ENTITY x "y">]><Faktura/>'
+
     with pytest.raises(FA3ParseError, match="DOCTYPE/ENTITY"):
         parse_invoice_xml(xml)
+
+
+def test_parse_rejects_entity_declaration_outside_doctype() -> None:
+    # `<!ENTITY>` w prologu nie jest poprawnym XML-em — dokument musi zostać
+    # odrzucony, choć komunikat dotyczy składni, a nie samej deklaracji DTD.
+    with pytest.raises(FA3ParseError):
+        parse_invoice_xml(b"<!ENTITY x 'y'><Faktura/>")
 
 
 def test_parse_rejects_malformed_xml() -> None:
@@ -1009,3 +1012,69 @@ def test_parse_additional_description_without_row_number() -> None:
     parsed = _parse(invoice.to_xml())
 
     assert parsed.additional_descriptions[0].row_number is None
+
+
+# --- poprawki z review: DTD niezależne od kodowania ------------------------
+
+
+def test_parse_rejects_dtd_hidden_in_utf16() -> None:
+    xml = _base().decode("utf-8").replace("encoding='utf-8'", "encoding='UTF-16'")
+    xml = xml.replace("?>", "?>\n<!DOCTYPE Faktura [<!ENTITY x 'INJECTED'>]>", 1)
+    xml = xml.replace(">FV/ERR<", ">&x;<")
+
+    with pytest.raises(FA3ParseError, match="DOCTYPE/ENTITY"):
+        _parse(xml.encode("utf-16"))
+
+
+def test_parse_accepts_doctype_text_inside_comment() -> None:
+    def _change(root: ET.Element) -> None:
+        root.insert(0, ET.Comment(" <!DOCTYPE to tylko tekst komentarza "))
+
+    invoice = _parse(_mutate(_base(), _change))
+
+    assert invoice.invoice_number == "FV/ERR"
+
+
+def test_parse_wraps_elementtree_parser_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ksef_client.documents.fa3.parse as parse_module
+
+    def _fail(*_args: object, **_kwargs: object) -> ET.Element:
+        raise ET.ParseError("symulowany błąd")
+
+    monkeypatch.setattr(parse_module.ET, "fromstring", _fail)
+
+    with pytest.raises(FA3ParseError, match="Nieprawidłowy XML"):
+        parse_module.parse_invoice_xml(_base())
+
+
+def test_parse_rejects_exponent_notation() -> None:
+    xml = _mutate(
+        _base(),
+        lambda root: _set(root, "fa:Faktura/fa:Fa/fa:FaWiersz/fa:P_8B", "1e5"),
+    )
+
+    with pytest.raises(FA3ParseError, match="nie jest liczbą"):
+        _parse(xml)
+
+
+def test_parse_rejects_rola_inna_without_description() -> None:
+    other = replace(
+        Party.polish_company(nip="3333333333", name="Trzeci", address="Adres 3"),
+        other_role_description="Rola opisana",
+    )
+    invoice = (
+        FA3Invoice.basic("FV/ROLA")
+        .issued_on(date(2026, 3, 1))
+        .seller(SELLER)
+        .buyer(BUYER)
+        .add_party(other, ThirdPartyRole.OTHER)
+        .add_service_line("Usługa", quantity="1", unit_net_price="100", tax=VatClass.standard_23())
+        .build()
+    )
+    xml = _mutate(
+        invoice.to_xml(),
+        lambda root: _drop(root, "fa:Faktura/fa:Podmiot3/fa:OpisRoli"),
+    )
+
+    with pytest.raises(FA3ParseError, match="OpisRoli"):
+        _parse(xml)

@@ -555,3 +555,67 @@ def test_default_store_uses_standard_directory(
     monkeypatch.setenv("APPDATA", str(tmp_path))
 
     assert FileCertificateStore.default().directory == paths.certificates_dir()
+
+
+def test_stored_certificate_repr_redacts_key_material(
+    store: FileCertificateStore, rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey]
+) -> None:
+    certificate, key = rsa_pair
+    store.save("prod", certificate=certificate, private_key=key)
+
+    text = repr(store.load("prod"))
+
+    assert "PRIVATE KEY" not in text
+    assert "private_key=<redacted>" in text
+    assert "private_key_pem=<redacted>" in text
+
+
+def test_overwrite_failure_restores_previous_pair(
+    store: FileCertificateStore,
+    rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old_certificate, old_key = rsa_pair
+    store.save("prod", certificate=old_certificate, private_key=old_key)
+    new_key = _key()
+    new_certificate = _certificate(new_key, common_name="New")
+
+    original_write = store._write_file
+    calls = {"count": 0}
+
+    def _failing_write(path: Path, data: bytes) -> None:
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise OSError("disk full")
+        original_write(path, data)
+
+    monkeypatch.setattr(store, "_write_file", _failing_write)
+
+    with pytest.raises(CertificateStoreError, match="Nie można zapisać certyfikatu"):
+        store.save(
+            "prod",
+            certificate=new_certificate,
+            private_key=new_key,
+            overwrite=True,
+        )
+
+    restored = store.load("prod")
+    assert restored.certificate == old_certificate
+    assert restored.private_key.private_numbers() == old_key.private_numbers()
+
+
+def test_delete_wraps_os_error(
+    store: FileCertificateStore,
+    rsa_pair: tuple[x509.Certificate, rsa.RSAPrivateKey],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    certificate, key = rsa_pair
+    store.save("prod", certificate=certificate, private_key=key)
+
+    def _locked(*_args: object, **_kwargs: object) -> None:
+        raise OSError("file is locked")
+
+    monkeypatch.setattr(Path, "unlink", _locked)
+
+    with pytest.raises(CertificateStoreError, match="Nie można usunąć"):
+        store.delete("prod")

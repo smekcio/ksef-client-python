@@ -97,8 +97,14 @@ tekst.
 
 ## Bezpieczeństwo
 
-- deklaracje `DOCTYPE`/`ENTITY` są odrzucane (`FA3ParseError`) — ochrona przed eksplozją encji,
+- deklaracje `DOCTYPE`/`ENTITY` są odrzucane (`FA3ParseError`) **w każdym kodowaniu** —
+  dokument jest najpierw parsowany przez `expat`, który sam rozpoznaje UTF-8/UTF-16, więc
+  obejście przez zmianę kodowania nie działa, a encje nie są rozwijane,
+- komentarz zawierający literalny tekst `<!DOCTYPE` nie jest błędem (kontrola działa na
+  poziomie parsera, nie na bajtach),
 - obowiązuje limit rozmiaru `MAX_XML_BYTES` (20 MiB),
+- liczby muszą być zapisane dziesiętnie — notacja wykładnicza (`1e5`) jest odrzucana,
+  tak jak wymaga tego XSD `decimal`,
 - parser nie pobiera niczego z sieci i nie rozwiązuje zewnętrznych encji.
 
 ## Błędy

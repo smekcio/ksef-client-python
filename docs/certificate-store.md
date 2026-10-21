@@ -105,9 +105,19 @@ store.load("prod", password="sekret") # OK
 ## Bezpieczeństwo
 
 - nazwa wpisu jest walidowana (`[A-Za-z0-9._-]{1,64}`, bez `..`) — nie da się wyjść poza katalog,
-- pliki powstają atomowo i z uprawnieniami `0600`,
+- pliki powstają atomowo i z uprawnieniami `0600` (na Windows `chmod` nie steruje ACL —
+  klucz chroni dziedziczony ACL katalogu użytkownika),
 - zapis odrzuca parę, w której klucz nie pasuje do certyfikatu (ochrona przed pomyleniem plików),
+- `repr(StoredCertificate)` **nie zawiera klucza** — materiał klucza jest oznaczony jako
+  `<redacted>`, więc log obiektu nie wycieka sekretu,
+- nieudany `save(overwrite=True)` przywraca poprzednią parę certyfikat + klucz, zamiast
+  zostawiać nowy certyfikat ze starym kluczem,
+- `delete()` najpierw sprawdza, czy katalog wpisu nie zawiera podkatalogów — nie usuwa
+  plików „w połowie”,
 - `list()` pomija uszkodzone wpisy z `RuntimeWarning`, zamiast blokować odczyt pozostałych.
+
+Domyślnie klucz jest zapisywany **bez hasła** — jeśli nośnik nie jest szyfrowany, podaj
+`password`, aby zaszyfrować klucz w PEM (hasło nie jest nigdzie zapisywane).
 
 ## Czego moduł nie robi
 

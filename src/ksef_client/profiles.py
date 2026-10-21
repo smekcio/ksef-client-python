@@ -273,7 +273,11 @@ class ProfileStore:
         if not isinstance(active, str):
             return None
         payload = document["profiles"].get(active)
-        if not isinstance(payload, dict):
+        # Wpis musi się jeszcze parsować: sam `dict` nie wystarczy. Wcześniej
+        # uszkodzony profil (np. bez `context_value`) dawał `active_name()`
+        # różne od `active()`, więc wołający zobaczył nazwę profilu, którego
+        # nie dało się użyć.
+        if _parse_profile(active, payload) is None:
             return None
         return active
 
@@ -473,7 +477,9 @@ class ProfileStore:
         del profiles[normalized]
         if document.get("active_profile") == normalized:
             remaining = sorted(
-                key for key, payload in profiles.items() if isinstance(key, str) and payload
+                key
+                for key, payload in profiles.items()
+                if isinstance(key, str) and _parse_profile(key, payload) is not None
             )
             document["active_profile"] = remaining[0] if remaining else None
         document["version"] = _CONFIG_VERSION

@@ -588,3 +588,39 @@ def test_options_from_missing_profile_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ProfileError, match="nie istnieje"):
         KsefClientOptions.from_profile("demo", store=store)
+
+
+def test_active_name_is_none_for_invalid_dict_payload(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _write(store.path, {"active_profile": "x", "profiles": {"x": {"base_url": 5}}})
+
+    assert store.active_name() is None
+    assert store.active() is None
+
+
+def test_delete_promotes_first_valid_profile_skipping_invalid(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _write(
+        store.path,
+        {
+            "active_profile": "gone",
+            "profiles": {
+                "gone": {
+                    "base_url": KsefEnvironment.DEMO.value,
+                    "context_type": "nip",
+                    "context_value": "1",
+                },
+                "a": {
+                    "base_url": KsefEnvironment.TEST.value,
+                    "context_type": "nip",
+                    "context_value": "2",
+                },
+                "broken": {"base_url": 5},
+            },
+        },
+    )
+
+    store.delete("gone")
+
+    assert store.active_name() == "a"
+    assert store.active() is not None

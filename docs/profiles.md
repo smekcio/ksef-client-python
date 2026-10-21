@@ -99,6 +99,13 @@ Uszkodzonego pliku SDK **nie nadpisuje** — w przeciwieństwie do CLI, które p
 kopii `.corrupt-*`. Biblioteka nie powinna po cichu kasować konfiguracji użytkownika; komunikat
 podaje ścieżkę pliku do naprawy.
 
+## Współbieżność
+
+Zapis jest atomowy (żaden czytelnik nie zobaczy połowy pliku), ale **nie ma blokady
+międzyprocesowej**: dwa równoległe zapisy (np. CLI i skrypt SDK) rozstrzyga „ostatni wygrywa”.
+Do jednoczesnej edycji profili z wielu procesów używaj jednego z nich jako właściciela
+konfiguracji albo own synchronizacji po stronie aplikacji.
+
 ## Zgodność z CLI
 
 `ksef profile create --name demo --env TEST ...` tworzy profil widoczny w SDK, a
