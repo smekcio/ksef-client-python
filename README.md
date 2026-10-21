@@ -16,9 +16,11 @@ Najważniejsze cechy:
 - **typowane modele** `ksef_client.models` zamiast surowych słowników dla publicznych żądań SDK,
 - **klient synchroniczny i asynchroniczny**: `KsefClient` oraz `AsyncKsefClient`,
 - **CLI `ksef`** do konfiguracji, diagnostyki, uwierzytelniania, wysyłki i pobierania faktur,
+- **profile i magazyn certyfikatów w SDK** — te same dane co CLI, bez zależności od `typer`/`keyring`,
+- **paginacja metadanych faktur** — iteratory `iter_invoice_metadata*` w wersji sync i async,
 - **uwierzytelnianie tokenem KSeF i XAdES**, w tym obsługa PKCS#12 oraz PEM,
 - **sesje online i wsadowe**, eksport faktur, UPO, linki weryfikacyjne, QR i Latarnia KSeF,
-- **FA(3)**: budowanie XML faktur, walidacja XSD i przygotowanie paczek ZIP/TarGz,
+- **FA(3)**: budowanie XML faktur, walidacja XSD, przygotowanie paczek ZIP/TarGz oraz **odczyt XML → model**,
 - narzędzia pomocnicze do szyfrowania, ZIP/TarGz, Base64Url i obsługi adresów pre-signed URL.
 
 ## 🧭 Spis treści
@@ -175,6 +177,67 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
 print(f"Liczba faktur: {len(metadata.invoices)}")
 ```
 
+### 🔎 Odczyt faktury FA(3) (XML → model)
+
+Dokument pobrany z KSeF można odczytać do tego samego modelu, którego używają buildery:
+
+```python
+from ksef_client.documents.fa3 import FA3Invoice, parse_invoice_xml
+
+content = client.invoices.get_invoice_bytes(ksef_number, access_token=access_token)
+invoice = parse_invoice_xml(content.content)
+
+print(invoice.invoice_number, invoice.total_gross)
+for line in invoice.lines:
+    print(line.description, line.effective_net_amount)
+for warning in invoice.warnings:  # elementy spoza modelu — nigdy po cichu
+    print(warning.message)
+
+assert FA3Invoice.from_xml(content.content).to_xml()  # roundtrip
+```
+
+Szczegóły i granice (zaliczki, marża, daty): [`docs/fa3-parsing.md`](docs/fa3-parsing.md).
+
+### 📄 Paginacja metadanych faktur
+
+Zamiast ręcznej pętli po `pageOffset` użyj iteratora — sam pilnuje `hasMore`, limitu
+10 000 wyników i pustych stron:
+
+```python
+for invoice in client.invoices.iter_invoice_metadata_by_date_range(
+    subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
+    date_type=m.InvoiceQueryDateType.ISSUE,
+    date_from="2026-01-01T00:00:00Z",
+    date_to="2026-01-31T23:59:59Z",
+    access_token=access_token,
+    page_size=250,
+):
+    print(invoice.ksef_number)
+```
+
+Wersje `iter_invoice_metadata_pages` (strony) i `iter_invoice_metadata` (filtry) oraz ich
+odpowiedniki async są opisane w [`docs/api/invoices.md`](docs/api/invoices.md).
+
+### 🗂️ Profile i certyfikaty poza CLI
+
+SDK czyta te same profile, które zapisuje `ksef init`, i potrafi przechować parę
+certyfikat + klucz:
+
+```python
+from ksef_client import KsefClient, KsefClientOptions
+from ksef_client.certificates import FileCertificateStore
+from ksef_client.profiles import ProfileStore
+
+client = KsefClient(KsefClientOptions.from_profile("demo"))
+
+store = FileCertificateStore.default()
+store.save("prod-2026", certificate=cert_pem, private_key=key_pem, environment="PROD")
+certificate, private_key = store.load("prod-2026").key_pair()
+```
+
+Bez dodatku `cli` i bez nowych zależności. Opis: [`docs/profiles.md`](docs/profiles.md),
+[`docs/certificate-store.md`](docs/certificate-store.md).
+
 ### 📤 Wysyłka faktury w sesji online
 
 Do wysyłki faktur używaj scenariusza `OnlineSessionWorkflow`. Aktualny model pracy to:
@@ -237,8 +300,9 @@ Przykłady uruchomieniowe:
 | Modele | Typowane modele żądań i odpowiedzi w `ksef_client.models`. |
 | Uwierzytelnianie | Token KSeF, XAdES, odświeżanie tokenów i unieważnianie bieżącego tokena. |
 | Sesje | Sesje online i wsadowe, obsługa ZIP, części, szyfrowania i zamykania sesji. |
-| Faktury | Lista metadanych, pobieranie faktur, eksport paczek i narzędzia do ich przetwarzania. |
-| FA(3) | Buildery, drafty, XML, walidacja XSD i ZIP do sesji wsadowych. |
+| Faktury | Lista metadanych, iteratory paginacji (sync/async), pobieranie faktur, eksport paczek i narzędzia do ich przetwarzania. |
+| FA(3) | Buildery, drafty, XML, walidacja XSD, **odczyt XML → model** i ZIP do sesji wsadowych. |
+| Konfiguracja | Profile klienta wspólne z CLI oraz magazyn certyfikatów XAdES (`0600`). |
 | UPO | Sprawdzanie statusów i pobieranie urzędowego poświadczenia odbioru. |
 | CLI | Operacje administracyjne i diagnostyczne bez pisania kodu. |
 | Latarnia | Publiczny status dostępności KSeF i komunikaty serwisowe. |
@@ -252,6 +316,8 @@ Główna dokumentacja znajduje się w katalogu [`docs/`](docs/README.md):
 - [konfiguracja klienta](docs/configuration.md),
 - [błędy, retry i limity](docs/errors.md),
 - [referencja API](docs/api/README.md),
+- [profile klienta](docs/profiles.md),
+- [magazyn certyfikatów](docs/certificate-store.md),
 - [scenariusze sesji i eksportu](docs/workflows/README.md),
 - [usługi pomocnicze](docs/services/README.md),
 - [narzędzia użytkowe](docs/utils/README.md),

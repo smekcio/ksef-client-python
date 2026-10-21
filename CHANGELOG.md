@@ -4,6 +4,25 @@
 
 ### Features
 
+* **sdk:** odczyt FA(3) — nowy moduł `ksef_client.documents.fa3.parse` z `parse_invoice_xml()`
+  i `FA3Invoice.from_xml()` zamienia dokument FA(3) na model domenowy. Parser pokrywa wszystkie
+  rodzaje faktur, adnotacje, zaliczki, korekty, rozliczenie, płatność, warunki transakcji,
+  zamówienie, stopkę i załącznik; elementy spoza modelu trafiają do `warnings` (nigdy po cichu),
+  a dokumenty z `DOCTYPE`/`ENTITY` są odrzucane. Stawka VAT zaliczki jest wnioskowana
+  z podsumowania, a gdy to niemożliwe — jawnie ostrzega i przyjmuje 23% (jak builder). Roundtrip
+  `parse → to_xml` jest testowany dla wszystkich rodzajów faktur
+* **sdk:** paginacja metadanych faktur — `iter_invoice_metadata_pages()`, `iter_invoice_metadata()`
+  i `iter_invoice_metadata_by_date_range()` w `InvoicesClient` i `AsyncInvoicesClient`. Iteratory
+  respektują `hasMore`, kończą pracę na limicie 10 000 wyników (`isTruncated`) i na pustej stronie
+  z `hasMore=true`, emitując `KsefPaginationWarning`. Nowy moduł `ksef_client.pagination` zawiera
+  walidację `pageSize` (10–250) i `pageOffset` oraz stałe kontraktu
+* **sdk:** profile klienta i magazyn certyfikatów dostępne bez CLI. `ksef_client.profiles`
+  (`ProfileStore`, `Profile`) czyta i zapisuje ten sam `config.json` co `ksef` (z zachowaniem
+  nieznanych kluczy i atomowym zapisem `0600`), a `KsefClientOptions.from_profile()` buduje opcje
+  z profilu. `ksef_client.certificates` (`FileCertificateStore`) przechowuje parę certyfikat + klucz
+  jako PEM, waliduje dopasowanie klucza do certyfikatu i obsługuje klucze szyfrowane hasłem
+* **docs:** nowe strony `docs/profiles.md`, `docs/certificate-store.md`, `docs/fa3-parsing.md`
+  oraz sekcja paginacji w `docs/api/invoices.md`
 * **api:** align with KSeF API 2.9.0 — the OpenAPI snapshot, generated models and the documented
   compatibility level move from 2.8.1 to 2.9.0. New surface: `OwnerPermissionScope` and the optional
   `ownerPermissions` field in the response of `POST /permissions/query/personal/grants` (owner

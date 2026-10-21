@@ -29,6 +29,61 @@ Uwaga dla `dateRange`:
 - jeśli `dateRange.from` / `dateRange.to` jest podane jako ISO date-time bez offsetu (`YYYY-MM-DDTHH:MM[:SS]`),
   SDK normalizuje je do strefy `Europe/Warsaw` i wysyła z jawnie dopisanym offsetem (`+01:00`/`+02:00`).
 
+## `iter_invoice_metadata_pages(request_payload, *, access_token, page_size=100, page_offset=0, max_pages=None, sort_order=None)`
+
+Iterator stron — pobiera kolejne strony, dopóki KSeF deklaruje `hasMore`.
+
+- `page_size` musi mieścić się w **10–250** (kontrakt OpenAPI 2.9.0); wartość jest sprawdzana
+  lokalnie, przed pierwszym żądaniem (`ValueError`/`TypeError`).
+- `page_offset` to indeks pierwszej strony (0 = początek).
+- `max_pages` to opcjonalny bezpiecznik liczby stron.
+- Po osiągnięciu limitu **10 000** wyników (`isTruncated`) iterator kończy pracę i emituje
+  `ksef_client.pagination.KsefPaginationWarning` — dalsze strony nie zawierają brakujących
+  faktur, więc pobieranie ich tylko zużywałoby limit tempa.
+- Pusta strona z `hasMore=true` (anomalia serwera) również kończy iterację z ostrzeżeniem,
+  zamiast kręcić się w nieskończonej pętli.
+
+```python
+from ksef_client.models import InvoiceQuerySubjectType, InvoiceQueryDateType
+
+for page in client.invoices.iter_invoice_metadata_pages(
+    filters,
+    access_token=access_token,
+    page_size=250,
+):
+    print(len(page.invoices), page.has_more)
+```
+
+## `iter_invoice_metadata(request_payload, *, access_token, ...)`
+
+To samo co powyżej, ale zwraca pojedyncze `InvoiceMetadata` zamiast stron. Parametry są
+identyczne.
+
+```python
+for invoice in client.invoices.iter_invoice_metadata(filters, access_token=access_token):
+    print(invoice.ksef_number, invoice.issue_date)
+```
+
+## `iter_invoice_metadata_by_date_range(*, subject_type, date_type, date_from, date_to=None, access_token, ...)`
+
+Skrót dla najczęstszego przypadku: buduje `InvoiceQueryFilters` z zakresu dat (te same zasady
+normalizacji i limitu 100 dni co `query_invoice_metadata_by_date_range`) i iteruje po całym
+wyniku.
+
+```python
+for invoice in client.invoices.iter_invoice_metadata_by_date_range(
+    subject_type=InvoiceQuerySubjectType.SUBJECT1,
+    date_type=InvoiceQueryDateType.ISSUE,
+    date_from="2026-01-01T00:00:00Z",
+    date_to="2026-01-31T23:59:59Z",
+    access_token=access_token,
+):
+    ...
+```
+
+Wersje asynchroniczne (`AsyncInvoicesClient`) mają te same nazwy i zwracają `AsyncIterator`.
+Wszystkie trzy metody są **addytywne** — dotychczasowe `query_invoice_metadata*` działają bez zmian.
+
 ## `export_invoices(request_payload, access_token)`
 
 Endpoint: `POST /invoices/exports`

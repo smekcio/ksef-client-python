@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import warnings
+from collections.abc import AsyncIterator, Iterator
 from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -11,11 +13,20 @@ from ..models import (
     InvoiceContent,
     InvoiceExportRequest,
     InvoiceExportStatusResponse,
+    InvoiceMetadata,
     InvoiceQueryDateRange,
     InvoiceQueryDateType,
     InvoiceQueryFilters,
     InvoiceQuerySubjectType,
     QueryInvoicesMetadataResponse,
+)
+from ..pagination import (
+    INVOICE_METADATA_PAGE_SIZE_DEFAULT,
+    KsefPaginationWarning,
+    iter_page_offsets,
+    page_should_continue,
+    pagination_warning,
+    validate_page_size,
 )
 from ..utils.datetime_parsing import normalize_api_timestamp, try_parse_api_datetime
 from .base import AsyncBaseApiClient, BaseApiClient, _serialize_json_payload
@@ -250,6 +261,161 @@ class InvoicesClient(BaseApiClient):
             sort_order=sort_order,
         )
 
+    def iter_invoice_metadata_pages(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        access_token: str,
+        page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
+        page_offset: int = 0,
+        max_pages: int | None = None,
+        sort_order: str | None = None,
+    ) -> Iterator[QueryInvoicesMetadataResponse]:
+        """Iteruje po stronach metadanych faktur, aż KSeF zwróci ostatnią.
+
+        Pętla respektuje ``hasMore`` i ``isTruncated``: po osiągnięciu limitu
+        10 000 wyników kończy pracę i emituje
+        :class:`~ksef_client.pagination.KsefPaginationWarning` zamiast wysyłać
+        kolejne żądania, które i tak nie zwrócą brakujących faktur.
+
+        Args:
+            request_payload: Filtry zapytania (``InvoiceQueryFilters``).
+            access_token: Token dostępu.
+            page_size: Rozmiar strony (10–250). Domyślnie 100.
+            page_offset: Indeks pierwszej strony (0 = początek).
+            max_pages: Opcjonalny bezpiecznik liczby stron.
+            sort_order: Kolejność sortowania (``Asc``/``Desc``).
+
+        Yields:
+            Kolejne strony odpowiedzi API.
+
+        Raises:
+            ValueError: Gdy ``page_size``, ``page_offset`` lub ``max_pages``
+                są poza dozwolonym zakresem.
+            TypeError: Gdy któryś z parametrów liczbowych nie jest liczbą
+                całkowitą.
+
+        Example:
+            ```python
+            for page in client.invoices.iter_invoice_metadata_pages(
+                filters, access_token=token, page_size=250
+            ):
+                print(len(page.invoices), page.has_more)
+            ```
+        """
+        validate_page_size(page_size)
+        for offset in iter_page_offsets(
+            page_size=page_size,
+            start_offset=page_offset,
+            max_pages=max_pages,
+        ):
+            page = self.query_invoice_metadata(
+                request_payload,
+                access_token=access_token,
+                page_offset=offset,
+                page_size=page_size,
+                sort_order=sort_order,
+            )
+            yield page
+            warning = pagination_warning(page, page_size=page_size, page_offset=offset)
+            if warning is not None:
+                warnings.warn(warning, KsefPaginationWarning, stacklevel=2)
+            if not page_should_continue(page):
+                return
+
+    def iter_invoice_metadata(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        access_token: str,
+        page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
+        page_offset: int = 0,
+        max_pages: int | None = None,
+        sort_order: str | None = None,
+    ) -> Iterator[InvoiceMetadata]:
+        """Iteruje po wszystkich fakturach pasujących do filtrów.
+
+        Wygodna nakładka na :meth:`iter_invoice_metadata_pages`, która zwraca
+        pojedyncze pozycje zamiast stron. Parametry i zachowanie przy obcięciu
+        wyniku są identyczne.
+
+        Args:
+            request_payload: Filtry zapytania (``InvoiceQueryFilters``).
+            access_token: Token dostępu.
+            page_size: Rozmiar strony (10–250). Domyślnie 100.
+            page_offset: Indeks pierwszej strony (0 = początek).
+            max_pages: Opcjonalny bezpiecznik liczby stron.
+            sort_order: Kolejność sortowania (``Asc``/``Desc``).
+
+        Yields:
+            Kolejne metadane faktur.
+
+        Raises:
+            ValueError: Gdy parametry paginacji są poza dozwolonym zakresem.
+            TypeError: Gdy któryś z parametrów liczbowych nie jest liczbą
+                całkowitą.
+        """
+        for page in self.iter_invoice_metadata_pages(
+            request_payload,
+            access_token=access_token,
+            page_size=page_size,
+            page_offset=page_offset,
+            max_pages=max_pages,
+            sort_order=sort_order,
+        ):
+            yield from page.invoices
+
+    def iter_invoice_metadata_by_date_range(
+        self,
+        *,
+        subject_type: InvoiceQuerySubjectType | str,
+        date_type: InvoiceQueryDateType | str,
+        date_from: str,
+        date_to: str | None = None,
+        access_token: str,
+        page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
+        page_offset: int = 0,
+        max_pages: int | None = None,
+        sort_order: str | None = None,
+    ) -> Iterator[InvoiceMetadata]:
+        """Iteruje po metadanych faktur z zakresu dat.
+
+        Odpowiednik :meth:`query_invoice_metadata_by_date_range` dla całego
+        wyniku, nie jednej strony.
+
+        Args:
+            subject_type: Podmiot, którego dotyczą faktury.
+            date_type: Typ daty użytej do filtrowania.
+            date_from: Początek zakresu (ISO 8601).
+            date_to: Koniec zakresu; ``None`` znaczy „do teraz”.
+            access_token: Token dostępu.
+            page_size: Rozmiar strony (10–250). Domyślnie 100.
+            page_offset: Indeks pierwszej strony (0 = początek).
+            max_pages: Opcjonalny bezpiecznik liczby stron.
+            sort_order: Kolejność sortowania (``Asc``/``Desc``).
+
+        Yields:
+            Kolejne metadane faktur.
+
+        Raises:
+            ValueError: Gdy zakres dat lub parametry paginacji są niepoprawne.
+            TypeError: Gdy któryś z parametrów liczbowych nie jest liczbą
+                całkowitą.
+        """
+        yield from self.iter_invoice_metadata(
+            _build_invoice_query_filters(
+                subject_type=subject_type,
+                date_type=date_type,
+                date_from=date_from,
+                date_to=date_to,
+            ),
+            access_token=access_token,
+            page_size=page_size,
+            page_offset=page_offset,
+            max_pages=max_pages,
+            sort_order=sort_order,
+        )
+
     def export_invoices(
         self, request_payload: InvoiceExportRequest, *, access_token: str
     ) -> ExportInvoicesResponse:
@@ -360,6 +526,142 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             page_size=page_size,
             sort_order=sort_order,
         )
+
+    async def iter_invoice_metadata_pages(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        access_token: str,
+        page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
+        page_offset: int = 0,
+        max_pages: int | None = None,
+        sort_order: str | None = None,
+    ) -> AsyncIterator[QueryInvoicesMetadataResponse]:
+        """Asynchroniczny odpowiednik :meth:`InvoicesClient.iter_invoice_metadata_pages`.
+
+        Args:
+            request_payload: Filtry zapytania (``InvoiceQueryFilters``).
+            access_token: Token dostępu.
+            page_size: Rozmiar strony (10–250). Domyślnie 100.
+            page_offset: Indeks pierwszej strony (0 = początek).
+            max_pages: Opcjonalny bezpiecznik liczby stron.
+            sort_order: Kolejność sortowania (``Asc``/``Desc``).
+
+        Yields:
+            Kolejne strony odpowiedzi API.
+
+        Raises:
+            ValueError: Gdy parametry paginacji są poza dozwolonym zakresem.
+            TypeError: Gdy któryś z parametrów liczbowych nie jest liczbą
+                całkowitą.
+        """
+        validate_page_size(page_size)
+        for offset in iter_page_offsets(
+            page_size=page_size,
+            start_offset=page_offset,
+            max_pages=max_pages,
+        ):
+            page = await self.query_invoice_metadata(
+                request_payload,
+                access_token=access_token,
+                page_offset=offset,
+                page_size=page_size,
+                sort_order=sort_order,
+            )
+            yield page
+            warning = pagination_warning(page, page_size=page_size, page_offset=offset)
+            if warning is not None:
+                warnings.warn(warning, KsefPaginationWarning, stacklevel=2)
+            if not page_should_continue(page):
+                return
+
+    async def iter_invoice_metadata(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        access_token: str,
+        page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
+        page_offset: int = 0,
+        max_pages: int | None = None,
+        sort_order: str | None = None,
+    ) -> AsyncIterator[InvoiceMetadata]:
+        """Asynchroniczny odpowiednik :meth:`InvoicesClient.iter_invoice_metadata`.
+
+        Args:
+            request_payload: Filtry zapytania (``InvoiceQueryFilters``).
+            access_token: Token dostępu.
+            page_size: Rozmiar strony (10–250). Domyślnie 100.
+            page_offset: Indeks pierwszej strony (0 = początek).
+            max_pages: Opcjonalny bezpiecznik liczby stron.
+            sort_order: Kolejność sortowania (``Asc``/``Desc``).
+
+        Yields:
+            Kolejne metadane faktur.
+
+        Raises:
+            ValueError: Gdy parametry paginacji są poza dozwolonym zakresem.
+            TypeError: Gdy któryś z parametrów liczbowych nie jest liczbą
+                całkowitą.
+        """
+        async for page in self.iter_invoice_metadata_pages(
+            request_payload,
+            access_token=access_token,
+            page_size=page_size,
+            page_offset=page_offset,
+            max_pages=max_pages,
+            sort_order=sort_order,
+        ):
+            for invoice in page.invoices:
+                yield invoice
+
+    async def iter_invoice_metadata_by_date_range(
+        self,
+        *,
+        subject_type: InvoiceQuerySubjectType | str,
+        date_type: InvoiceQueryDateType | str,
+        date_from: str,
+        date_to: str | None = None,
+        access_token: str,
+        page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
+        page_offset: int = 0,
+        max_pages: int | None = None,
+        sort_order: str | None = None,
+    ) -> AsyncIterator[InvoiceMetadata]:
+        """Asynchroniczny odpowiednik iteracji po zakresie dat.
+
+        Args:
+            subject_type: Podmiot, którego dotyczą faktury.
+            date_type: Typ daty użytej do filtrowania.
+            date_from: Początek zakresu (ISO 8601).
+            date_to: Koniec zakresu; ``None`` znaczy „do teraz”.
+            access_token: Token dostępu.
+            page_size: Rozmiar strony (10–250). Domyślnie 100.
+            page_offset: Indeks pierwszej strony (0 = początek).
+            max_pages: Opcjonalny bezpiecznik liczby stron.
+            sort_order: Kolejność sortowania (``Asc``/``Desc``).
+
+        Yields:
+            Kolejne metadane faktur.
+
+        Raises:
+            ValueError: Gdy zakres dat lub parametry paginacji są niepoprawne.
+            TypeError: Gdy któryś z parametrów liczbowych nie jest liczbą
+                całkowitą.
+        """
+        async for invoice in self.iter_invoice_metadata(
+            _build_invoice_query_filters(
+                subject_type=subject_type,
+                date_type=date_type,
+                date_from=date_from,
+                date_to=date_to,
+            ),
+            access_token=access_token,
+            page_size=page_size,
+            page_offset=page_offset,
+            max_pages=max_pages,
+            sort_order=sort_order,
+        ):
+            yield invoice
 
     async def export_invoices(
         self, request_payload: InvoiceExportRequest, *, access_token: str

@@ -8,7 +8,9 @@ Katalog zawiera minimalne skrypty uruchomieniowe prezentujące podstawowe scenar
 - wysyłka faktury w sesji online (XML FA(3) z pliku),
 - resume sesji online z `OnlineSessionState`,
 - resume sesji batch z `BatchSessionState`,
-- SDK-only generowanie FA(3): builder, XML/XSD, batch ZIP, JSON draft.
+- SDK-only generowanie FA(3): builder, XML/XSD, batch ZIP, JSON draft,
+- odczyt FA(3): XML → model → XML (roundtrip),
+- profile klienta i magazyn certyfikatów bez CLI (tylko odczyt).
 
 Polecenia w tym dokumencie zakładają uruchomienie z katalogu `ksef-client-python`.
 
@@ -189,4 +191,28 @@ Uruchomienie:
 
 ```bash
 python docs/examples/fa3_json_roundtrip_sdk.py
+```
+
+### `fa3_parse_roundtrip.py`
+
+Buduje fakturę, serializuje ją do XML, odczytuje przez `parse_invoice_xml` i porównuje dokumenty
+(poza `Naglowek/DataWytworzeniaFa`). Nie wymaga sieci ani danych uwierzytelniających.
+
+Workflow: builder → `to_xml()` → `parse_invoice_xml()` → `to_xml()` → porównanie.
+
+Uruchomienie:
+
+```bash
+python docs/examples/fa3_parse_roundtrip.py
+```
+
+### `profiles_sdk.py`
+
+Pokazuje odczyt profili (`ProfileStore`) i magazynu certyfikatów (`FileCertificateStore`) bez CLI.
+Skrypt nic nie zapisuje — można go bezpiecznie uruchomić na własnej konfiguracji.
+
+Uruchomienie:
+
+```bash
+python docs/examples/profiles_sdk.py
 ```

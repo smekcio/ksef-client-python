@@ -4,6 +4,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from importlib import metadata
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .profiles import Profile, ProfileStore
 
 
 class KsefEnvironment(str, Enum):
@@ -94,3 +98,48 @@ class KsefClientOptions:
         if base.startswith(KsefEnvironment.PROD.value):
             return KsefLighthouseEnvironment.PROD.value
         raise ValueError("Unknown KSeF environment; set base_lighthouse_url explicitly.")
+
+    @classmethod
+    def from_profile(
+        cls,
+        profile: Profile | str,
+        *,
+        store: ProfileStore | None = None,
+        **overrides: Any,
+    ) -> KsefClientOptions:
+        """Buduje opcje klienta z profilu (obiektu albo nazwy w magazynie).
+
+        Profile są wspólne z CLI, więc konfiguracja utworzona przez
+        ``ksef init`` działa bez powielania ustawień w kodzie.
+
+        Args:
+            profile: Obiekt :class:`~ksef_client.profiles.Profile` albo nazwa
+                profilu do odczytania ze ``store``.
+            store: Magazyn profili; ``None`` oznacza
+                :meth:`~ksef_client.profiles.ProfileStore.default`.
+            **overrides: Pola nadpisujące wartości z profilu (np.
+                ``timeout_seconds=10``). Jawne ``base_url`` ma pierwszeństwo
+                przed adresem z profilu.
+
+        Returns:
+            Opcje gotowe do przekazania do ``KsefClient``.
+
+        Raises:
+            ProfileError: Gdy nazwa nie istnieje albo plik profili jest
+                uszkodzony.
+
+        Example:
+            ```python
+            options = KsefClientOptions.from_profile("demo")
+            client = KsefClient(options)
+            ```
+        """
+        from .profiles import ProfileStore
+
+        if isinstance(profile, str):
+            resolved = (store or ProfileStore.default()).get(profile)
+        else:
+            resolved = profile
+        options: dict[str, Any] = {"base_url": resolved.base_url}
+        options.update(overrides)
+        return cls(**options)

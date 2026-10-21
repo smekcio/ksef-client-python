@@ -39,6 +39,7 @@ from .domain import (
     PartialPayment,
     Party,
     PartyIdentifier,
+    PartyIdentifierKind,
     PaymentTerms,
     RawXmlExtension,
     Settlement,
@@ -66,6 +67,7 @@ from .models import (
     FA3Party,
     FA3ValidationIssue,
 )
+from .parse import FA3ParseError, parse_invoice_xml
 from .sections import (
     AdditionalDescription,
     AdvancePayment,
@@ -124,6 +126,7 @@ __all__ = [
     "FA3Invoice",
     "FA3InvoiceKind",
     "FA3Line",
+    "FA3ParseError",
     "FA3Party",
     "FA3ValidationIssue",
     "FA3ValidationResult",
@@ -142,6 +145,7 @@ __all__ = [
     "PartialPayment",
     "Party",
     "PartyIdentifier",
+    "PartyIdentifierKind",
     "PaymentDue",
     "PaymentMethod",
     "PaymentTerms",
@@ -167,6 +171,7 @@ __all__ = [
     "audit_fa3_xsd_coverage",
     "invoice_to_xml",
     "parse_fa3_xsd_elements",
+    "parse_invoice_xml",
     "validate_fa3_xml_xsd",
     "FA3_SCHEMA_FILE",
     "Fa3CurrencyMismatchError",
