@@ -90,10 +90,11 @@ się `ValueError`.
 - Retry działa w warstwie HTTP, więc obejmuje wszystkich klientów (również Latarnię).
 - Klient uwierzytelniony sprawdza ważność tokena przed każdą próbą HTTP, także
   po pauzie `Retry-After`. Każda próba może obsłużyć własne 401 (refresh + jedna
-  powtórka), więc maks. liczba żądań do endpointu to `2 * (max_retries + 1)`,
-  a odświeżeń — do `max_retries + 1` (gdy każda próba zwróci 401). Dla
-  `max_retries=2` to 6 żądań i 3 odświeżenia; budżet ponowień dla 429/502/503/504
-  pozostaje wspólny dla całego wywołania.
+  powtórka), więc maks. liczba żądań do endpointu to `2 * (max_retries + 1)`.
+  Do tego dochodzą wywołania refresh: jedno na próbę z 401 (`max_retries + 1`),
+  a proaktywny refresh przed próbą może dodać kolejne. Dla `max_retries=2` sam
+  scenariusz 401/429 daje 6 żądań i 3 odświeżenia; budżet ponowień dla
+  429/502/503/504 pozostaje wspólny dla całego wywołania.
 
 ## Interakcja z CLI
 
