@@ -699,3 +699,106 @@ def test_async_manager_accepts_sync_refresh_handler() -> None:
         assert await manager.force_refresh() == "fresh"
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("delay_before_callback", [False, True])
+def test_concurrent_refresh_callbacks_cannot_overwrite_newer_token(
+    delay_before_callback: bool,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    first_started = threading.Event()
+    release_first = threading.Event()
+    second_refreshed = threading.Event()
+    saved: list[str] = []
+    refreshes = 0
+
+    def handler(_: str) -> TokenInfo:
+        nonlocal refreshes
+        refreshes += 1
+        if refreshes == 2:
+            second_refreshed.set()
+        return TokenInfo(f"token-{refreshes}", FAR_FUTURE)
+
+    def persist(info: TokenInfo) -> None:
+        if info.token == "token-1" and not delay_before_callback:
+            first_started.set()
+            assert release_first.wait(5)
+        saved.append(info.token)
+
+    manager = TokenManager("initial", "rt", refresh_handler=handler, on_refresh=persist)
+    notify = manager._notify
+
+    def delayed_notify(info: TokenInfo | None) -> None:
+        if info is not None and info.token == "token-1" and delay_before_callback:
+            first_started.set()
+            assert release_first.wait(5)
+        notify(info)
+
+    manager._notify = delayed_notify  # type: ignore[method-assign]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(manager.force_refresh)
+        try:
+            assert first_started.wait(5)
+            second = executor.submit(manager.force_refresh)
+            assert second_refreshed.wait(5)
+            if delay_before_callback:
+                assert second.result(timeout=5) == "token-2"
+        finally:
+            release_first.set()
+        assert first.result(timeout=5) == "token-1"
+        assert second.result(timeout=5) == "token-2"
+
+    assert saved == (["token-2"] if delay_before_callback else ["token-1", "token-2"])
+    assert manager.get_access_token() == saved[-1] == "token-2"
+
+
+@pytest.mark.parametrize("delay_before_callback", [False, True])
+def test_async_refresh_callbacks_cannot_overwrite_newer_token(
+    delay_before_callback: bool,
+) -> None:
+    async def scenario() -> None:
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        second_refreshed = asyncio.Event()
+        saved: list[str] = []
+        refreshes = 0
+
+        async def handler(_: str) -> TokenInfo:
+            nonlocal refreshes
+            refreshes += 1
+            if refreshes == 2:
+                second_refreshed.set()
+            return TokenInfo(f"token-{refreshes}", FAR_FUTURE)
+
+        async def persist(info: TokenInfo) -> None:
+            if info.token == "token-1" and not delay_before_callback:
+                first_started.set()
+                await release_first.wait()
+            saved.append(info.token)
+
+        manager = AsyncTokenManager("initial", "rt", refresh_handler=handler, on_refresh=persist)
+        notify = manager._notify
+
+        async def delayed_notify(info: TokenInfo | None) -> None:
+            if info is not None and info.token == "token-1" and delay_before_callback:
+                first_started.set()
+                await release_first.wait()
+            await notify(info)
+
+        manager._notify = delayed_notify  # type: ignore[method-assign]
+        first = asyncio.create_task(manager.force_refresh())
+        try:
+            await first_started.wait()
+            second = asyncio.create_task(manager.force_refresh())
+            await second_refreshed.wait()
+            if delay_before_callback:
+                assert await second == "token-2"
+        finally:
+            release_first.set()
+        assert await first == "token-1"
+        assert await second == "token-2"
+        assert saved == (["token-2"] if delay_before_callback else ["token-1", "token-2"])
+        assert await manager.get_access_token() == saved[-1] == "token-2"
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=5))

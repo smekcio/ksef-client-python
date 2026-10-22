@@ -88,6 +88,9 @@ się `ValueError`.
 - Najgorszy czas oczekiwania to `max_retries * 300 s` przy `Retry-After: 300`; jeśli
   to za dużo, zmniejsz `max_retries`.
 - Retry działa w warstwie HTTP, więc obejmuje wszystkich klientów (również Latarnię).
+- Klient uwierzytelniony sprawdza ważność tokena przed każdą próbą HTTP, także
+  po pauzie `Retry-After`. Obsługa 401 nie rozpoczyna nowej pętli retry — limit
+  ponowień dla 429/502/503/504 pozostaje wspólny dla całego wywołania.
 
 ## Interakcja z CLI
 

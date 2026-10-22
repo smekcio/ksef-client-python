@@ -88,6 +88,11 @@ client = AuthenticatedClient.from_auth_result(options, auth_result, on_refresh=p
 Wyjątek z callbacku propaguje do wołającego — jeśli zapis może zawieść, obsłuż go
 wewnątrz callbacku.
 
+Callbacki zapisu są wykonywane kolejno, również przy równoległych odświeżeniach.
+Opóźniony callback jest pomijany, jeśli przed jego rozpoczęciem token został już
+zastąpiony nowszym. Callback może odczytać stan managera, ale nie powinien wywoływać
+kolejnego odświeżenia, które również uruchomiłoby callback.
+
 ### Podgląd stanu bez sekretów
 
 ```python

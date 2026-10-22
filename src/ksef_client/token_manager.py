@@ -144,6 +144,8 @@ class TokenManager:
         self._refresh_handler_is_custom = refresh_handler is not None
         self._clock = clock or _utc_now
         self._lock = threading.Lock()
+        self._notification_lock = threading.Lock()
+        self._last_refresh_info: TokenInfo | None = None
 
     @staticmethod
     def _normalize_valid_until(value: str | datetime | None) -> datetime | None:
@@ -245,6 +247,7 @@ class TokenManager:
             )
             expires_at = None
         self._access_token_expires_at = expires_at
+        self._last_refresh_info = info
         return info
 
     def _refresh_if_needed_locked(self) -> TokenInfo | None:
@@ -258,7 +261,11 @@ class TokenManager:
 
     def _notify(self, info: TokenInfo | None) -> None:
         if info is not None and self._on_refresh is not None:
-            self._on_refresh(info)
+            # Serialize writes without holding the token lock during user code.
+            # A delayed notification must not overwrite an already newer token.
+            with self._notification_lock:
+                if info is self._last_refresh_info:
+                    self._on_refresh(info)
 
     def get_access_token(self) -> str:
         """Zwraca ważny token dostępowy, odświeżając go proaktywnie, gdy trzeba."""
@@ -353,6 +360,8 @@ class AsyncTokenManager:
         self._refresh_handler_is_custom = refresh_handler is not None
         self._clock = clock or _utc_now
         self._lock = asyncio.Lock()
+        self._notification_lock = asyncio.Lock()
+        self._last_refresh_info: TokenInfo | None = None
 
     @classmethod
     def from_tokens(
@@ -426,6 +435,7 @@ class AsyncTokenManager:
             )
             expires_at = None
         self._access_token_expires_at = expires_at
+        self._last_refresh_info = info
         return info
 
     async def _refresh_if_needed_locked(self) -> TokenInfo | None:
@@ -438,9 +448,12 @@ class AsyncTokenManager:
     async def _notify(self, info: TokenInfo | None) -> None:
         if info is None or self._on_refresh is None:
             return
-        result = self._on_refresh(info)
-        if inspect.isawaitable(result):
-            await result
+        # Keep persistence ordered while allowing requests to read the token.
+        async with self._notification_lock:
+            if info is self._last_refresh_info:
+                result = self._on_refresh(info)
+                if inspect.isawaitable(result):
+                    await result
 
     async def get_access_token(self) -> str:
         """Zwraca ważny token dostępowy, odświeżając go proaktywnie, gdy trzeba."""
@@ -483,6 +496,9 @@ class TokenRefreshingHttpClient(BaseHttpClient):
     ``skip_auth``, żądanie idzie dotychczasową ścieżką — manager nie jest
     konsultowany. Odpowiedź 401 na token z managera powoduje jednorazowe
     odświeżenie i powtórzenie żądania.
+
+    Token jest pobierany w ``_request_once``, aby każda próba pętli retry
+    sprawdzała jego ważność także po długim ``Retry-After``.
     """
 
     def __init__(self, options: KsefClientOptions, token_manager: TokenManager) -> None:
@@ -494,7 +510,7 @@ class TokenRefreshingHttpClient(BaseHttpClient):
         """Manager, z którego klient pobiera token (do weryfikacji spójności)."""
         return self._token_manager
 
-    def request(
+    def _request_once(
         self,
         method: str,
         path: str,
@@ -509,7 +525,7 @@ class TokenRefreshingHttpClient(BaseHttpClient):
         expected_status: set[int] | None = None,
     ) -> HttpResponse:
         if skip_auth or access_token is not None or refresh_token is not None:
-            return super().request(
+            return super()._request_once(
                 method,
                 path,
                 params=params,
@@ -524,7 +540,7 @@ class TokenRefreshingHttpClient(BaseHttpClient):
 
         token = self._token_manager.get_access_token()
         try:
-            return super().request(
+            return super()._request_once(
                 method,
                 path,
                 params=params,
@@ -539,7 +555,7 @@ class TokenRefreshingHttpClient(BaseHttpClient):
             if exc.status_code != 401 or not self._token_manager.can_refresh:
                 raise
             fresh = self._token_manager.force_refresh(stale_token=token)
-            return super().request(
+            return super()._request_once(
                 method,
                 path,
                 params=params,
@@ -564,7 +580,7 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
         """Manager, z którego klient pobiera token (do weryfikacji spójności)."""
         return self._token_manager
 
-    async def request(
+    async def _request_once(
         self,
         method: str,
         path: str,
@@ -579,7 +595,7 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
         expected_status: set[int] | None = None,
     ) -> HttpResponse:
         if skip_auth or access_token is not None or refresh_token is not None:
-            return await super().request(
+            return await super()._request_once(
                 method,
                 path,
                 params=params,
@@ -594,7 +610,7 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
 
         token = await self._token_manager.get_access_token()
         try:
-            return await super().request(
+            return await super()._request_once(
                 method,
                 path,
                 params=params,
@@ -609,7 +625,7 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
             if exc.status_code != 401 or not self._token_manager.can_refresh:
                 raise
             fresh = await self._token_manager.force_refresh(stale_token=token)
-            return await super().request(
+            return await super()._request_once(
                 method,
                 path,
                 params=params,

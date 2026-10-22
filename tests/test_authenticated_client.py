@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
@@ -14,6 +15,7 @@ from ksef_client.config import KsefClientOptions
 from ksef_client.exceptions import KsefHttpError
 from ksef_client.http import AsyncBaseHttpClient, BaseHttpClient
 from ksef_client.models import AuthenticationTokensResponse, TokenInfo
+from ksef_client.retry import RetryConfig
 from ksef_client.services.workflows import AuthResult
 from ksef_client.token_manager import (
     AsyncTokenManager,
@@ -444,5 +446,96 @@ def test_async_from_auth_result_builds_manager() -> None:
         assert isinstance(client.http_client, AsyncTokenRefreshingHttpClient)
         assert client.token_manager.can_refresh is True
         await client.aclose()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("initial_401", [False, True])
+@pytest.mark.parametrize("exhaust_budget", [False, True])
+def test_retry_checks_token_after_each_delay(initial_401: bool, exhaust_budget: bool) -> None:
+    now = datetime(2026, 10, 22, tzinfo=timezone.utc)
+    refreshes: list[str] = []
+    sent: list[str] = []
+
+    def refresh(_: str) -> TokenInfo:
+        token = f"fresh-{len(refreshes) + 1}"
+        refreshes.append(token)
+        return TokenInfo(token, (now + timedelta(seconds=120)).isoformat())
+
+    def sleep(seconds: float) -> None:
+        nonlocal now
+        now += timedelta(seconds=seconds)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.append(request.headers["Authorization"])
+        if initial_401 and len(sent) == 1:
+            return _unauthorized()
+        if exhaust_budget or len(sent) < 3 + int(initial_401):
+            return httpx.Response(429, headers={"Retry-After": "300"})
+        return httpx.Response(204)
+
+    options = KsefClientOptions(base_url=BASE_URL, retry=RetryConfig(max_retries=2))
+    manager = TokenManager(
+        "initial", "rt", access_token_valid_until=now + timedelta(seconds=120),
+        refresh_handler=refresh, clock=lambda: now,
+    )
+    with AuthenticatedClient(options, manager) as client:
+        client._http._client.close()
+        client._http._client = httpx.Client(transport=httpx.MockTransport(handle))
+        with patch("ksef_client.http.time.sleep", sleep):
+            if exhaust_budget:
+                with pytest.raises(KsefHttpError) as error:
+                    client.auth.revoke_current_session()
+                assert error.value.status_code == 429
+            else:
+                client.auth.revoke_current_session()
+    assert len(refreshes) == 2 + int(initial_401)
+    assert sent == ["Bearer initial", *[f"Bearer {token}" for token in refreshes]]
+
+
+@pytest.mark.parametrize("initial_401", [False, True])
+@pytest.mark.parametrize("exhaust_budget", [False, True])
+def test_async_retry_checks_token_after_each_delay(
+    initial_401: bool, exhaust_budget: bool,
+) -> None:
+    async def scenario() -> None:
+        now = datetime(2026, 10, 22, tzinfo=timezone.utc)
+        refreshes: list[str] = []
+        sent: list[str] = []
+
+        async def refresh(_: str) -> TokenInfo:
+            token = f"fresh-{len(refreshes) + 1}"
+            refreshes.append(token)
+            return TokenInfo(token, (now + timedelta(seconds=120)).isoformat())
+
+        async def sleep(seconds: float) -> None:
+            nonlocal now
+            now += timedelta(seconds=seconds)
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            sent.append(request.headers["Authorization"])
+            if initial_401 and len(sent) == 1:
+                return _unauthorized()
+            if exhaust_budget or len(sent) < 3 + int(initial_401):
+                return httpx.Response(429, headers={"Retry-After": "300"})
+            return httpx.Response(204)
+
+        options = KsefClientOptions(base_url=BASE_URL, retry=RetryConfig(max_retries=2))
+        manager = AsyncTokenManager(
+            "initial", "rt", access_token_valid_until=now + timedelta(seconds=120),
+            refresh_handler=refresh, clock=lambda: now,
+        )
+        async with AsyncAuthenticatedClient(options, manager) as client:
+            await client._http._client.aclose()
+            client._http._client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+            with patch("ksef_client.http.asyncio.sleep", sleep):
+                if exhaust_budget:
+                    with pytest.raises(KsefHttpError) as error:
+                        await client.auth.revoke_current_session()
+                    assert error.value.status_code == 429
+                else:
+                    await client.auth.revoke_current_session()
+        assert len(refreshes) == 2 + int(initial_401)
+        assert sent == ["Bearer initial", *[f"Bearer {token}" for token in refreshes]]
 
     asyncio.run(scenario())
