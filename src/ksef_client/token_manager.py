@@ -17,7 +17,9 @@ Zasady działania:
   więc dwa równoległe żądania nie wykonają dwóch refreshy,
 * **jawny token wygrywa** — jeśli wołający poda ``access_token``/``refresh_token``
   w metodzie, manager nie jest konsultowany (dotychczasowe zachowanie zostaje),
-* **``skip_auth``** (pre-signed URL) nigdy nie dostaje nagłówka ``Authorization``.
+* **``skip_auth``** (pre-signed URL) nigdy nie dostaje nagłówka ``Authorization``,
+* **bezpieczne callbacki** — ``on_refresh`` nie może zainicjować kolejnego refreshu;
+  taka reentrancja kończy się ``TokenManagerError`` zamiast zakleszczenia.
 
 Bezpieczeństwo: wartości tokenów nie trafiają do ``repr`` ani do logów; po
 odświeżeniu wołający może zapisać nowy token przez ``on_refresh`` (np. do keyringa).
@@ -26,6 +28,7 @@ odświeżeniu wołający może zapisać nowy token przez ``on_refresh`` (np. do 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import logging
 import math
@@ -45,6 +48,26 @@ if TYPE_CHECKING:
     from .config import KsefClientOptions
 
 logger = logging.getLogger(__name__)
+
+class _SyncNotificationState(threading.local):
+    """Per-wątkowy znacznik „trwa callback on_refresh” (wariant sync)."""
+
+    active: bool = False
+
+
+#: Znacznik „trwa callback on_refresh” — zapobiega zakleszczeniu na locku powiadomień.
+#: Wariant sync jest per-wątek (inny wątek może odświeżać równolegle), a async jest
+#: per-zadanie (``ContextVar``), więc równoległe zadania nie są fałszywie blokowane.
+_SYNC_NOTIFYING = _SyncNotificationState()
+_ASYNC_NOTIFYING: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "ksef_client_notifying",
+    default=False,
+)
+
+_REENTRANT_REFRESH_ERROR = (
+    "on_refresh callback must not trigger another token refresh; "
+    "the callback runs while token notifications are being serialized."
+)
 
 #: Domyślny zapas przed wygaśnięciem tokena (sekundy), po którym następuje refresh.
 DEFAULT_REFRESH_MARGIN_SECONDS = 60.0
@@ -223,6 +246,8 @@ class TokenManager:
         return self._now() + timedelta(seconds=self._refresh_margin_seconds) >= expires_at
 
     def _refresh_locked(self) -> TokenInfo:
+        if _SYNC_NOTIFYING.active:
+            raise TokenManagerError(_REENTRANT_REFRESH_ERROR)
         if self._refresh_token is None or self._refresh_handler is None:
             raise TokenManagerError(
                 "Cannot refresh the access token: no refresh token or refresh handler."
@@ -265,7 +290,12 @@ class TokenManager:
             # A delayed notification must not overwrite an already newer token.
             with self._notification_lock:
                 if info is self._last_refresh_info:
-                    self._on_refresh(info)
+                    previous = _SYNC_NOTIFYING.active
+                    _SYNC_NOTIFYING.active = True
+                    try:
+                        self._on_refresh(info)
+                    finally:
+                        _SYNC_NOTIFYING.active = previous
 
     def get_access_token(self) -> str:
         """Zwraca ważny token dostępowy, odświeżając go proaktywnie, gdy trzeba."""
@@ -418,6 +448,8 @@ class AsyncTokenManager:
         return self._now() + timedelta(seconds=self._refresh_margin_seconds) >= expires_at
 
     async def _refresh_locked(self) -> TokenInfo:
+        if _ASYNC_NOTIFYING.get():
+            raise TokenManagerError(_REENTRANT_REFRESH_ERROR)
         if self._refresh_token is None or self._refresh_handler is None:
             raise TokenManagerError(
                 "Cannot refresh the access token: no refresh token or refresh handler."
@@ -451,9 +483,13 @@ class AsyncTokenManager:
         # Keep persistence ordered while allowing requests to read the token.
         async with self._notification_lock:
             if info is self._last_refresh_info:
-                result = self._on_refresh(info)
-                if inspect.isawaitable(result):
-                    await result
+                marker = _ASYNC_NOTIFYING.set(True)
+                try:
+                    result = self._on_refresh(info)
+                    if inspect.isawaitable(result):
+                        await result
+                finally:
+                    _ASYNC_NOTIFYING.reset(marker)
 
     async def get_access_token(self) -> str:
         """Zwraca ważny token dostępowy, odświeżając go proaktywnie, gdy trzeba."""

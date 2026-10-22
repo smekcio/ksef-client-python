@@ -802,3 +802,67 @@ def test_async_refresh_callbacks_cannot_overwrite_newer_token(
         assert await manager.get_access_token() == saved[-1] == "token-2"
 
     asyncio.run(asyncio.wait_for(scenario(), timeout=5))
+
+
+def test_callback_cannot_trigger_nested_refresh() -> None:
+    manager: TokenManager
+
+    def persist(info: TokenInfo) -> None:
+        manager.force_refresh()
+
+    manager = TokenManager(
+        "old",
+        "rt",
+        access_token_valid_until=NOW - timedelta(minutes=5),
+        refresh_handler=lambda rt: TokenInfo("new", FAR_FUTURE),
+        on_refresh=persist,
+        clock=_clock,
+    )
+
+    with pytest.raises(TokenManagerError, match="must not trigger"):
+        manager.get_access_token()
+
+
+def test_callback_can_read_current_token() -> None:
+    seen: list[tuple[str, str]] = []
+    manager: TokenManager
+
+    def persist(info: TokenInfo) -> None:
+        seen.append((info.token, manager.get_access_token()))
+
+    manager = TokenManager(
+        "old",
+        "rt",
+        access_token_valid_until=NOW - timedelta(minutes=5),
+        refresh_handler=lambda rt: TokenInfo("new", FAR_FUTURE),
+        on_refresh=persist,
+        clock=_clock,
+    )
+
+    assert manager.get_access_token() == "new"
+    assert seen == [("new", "new")]
+
+
+def test_async_callback_cannot_trigger_nested_refresh() -> None:
+    async def scenario() -> None:
+        manager: AsyncTokenManager
+
+        async def persist(info: TokenInfo) -> None:
+            await manager.force_refresh()
+
+        async def handler(refresh_token: str) -> TokenInfo:
+            return TokenInfo("new", FAR_FUTURE)
+
+        manager = AsyncTokenManager(
+            "old",
+            "rt",
+            access_token_valid_until=NOW - timedelta(minutes=5),
+            refresh_handler=handler,
+            on_refresh=persist,
+            clock=_clock,
+        )
+
+        with pytest.raises(TokenManagerError, match="must not trigger"):
+            await asyncio.wait_for(manager.get_access_token(), timeout=2)
+
+    asyncio.run(scenario())

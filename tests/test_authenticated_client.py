@@ -493,6 +493,36 @@ def test_retry_checks_token_after_each_delay(initial_401: bool, exhaust_budget: 
     assert sent == ["Bearer initial", *[f"Bearer {token}" for token in refreshes]]
 
 
+def test_401_refresh_per_retry_attempt_has_bounded_request_budget() -> None:
+    requests = 0
+    refreshes = 0
+
+    def refresh_handler(_: str) -> TokenInfo:
+        nonlocal refreshes
+        refreshes += 1
+        return TokenInfo(f"fresh-{refreshes}", FAR_FUTURE)
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        if requests % 2 == 1:
+            return _unauthorized()
+        return httpx.Response(429, headers={"Retry-After": "1"})
+
+    options = KsefClientOptions(base_url=BASE_URL, retry=RetryConfig(max_retries=2))
+    manager = TokenManager("initial", "rt", refresh_handler=refresh_handler)
+    with AuthenticatedClient(options, manager) as client:
+        client._http._client.close()
+        client._http._client = httpx.Client(transport=httpx.MockTransport(transport))
+        with patch("ksef_client.http.time.sleep"), pytest.raises(KsefHttpError) as excinfo:
+            client.auth.revoke_current_session()
+
+    assert excinfo.value.status_code == 429
+    # 3 próby × (401 + 429) = 6 żądań do endpointu, po jednym refreshu na próbę.
+    assert requests == 6
+    assert refreshes == 3
+
+
 @pytest.mark.parametrize("initial_401", [False, True])
 @pytest.mark.parametrize("exhaust_budget", [False, True])
 def test_async_retry_checks_token_after_each_delay(

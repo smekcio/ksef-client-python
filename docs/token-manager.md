@@ -90,8 +90,10 @@ wewnątrz callbacku.
 
 Callbacki zapisu są wykonywane kolejno, również przy równoległych odświeżeniach.
 Opóźniony callback jest pomijany, jeśli przed jego rozpoczęciem token został już
-zastąpiony nowszym. Callback może odczytać stan managera, ale nie powinien wywoływać
-kolejnego odświeżenia, które również uruchomiłoby callback.
+zastąpiony nowszym. Callback może odczytać stan managera (np. `snapshot()` albo
+`get_access_token()`, gdy token jest ważny), ale **nie może zainicjować kolejnego
+odświeżenia** — `force_refresh()` albo refresh wywołany z callbacku kończy się
+natychmiast `TokenManagerError` zamiast zakleszczenia.
 
 ### Podgląd stanu bez sekretów
 
