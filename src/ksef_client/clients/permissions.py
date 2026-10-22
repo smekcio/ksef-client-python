@@ -43,7 +43,7 @@ def _page_params(page_offset: int | None, page_size: int | None) -> dict[str, An
 
 class PermissionsClient(BaseApiClient):
     def check_attachment_permission_status(
-        self, access_token: str
+        self, access_token: str | None = None
     ) -> CheckAttachmentPermissionStatusResponse:
         return self._request_model(
             "GET",
@@ -53,7 +53,10 @@ class PermissionsClient(BaseApiClient):
         )
 
     def grant_authorization(
-        self, request_payload: EntityAuthorizationPermissionsGrantRequest, *, access_token: str
+        self,
+        request_payload: EntityAuthorizationPermissionsGrantRequest,
+        *,
+        access_token: str | None = None,
     ) -> PermissionsOperationResponse:
         return self._request_model(
             "POST",
@@ -65,7 +68,7 @@ class PermissionsClient(BaseApiClient):
         )
 
     def revoke_authorization(
-        self, permission_id: str, *, access_token: str
+        self, permission_id: str, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return self._request_model(
             "DELETE",
@@ -76,7 +79,7 @@ class PermissionsClient(BaseApiClient):
         )
 
     def revoke_common_permission(
-        self, permission_id: str, *, access_token: str
+        self, permission_id: str, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return self._request_model(
             "DELETE",
@@ -87,7 +90,7 @@ class PermissionsClient(BaseApiClient):
         )
 
     def grant_entity(
-        self, request_payload: EntityPermissionsGrantRequest, *, access_token: str
+        self, request_payload: EntityPermissionsGrantRequest, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return self._request_model(
             "POST",
@@ -99,7 +102,7 @@ class PermissionsClient(BaseApiClient):
         )
 
     def grant_eu_entity(
-        self, request_payload: EuEntityPermissionsGrantRequest, *, access_token: str
+        self, request_payload: EuEntityPermissionsGrantRequest, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return self._request_model(
             "POST",
@@ -114,7 +117,7 @@ class PermissionsClient(BaseApiClient):
         self,
         request_payload: EuEntityAdministrationPermissionsGrantRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> PermissionsOperationResponse:
         return self._request_model(
             "POST",
@@ -126,7 +129,7 @@ class PermissionsClient(BaseApiClient):
         )
 
     def grant_indirect(
-        self, request_payload: IndirectPermissionsGrantRequest, *, access_token: str
+        self, request_payload: IndirectPermissionsGrantRequest, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return self._request_model(
             "POST",
@@ -138,7 +141,7 @@ class PermissionsClient(BaseApiClient):
         )
 
     def grant_person(
-        self, request_payload: PersonPermissionsGrantRequest, *, access_token: str
+        self, request_payload: PersonPermissionsGrantRequest, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return self._request_model(
             "POST",
@@ -150,7 +153,7 @@ class PermissionsClient(BaseApiClient):
         )
 
     def grant_subunit(
-        self, request_payload: SubunitPermissionsGrantRequest, *, access_token: str
+        self, request_payload: SubunitPermissionsGrantRequest, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return self._request_model(
             "POST",
@@ -162,7 +165,7 @@ class PermissionsClient(BaseApiClient):
         )
 
     def get_operation_status(
-        self, reference_number: str, *, access_token: str
+        self, reference_number: str, *, access_token: str | None = None
     ) -> PermissionsOperationStatusResponse:
         return self._request_model(
             "GET",
@@ -177,7 +180,7 @@ class PermissionsClient(BaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryEntityAuthorizationPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return self._request_model(
@@ -194,7 +197,7 @@ class PermissionsClient(BaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryEntityRolesResponse:
         params = _page_params(page_offset, page_size)
         return self._request_model(
@@ -211,7 +214,7 @@ class PermissionsClient(BaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryEntityPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return self._request_model(
@@ -229,7 +232,7 @@ class PermissionsClient(BaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryEuEntityPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return self._request_model(
@@ -247,7 +250,7 @@ class PermissionsClient(BaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryPersonalPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return self._request_model(
@@ -265,7 +268,7 @@ class PermissionsClient(BaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryPersonPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return self._request_model(
@@ -283,7 +286,7 @@ class PermissionsClient(BaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QuerySubordinateEntityRolesResponse:
         params = _page_params(page_offset, page_size)
         return self._request_model(
@@ -301,7 +304,7 @@ class PermissionsClient(BaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QuerySubunitPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return self._request_model(
@@ -316,7 +319,7 @@ class PermissionsClient(BaseApiClient):
 
 class AsyncPermissionsClient(AsyncBaseApiClient):
     async def check_attachment_permission_status(
-        self, access_token: str
+        self, access_token: str | None = None
     ) -> CheckAttachmentPermissionStatusResponse:
         return await self._request_model(
             "GET",
@@ -326,7 +329,10 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         )
 
     async def grant_authorization(
-        self, request_payload: EntityAuthorizationPermissionsGrantRequest, *, access_token: str
+        self,
+        request_payload: EntityAuthorizationPermissionsGrantRequest,
+        *,
+        access_token: str | None = None,
     ) -> PermissionsOperationResponse:
         return await self._request_model(
             "POST",
@@ -338,7 +344,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         )
 
     async def revoke_authorization(
-        self, permission_id: str, *, access_token: str
+        self, permission_id: str, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return await self._request_model(
             "DELETE",
@@ -349,7 +355,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         )
 
     async def revoke_common_permission(
-        self, permission_id: str, *, access_token: str
+        self, permission_id: str, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return await self._request_model(
             "DELETE",
@@ -360,7 +366,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         )
 
     async def grant_entity(
-        self, request_payload: EntityPermissionsGrantRequest, *, access_token: str
+        self, request_payload: EntityPermissionsGrantRequest, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return await self._request_model(
             "POST",
@@ -372,7 +378,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         )
 
     async def grant_eu_entity(
-        self, request_payload: EuEntityPermissionsGrantRequest, *, access_token: str
+        self, request_payload: EuEntityPermissionsGrantRequest, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return await self._request_model(
             "POST",
@@ -387,7 +393,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         self,
         request_payload: EuEntityAdministrationPermissionsGrantRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> PermissionsOperationResponse:
         return await self._request_model(
             "POST",
@@ -399,7 +405,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         )
 
     async def grant_indirect(
-        self, request_payload: IndirectPermissionsGrantRequest, *, access_token: str
+        self, request_payload: IndirectPermissionsGrantRequest, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return await self._request_model(
             "POST",
@@ -411,7 +417,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         )
 
     async def grant_person(
-        self, request_payload: PersonPermissionsGrantRequest, *, access_token: str
+        self, request_payload: PersonPermissionsGrantRequest, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return await self._request_model(
             "POST",
@@ -423,7 +429,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         )
 
     async def grant_subunit(
-        self, request_payload: SubunitPermissionsGrantRequest, *, access_token: str
+        self, request_payload: SubunitPermissionsGrantRequest, *, access_token: str | None = None
     ) -> PermissionsOperationResponse:
         return await self._request_model(
             "POST",
@@ -435,7 +441,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         )
 
     async def get_operation_status(
-        self, reference_number: str, *, access_token: str
+        self, reference_number: str, *, access_token: str | None = None
     ) -> PermissionsOperationStatusResponse:
         return await self._request_model(
             "GET",
@@ -450,7 +456,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryEntityAuthorizationPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return await self._request_model(
@@ -467,7 +473,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryEntityRolesResponse:
         params = _page_params(page_offset, page_size)
         return await self._request_model(
@@ -484,7 +490,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryEntityPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return await self._request_model(
@@ -502,7 +508,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryEuEntityPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return await self._request_model(
@@ -520,7 +526,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryPersonalPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return await self._request_model(
@@ -538,7 +544,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryPersonPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return await self._request_model(
@@ -556,7 +562,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QuerySubordinateEntityRolesResponse:
         params = _page_params(page_offset, page_size)
         return await self._request_model(
@@ -574,7 +580,7 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         *,
         page_offset: int | None = None,
         page_size: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QuerySubunitPermissionsResponse:
         params = _page_params(page_offset, page_size)
         return await self._request_model(

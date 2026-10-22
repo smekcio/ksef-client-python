@@ -80,6 +80,23 @@ options = KsefClientOptions(
 Publiczne API SDK nie dodaje osobnego parametru do tego nagłówka; używa istniejącego
 `custom_headers`.
 
+## Automatyczny retry w SDK
+
+Zamiast ręcznej pętli możesz włączyć retry w konfiguracji klienta — SDK respektuje
+`Retry-After`, stosuje backoff z jitterem i ponawia tylko bezpieczne metody
+(`GET`/`PUT`/`DELETE`; `POST` wyłącznie po jawnym dodaniu ścieżki):
+
+```python
+from ksef_client import KsefClientOptions, RetryConfig
+
+options = KsefClientOptions(base_url="...", retry=RetryConfig())
+```
+
+Retry jest domyślnie wyłączony. Szczegóły i ograniczenia: [retry.md](retry.md).
+
+Poniższy przykład pokazuje ręczną obsługę 429 — przydaje się, gdy potrzebujesz
+pełnej kontroli nad pętlą.
+
 ## Przykładowa obsługa 429 z `Retry-After`
 
 ```python

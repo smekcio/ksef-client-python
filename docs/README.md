@@ -51,6 +51,8 @@ Biblioteka udostępnia trzy poziomy użycia:
 - [Migracja typed model API](migration-typed-model-api.md)
 - [Konfiguracja klienta](configuration.md)
 - [Błędy i retry](errors.md)
+- [Retry HTTP (backoff i `Retry-After`)](retry.md)
+- [Klient uwierzytelniony i auto-refresh tokena](token-manager.md)
 
 **Referencja API (endpointy):**
 

@@ -13,7 +13,7 @@ from .base import AsyncBaseApiClient, BaseApiClient
 
 class TokensClient(BaseApiClient):
     def generate_token(
-        self, request_payload: GenerateTokenRequest, *, access_token: str
+        self, request_payload: GenerateTokenRequest, *, access_token: str | None = None
     ) -> GenerateTokenResponse:
         return self._request_model(
             "POST",
@@ -27,7 +27,7 @@ class TokensClient(BaseApiClient):
     def list_tokens(
         self,
         *,
-        access_token: str,
+        access_token: str | None = None,
         statuses: list[str] | None = None,
         description: str | None = None,
         author_identifier: str | None = None,
@@ -60,7 +60,9 @@ class TokensClient(BaseApiClient):
             access_token=access_token,
         )
 
-    def get_token_status(self, reference_number: str, *, access_token: str) -> TokenStatusResponse:
+    def get_token_status(
+        self, reference_number: str, *, access_token: str | None = None
+    ) -> TokenStatusResponse:
         return self._request_model(
             "GET",
             f"/tokens/{reference_number}",
@@ -68,7 +70,7 @@ class TokensClient(BaseApiClient):
             access_token=access_token,
         )
 
-    def revoke_token(self, reference_number: str, *, access_token: str) -> None:
+    def revoke_token(self, reference_number: str, *, access_token: str | None = None) -> None:
         self._request_json(
             "DELETE",
             f"/tokens/{reference_number}",
@@ -79,7 +81,7 @@ class TokensClient(BaseApiClient):
 
 class AsyncTokensClient(AsyncBaseApiClient):
     async def generate_token(
-        self, request_payload: GenerateTokenRequest, *, access_token: str
+        self, request_payload: GenerateTokenRequest, *, access_token: str | None = None
     ) -> GenerateTokenResponse:
         return await self._request_model(
             "POST",
@@ -93,7 +95,7 @@ class AsyncTokensClient(AsyncBaseApiClient):
     async def list_tokens(
         self,
         *,
-        access_token: str,
+        access_token: str | None = None,
         statuses: list[str] | None = None,
         description: str | None = None,
         author_identifier: str | None = None,
@@ -127,7 +129,7 @@ class AsyncTokensClient(AsyncBaseApiClient):
         )
 
     async def get_token_status(
-        self, reference_number: str, *, access_token: str
+        self, reference_number: str, *, access_token: str | None = None
     ) -> TokenStatusResponse:
         return await self._request_model(
             "GET",
@@ -136,7 +138,7 @@ class AsyncTokensClient(AsyncBaseApiClient):
             access_token=access_token,
         )
 
-    async def revoke_token(self, reference_number: str, *, access_token: str) -> None:
+    async def revoke_token(self, reference_number: str, *, access_token: str | None = None) -> None:
         await self._request_json(
             "DELETE",
             f"/tokens/{reference_number}",

@@ -5,7 +5,7 @@ from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class RateLimitsClient(BaseApiClient):
-    def get_rate_limits(self, access_token: str) -> EffectiveApiRateLimits:
+    def get_rate_limits(self, access_token: str | None = None) -> EffectiveApiRateLimits:
         return self._request_model(
             "GET",
             "/rate-limits",
@@ -15,7 +15,7 @@ class RateLimitsClient(BaseApiClient):
 
 
 class AsyncRateLimitsClient(AsyncBaseApiClient):
-    async def get_rate_limits(self, access_token: str) -> EffectiveApiRateLimits:
+    async def get_rate_limits(self, access_token: str | None = None) -> EffectiveApiRateLimits:
         return await self._request_model(
             "GET",
             "/rate-limits",

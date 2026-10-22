@@ -46,7 +46,30 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
     ).access_token
 ```
 
+## 2b) Klient z automatycznym odświeżaniem tokena
+
+`AuthenticatedClient` wstrzykuje token do każdego żądania i odświeża go 60 s przed
+wygaśnięciem — nie musisz przekazywać `access_token` do metod:
+
+```python
+from ksef_client import AuthenticatedClient
+from ksef_client.services import AuthCoordinator
+
+with KsefClient(options) as anonymous:
+    auth_result = AuthCoordinator(anonymous.auth).authenticate_with_ksef_token(...)
+
+with AuthenticatedClient.from_auth_result(options, auth_result) as client:
+    invoice = client.invoices.get_invoice("<KSEF_NUMBER>")   # bez access_token
+```
+
+Szczegóły (refresh proaktywny/reaktywny, `on_refresh`, wariant async):
+[token-manager.md](token-manager.md). Jeśli wolisz stare API, `access_token` w metodach
+nadal działa i ma pierwszeństwo.
+
 ## 3) Pierwsze wywołanie API
+
+`access_token` jest opcjonalny: przy `AuthenticatedClient` możesz go pominąć,
+a przy zwykłym `KsefClient` przekazujesz go jawnie (tak jak dotychczas).
 
 ```python
 metadata = client.invoices.query_invoice_metadata_by_date_range(

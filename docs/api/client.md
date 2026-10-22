@@ -42,12 +42,17 @@ asyncio.run(main())
 
 ## Token (`access_token`)
 
-Token może zostać przekazany na dwa sposoby:
+Token może zostać przekazany na trzy sposoby:
 
 - w konstruktorze: `KsefClient(options, access_token=...)`
 - per-call: `client.invoices.query_invoice_metadata(..., access_token=...)`
+- przez `AuthenticatedClient` — token jest wstrzykiwany do każdego żądania i odświeżany
+  automatycznie; żadna metoda nie wymaga wtedy `access_token`
+  (patrz [Klient uwierzytelniony i tokeny](../token-manager.md))
 
-Wariant per-call jest preferowany w przypadku obsługi wielu kontekstów.
+Wariant per-call jest preferowany w przypadku obsługi wielu kontekstów. We wszystkich
+metodach klientów `access_token` ma domyślnie `None` — jawne przekazanie tokena nadal
+działa i ma pierwszeństwo przed tokenem klienta.
 
 Ważne dla resume workflow:
 - handle sesji (`OnlineSessionHandle`, `BatchSessionHandle`) i metody `client.sessions.*`

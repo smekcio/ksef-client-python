@@ -18,7 +18,7 @@ from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class CertificatesClient(BaseApiClient):
-    def get_limits(self, access_token: str) -> CertificateLimitsResponse:
+    def get_limits(self, access_token: str | None = None) -> CertificateLimitsResponse:
         return self._request_model(
             "GET",
             "/certificates/limits",
@@ -26,7 +26,9 @@ class CertificatesClient(BaseApiClient):
             access_token=access_token,
         )
 
-    def get_enrollment_data(self, access_token: str) -> CertificateEnrollmentDataResponse:
+    def get_enrollment_data(
+        self, access_token: str | None = None
+    ) -> CertificateEnrollmentDataResponse:
         return self._request_model(
             "GET",
             "/certificates/enrollments/data",
@@ -35,7 +37,7 @@ class CertificatesClient(BaseApiClient):
         )
 
     def send_enrollment(
-        self, request_payload: EnrollCertificateRequest, *, access_token: str
+        self, request_payload: EnrollCertificateRequest, *, access_token: str | None = None
     ) -> EnrollCertificateResponse:
         return self._request_model(
             "POST",
@@ -47,7 +49,7 @@ class CertificatesClient(BaseApiClient):
         )
 
     def get_enrollment_status(
-        self, reference_number: str, *, access_token: str
+        self, reference_number: str, *, access_token: str | None = None
     ) -> CertificateEnrollmentStatusResponse:
         return self._request_model(
             "GET",
@@ -62,7 +64,7 @@ class CertificatesClient(BaseApiClient):
         *,
         page_size: int | None = None,
         page_offset: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryCertificatesResponse:
         params: dict[str, Any] = {}
         if page_size is not None:
@@ -79,7 +81,7 @@ class CertificatesClient(BaseApiClient):
         )
 
     def retrieve_certificate(
-        self, request_payload: RetrieveCertificatesRequest, *, access_token: str
+        self, request_payload: RetrieveCertificatesRequest, *, access_token: str | None = None
     ) -> RetrieveCertificatesResponse:
         return self._request_model(
             "POST",
@@ -94,7 +96,7 @@ class CertificatesClient(BaseApiClient):
         certificate_serial_number: str,
         request_payload: RevokeCertificateRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> None:
         self._request_json(
             "POST",
@@ -106,7 +108,7 @@ class CertificatesClient(BaseApiClient):
 
 
 class AsyncCertificatesClient(AsyncBaseApiClient):
-    async def get_limits(self, access_token: str) -> CertificateLimitsResponse:
+    async def get_limits(self, access_token: str | None = None) -> CertificateLimitsResponse:
         return await self._request_model(
             "GET",
             "/certificates/limits",
@@ -114,7 +116,9 @@ class AsyncCertificatesClient(AsyncBaseApiClient):
             access_token=access_token,
         )
 
-    async def get_enrollment_data(self, access_token: str) -> CertificateEnrollmentDataResponse:
+    async def get_enrollment_data(
+        self, access_token: str | None = None
+    ) -> CertificateEnrollmentDataResponse:
         return await self._request_model(
             "GET",
             "/certificates/enrollments/data",
@@ -123,7 +127,7 @@ class AsyncCertificatesClient(AsyncBaseApiClient):
         )
 
     async def send_enrollment(
-        self, request_payload: EnrollCertificateRequest, *, access_token: str
+        self, request_payload: EnrollCertificateRequest, *, access_token: str | None = None
     ) -> EnrollCertificateResponse:
         return await self._request_model(
             "POST",
@@ -135,7 +139,7 @@ class AsyncCertificatesClient(AsyncBaseApiClient):
         )
 
     async def get_enrollment_status(
-        self, reference_number: str, *, access_token: str
+        self, reference_number: str, *, access_token: str | None = None
     ) -> CertificateEnrollmentStatusResponse:
         return await self._request_model(
             "GET",
@@ -150,7 +154,7 @@ class AsyncCertificatesClient(AsyncBaseApiClient):
         *,
         page_size: int | None = None,
         page_offset: int | None = None,
-        access_token: str,
+        access_token: str | None = None,
     ) -> QueryCertificatesResponse:
         params: dict[str, Any] = {}
         if page_size is not None:
@@ -167,7 +171,7 @@ class AsyncCertificatesClient(AsyncBaseApiClient):
         )
 
     async def retrieve_certificate(
-        self, request_payload: RetrieveCertificatesRequest, *, access_token: str
+        self, request_payload: RetrieveCertificatesRequest, *, access_token: str | None = None
     ) -> RetrieveCertificatesResponse:
         return await self._request_model(
             "POST",
@@ -182,7 +186,7 @@ class AsyncCertificatesClient(AsyncBaseApiClient):
         certificate_serial_number: str,
         request_payload: RevokeCertificateRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
     ) -> None:
         await self._request_json(
             "POST",

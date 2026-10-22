@@ -4,6 +4,16 @@
 
 ### Features
 
+* **sdk:** klient uwierzytelniony z auto-refresh tokena — `AuthenticatedClient`/
+  `AsyncAuthenticatedClient` i `TokenManager`/`AsyncTokenManager`. Token dostępowy jest
+  wstrzykiwany w warstwie HTTP, odświeżany proaktywnie 60 s przed wygaśnięciem (`refresh_margin_seconds`)
+  i jednorazowo po odpowiedzi 401; refresh jest deduplikowany lockiem, a `on_refresh` pozwala
+  zapisać nowy token. `access_token` nie jest już wymagany w żadnej metodzie klientów — jawne
+  przekazanie tokena nadal działa i ma pierwszeństwo
+* **sdk:** retry HTTP włączany przez `KsefClientOptions(retry=RetryConfig())` — ponawianie
+  429/502/503/504 z backoffem wykładniczym i jitterem, respektowanie `Retry-After` (sufit 300 s)
+  oraz allowlista metod (`GET`/`PUT`/`DELETE`; `POST` tylko po jawnym dodaniu ścieżki). Retry jest
+  domyślnie wyłączony, więc dotychczasowe zachowanie pozostaje bez zmian
 * **sdk:** odczyt FA(3) — nowy moduł `ksef_client.documents.fa3.parse` z `parse_invoice_xml()`
   i `FA3Invoice.from_xml()` zamienia dokument FA(3) na model domenowy. Parser pokrywa wszystkie
   rodzaje faktur, adnotacje, zaliczki, korekty, rozliczenie, płatność, warunki transakcji,

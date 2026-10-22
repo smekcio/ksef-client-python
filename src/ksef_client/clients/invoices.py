@@ -187,7 +187,7 @@ def _serialize_invoice_payload(request_payload: Any) -> _SerializedInvoicePayloa
 
 
 class InvoicesClient(BaseApiClient):
-    def get_invoice(self, ksef_number: str, *, access_token: str) -> InvoiceContent:
+    def get_invoice(self, ksef_number: str, *, access_token: str | None = None) -> InvoiceContent:
         response = self._request_raw(
             "GET",
             f"/invoices/ksef/{ksef_number}",
@@ -199,7 +199,9 @@ class InvoicesClient(BaseApiClient):
             sha256_base64=response.headers.get("x-ms-meta-hash"),
         )
 
-    def get_invoice_bytes(self, ksef_number: str, *, access_token: str) -> BinaryContent:
+    def get_invoice_bytes(
+        self, ksef_number: str, *, access_token: str | None = None
+    ) -> BinaryContent:
         response = self._request_raw(
             "GET",
             f"/invoices/ksef/{ksef_number}",
@@ -215,7 +217,7 @@ class InvoicesClient(BaseApiClient):
         self,
         request_payload: InvoiceQueryFilters,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_offset: int | None = None,
         page_size: int | None = None,
         sort_order: str | None = None,
@@ -243,7 +245,7 @@ class InvoicesClient(BaseApiClient):
         date_type: InvoiceQueryDateType | str,
         date_from: str,
         date_to: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
         page_offset: int | None = None,
         page_size: int | None = None,
         sort_order: str | None = None,
@@ -265,7 +267,7 @@ class InvoicesClient(BaseApiClient):
         self,
         request_payload: InvoiceQueryFilters,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
         page_offset: int = 0,
         max_pages: int | None = None,
@@ -326,7 +328,7 @@ class InvoicesClient(BaseApiClient):
         self,
         request_payload: InvoiceQueryFilters,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
         page_offset: int = 0,
         max_pages: int | None = None,
@@ -380,7 +382,7 @@ class InvoicesClient(BaseApiClient):
         date_type: InvoiceQueryDateType | str,
         date_from: str,
         date_to: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
         page_offset: int = 0,
         max_pages: int | None = None,
@@ -436,7 +438,7 @@ class InvoicesClient(BaseApiClient):
                 return
 
     def export_invoices(
-        self, request_payload: InvoiceExportRequest, *, access_token: str
+        self, request_payload: InvoiceExportRequest, *, access_token: str | None = None
     ) -> ExportInvoicesResponse:
         return self._request_model(
             "POST",
@@ -448,7 +450,7 @@ class InvoicesClient(BaseApiClient):
         )
 
     def get_export_status(
-        self, reference_number: str, *, access_token: str
+        self, reference_number: str, *, access_token: str | None = None
     ) -> InvoiceExportStatusResponse:
         return self._request_model(
             "GET",
@@ -472,7 +474,9 @@ class InvoicesClient(BaseApiClient):
 
 
 class AsyncInvoicesClient(AsyncBaseApiClient):
-    async def get_invoice(self, ksef_number: str, *, access_token: str) -> InvoiceContent:
+    async def get_invoice(
+        self, ksef_number: str, *, access_token: str | None = None
+    ) -> InvoiceContent:
         response = await self._request_raw(
             "GET",
             f"/invoices/ksef/{ksef_number}",
@@ -484,7 +488,9 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             sha256_base64=response.headers.get("x-ms-meta-hash"),
         )
 
-    async def get_invoice_bytes(self, ksef_number: str, *, access_token: str) -> BinaryContent:
+    async def get_invoice_bytes(
+        self, ksef_number: str, *, access_token: str | None = None
+    ) -> BinaryContent:
         response = await self._request_raw(
             "GET",
             f"/invoices/ksef/{ksef_number}",
@@ -500,7 +506,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         self,
         request_payload: InvoiceQueryFilters,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_offset: int | None = None,
         page_size: int | None = None,
         sort_order: str | None = None,
@@ -528,7 +534,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         date_type: InvoiceQueryDateType | str,
         date_from: str,
         date_to: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
         page_offset: int | None = None,
         page_size: int | None = None,
         sort_order: str | None = None,
@@ -550,7 +556,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         self,
         request_payload: InvoiceQueryFilters,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
         page_offset: int = 0,
         max_pages: int | None = None,
@@ -597,7 +603,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         self,
         request_payload: InvoiceQueryFilters,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
         page_offset: int = 0,
         max_pages: int | None = None,
@@ -648,7 +654,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         date_type: InvoiceQueryDateType | str,
         date_from: str,
         date_to: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
         page_offset: int = 0,
         max_pages: int | None = None,
@@ -702,7 +708,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
                 return
 
     async def export_invoices(
-        self, request_payload: InvoiceExportRequest, *, access_token: str
+        self, request_payload: InvoiceExportRequest, *, access_token: str | None = None
     ) -> ExportInvoicesResponse:
         return await self._request_model(
             "POST",
@@ -714,7 +720,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         )
 
     async def get_export_status(
-        self, reference_number: str, *, access_token: str
+        self, reference_number: str, *, access_token: str | None = None
     ) -> InvoiceExportStatusResponse:
         return await self._request_model(
             "GET",

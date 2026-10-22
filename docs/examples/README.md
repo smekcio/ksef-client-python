@@ -11,6 +11,8 @@ Katalog zawiera minimalne skrypty uruchomieniowe prezentujące podstawowe scenar
 - SDK-only generowanie FA(3): builder, XML/XSD, batch ZIP, JSON draft,
 - odczyt FA(3): XML → model → XML (roundtrip),
 - profile klienta i magazyn certyfikatów bez CLI (tylko odczyt).
+- klient z automatycznym odświeżaniem tokena (`AuthenticatedClient`),
+- konfiguracja retry HTTP (`RetryConfig`) bez łączenia się z KSeF.
 
 Polecenia w tym dokumencie zakładają uruchomienie z katalogu `ksef-client-python`.
 
@@ -215,4 +217,24 @@ Uruchomienie:
 
 ```bash
 python docs/examples/profiles_sdk.py
+```
+
+### `authenticated_client.py`
+
+Uwierzytelnienie tokenem KSeF i wywołanie API przez `AuthenticatedClient` — bez
+przekazywania `access_token` do metod. Token jest odświeżany automatycznie.
+
+```bash
+KSEF_TOKEN=... KSEF_CONTEXT_TYPE=nip KSEF_CONTEXT_VALUE=... \
+KSEF_BASE_URL=https://api-demo.ksef.mf.gov.pl \
+python docs/examples/authenticated_client.py
+```
+
+### `retry_config.py`
+
+Pokazuje `RetryConfig` w praktyce: które metody/statusy są ponawiane, jak rośnie
+backoff i jak `Retry-After` wpływa na opóźnienie. Nie wymaga sieci ani tokena.
+
+```bash
+python docs/examples/retry_config.py
 ```

@@ -603,7 +603,7 @@ class OnlineSessionWorkflow:
         form_code: FormCode,
         public_certificate: str,
         public_key_id: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
         upo_v43: bool = False,
     ) -> OnlineSessionHandle:
         encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
@@ -643,7 +643,7 @@ class OnlineSessionWorkflow:
         session_reference_number: str,
         invoice_xml: bytes,
         encryption_data: EncryptionData,
-        access_token: str,
+        access_token: str | None = None,
         offline_mode: bool | None = None,
         hash_of_corrected_invoice: str | None = None,
     ) -> SendInvoiceResponse:
@@ -660,7 +660,7 @@ class OnlineSessionWorkflow:
             access_token=access_token,
         )
 
-    def close_session(self, reference_number: str, access_token: str) -> None:
+    def close_session(self, reference_number: str, access_token: str | None = None) -> None:
         self._sessions.close_online_session(reference_number, access_token)
 
 
@@ -674,7 +674,7 @@ class AsyncOnlineSessionWorkflow:
         form_code: FormCode,
         public_certificate: str,
         public_key_id: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
         upo_v43: bool = False,
     ) -> AsyncOnlineSessionHandle:
         encryption = build_encryption_data(public_certificate, public_key_id=public_key_id)
@@ -714,7 +714,7 @@ class AsyncOnlineSessionWorkflow:
         session_reference_number: str,
         invoice_xml: bytes,
         encryption_data: EncryptionData,
-        access_token: str,
+        access_token: str | None = None,
         offline_mode: bool | None = None,
         hash_of_corrected_invoice: str | None = None,
     ) -> SendInvoiceResponse:
@@ -731,7 +731,7 @@ class AsyncOnlineSessionWorkflow:
             access_token=access_token,
         )
 
-    async def close_session(self, reference_number: str, access_token: str) -> None:
+    async def close_session(self, reference_number: str, access_token: str | None = None) -> None:
         await self._sessions.close_online_session(reference_number, access_token)
 
 
@@ -757,7 +757,7 @@ class BatchSessionWorkflow:
         compression_type: CompressionType | str = CompressionType.ZIP,
         public_certificate: str,
         public_key_id: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
     ) -> BatchSessionHandle:
@@ -827,7 +827,7 @@ class BatchSessionWorkflow:
         compression_type: CompressionType | str = CompressionType.ZIP,
         public_certificate: str,
         public_key_id: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
         parallelism: int = 1,
@@ -873,7 +873,7 @@ class AsyncBatchSessionWorkflow:
         compression_type: CompressionType | str = CompressionType.ZIP,
         public_certificate: str,
         public_key_id: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
     ) -> AsyncBatchSessionHandle:
@@ -943,7 +943,7 @@ class AsyncBatchSessionWorkflow:
         compression_type: CompressionType | str = CompressionType.ZIP,
         public_certificate: str,
         public_key_id: str | None = None,
-        access_token: str,
+        access_token: str | None = None,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
         parallelism: int = 1,
