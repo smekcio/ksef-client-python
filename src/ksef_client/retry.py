@@ -39,13 +39,14 @@ MAX_RETRY_AFTER_SECONDS = 300
 #: ``Retry-After`` i tylko one kwalifikują się do pętli retry.
 RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({429, 502, 503, 504})
 
-#: Twardy sufit opóźnienia jednej ponownej próby (24 h, w milisekundach).
+#: Twardy sufit opóźnienia jednej ponownej próby (5 minut, w milisekundach).
 #:
-#: ``max_delay_ms=None`` wyłącza **własny** sufit konfiguracji, ale nie ten
-#: bezpieczeństwa: bez niego backoff wykładniczy przy dużym ``max_retries``
-#: dochodziłby do wartości, których ``time.sleep``/``asyncio.sleep`` nie przyjmą
-#: (``OverflowError``), zamiast po prostu czekać.
-MAX_RETRY_DELAY_MS = 86_400_000
+#: Ten sam limit co ``MAX_RETRY_AFTER_SECONDS``: SDK nigdy nie usypia procesu na
+#: dłużej niż 5 minut na jedną próbę. ``max_delay_ms=None`` wyłącza **własny**
+#: sufit konfiguracji, ale nie ten; bez niego backoff wykładniczy przy dużym
+#: ``max_retries`` dochodziłby do wartości, których ``time.sleep``/``asyncio.sleep``
+#: nie przyjmą (``OverflowError``), zamiast po prostu czekać.
+MAX_RETRY_DELAY_MS = 300_000
 
 
 @dataclass(frozen=True)
@@ -53,19 +54,19 @@ class RetryConfig:
     """Konfiguracja automatycznego ponawiania żądań HTTP.
 
     Args:
-        max_retries: Ile razy ponowić po nieudanej próbie (``0`` = jedno żądanie,
-            bez ponowień).
+        max_retries: Ile razy ponowić po nieudanej próbie (``0..20``; ``0`` = jedno
+            żądanie, bez ponowień).
         base_delay_ms: Bazowe opóźnienie pierwszej ponownej próby (milisekundy).
         jitter_ratio: Losowy rozrzut opóźnienia w zakresie ``±jitter_ratio``
             (``0.2`` = ±20%), żeby równolegli klienci nie uderzali w serwer
             w tej samej chwili.
         max_delay_ms: Sufit wyliczonego backoffu (milisekundy); ``None`` wyłącza
             własny sufit konfiguracji, ale nadal obowiązuje twardy sufit
-            bezpieczeństwa ``MAX_RETRY_DELAY_MS`` (24 h). Nie dotyczy
+            bezpieczeństwa ``MAX_RETRY_DELAY_MS`` (5 min). Nie dotyczy
             ``Retry-After`` — wartość podana przez serwer ma pierwszeństwo
             (z sufitem ``MAX_RETRY_AFTER_SECONDS``).
-        retryable_methods: Metody, które wolno ponawiać. Wartości są normalizowane
-            do wielkich liter.
+        retryable_methods: Metody, które wolno ponawiać (bez ``POST`` — ten ma
+            osobną allowlistę ścieżek). Wartości są normalizowane do wielkich liter.
         retryable_post_paths: Ścieżki ``POST`` (dokładne, względne, np.
             ``"/invoices/query/metadata"``), które wolno ponawiać. Puste domyślnie:
             wysyłka faktury i redeem tokena nie mogą zostać powtórzone przez pomyłkę.
@@ -84,8 +85,8 @@ class RetryConfig:
     def __post_init__(self) -> None:
         if self.max_retries < 0:
             raise ValueError("max_retries must be >= 0")
-        if self.max_retries > 100:
-            raise ValueError("max_retries must be <= 100")
+        if self.max_retries > 20:
+            raise ValueError("max_retries must be <= 20")
         if self.base_delay_ms <= 0:
             raise ValueError("base_delay_ms must be > 0")
         if not (0 <= self.jitter_ratio <= 1):
@@ -93,10 +94,20 @@ class RetryConfig:
         if self.max_delay_ms is not None and self.max_delay_ms < self.base_delay_ms:
             raise ValueError("max_delay_ms must be >= base_delay_ms")
         if self.max_delay_ms is not None and self.max_delay_ms > MAX_RETRY_DELAY_MS:
-            raise ValueError(f"max_delay_ms must be <= {MAX_RETRY_DELAY_MS} (24 h)")
+            raise ValueError(f"max_delay_ms must be <= {MAX_RETRY_DELAY_MS} (5 min)")
         methods = frozenset(str(method).strip().upper() for method in self.retryable_methods)
         if "" in methods:
             raise ValueError("retryable_methods cannot contain an empty method name")
+        if "POST" in methods:
+            raise ValueError(
+                "POST cannot be added to retryable_methods; "
+                "use retryable_post_paths to allowlist specific paths"
+            )
+        for post_path in self.retryable_post_paths:
+            if not isinstance(post_path, str) or not post_path.startswith("/"):
+                raise ValueError(
+                    "retryable_post_paths must contain relative paths starting with '/'"
+                )
         # `frozen=True`: normalizację ustawiamy przez `object.__setattr__`, bo
         # `__post_init__` nie może przypisać do pola normalnie.
         object.__setattr__(self, "retryable_methods", methods)
@@ -143,7 +154,8 @@ def compute_retry_delay_seconds(
 
     ``Retry-After`` wygrywa z backoffem: serwer wie lepiej, ile kazać czekać.
     W przeciwnym razie opóźnienie rośnie wykładniczo (``base * 2**(attempt-1)``)
-    z losowym rozrzutem ``±jitter_ratio`` i sufitem ``max_delay_ms``.
+    z losowym rozrzutem ``±jitter_ratio`` i sufitem ``max_delay_ms`` (oraz twardym
+    sufitem ``MAX_RETRY_DELAY_MS``).
 
     Args:
         attempt: Numer próby, która właśnie się nie udała (``1`` = pierwsza).
@@ -190,8 +202,8 @@ def should_retry_request(
     Ponowienie wymaga jednocześnie:
 
     * statusu z ``RETRYABLE_STATUS_CODES`` (429/502/503/504),
-    * metody z allowlisty (``GET``/``PUT``/``DELETE``) albo ``POST`` na ścieżce
-      jawnie dopuszczonej w ``retryable_post_paths``.
+    * metody z allowlisty (``GET``/``PUT``/``DELETE``); ``POST`` kwalifikuje się
+      wyłącznie na ścieżce jawnie dopuszczonej w ``retryable_post_paths``.
 
     Args:
         method: Metoda HTTP żądania.

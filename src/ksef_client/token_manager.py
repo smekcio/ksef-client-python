@@ -128,6 +128,12 @@ class TokenManager:
             raise TokenManagerError("refresh_token must be a string or None")
         if not math.isfinite(refresh_margin_seconds) or refresh_margin_seconds < 0:
             raise TokenManagerError("refresh_margin_seconds must be a finite value >= 0")
+        if refresh_handler is not None and not callable(refresh_handler):
+            raise TokenManagerError("refresh_handler must be callable")
+        if on_refresh is not None and not callable(on_refresh):
+            raise TokenManagerError("on_refresh must be callable")
+        if clock is not None and not callable(clock):
+            raise TokenManagerError("clock must be callable")
 
         self._access_token = access_token
         self._refresh_token = refresh_token or None
@@ -135,6 +141,7 @@ class TokenManager:
         self._refresh_margin_seconds = refresh_margin_seconds
         self._on_refresh = on_refresh
         self._refresh_handler = refresh_handler
+        self._refresh_handler_is_custom = refresh_handler is not None
         self._clock = clock or _utc_now
         self._lock = threading.Lock()
 
@@ -181,13 +188,18 @@ class TokenManager:
         )
 
     def bind_auth_client(self, auth_client: AuthClient) -> None:
-        """Podłącza klienta auth jako domyślny handler refreshu (jeśli brak własnego)."""
+        """Podłącza klienta auth jako domyślny handler refreshu.
+
+        Własny ``refresh_handler`` (podany w konstruktorze) nie jest nadpisywany;
+        handler podłączony automatycznie jest zastępowany przy ponownym bindowaniu,
+        dzięki czemu manager można bezpiecznie przenieść do nowego klienta.
+        """
 
         def _refresh(refresh_token: str) -> TokenInfo:
             return auth_client.refresh_access_token(refresh_token).access_token
 
         with self._lock:
-            if self._refresh_handler is None:
+            if not self._refresh_handler_is_custom:
                 self._refresh_handler = _refresh
 
     @property
@@ -323,6 +335,12 @@ class AsyncTokenManager:
             raise TokenManagerError("refresh_token must be a string or None")
         if not math.isfinite(refresh_margin_seconds) or refresh_margin_seconds < 0:
             raise TokenManagerError("refresh_margin_seconds must be a finite value >= 0")
+        if refresh_handler is not None and not callable(refresh_handler):
+            raise TokenManagerError("refresh_handler must be callable")
+        if on_refresh is not None and not callable(on_refresh):
+            raise TokenManagerError("on_refresh must be callable")
+        if clock is not None and not callable(clock):
+            raise TokenManagerError("clock must be callable")
 
         self._access_token = access_token
         self._refresh_token = refresh_token or None
@@ -332,6 +350,7 @@ class AsyncTokenManager:
         self._refresh_margin_seconds = refresh_margin_seconds
         self._on_refresh = on_refresh
         self._refresh_handler = refresh_handler
+        self._refresh_handler_is_custom = refresh_handler is not None
         self._clock = clock or _utc_now
         self._lock = asyncio.Lock()
 
@@ -358,13 +377,17 @@ class AsyncTokenManager:
         )
 
     def bind_auth_client(self, auth_client: AsyncAuthClient) -> None:
-        """Podłącza async klienta auth jako domyślny handler refreshu."""
+        """Podłącza async klienta auth jako domyślny handler refreshu.
+
+        Własny ``refresh_handler`` nie jest nadpisywany; handler automatyczny jest
+        zastępowany przy ponownym bindowaniu.
+        """
 
         async def _refresh(refresh_token: str) -> TokenInfo:
             response = await auth_client.refresh_access_token(refresh_token)
             return response.access_token
 
-        if self._refresh_handler is None:
+        if not self._refresh_handler_is_custom:
             self._refresh_handler = _refresh
 
     @property

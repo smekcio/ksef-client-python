@@ -62,9 +62,9 @@ def test_retry_config_allows_zero_retries() -> None:
 
 def test_retry_config_rejects_excessive_retries() -> None:
     with pytest.raises(ValueError, match="max_retries"):
-        RetryConfig(max_retries=101)
+        RetryConfig(max_retries=21)
 
-    assert RetryConfig(max_retries=100).max_retries == 100
+    assert RetryConfig(max_retries=20).max_retries == 20
 
 
 # --- parse_retry_after_seconds -------------------------------------------
@@ -229,11 +229,22 @@ def test_retry_config_rejects_max_delay_above_safety_ceiling() -> None:
         RetryConfig(max_delay_ms=MAX_RETRY_DELAY_MS + 1)
 
 
-def test_post_in_retryable_methods_is_still_not_retried() -> None:
-    config = RetryConfig(retryable_methods=frozenset({"GET", "POST"}))
+def test_retry_config_rejects_non_relative_post_paths() -> None:
+    with pytest.raises(ValueError, match="relative paths"):
+        RetryConfig(retryable_post_paths=frozenset({"https://example.com/hook"}))
 
+
+def test_retry_config_rejects_post_in_methods() -> None:
+    with pytest.raises(ValueError, match="retryable_post_paths"):
+        RetryConfig(retryable_methods=frozenset({"GET", "POST"}))
+
+
+def test_should_retry_request_routes_post_only_through_paths() -> None:
+    config = RetryConfig(retryable_post_paths=frozenset({"/invoices/query/metadata"}))
+
+    assert should_retry_request("POST", "/invoices/query/metadata", 503, config) is True
     assert should_retry_request("POST", "/sessions/online/invoices", 503, config) is False
-    assert should_retry_request("GET", "/x", 503, config) is True
+    assert should_retry_request("GET", "/sessions/online", 503, config) is True
 
 
 def test_options_reject_non_retry_config() -> None:

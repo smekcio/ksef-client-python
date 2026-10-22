@@ -124,9 +124,10 @@ async with AsyncAuthenticatedClient(options, manager) as client:
 * `refresh_margin_seconds` dotyczy tylko tokenów z datą ważności; przy jej braku
   działa wyłącznie retry po 401.
 * `TokenManager` nie jest wspólny między procesami — każdy proces ma własny stan.
-* Manager jest związany z pierwszym klientem, który go użył (`bind_auth_client` nie
-  nadpisuje istniejącego handlera). Nie współdziel jednego managera między klientami —
-  utwórz osobny manager (albo `from_auth_result`) dla każdego klienta.
+* `bind_auth_client` **nie nadpisuje własnego** `refresh_handler` podanego
+  w konstruktorze; handler podłączony automatycznie jest zastępowany przy ponownym
+  bindowaniu, więc manager można przenieść do nowego klienta. Jeśli klient został
+  zamknięty, a manager nie został przebindowany, refresh może się nie udać.
 * `AsyncTokenManager` używaj w jednej pętli zdarzeń (jak większość obiektów asyncio).
 
 ## Zobacz też

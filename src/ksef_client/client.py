@@ -160,6 +160,9 @@ class AuthenticatedClient(KsefClient):
         options: Opcje klienta (mogą zawierać ``retry``).
         token_manager: Manager tokenów (np. z
             :meth:`AuthenticatedClient.from_auth_result`).
+        http_client: Opcjonalny, własny transport — musi to być
+            :class:`~ksef_client.token_manager.TokenRefreshingHttpClient`
+            korzystający z tego samego ``token_manager``.
 
     Example:
         ```python

@@ -337,6 +337,50 @@ def test_bind_auth_client_uses_refresh_endpoint() -> None:
     assert auth_client.calls == ["rt"]
 
 
+def test_rebinding_manager_uses_latest_auth_client() -> None:
+    first = _FakeAuthClient()
+    second = _FakeAuthClient()
+    manager = TokenManager(
+        "old",
+        "rt",
+        access_token_valid_until=NOW - timedelta(minutes=5),
+        clock=_clock,
+    )
+
+    manager.bind_auth_client(first)  # type: ignore[arg-type]
+    manager.bind_auth_client(second)  # type: ignore[arg-type]
+
+    assert manager.get_access_token() == "fresh-from-endpoint"
+    assert first.calls == []
+    assert second.calls == ["rt"]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"refresh_handler": "not-callable"},
+        {"on_refresh": "not-callable"},
+        {"clock": "not-callable"},
+    ],
+)
+def test_constructor_rejects_non_callable_hooks(kwargs: dict[str, object]) -> None:
+    with pytest.raises(TokenManagerError, match="must be callable"):
+        TokenManager("token", **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"refresh_handler": "not-callable"},
+        {"on_refresh": "not-callable"},
+        {"clock": "not-callable"},
+    ],
+)
+def test_async_constructor_rejects_non_callable_hooks(kwargs: dict[str, object]) -> None:
+    with pytest.raises(TokenManagerError, match="must be callable"):
+        AsyncTokenManager("token", **kwargs)  # type: ignore[arg-type]
+
+
 def test_bind_auth_client_does_not_override_custom_handler() -> None:
     auth_client = _FakeAuthClient()
     manager = TokenManager(
@@ -535,6 +579,27 @@ class _FakeAsyncAuthClient:
     async def refresh_access_token(self, refresh_token: str) -> AuthenticationTokenRefreshResponse:
         self.calls.append(refresh_token)
         return AuthenticationTokenRefreshResponse(access_token=TokenInfo("fresh", FAR_FUTURE))
+
+
+def test_async_rebinding_manager_uses_latest_auth_client() -> None:
+    async def scenario() -> None:
+        first = _FakeAsyncAuthClient()
+        second = _FakeAsyncAuthClient()
+        manager = AsyncTokenManager(
+            "old",
+            "rt",
+            access_token_valid_until=NOW - timedelta(minutes=5),
+            clock=_clock,
+        )
+
+        manager.bind_auth_client(first)  # type: ignore[arg-type]
+        manager.bind_auth_client(second)  # type: ignore[arg-type]
+
+        assert await manager.get_access_token() == "fresh"
+        assert first.calls == []
+        assert second.calls == ["rt"]
+
+    asyncio.run(scenario())
 
 
 def test_async_bind_auth_client_uses_refresh_endpoint() -> None:

@@ -24,18 +24,18 @@ with KsefClient(options) as client:
 
 ```python
 RetryConfig(
-    max_retries=3,                    # 0..100 (0 = jedno żądanie, bez ponowień)
+    max_retries=3,                    # 0..20 (0 = jedno żądanie, bez ponowień)
     base_delay_ms=250,                # baza backoffu wykładniczego
     jitter_ratio=0.2,                 # ±20% losowego rozrzutu
-    max_delay_ms=30_000,              # sufit backoffu (None = tylko sufit bezpieczeństwa 24 h)
+    max_delay_ms=30_000,              # sufit backoffu (None = tylko sufit bezpieczeństwa 5 min)
     retryable_methods=frozenset({"GET", "PUT", "DELETE"}),
     retryable_post_paths=frozenset(), # POST ponawiany tylko po jawnym dodaniu ścieżki
 )
 ```
 
 Walidacja odbywa się w konstruktorze — niepoprawne wartości kończą się `ValueError`.
-`max_delay_ms` nie może przekraczać `MAX_RETRY_DELAY_MS` (24 h); to samo ograniczenie
-obowiązuje, gdy `max_delay_ms=None`.
+`max_delay_ms` nie może przekraczać `MAX_RETRY_DELAY_MS` (5 min); to samo ograniczenie
+obowiązuje, gdy `max_delay_ms=None`. Jedna pauza nigdy nie przekracza więc 5 minut.
 
 ## Które odpowiedzi są ponawiane
 
@@ -49,9 +49,10 @@ i tylko metod z allowlisty:
 | `DELETE` | tak | zamknięcie sesji, revoke — operacje idempotentne |
 | `POST` | **nie** | wysyłka faktury, redeem tokena, challenge — nie można ich powtórzyć bez ryzyka |
 
-`POST` **nigdy** nie jest ponawiany na podstawie samej metody — nawet jeśli dodasz go do
-`retryable_methods`. Jedyną furtką jest `retryable_post_paths` z dokładną ścieżką.
-Nie dodawaj tam endpointów nieidempotentnych (wysyłka faktury, redeem tokena).
+`POST` **nigdy** nie jest ponawiany na podstawie samej metody — dodanie `"POST"` do
+`retryable_methods` kończy się `ValueError`. Jedyną furtką jest `retryable_post_paths`
+z dokładną ścieżką. Nie dodawaj tam endpointów nieidempotentnych (wysyłka faktury,
+redeem tokena).
 
 Jeśli endpoint `POST` jest bezpieczny do powtórzenia (np. zapytanie o metadane), dodaj
 jego ścieżkę jawnie:
@@ -62,8 +63,9 @@ config = RetryConfig(
 )
 ```
 
-Ścieżki są dopasowywane dosłownie i dotyczą tylko ścieżek względnych — `POST` na
-absolutny pre-signed URL nigdy nie jest ponawiany.
+Ścieżki są dopasowywane dosłownie i muszą być względne (zaczynać się od `/`) — `POST` na
+absolutny pre-signed URL nigdy nie jest ponawiany, a próba dodania takiego adresu kończy
+się `ValueError`.
 
 ## Opóźnienia
 
@@ -71,7 +73,7 @@ absolutny pre-signed URL nigdy nie jest ponawiany.
    `MAX_RETRY_AFTER_SECONDS = 300` s — wartość od serwera nie może usypiać procesu na dni).
 2. W przeciwnym razie działa backoff wykładniczy: `base_delay_ms * 2**(n-1)` z losowym
    rozrzutem `±jitter_ratio` i sufitem `max_delay_ms` (a gdy ten jest `None` — sufitem
-   bezpieczeństwa 24 h, żeby opóźnienie zawsze mieściło się w zakresie `sleep`).
+   bezpieczeństwa 5 min, żeby opóźnienie zawsze mieściło się w zakresie `sleep`).
 
 ```python
 # 429 z Retry-After: 30  →  czekaj 30 s
