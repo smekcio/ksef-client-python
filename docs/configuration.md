@@ -21,6 +21,7 @@ options = KsefClientOptions(
     system_warning_handler=None,
     base_qr_url=None,
     base_lighthouse_url=None,
+    retry=None,  # RetryConfig() włącza automatyczne ponawianie
 )
 ```
 
@@ -126,9 +127,27 @@ Opcjonalny callback `Callable[[str], None]` wywoływany, gdy KSeF zwróci nagł�
 `X-System-Warning`. Nagłówek przenosi ostrzeżenia techniczne i nie oznacza błędu operacji.
 Na środowisku TEST można wymusić treść ostrzeżenia nagłówkiem `X-Test-System-Warning`.
 
+### `retry`
+
+Automatyczne ponawianie żądań HTTP (opt-in). `None` (domyślnie) oznacza brak retry —
+zachowanie identyczne z wersjami bez tego pola.
+
+```python
+from ksef_client import KsefClientOptions, RetryConfig
+
+options = KsefClientOptions(
+    base_url="https://api-test.ksef.mf.gov.pl",
+    retry=RetryConfig(max_retries=3, base_delay_ms=250, jitter_ratio=0.2),
+)
+```
+
+Retry dotyczy wyłącznie 429/502/503/504, respektuje `Retry-After` (sufit 300 s) i ponawia
+`GET`/`PUT`/`DELETE`; `POST` wymaga jawnej ścieżki w `retryable_post_paths`. Jedna pauza
+nie przekracza 5 minut. Szczegóły i ograniczenia: [retry.md](retry.md).
+
 ## Przekazywanie `access_token`
 
-Dostępne są dwa sposoby przekazywania `access_token`:
+Dostępne są trzy sposoby przekazywania `access_token`:
 
 1) Przekazanie tokena w konstruktorze klienta:
 
@@ -165,3 +184,20 @@ client.invoices.query_invoice_metadata(
     access_token=access_token,
 )
 ```
+
+3) Klient zarządzający tokenem (`AuthenticatedClient` / `AsyncAuthenticatedClient`) —
+   token jest wstrzykiwany i odświeżany automatycznie, więc nie przekazujesz go do metod:
+
+```python
+from ksef_client import AuthenticatedClient, models as m
+
+with AuthenticatedClient.from_auth_result(options, auth_result) as client:
+    client.invoices.query_invoice_metadata_by_date_range(
+        subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
+        date_type=m.InvoiceQueryDateType.ISSUE,
+        date_from="2026-01-01T00:00:00Z",
+        date_to="2026-01-31T23:59:59Z",
+    )   # bez access_token
+```
+
+Szczegóły: [token-manager.md](token-manager.md).

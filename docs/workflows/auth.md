@@ -84,6 +84,9 @@ new_tokens = client.auth.refresh_access_token(refresh_token)
 access_token = new_tokens.access_token.token
 ```
 
+Do automatycznego odświeżania (proaktywny refresh 60 s przed wygaśnięciem + ponowienie
+po 401) użyj `TokenManager`/`AuthenticatedClient` — [token-manager.md](../token-manager.md).
+
 ## Najczęstsze problemy
 
 - `401` po statusie auth: w `get_auth_status()` idzie **authentication token**, nie `accessToken`.

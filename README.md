@@ -46,6 +46,7 @@ Użyj `ksef-client`, jeżeli potrzebujesz:
 - szybko sprawdzić konfigurację środowiska KSeF z terminala,
 - obsłużyć pełny przepływ uwierzytelnienia, wysyłki faktury i pobrania UPO,
 - pracować na typowanych modelach zamiast utrzymywać własne słowniki i mapowania JSON,
+- zautomatyzować odświeżanie tokena i ponawianie przejściowych błędów HTTP,
 - korzystać z gotowych scenariuszy dla sesji online, sesji wsadowych i eksportu faktur,
 - przygotowywać XML FA(3) programistycznie i walidować go z oficjalnym XSD,
 - testować integrację w środowiskach TEST/DEMO przed przejściem na PROD.
@@ -159,14 +160,15 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
         m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
     )
 
-    access_token = AuthCoordinator(client.auth).authenticate_with_ksef_token(
+    auth_result = AuthCoordinator(client.auth).authenticate_with_ksef_token(
         token=KSEF_TOKEN,
         public_certificate=token_cert_pem,
         context_identifier_type=CONTEXT_TYPE,
         context_identifier_value=CONTEXT_VALUE,
         max_attempts=90,
         poll_interval_seconds=2.0,
-    ).access_token
+    )
+    access_token = auth_result.access_token
 
     metadata = client.invoices.query_invoice_metadata_by_date_range(
         subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
@@ -179,6 +181,32 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
 
 print(f"Liczba faktur: {len(metadata.invoices)}")
 ```
+
+### 🔐 Token zarządzany przez SDK (opcjonalnie)
+
+Zamiast przekazywać `access_token` do każdego wywołania możesz użyć
+`AuthenticatedClient` — token jest wstrzykiwany automatycznie, odświeżany 60 s przed
+wygaśnięciem i po odpowiedzi 401. Retry HTTP włączysz jednym polem konfiguracji:
+
+```python
+from ksef_client import AuthenticatedClient, RetryConfig
+
+options = KsefClientOptions(
+    base_url=KsefEnvironment.DEMO.value,
+    retry=RetryConfig(),          # 429/502/503/504 + Retry-After
+)
+
+with AuthenticatedClient.from_auth_result(options, auth_result) as client:
+    metadata = client.invoices.query_invoice_metadata_by_date_range(
+        subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
+        date_type=m.InvoiceQueryDateType.ISSUE,
+        date_from="2026-01-01T00:00:00Z",
+        date_to="2026-01-31T23:59:59Z",
+        page_size=10,
+    )                             # bez access_token
+```
+
+Szczegóły: [token-manager.md](docs/token-manager.md), [retry.md](docs/retry.md).
 
 ### 🔎 Odczyt faktury FA(3) (XML → model)
 
@@ -318,6 +346,8 @@ Główna dokumentacja znajduje się w katalogu [`docs/`](docs/README.md):
 - [pierwsze kroki](docs/getting-started.md),
 - [konfiguracja klienta](docs/configuration.md),
 - [błędy, retry i limity](docs/errors.md),
+- [automatyczne odświeżanie tokena i klient uwierzytelniony](docs/token-manager.md),
+- [retry HTTP (backoff, `Retry-After`)](docs/retry.md),
 - [referencja API](docs/api/README.md),
 - [profile klienta](docs/profiles.md),
 - [magazyn certyfikatów](docs/certificate-store.md),

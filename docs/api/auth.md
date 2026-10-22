@@ -9,6 +9,10 @@ Ten podklient obsługuje:
 
 Workflow: [Uwierzytelnianie](../workflows/auth.md).
 
+`access_token` w metodach jest opcjonalny (`None` = token z klienta). Automatyczne
+odświeżanie (proaktywny refresh + ponowienie po 401) opisuje
+[token-manager.md](../token-manager.md).
+
 ## `get_active_sessions(...)`
 
 Pobiera listę aktywnych sesji uwierzytelnienia.
@@ -77,3 +81,6 @@ Ważne: `redeem` jest **jednorazowe** dla danego `authenticationToken`. Ponowne 
 Endpoint: `POST /auth/token/refresh`
 
 Refresh token jest przekazywany w `Authorization: Bearer <refreshToken>`. Metoda `refresh_access_token()` mapuje to poprawnie; ręczne ustawianie nagłówka `Authorization` nie jest wymagane.
+
+Do automatycznego odświeżania użyj `TokenManager`/`AuthenticatedClient` — patrz
+[token-manager.md](../token-manager.md).

@@ -8,6 +8,9 @@ zwracających treści binarne lub nietypowe nagłówki (np. `InvoicesClient.get_
 
 Dla `AsyncKsefClient` zestaw metod jest taki sam – różni się tylko sposób wywołania (`await`).
 
+Zarządzanie tokenem (auto-refresh): [token-manager.md](../token-manager.md); retry HTTP:
+[retry.md](../retry.md).
+
 Jeśli migrujesz starszy kod oparty o `dict`, zobacz [`../migration-typed-model-api.md`](../migration-typed-model-api.md).
 
 ## Strony

@@ -41,7 +41,7 @@ albo pełnego zestawu extras.
 
 Biblioteka udostępnia trzy poziomy użycia:
 
-1) **Klient API (cienka warstwa)** – `KsefClient` / `AsyncKsefClient` oraz podklienci (`.auth`, `.sessions`, …). Metody odpowiadają endpointom KSeF, przyjmują typowane modele requestów z `ksef_client.models` i w wielu przypadkach zwracają typowane modele odpowiedzi. Wyjątki dotyczą endpointów binarnych lub pomocniczych.
+1) **Klient API (cienka warstwa)** – `KsefClient` / `AsyncKsefClient` oraz podklienci (`.auth`, `.sessions`, …); `AuthenticatedClient` / `AsyncAuthenticatedClient` dodają automatyczne wstrzykiwanie i odświeżanie tokena. Metody odpowiadają endpointom KSeF, przyjmują typowane modele requestów z `ksef_client.models` i w wielu przypadkach zwracają typowane modele odpowiedzi. Wyjątki dotyczą endpointów binarnych lub pomocniczych.
 2) **Scenariusze (workflow)** – klasy z `ksef_client.services`, m.in. `AuthCoordinator`, `OnlineSessionWorkflow`, `BatchSessionWorkflow`, `ExportWorkflow`. Warstwa workflow łączy kilka wywołań API z operacjami lokalnymi (szyfrowanie, ZIP) i porządkuje typowe przepływy.
 3) **Dokumenty FA(3)** – moduł `ksef_client.documents.fa3` buduje faktury, serializuje XML i opcjonalnie waliduje XSD przed wysyłką online/batch.
 

@@ -68,6 +68,9 @@ Szczegóły (refresh proaktywny/reaktywny, `on_refresh`, wariant async):
 [token-manager.md](token-manager.md). Jeśli wolisz stare API, `access_token` w metodach
 nadal działa i ma pierwszeństwo.
 
+Retry HTTP (429/502/503/504) włączysz przez `KsefClientOptions(retry=RetryConfig())` —
+szczegóły: [retry.md](retry.md).
+
 ## 3) Pierwsze wywołanie API
 
 `access_token` jest opcjonalny: przy `AuthenticatedClient` możesz go pominąć,
