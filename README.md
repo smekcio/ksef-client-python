@@ -182,9 +182,7 @@ with AuthenticatedClient.from_auth_result(options, auth_result) as client:
 print(f"Liczba faktur: {len(metadata.invoices)}")
 ```
 
-Klasyczne API działa bez zmian: `KsefClient(options, access_token=auth_result.access_token)`
-i jawne `access_token=...` w metodach. Szczegóły: [token-manager.md](docs/token-manager.md),
-[retry.md](docs/retry.md).
+Szczegóły: [token-manager.md](docs/token-manager.md), [retry.md](docs/retry.md).
 
 ### 🔎 Odczyt faktury FA(3) (XML → model)
 
@@ -251,9 +249,7 @@ Bez dodatku `cli` i bez nowych zależności. Opis: [`docs/profiles.md`](docs/pro
 Do wysyłki faktur używaj scenariusza `OnlineSessionWorkflow`. Aktualny model pracy to:
 `open_session() -> session.send_invoice() -> session.close()`.
 
-Poniższy fragment zakłada, że jesteś wewnątrz bloku `with ... as client:` z szybkiego
-startu (`AuthenticatedClient`). Jeśli używasz `KsefClient` z jawnym tokenem, przekaż
-`access_token=...` — metody nadal go przyjmują.
+Poniższy fragment zakłada, że jesteś wewnątrz bloku `with ... as client:` z szybkiego startu.
 
 ```python
 from pathlib import Path
