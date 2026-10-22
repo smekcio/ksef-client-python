@@ -139,62 +139,36 @@ Pełna specyfikacja CLI: [`docs/cli/README.md`](docs/cli/README.md).
 
 ## 🧩 Szybki start: SDK
 
-Minimalny przepływ w kodzie zwykle wygląda tak:
-
-1. tworzysz klienta dla wybranego środowiska,
-2. pobierasz publiczny certyfikat KSeF do szyfrowania tokena,
-3. uzyskujesz `access_token`,
-4. wykonujesz wywołanie API na typowanych modelach.
+Najkrótsza droga: uwierzytelnij się raz, a `AuthenticatedClient` sam wstrzykuje
+i odświeża token dostępowy (60 s przed wygaśnięciem i po 401). Retry HTTP włączasz
+jednym polem konfiguracji:
 
 ```python
-from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
-from ksef_client import models as m
+from ksef_client import (
+    AuthenticatedClient,
+    KsefClient,
+    KsefClientOptions,
+    KsefEnvironment,
+    RetryConfig,
+    models as m,
+)
 from ksef_client.services import AuthCoordinator
-
-KSEF_TOKEN = "<TOKEN_KSEF>"
-CONTEXT_TYPE = "nip"
-CONTEXT_VALUE = "5265877635"
-
-with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as client:
-    token_cert_pem = client.security.get_public_key_certificate_pem(
-        m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
-    )
-
-    auth_result = AuthCoordinator(client.auth).authenticate_with_ksef_token(
-        token=KSEF_TOKEN,
-        public_certificate=token_cert_pem,
-        context_identifier_type=CONTEXT_TYPE,
-        context_identifier_value=CONTEXT_VALUE,
-        max_attempts=90,
-        poll_interval_seconds=2.0,
-    )
-    access_token = auth_result.access_token
-
-    metadata = client.invoices.query_invoice_metadata_by_date_range(
-        subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
-        date_type=m.InvoiceQueryDateType.ISSUE,
-        date_from="2026-01-01T00:00:00Z",
-        date_to="2026-01-31T23:59:59Z",
-        access_token=access_token,
-        page_size=10,
-    )
-
-print(f"Liczba faktur: {len(metadata.invoices)}")
-```
-
-### 🔐 Token zarządzany przez SDK (opcjonalnie)
-
-Zamiast przekazywać `access_token` do każdego wywołania możesz użyć
-`AuthenticatedClient` — token jest wstrzykiwany automatycznie, odświeżany 60 s przed
-wygaśnięciem i po odpowiedzi 401. Retry HTTP włączysz jednym polem konfiguracji:
-
-```python
-from ksef_client import AuthenticatedClient, RetryConfig
 
 options = KsefClientOptions(
     base_url=KsefEnvironment.DEMO.value,
     retry=RetryConfig(),          # 429/502/503/504 + Retry-After
 )
+
+with KsefClient(options) as anonymous:
+    certificate = anonymous.security.get_public_key_certificate_pem(
+        m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
+    )
+    auth_result = AuthCoordinator(anonymous.auth).authenticate_with_ksef_token(
+        token="<TOKEN_KSEF>",
+        public_certificate=certificate,
+        context_identifier_type="nip",
+        context_identifier_value="5265877635",
+    )
 
 with AuthenticatedClient.from_auth_result(options, auth_result) as client:
     metadata = client.invoices.query_invoice_metadata_by_date_range(
@@ -204,9 +178,13 @@ with AuthenticatedClient.from_auth_result(options, auth_result) as client:
         date_to="2026-01-31T23:59:59Z",
         page_size=10,
     )                             # bez access_token
+
+print(f"Liczba faktur: {len(metadata.invoices)}")
 ```
 
-Szczegóły: [token-manager.md](docs/token-manager.md), [retry.md](docs/retry.md).
+Klasyczne API działa bez zmian: `KsefClient(options, access_token=auth_result.access_token)`
+i jawne `access_token=...` w metodach. Szczegóły: [token-manager.md](docs/token-manager.md),
+[retry.md](docs/retry.md).
 
 ### 🔎 Odczyt faktury FA(3) (XML → model)
 
@@ -215,7 +193,7 @@ Dokument pobrany z KSeF można odczytać do tego samego modelu, którego używaj
 ```python
 from ksef_client.documents.fa3 import FA3Invoice, parse_invoice_xml
 
-content = client.invoices.get_invoice_bytes(ksef_number, access_token=access_token)
+content = client.invoices.get_invoice_bytes(ksef_number)
 invoice = parse_invoice_xml(content.content)
 
 print(invoice.invoice_number, invoice.total_gross)
@@ -240,7 +218,6 @@ for invoice in client.invoices.iter_invoice_metadata_by_date_range(
     date_type=m.InvoiceQueryDateType.ISSUE,
     date_from="2026-01-01T00:00:00Z",
     date_to="2026-01-31T23:59:59Z",
-    access_token=access_token,
     page_size=250,
 ):
     print(invoice.ksef_number)
@@ -274,7 +251,9 @@ Bez dodatku `cli` i bez nowych zależności. Opis: [`docs/profiles.md`](docs/pro
 Do wysyłki faktur używaj scenariusza `OnlineSessionWorkflow`. Aktualny model pracy to:
 `open_session() -> session.send_invoice() -> session.close()`.
 
-Poniższy fragment zakłada, że jesteś wewnątrz bloku `with KsefClient(...) as client:` i masz już `access_token` z poprzedniego kroku.
+Poniższy fragment zakłada, że jesteś wewnątrz bloku `with ... as client:` z szybkiego
+startu (`AuthenticatedClient`). Jeśli używasz `KsefClient` z jawnym tokenem, przekaż
+`access_token=...` — metody nadal go przyjmują.
 
 ```python
 from pathlib import Path
@@ -292,11 +271,10 @@ workflow = OnlineSessionWorkflow(client.sessions)
 session = workflow.open_session(
     form_code=m.FormCode(system_code="FA (3)", schema_version="1-0E", value="FA"),
     public_certificate=symmetric_cert_pem,
-    access_token=access_token,
 )
 
-send_result = session.send_invoice(invoice_xml, access_token=access_token)
-session.close(access_token=access_token)
+send_result = session.send_invoice(invoice_xml)
+session.close()
 
 print(send_result.reference_number)
 ```
