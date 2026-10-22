@@ -12,6 +12,7 @@ from ksef_client.client import AsyncKsefClient, KsefClient
 from ksef_client.clients.invoices import AsyncInvoicesClient, InvoicesClient
 from ksef_client.config import KsefClientOptions
 from ksef_client.exceptions import KsefHttpError
+from ksef_client.http import AsyncBaseHttpClient, BaseHttpClient
 from ksef_client.models import AuthenticationTokensResponse, TokenInfo
 from ksef_client.services.workflows import AuthResult
 from ksef_client.token_manager import (
@@ -257,6 +258,54 @@ def test_from_auth_result_passes_on_refresh_callback() -> None:
     # refresh idzie przez endpoint z jawnym refresh_token (brak rekurencji providera)
     sent_headers = refresh_request.call_args.kwargs["headers"]
     assert sent_headers["Authorization"] == "Bearer refresh"
+
+
+def test_authenticated_client_rejects_plain_http_client() -> None:
+    options = _options()
+    plain = BaseHttpClient(options)
+
+    with pytest.raises(ValueError, match="TokenRefreshingHttpClient"):
+        AuthenticatedClient(options, TokenManager("token"), http_client=plain)
+
+
+def test_async_authenticated_client_rejects_plain_http_client() -> None:
+    options = _options()
+    plain = AsyncBaseHttpClient(options)
+
+    with pytest.raises(ValueError, match="AsyncTokenRefreshingHttpClient"):
+        AsyncAuthenticatedClient(options, AsyncTokenManager("token"), http_client=plain)
+
+
+def test_authenticated_client_accepts_matching_http_client() -> None:
+    options = _options()
+    manager = TokenManager("token")
+    http_client = TokenRefreshingHttpClient(options, manager)
+
+    client = AuthenticatedClient(options, manager, http_client=http_client)
+
+    assert client.http_client is http_client
+    client.close()
+
+
+def test_authenticated_client_rejects_http_client_with_different_manager() -> None:
+    options = _options()
+    manager = TokenManager("token")
+    other_manager = TokenManager("other")
+    http_client = TokenRefreshingHttpClient(options, other_manager)
+
+    with pytest.raises(ValueError, match="same TokenManager"):
+        AuthenticatedClient(options, manager, http_client=http_client)
+    http_client.close()
+
+
+def test_async_authenticated_client_rejects_http_client_with_different_manager() -> None:
+    options = _options()
+    manager = AsyncTokenManager("token")
+    other_manager = AsyncTokenManager("other")
+    http_client = AsyncTokenRefreshingHttpClient(options, other_manager)
+
+    with pytest.raises(ValueError, match="same AsyncTokenManager"):
+        AsyncAuthenticatedClient(options, manager, http_client=http_client)
 
 
 def test_client_rejects_access_token_and_http_client_together() -> None:

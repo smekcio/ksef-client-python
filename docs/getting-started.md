@@ -2,7 +2,9 @@
 
 ## 1) Konfiguracja klienta
 
-Konfiguracja opiera się o `base_url` (środowisko). Dla większości endpointów chronionych wymagany jest również `access_token`.
+Konfiguracja opiera się o `base_url` (środowisko). Endpointy chronione wymagają tokena —
+możesz przekazać go jawnie (`KsefClient(options, access_token=...)`) albo użyć
+`AuthenticatedClient`, który wstrzykuje i odświeża token automatycznie.
 
 ```python
 from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment

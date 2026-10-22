@@ -175,6 +175,12 @@ class AuthenticatedClient(KsefClient):
         *,
         http_client: BaseHttpClient | None = None,
     ) -> None:
+        if http_client is not None and not isinstance(http_client, TokenRefreshingHttpClient):
+            raise ValueError(
+                "http_client must be a TokenRefreshingHttpClient (it injects the managed token)"
+            )
+        if http_client is not None and http_client.token_manager is not token_manager:
+            raise ValueError("http_client and token_manager must use the same TokenManager")
         super().__init__(
             options,
             http_client=http_client
@@ -219,6 +225,15 @@ class AsyncAuthenticatedClient(AsyncKsefClient):
         *,
         http_client: AsyncBaseHttpClient | None = None,
     ) -> None:
+        if http_client is not None and not isinstance(
+            http_client, AsyncTokenRefreshingHttpClient
+        ):
+            raise ValueError(
+                "http_client must be an AsyncTokenRefreshingHttpClient "
+                "(it injects the managed token)"
+            )
+        if http_client is not None and http_client.token_manager is not token_manager:
+            raise ValueError("http_client and token_manager must use the same AsyncTokenManager")
         super().__init__(
             options,
             http_client=http_client

@@ -66,9 +66,16 @@ def test_constructor_rejects_non_string_refresh_token() -> None:
         TokenManager("token", 123)  # type: ignore[arg-type]
 
 
-def test_constructor_rejects_negative_margin() -> None:
+@pytest.mark.parametrize("margin", [-1, float("nan"), float("inf")])
+def test_constructor_rejects_invalid_margin(margin: float) -> None:
     with pytest.raises(TokenManagerError):
-        TokenManager("token", refresh_margin_seconds=-1)
+        TokenManager("token", refresh_margin_seconds=margin)
+
+
+@pytest.mark.parametrize("margin", [float("nan"), float("inf")])
+def test_async_constructor_rejects_invalid_margin(margin: float) -> None:
+    with pytest.raises(TokenManagerError):
+        AsyncTokenManager("token", refresh_margin_seconds=margin)
 
 
 def test_constructor_rejects_invalid_validity_string() -> None:
@@ -597,3 +604,33 @@ def test_async_refresh_returning_past_validity_switches_to_reactive(
 
     asyncio.run(scenario())
     assert "reactive refresh" in caplog.text
+
+
+def test_sync_manager_rejects_async_refresh_handler() -> None:
+    async def handler(refresh_token: str) -> TokenInfo:
+        return TokenInfo("new", None)
+
+    manager = TokenManager(
+        "old",
+        "rt",
+        access_token_valid_until=NOW - timedelta(minutes=5),
+        refresh_handler=handler,  # type: ignore[arg-type]
+        clock=_clock,
+    )
+
+    with pytest.raises(TokenManagerError, match="AsyncTokenManager"):
+        manager.get_access_token()
+
+
+def test_async_manager_accepts_sync_refresh_handler() -> None:
+    async def scenario() -> None:
+        manager = AsyncTokenManager(
+            "old",
+            "rt",
+            refresh_handler=lambda rt: TokenInfo("fresh", None),
+            clock=_clock,
+        )
+
+        assert await manager.force_refresh() == "fresh"
+
+    asyncio.run(scenario())

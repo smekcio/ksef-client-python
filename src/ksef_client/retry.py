@@ -39,6 +39,14 @@ MAX_RETRY_AFTER_SECONDS = 300
 #: ``Retry-After`` i tylko one kwalifikują się do pętli retry.
 RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({429, 502, 503, 504})
 
+#: Twardy sufit opóźnienia jednej ponownej próby (24 h, w milisekundach).
+#:
+#: ``max_delay_ms=None`` wyłącza **własny** sufit konfiguracji, ale nie ten
+#: bezpieczeństwa: bez niego backoff wykładniczy przy dużym ``max_retries``
+#: dochodziłby do wartości, których ``time.sleep``/``asyncio.sleep`` nie przyjmą
+#: (``OverflowError``), zamiast po prostu czekać.
+MAX_RETRY_DELAY_MS = 86_400_000
+
 
 @dataclass(frozen=True)
 class RetryConfig:
@@ -52,8 +60,10 @@ class RetryConfig:
             (``0.2`` = ±20%), żeby równolegli klienci nie uderzali w serwer
             w tej samej chwili.
         max_delay_ms: Sufit wyliczonego backoffu (milisekundy); ``None`` wyłącza
-            sufit. Nie dotyczy ``Retry-After`` — wartość podana przez serwer ma
-            pierwszeństwo (z sufitem ``MAX_RETRY_AFTER_SECONDS``).
+            własny sufit konfiguracji, ale nadal obowiązuje twardy sufit
+            bezpieczeństwa ``MAX_RETRY_DELAY_MS`` (24 h). Nie dotyczy
+            ``Retry-After`` — wartość podana przez serwer ma pierwszeństwo
+            (z sufitem ``MAX_RETRY_AFTER_SECONDS``).
         retryable_methods: Metody, które wolno ponawiać. Wartości są normalizowane
             do wielkich liter.
         retryable_post_paths: Ścieżki ``POST`` (dokładne, względne, np.
@@ -74,12 +84,16 @@ class RetryConfig:
     def __post_init__(self) -> None:
         if self.max_retries < 0:
             raise ValueError("max_retries must be >= 0")
+        if self.max_retries > 100:
+            raise ValueError("max_retries must be <= 100")
         if self.base_delay_ms <= 0:
             raise ValueError("base_delay_ms must be > 0")
         if not (0 <= self.jitter_ratio <= 1):
             raise ValueError("jitter_ratio must be in range [0, 1]")
         if self.max_delay_ms is not None and self.max_delay_ms < self.base_delay_ms:
             raise ValueError("max_delay_ms must be >= base_delay_ms")
+        if self.max_delay_ms is not None and self.max_delay_ms > MAX_RETRY_DELAY_MS:
+            raise ValueError(f"max_delay_ms must be <= {MAX_RETRY_DELAY_MS} (24 h)")
         methods = frozenset(str(method).strip().upper() for method in self.retryable_methods)
         if "" in methods:
             raise ValueError("retryable_methods cannot contain an empty method name")
@@ -150,11 +164,18 @@ def compute_retry_delay_seconds(
     if retry_after_seconds is not None:
         return retry_after_seconds
 
-    base = float(config.base_delay_ms) * (2 ** (attempt - 1))
+    # Wykładnik ograniczamy, żeby `2 ** attempt` nie przepełnił `float`
+    # przy dużym `max_retries` (wcześniej: OverflowError zamiast opóźnienia).
+    exponent = min(attempt - 1, 63)
+    base = float(config.base_delay_ms) * (2 ** exponent)
     jitter_factor = 1 + ((random_value * 2 - 1) * config.jitter_ratio)
     effective_ms = max(0.0, base * jitter_factor)
-    if config.max_delay_ms is not None:
-        effective_ms = min(effective_ms, float(config.max_delay_ms))
+    cap_ms = (
+        float(config.max_delay_ms)
+        if config.max_delay_ms is not None
+        else float(MAX_RETRY_DELAY_MS)
+    )
+    effective_ms = min(effective_ms, cap_ms, float(MAX_RETRY_DELAY_MS))
     return effective_ms / 1000.0
 
 
@@ -187,15 +208,16 @@ def should_retry_request(
         return False
 
     normalized_method = method.strip().upper()
-    if normalized_method in config.retryable_methods:
-        return True
     if normalized_method == "POST":
+        # POST tylko po jawnej ścieżce — nawet jeśli ktoś doda "POST" do
+        # `retryable_methods`, nieidempotentna wysyłka nie może być ponawiana.
         return path in config.retryable_post_paths
-    return False
+    return normalized_method in config.retryable_methods
 
 
 __all__ = [
     "MAX_RETRY_AFTER_SECONDS",
+    "MAX_RETRY_DELAY_MS",
     "RETRYABLE_STATUS_CODES",
     "RetryConfig",
     "compute_retry_delay_seconds",

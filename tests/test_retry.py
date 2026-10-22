@@ -5,8 +5,10 @@ from email.utils import format_datetime
 
 import pytest
 
+from ksef_client.config import KsefClientOptions
 from ksef_client.http import MAX_RETRY_AFTER_SECONDS, RETRYABLE_STATUS_CODES
 from ksef_client.retry import (
+    MAX_RETRY_DELAY_MS,
     RetryConfig,
     compute_retry_delay_seconds,
     parse_retry_after_seconds,
@@ -56,6 +58,13 @@ def test_retry_config_allows_disabling_delay_cap() -> None:
 
 def test_retry_config_allows_zero_retries() -> None:
     assert RetryConfig(max_retries=0).max_retries == 0
+
+
+def test_retry_config_rejects_excessive_retries() -> None:
+    with pytest.raises(ValueError, match="max_retries"):
+        RetryConfig(max_retries=101)
+
+    assert RetryConfig(max_retries=100).max_retries == 100
 
 
 # --- parse_retry_after_seconds -------------------------------------------
@@ -202,3 +211,31 @@ def test_should_retry_request_does_not_retry_post_on_absolute_url() -> None:
 
 def test_should_retry_request_rejects_method_outside_allowlist() -> None:
     assert should_retry_request("PATCH", "/x", 503, RetryConfig()) is False
+
+
+def test_compute_retry_delay_does_not_overflow_for_huge_attempt() -> None:
+    # Wcześniej `2 ** attempt` przepełniał float przy dużym max_retries.
+    config = RetryConfig(base_delay_ms=250, jitter_ratio=0.0, max_delay_ms=None)
+
+    assert compute_retry_delay_seconds(5000, config, random_value=0.5) == MAX_RETRY_DELAY_MS / 1000
+
+
+def test_retry_config_accepts_max_delay_at_safety_ceiling() -> None:
+    assert RetryConfig(max_delay_ms=MAX_RETRY_DELAY_MS).max_delay_ms == MAX_RETRY_DELAY_MS
+
+
+def test_retry_config_rejects_max_delay_above_safety_ceiling() -> None:
+    with pytest.raises(ValueError, match="max_delay_ms"):
+        RetryConfig(max_delay_ms=MAX_RETRY_DELAY_MS + 1)
+
+
+def test_post_in_retryable_methods_is_still_not_retried() -> None:
+    config = RetryConfig(retryable_methods=frozenset({"GET", "POST"}))
+
+    assert should_retry_request("POST", "/sessions/online/invoices", 503, config) is False
+    assert should_retry_request("GET", "/x", 503, config) is True
+
+
+def test_options_reject_non_retry_config() -> None:
+    with pytest.raises(TypeError, match="RetryConfig"):
+        KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl", retry="oops")  # type: ignore[arg-type]

@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import math
 import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -125,8 +126,8 @@ class TokenManager:
             raise TokenManagerError("access_token must be a non-empty string")
         if refresh_token is not None and not isinstance(refresh_token, str):
             raise TokenManagerError("refresh_token must be a string or None")
-        if refresh_margin_seconds < 0:
-            raise TokenManagerError("refresh_margin_seconds must be >= 0")
+        if not math.isfinite(refresh_margin_seconds) or refresh_margin_seconds < 0:
+            raise TokenManagerError("refresh_margin_seconds must be a finite value >= 0")
 
         self._access_token = access_token
         self._refresh_token = refresh_token or None
@@ -213,6 +214,12 @@ class TokenManager:
                 "Cannot refresh the access token: no refresh token or refresh handler."
             )
         info = self._refresh_handler(self._refresh_token)
+        if inspect.isawaitable(info):
+            if inspect.iscoroutine(info):
+                info.close()
+            raise TokenManagerError(
+                "refresh_handler is async; use AsyncTokenManager for async handlers."
+            )
         if not isinstance(info, TokenInfo) or not info.token:
             raise TokenManagerError("Refresh handler returned an empty access token.")
         self._access_token = info.token
@@ -307,15 +314,15 @@ class AsyncTokenManager:
         access_token_valid_until: str | datetime | None = None,
         refresh_margin_seconds: float = DEFAULT_REFRESH_MARGIN_SECONDS,
         on_refresh: Callable[[TokenInfo], Awaitable[None] | None] | None = None,
-        refresh_handler: Callable[[str], Awaitable[TokenInfo]] | None = None,
+        refresh_handler: Callable[[str], TokenInfo | Awaitable[TokenInfo]] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not isinstance(access_token, str) or not access_token.strip():
             raise TokenManagerError("access_token must be a non-empty string")
         if refresh_token is not None and not isinstance(refresh_token, str):
             raise TokenManagerError("refresh_token must be a string or None")
-        if refresh_margin_seconds < 0:
-            raise TokenManagerError("refresh_margin_seconds must be >= 0")
+        if not math.isfinite(refresh_margin_seconds) or refresh_margin_seconds < 0:
+            raise TokenManagerError("refresh_margin_seconds must be a finite value >= 0")
 
         self._access_token = access_token
         self._refresh_token = refresh_token or None
@@ -335,7 +342,7 @@ class AsyncTokenManager:
         *,
         refresh_margin_seconds: float = DEFAULT_REFRESH_MARGIN_SECONDS,
         on_refresh: Callable[[TokenInfo], Awaitable[None] | None] | None = None,
-        refresh_handler: Callable[[str], Awaitable[TokenInfo]] | None = None,
+        refresh_handler: Callable[[str], TokenInfo | Awaitable[TokenInfo]] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> AsyncTokenManager:
         """Buduje managera z odpowiedzi ``/auth/token/redeem`` (wersja async)."""
@@ -383,7 +390,8 @@ class AsyncTokenManager:
             raise TokenManagerError(
                 "Cannot refresh the access token: no refresh token or refresh handler."
             )
-        info = await self._refresh_handler(self._refresh_token)
+        result = self._refresh_handler(self._refresh_token)
+        info = await result if inspect.isawaitable(result) else result
         if not isinstance(info, TokenInfo) or not info.token:
             raise TokenManagerError("Refresh handler returned an empty access token.")
         self._access_token = info.token
@@ -458,6 +466,11 @@ class TokenRefreshingHttpClient(BaseHttpClient):
         super().__init__(options)
         self._token_manager = token_manager
 
+    @property
+    def token_manager(self) -> TokenManager:
+        """Manager, z którego klient pobiera token (do weryfikacji spójności)."""
+        return self._token_manager
+
     def request(
         self,
         method: str,
@@ -522,6 +535,11 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
     def __init__(self, options: KsefClientOptions, token_manager: AsyncTokenManager) -> None:
         super().__init__(options)
         self._token_manager = token_manager
+
+    @property
+    def token_manager(self) -> AsyncTokenManager:
+        """Manager, z którego klient pobiera token (do weryfikacji spójności)."""
+        return self._token_manager
 
     async def request(
         self,

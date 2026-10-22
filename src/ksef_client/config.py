@@ -72,6 +72,10 @@ class KsefClientOptions:
     #: wymaga świadomej decyzji wołającego.
     retry: RetryConfig | None = None
 
+    def __post_init__(self) -> None:
+        if self.retry is not None and not isinstance(self.retry, RetryConfig):
+            raise TypeError("retry must be a RetryConfig instance or None")
+
     def normalized_base_url(self) -> str:
         url = self.base_url.rstrip("/")
         if url.endswith("/v2") or url.endswith("/api/v2"):
