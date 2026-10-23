@@ -152,7 +152,7 @@ class TestDataClient(BaseApiClient):
         )
 
     def change_session_limits(
-        self, request_payload: SetSessionLimitsRequest, *, access_token: str
+        self, request_payload: SetSessionLimitsRequest, *, access_token: str | None = None
     ) -> EffectiveContextLimits | None:
         return self._request_optional_model(
             "POST",
@@ -162,7 +162,9 @@ class TestDataClient(BaseApiClient):
             access_token=access_token,
         )
 
-    def reset_session_limits(self, *, access_token: str) -> EffectiveContextLimits | None:
+    def reset_session_limits(
+        self, *, access_token: str | None = None
+    ) -> EffectiveContextLimits | None:
         return self._request_optional_model(
             "DELETE",
             "/testdata/limits/context/session",
@@ -171,7 +173,7 @@ class TestDataClient(BaseApiClient):
         )
 
     def change_certificate_limits(
-        self, request_payload: SetSubjectLimitsRequest, *, access_token: str
+        self, request_payload: SetSubjectLimitsRequest, *, access_token: str | None = None
     ) -> EffectiveSubjectLimits | None:
         return self._request_optional_model(
             "POST",
@@ -181,7 +183,9 @@ class TestDataClient(BaseApiClient):
             access_token=access_token,
         )
 
-    def reset_certificate_limits(self, *, access_token: str) -> EffectiveSubjectLimits | None:
+    def reset_certificate_limits(
+        self, *, access_token: str | None = None
+    ) -> EffectiveSubjectLimits | None:
         return self._request_optional_model(
             "DELETE",
             "/testdata/limits/subject/certificate",
@@ -190,7 +194,7 @@ class TestDataClient(BaseApiClient):
         )
 
     def set_rate_limits(
-        self, request_payload: SetRateLimitsRequest, *, access_token: str
+        self, request_payload: SetRateLimitsRequest, *, access_token: str | None = None
     ) -> EffectiveApiRateLimits | None:
         return self._request_optional_model(
             "POST",
@@ -200,7 +204,9 @@ class TestDataClient(BaseApiClient):
             access_token=access_token,
         )
 
-    def reset_rate_limits(self, *, access_token: str) -> EffectiveApiRateLimits | None:
+    def reset_rate_limits(
+        self, *, access_token: str | None = None
+    ) -> EffectiveApiRateLimits | None:
         return self._request_optional_model(
             "DELETE",
             "/testdata/rate-limits",
@@ -208,7 +214,9 @@ class TestDataClient(BaseApiClient):
             access_token=access_token,
         )
 
-    def restore_production_rate_limits(self, *, access_token: str) -> EffectiveApiRateLimits | None:
+    def restore_production_rate_limits(
+        self, *, access_token: str | None = None
+    ) -> EffectiveApiRateLimits | None:
         return self._request_optional_model(
             "POST",
             "/testdata/rate-limits/production",
@@ -360,7 +368,7 @@ class AsyncTestDataClient(AsyncBaseApiClient):
         )
 
     async def change_session_limits(
-        self, request_payload: SetSessionLimitsRequest, *, access_token: str
+        self, request_payload: SetSessionLimitsRequest, *, access_token: str | None = None
     ) -> EffectiveContextLimits | None:
         return await self._request_optional_model(
             "POST",
@@ -370,7 +378,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             access_token=access_token,
         )
 
-    async def reset_session_limits(self, *, access_token: str) -> EffectiveContextLimits | None:
+    async def reset_session_limits(
+        self, *, access_token: str | None = None
+    ) -> EffectiveContextLimits | None:
         return await self._request_optional_model(
             "DELETE",
             "/testdata/limits/context/session",
@@ -379,7 +389,7 @@ class AsyncTestDataClient(AsyncBaseApiClient):
         )
 
     async def change_certificate_limits(
-        self, request_payload: SetSubjectLimitsRequest, *, access_token: str
+        self, request_payload: SetSubjectLimitsRequest, *, access_token: str | None = None
     ) -> EffectiveSubjectLimits | None:
         return await self._request_optional_model(
             "POST",
@@ -389,7 +399,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             access_token=access_token,
         )
 
-    async def reset_certificate_limits(self, *, access_token: str) -> EffectiveSubjectLimits | None:
+    async def reset_certificate_limits(
+        self, *, access_token: str | None = None
+    ) -> EffectiveSubjectLimits | None:
         return await self._request_optional_model(
             "DELETE",
             "/testdata/limits/subject/certificate",
@@ -398,7 +410,7 @@ class AsyncTestDataClient(AsyncBaseApiClient):
         )
 
     async def set_rate_limits(
-        self, request_payload: SetRateLimitsRequest, *, access_token: str
+        self, request_payload: SetRateLimitsRequest, *, access_token: str | None = None
     ) -> EffectiveApiRateLimits | None:
         return await self._request_optional_model(
             "POST",
@@ -408,7 +420,9 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             access_token=access_token,
         )
 
-    async def reset_rate_limits(self, *, access_token: str) -> EffectiveApiRateLimits | None:
+    async def reset_rate_limits(
+        self, *, access_token: str | None = None
+    ) -> EffectiveApiRateLimits | None:
         return await self._request_optional_model(
             "DELETE",
             "/testdata/rate-limits",
@@ -417,7 +431,7 @@ class AsyncTestDataClient(AsyncBaseApiClient):
         )
 
     async def restore_production_rate_limits(
-        self, *, access_token: str
+        self, *, access_token: str | None = None
     ) -> EffectiveApiRateLimits | None:
         return await self._request_optional_model(
             "POST",

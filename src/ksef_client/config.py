@@ -6,6 +6,8 @@ from enum import Enum
 from importlib import metadata
 from typing import TYPE_CHECKING, Any
 
+from .retry import RetryConfig
+
 if TYPE_CHECKING:
     from .profiles import Profile, ProfileStore
 
@@ -64,6 +66,15 @@ class KsefClientOptions:
     allow_private_network_presigned_urls: bool = False
     system_warning_handler: Callable[[str], None] | None = None
     user_agent: str = field(default_factory=_default_user_agent)
+    #: Konfiguracja automatycznego ponawiania żądań HTTP. ``None`` (domyślnie)
+    #: oznacza brak retry — zachowanie identyczne z wersjami sprzed dodania pola.
+    #: Retry jest opt-in, bo ponawianie ``POST`` (wysyłka faktury, redeem tokena)
+    #: wymaga świadomej decyzji wołającego.
+    retry: RetryConfig | None = None
+
+    def __post_init__(self) -> None:
+        if self.retry is not None and not isinstance(self.retry, RetryConfig):
+            raise TypeError("retry must be a RetryConfig instance or None")
 
     def normalized_base_url(self) -> str:
         url = self.base_url.rstrip("/")

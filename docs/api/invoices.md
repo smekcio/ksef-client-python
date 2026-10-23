@@ -1,5 +1,9 @@
 # Faktury i eksport (`client.invoices`)
 
+> **Token:** wszystkie metody przyjmują `access_token=None`. Gdy go pominiesz,
+> używany jest token z `KsefClient`/`AuthenticatedClient` (albo żaden, jeśli klient
+> go nie ma). Jawne `access_token=...` ma pierwszeństwo.
+
 ## `get_invoice(ksef_number, access_token)`
 
 Endpoint: `GET /invoices/ksef/{ksefNumber}`

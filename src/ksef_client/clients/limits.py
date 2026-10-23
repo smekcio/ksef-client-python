@@ -5,7 +5,7 @@ from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class LimitsClient(BaseApiClient):
-    def get_context_limits(self, access_token: str) -> EffectiveContextLimits:
+    def get_context_limits(self, access_token: str | None = None) -> EffectiveContextLimits:
         return self._request_model(
             "GET",
             "/limits/context",
@@ -13,7 +13,7 @@ class LimitsClient(BaseApiClient):
             access_token=access_token,
         )
 
-    def get_subject_limits(self, access_token: str) -> EffectiveSubjectLimits:
+    def get_subject_limits(self, access_token: str | None = None) -> EffectiveSubjectLimits:
         return self._request_model(
             "GET",
             "/limits/subject",
@@ -23,7 +23,7 @@ class LimitsClient(BaseApiClient):
 
 
 class AsyncLimitsClient(AsyncBaseApiClient):
-    async def get_context_limits(self, access_token: str) -> EffectiveContextLimits:
+    async def get_context_limits(self, access_token: str | None = None) -> EffectiveContextLimits:
         return await self._request_model(
             "GET",
             "/limits/context",
@@ -31,7 +31,7 @@ class AsyncLimitsClient(AsyncBaseApiClient):
             access_token=access_token,
         )
 
-    async def get_subject_limits(self, access_token: str) -> EffectiveSubjectLimits:
+    async def get_subject_limits(self, access_token: str | None = None) -> EffectiveSubjectLimits:
         return await self._request_model(
             "GET",
             "/limits/subject",

@@ -108,7 +108,7 @@ class CollectiveIdentifiersClient(BaseApiClient):
         self,
         request_payload: GenerateCollectiveIdentifierRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         max_invoices: int | None = None,
     ) -> GenerateCollectiveIdentifierResponse:
         require_generate_invoices(request_payload.invoices, max_invoices=max_invoices)
@@ -125,7 +125,7 @@ class CollectiveIdentifiersClient(BaseApiClient):
         self,
         ksef_numbers: Sequence[str],
         *,
-        access_token: str,
+        access_token: str | None = None,
         descriptions: Sequence[str | None] | None = None,
         max_invoices: int | None = None,
     ) -> GenerateCollectiveIdentifierResponse:
@@ -139,7 +139,7 @@ class CollectiveIdentifiersClient(BaseApiClient):
         self,
         request_payload: CollectiveIdentifiersQueryRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> CollectiveIdentifiersQueryResponse:
@@ -160,7 +160,7 @@ class CollectiveIdentifiersClient(BaseApiClient):
         date_from: str,
         date_to: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
         collective_identifier_number: str | None = None,
         created_in_current_context: bool | None = None,
         invoice_count_from: int | None = None,
@@ -186,7 +186,7 @@ class CollectiveIdentifiersClient(BaseApiClient):
         self,
         request_payload: CollectiveIdentifiersQueryRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> Iterator[CollectiveIdentifiersQueryResponseItem]:
@@ -208,7 +208,7 @@ class CollectiveIdentifiersClient(BaseApiClient):
         self,
         collective_identifier_numbers: str | Sequence[str],
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> CollectiveIdentifierInvoicesQueryResponse:
@@ -234,7 +234,7 @@ class CollectiveIdentifiersClient(BaseApiClient):
         self,
         collective_identifier_numbers: str | Sequence[str],
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> Iterator[CollectiveIdentifierInvoicesQueryResponseItem]:
@@ -256,7 +256,7 @@ class CollectiveIdentifiersClient(BaseApiClient):
         self,
         ksef_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> CollectiveIdentifiersByKsefNumberQueryResponse:
@@ -275,7 +275,7 @@ class CollectiveIdentifiersClient(BaseApiClient):
         self,
         ksef_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> Iterator[CollectiveIdentifiersByKsefNumberQueryResponseItem]:
@@ -299,7 +299,7 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         self,
         request_payload: GenerateCollectiveIdentifierRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         max_invoices: int | None = None,
     ) -> GenerateCollectiveIdentifierResponse:
         require_generate_invoices(request_payload.invoices, max_invoices=max_invoices)
@@ -316,7 +316,7 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         self,
         ksef_numbers: Sequence[str],
         *,
-        access_token: str,
+        access_token: str | None = None,
         descriptions: Sequence[str | None] | None = None,
         max_invoices: int | None = None,
     ) -> GenerateCollectiveIdentifierResponse:
@@ -330,7 +330,7 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         self,
         request_payload: CollectiveIdentifiersQueryRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> CollectiveIdentifiersQueryResponse:
@@ -351,7 +351,7 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         date_from: str,
         date_to: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
         collective_identifier_number: str | None = None,
         created_in_current_context: bool | None = None,
         invoice_count_from: int | None = None,
@@ -377,7 +377,7 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         self,
         request_payload: CollectiveIdentifiersQueryRequest,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> AsyncIterator[CollectiveIdentifiersQueryResponseItem]:
@@ -400,7 +400,7 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         self,
         collective_identifier_numbers: str | Sequence[str],
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> CollectiveIdentifierInvoicesQueryResponse:
@@ -426,7 +426,7 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         self,
         collective_identifier_numbers: str | Sequence[str],
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> AsyncIterator[CollectiveIdentifierInvoicesQueryResponseItem]:
@@ -449,7 +449,7 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         self,
         ksef_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> CollectiveIdentifiersByKsefNumberQueryResponse:
@@ -468,7 +468,7 @@ class AsyncCollectiveIdentifiersClient(AsyncBaseApiClient):
         self,
         ksef_number: str,
         *,
-        access_token: str,
+        access_token: str | None = None,
         page_size: int | None = None,
         continuation_token: str | None = None,
     ) -> AsyncIterator[CollectiveIdentifiersByKsefNumberQueryResponseItem]:

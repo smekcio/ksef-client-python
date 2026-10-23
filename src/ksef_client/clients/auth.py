@@ -88,7 +88,7 @@ class AuthClient(BaseApiClient):
             access_token=access_token,
         )
 
-    def revoke_current_session(self, access_token: str) -> None:
+    def revoke_current_session(self, access_token: str | None = None) -> None:
         self._request_json(
             "DELETE",
             "/auth/sessions/current",
@@ -96,7 +96,7 @@ class AuthClient(BaseApiClient):
             expected_status={204},
         )
 
-    def revoke_session(self, reference_number: str, access_token: str) -> None:
+    def revoke_session(self, reference_number: str, access_token: str | None = None) -> None:
         self._request_json(
             "DELETE",
             f"/auth/sessions/{reference_number}",
@@ -219,7 +219,7 @@ class AsyncAuthClient(AsyncBaseApiClient):
             access_token=access_token,
         )
 
-    async def revoke_current_session(self, access_token: str) -> None:
+    async def revoke_current_session(self, access_token: str | None = None) -> None:
         await self._request_json(
             "DELETE",
             "/auth/sessions/current",
@@ -227,7 +227,7 @@ class AsyncAuthClient(AsyncBaseApiClient):
             expected_status={204},
         )
 
-    async def revoke_session(self, reference_number: str, access_token: str) -> None:
+    async def revoke_session(self, reference_number: str, access_token: str | None = None) -> None:
         await self._request_json(
             "DELETE",
             f"/auth/sessions/{reference_number}",

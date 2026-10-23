@@ -42,12 +42,17 @@ asyncio.run(main())
 
 ## Token (`access_token`)
 
-Token może zostać przekazany na dwa sposoby:
+Token może zostać przekazany na trzy sposoby:
 
 - w konstruktorze: `KsefClient(options, access_token=...)`
 - per-call: `client.invoices.query_invoice_metadata(..., access_token=...)`
+- przez `AuthenticatedClient` — token jest wstrzykiwany do każdego żądania i odświeżany
+  automatycznie; żadna metoda nie wymaga wtedy `access_token`
+  (patrz [Klient uwierzytelniony i tokeny](../token-manager.md))
 
-Wariant per-call jest preferowany w przypadku obsługi wielu kontekstów.
+Wariant per-call jest preferowany w przypadku obsługi wielu kontekstów. We wszystkich
+metodach klientów `access_token` ma domyślnie `None` — jawne przekazanie tokena nadal
+działa i ma pierwszeństwo przed tokenem klienta.
 
 Ważne dla resume workflow:
 - handle sesji (`OnlineSessionHandle`, `BatchSessionHandle`) i metody `client.sessions.*`
@@ -59,6 +64,26 @@ Stan sesji serializowany przez SDK nie zawiera tokenów. To świadoma decyzja be
 
 Ważne: payloady requestów w SDK są typed-only. Do metod klientów przekazuj modele z
 `ksef_client.models`, a nie surowe `dict`.
+
+## `AuthenticatedClient` i `AsyncAuthenticatedClient`
+
+Klient, który sam wstrzykuje token dostępowy i odświeża go 60 s przed wygaśnięciem
+oraz jednorazowo po odpowiedzi 401 — metody nie wymagają wtedy `access_token`:
+
+```python
+from ksef_client import AuthenticatedClient, models as m
+
+with AuthenticatedClient.from_auth_result(options, auth_result) as client:
+    metadata = client.invoices.query_invoice_metadata_by_date_range(
+        subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
+        date_type=m.InvoiceQueryDateType.ISSUE,
+        date_from="2026-01-01T00:00:00Z",
+        date_to="2026-01-31T23:59:59Z",
+    )
+```
+
+Wariant asynchroniczny: `AsyncAuthenticatedClient` + `AsyncTokenManager`. Szczegóły
+(refresh proaktywny/reaktywny, `on_refresh`, wariant async): [token-manager.md](../token-manager.md).
 
 ## Zamykanie połączeń
 

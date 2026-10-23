@@ -7,7 +7,12 @@ from .certificates import (
     FileCertificateStore,
     StoredCertificate,
 )
-from .client import AsyncKsefClient, KsefClient
+from .client import (
+    AsyncAuthenticatedClient,
+    AsyncKsefClient,
+    AuthenticatedClient,
+    KsefClient,
+)
 from .config import KsefClientOptions, KsefEnvironment, KsefLighthouseEnvironment
 from .exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 from .models import (
@@ -27,6 +32,8 @@ from .models import (
     TokenInfo,
 )
 from .profiles import Profile, ProfileError, ProfileStore
+from .retry import RetryConfig
+from .token_manager import AsyncTokenManager, TokenManager, TokenManagerError
 
 __all__ = [
     "KsefClientOptions",
@@ -34,6 +41,12 @@ __all__ = [
     "KsefLighthouseEnvironment",
     "KsefClient",
     "AsyncKsefClient",
+    "AuthenticatedClient",
+    "AsyncAuthenticatedClient",
+    "RetryConfig",
+    "TokenManager",
+    "AsyncTokenManager",
+    "TokenManagerError",
     "KsefApiError",
     "KsefRateLimitError",
     "KsefHttpError",

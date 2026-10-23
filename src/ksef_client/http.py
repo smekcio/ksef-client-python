@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import ipaddress
 import logging
 import math
+import random
 import re
+import time
 from dataclasses import MISSING, dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -25,6 +28,12 @@ from .models import (
     TooManyRequestsResponse,
     UnauthorizedProblemDetails,
     UnknownApiProblem,
+)
+from .retry import (
+    MAX_RETRY_AFTER_SECONDS,
+    RETRYABLE_STATUS_CODES,
+    compute_retry_delay_seconds,
+    should_retry_request,
 )
 
 logger = logging.getLogger(__name__)
@@ -168,17 +177,9 @@ def _handle_system_warning(options: KsefClientOptions, response: httpx.Response)
     options.system_warning_handler(warning)
 
 
-#: Górne ograniczenie `Retry-After` (sekundy).
-#:
-#: Serwer może zażądać pauzy o dowolnej długości (także `Retry-After: 86400`),
-#: a SDK czekałby wtedy dobę — proces wisiałby bez żadnego sygnału dla wołającego.
-#: Wartość powyżej limitu jest traktowana jako „odczekaj maksimum", a nie
-#: ignorowana, bo dalsze żądania i tak nie mają sensu.
-MAX_RETRY_AFTER_SECONDS = 300
-
-#: Statusy, których ponowienie ma sens — te same, które ponawia CLI
-#: (`cli.policies.retry.should_retry`). Tylko dla nich czytamy ``Retry-After``.
-RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({429, 502, 503, 504})
+# `MAX_RETRY_AFTER_SECONDS` i `RETRYABLE_STATUS_CODES` mieszkają w `retry.py`
+# (wspólne z CLI), a tutaj są importowane i re-eksportowane — istniejące importy
+# `from ksef_client.http import MAX_RETRY_AFTER_SECONDS` działają bez zmian.
 
 #: Status dla wyjątków bez odpowiedzi HTTP (błąd transportu, timeout).
 #:
@@ -710,6 +711,81 @@ class BaseHttpClient:
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
     ) -> HttpResponse:
+        """Wykonuje żądanie HTTP, opcjonalnie ponawiając je według ``options.retry``.
+
+        Bez skonfigurowanego ``retry`` zachowanie jest identyczne z wcześniejszym:
+        jedno żądanie i wyjątek przy błędzie. Pętla ponawia wyłącznie odpowiedzi
+        z ``RETRYABLE_STATUS_CODES`` dla metod z allowlisty (patrz
+        :func:`ksef_client.retry.should_retry_request`).
+        """
+        config = self._options.retry
+        if config is None:
+            return self._request_once(
+                method,
+                path,
+                params=params,
+                headers=headers,
+                json=json,
+                data=data,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                skip_auth=skip_auth,
+                expected_status=expected_status,
+            )
+
+        attempts_limit = config.max_retries + 1
+        attempt = 1
+        while True:
+            try:
+                return self._request_once(
+                    method,
+                    path,
+                    params=params,
+                    headers=headers,
+                    json=json,
+                    data=data,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    skip_auth=skip_auth,
+                    expected_status=expected_status,
+                )
+            except KsefHttpError as exc:
+                if attempt >= attempts_limit or not should_retry_request(
+                    method, path, exc.status_code, config
+                ):
+                    raise
+                delay = compute_retry_delay_seconds(
+                    attempt,
+                    config,
+                    retry_after=exc.retry_after_raw,
+                    random_value=random.random(),
+                )
+                logger.debug(
+                    "Retry %s %s (attempt %d/%d) in %.2fs after status %d",
+                    method,
+                    _loggable_url(path),
+                    attempt,
+                    attempts_limit,
+                    delay,
+                    exc.status_code,
+                )
+                time.sleep(delay)
+                attempt += 1
+
+    def _request_once(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: bytes | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        skip_auth: bool = False,
+        expected_status: set[int] | None = None,
+    ) -> HttpResponse:
         _reject_json_and_data_together(json, data)
         url = path
         if not _is_absolute_http_url(url):
@@ -839,6 +915,78 @@ class AsyncBaseHttpClient:
         await self._client.aclose()
 
     async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: bytes | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        skip_auth: bool = False,
+        expected_status: set[int] | None = None,
+    ) -> HttpResponse:
+        """Asynchroniczny odpowiednik :meth:`BaseHttpClient.request`.
+
+        Pętla retry ma identyczną semantykę; różni się wyłącznie ``asyncio.sleep``.
+        """
+        config = self._options.retry
+        if config is None:
+            return await self._request_once(
+                method,
+                path,
+                params=params,
+                headers=headers,
+                json=json,
+                data=data,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                skip_auth=skip_auth,
+                expected_status=expected_status,
+            )
+
+        attempts_limit = config.max_retries + 1
+        attempt = 1
+        while True:
+            try:
+                return await self._request_once(
+                    method,
+                    path,
+                    params=params,
+                    headers=headers,
+                    json=json,
+                    data=data,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    skip_auth=skip_auth,
+                    expected_status=expected_status,
+                )
+            except KsefHttpError as exc:
+                if attempt >= attempts_limit or not should_retry_request(
+                    method, path, exc.status_code, config
+                ):
+                    raise
+                delay = compute_retry_delay_seconds(
+                    attempt,
+                    config,
+                    retry_after=exc.retry_after_raw,
+                    random_value=random.random(),
+                )
+                logger.debug(
+                    "Retry %s %s (attempt %d/%d) in %.2fs after status %d",
+                    method,
+                    _loggable_url(path),
+                    attempt,
+                    attempts_limit,
+                    delay,
+                    exc.status_code,
+                )
+                await asyncio.sleep(delay)
+                attempt += 1
+
+    async def _request_once(
         self,
         method: str,
         path: str,
