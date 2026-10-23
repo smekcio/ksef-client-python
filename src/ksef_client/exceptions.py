@@ -71,6 +71,10 @@ class KsefExceptionCode(IntEnum):
     dostępne jako ``int`` w :attr:`KsefApiError.exception_codes`.
     """
 
+    INVALID_SIGNATURE_DOCUMENT = 9101
+    MISSING_SIGNATURE = 9102
+    SIGNATURE_LIMIT_EXCEEDED = 9103
+    INVALID_SIGNATURE = 9105
     INVALID_CONTENT = 21001
     INVALID_AUTH_CHALLENGE = 21111
     INVALID_CERTIFICATE = 21115
@@ -180,7 +184,9 @@ def exception_codes(problem: Any | None) -> tuple[int, ...]:
             return
         try:
             code = int(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # ``json.loads`` potrafi zwrócić ``inf`` dla ``1e309`` — int(inf) rzuca
+            # OverflowError; bez tego wyjątek przerywałby pętlę retry.
             return
         if code not in codes:
             codes.append(code)
@@ -294,6 +300,7 @@ def _restore_workflow_error(
 
 @dataclass(repr=False)
 class KsefHttpError(KsefError):
+    code: ClassVar[ErrorCode] = ErrorCode.HTTP_ERROR
     status_code: int
     message: str
     response_body: Any | None = None
@@ -551,18 +558,18 @@ class KsefAuthenticationTimeoutError(KsefWorkflowError, TimeoutError):
 
 
 _AUTHENTICATION_CODES = frozenset(
-    {21111, 21115, 21117, 21304, 21308, 21406, 21470}
+    {9101, 9102, 9103, 9105, 21111, 21115, 21117, 21304, 21308, 21406, 21470}
 )
 _AUTHORIZATION_CODES = frozenset({21301})
 _PERMISSION_CODES = frozenset({26001, 26002, 30001})
 _CERTIFICATE_CODES = frozenset(range(25001, 25012))
 _COLLECTIVE_IDENTIFIER_CODES = frozenset({71001, 71002, 71004, 71005})
-_EXPORT_CODES = frozenset({21181, 21182, 21183})
+_EXPORT_CODES = frozenset({21175, 21181, 21182, 21183})
 _SESSION_CODES = frozenset({21155, 21157, 21161, 21173, 21180, 21184, 21205, 21208})
 _INVOICE_UNAVAILABLE_CODES = frozenset({21165, 21166, 21167})
 _INVOICE_NOT_FOUND_CODES = frozenset({21164})
-_UPO_NOT_FOUND_CODES = frozenset({21175, 21178})
-_INVOICE_REJECTED_CODES = frozenset({21401, 21402, 21403})
+_UPO_NOT_FOUND_CODES = frozenset({21178})
+_INVOICE_REJECTED_CODES = frozenset({21402, 21403})
 _VALIDATION_CODES = frozenset({21001, 21217, 21405})
 _CONTINUATION_TOKEN_CODES = frozenset({21418})
 
@@ -592,10 +599,23 @@ def _class_for_codes(codes: tuple[int, ...]) -> type[KsefApiError] | None:
     return None
 
 
+def _is_auth_path(path: str) -> bool:
+    return "/auth/" in path or path.startswith("/auth")
+
+
+def _is_invoice_path(path: str) -> bool:
+    return "/invoices" in path or "/sessions" in path
+
+
 def classify_http_error(
-    status_code: int, problem: Any | None
+    status_code: int, problem: Any | None, *, path: str = ""
 ) -> type[KsefHttpError]:
-    """Dobiera klasę wyjątku do statusu i payloadu (nigdy nie rzuca)."""
+    """Dobiera klasę wyjątku do statusu, payloadu i ścieżki żądania.
+
+    ``path`` jest potrzebny dla kodu ``21401`` (niepoprawny dokument XSD), który
+    występuje zarówno przy podpisie XAdES w ``/auth/xades-signature``, jak i przy
+    fakturach — bez kontekstu nie da się ich rozróżnić.
+    """
     codes = exception_codes(problem)
 
     if status_code == 0:
@@ -609,6 +629,12 @@ def classify_http_error(
     if status_code == 410:
         return _class_for_codes(codes) or KsefResourceGoneError
     if status_code == 400:
+        if 21401 in codes:
+            if _is_auth_path(path):
+                return KsefAuthenticationError
+            if _is_invoice_path(path):
+                return KsefInvoiceRejectedError
+            return KsefValidationError
         return _class_for_codes(codes) or KsefBadRequestError
     if status_code in {502, 503, 504}:
         return KsefServiceUnavailableError

@@ -681,6 +681,7 @@ def _build_http_error(
     body: Any | None,
     problem: Any | None,
     retry_after_fields: dict[str, Any],
+    path: str = "",
 ) -> KsefHttpError:
     """Buduje wyjątek SDK dla nieoczekiwanego statusu HTTP.
 
@@ -707,7 +708,7 @@ def _build_http_error(
             **retry_after_fields,
         )
 
-    error_cls = classify_http_error(status_code, problem)
+    error_cls = classify_http_error(status_code, problem, path=path)
     if issubclass(error_cls, KsefApiError):
         return error_cls(
             status_code=status_code,
@@ -909,11 +910,11 @@ class BaseHttpClient:
             # odpowiedzi jest strona pośrednika albo puste ciało. Przyjmowanie
             # jej jako sukcesu zapisywało PUSTY plik UPO/faktury i raportowało
             # sukces (`upo download` tworzył plik o rozmiarze 0).
-            self._raise_for_status(response)
+            self._raise_for_status(response, path)
 
         return HttpResponse(response.status_code, response.headers, response.content)
 
-    def _raise_for_status(self, response: httpx.Response) -> None:
+    def _raise_for_status(self, response: httpx.Response, path: str = "") -> None:
         retry_after_fields = _retry_after_fields(response)
         content_type = response.headers.get("Content-Type", "")
         body: Any = None
@@ -930,6 +931,7 @@ class BaseHttpClient:
             body,
             problem,
             retry_after_fields,
+            path=path,
         )
 
 
@@ -1096,11 +1098,11 @@ class AsyncBaseHttpClient:
             # odpowiedzi jest strona pośrednika albo puste ciało. Przyjmowanie
             # jej jako sukcesu zapisywało PUSTY plik UPO/faktury i raportowało
             # sukces (`upo download` tworzył plik o rozmiarze 0).
-            self._raise_for_status(response)
+            self._raise_for_status(response, path)
 
         return HttpResponse(response.status_code, response.headers, response.content)
 
-    def _raise_for_status(self, response: httpx.Response) -> None:
+    def _raise_for_status(self, response: httpx.Response, path: str = "") -> None:
         retry_after_fields = _retry_after_fields(response)
         content_type = response.headers.get("Content-Type", "")
         body: Any = None
@@ -1117,4 +1119,5 @@ class AsyncBaseHttpClient:
             body,
             problem,
             retry_after_fields,
+            path=path,
         )

@@ -32,17 +32,17 @@ Dla odpowiedzi z JSON-em SDK wybiera klasę na podstawie statusu i kodów KSeF:
 | Klasa | `ErrorCode` | Kiedy |
 |---|---|---|
 | `KsefBadRequestError` | `bad_request` | 400 bez rozpoznanego kodu |
-| `KsefAuthenticationError` | `authentication_failed` | 401, 400 z kodami auth |
+| `KsefAuthenticationError` | `authentication_failed` | 401, 400 z kodami auth (w tym `9101`, `9102`, `9103`, `9105`; `21401` na `/auth/...`) |
 | `KsefAuthorizationError` | `authorization_failed` | 403, 400/`21301` |
 | `KsefPermissionError` | `permission_error` | `26xxx`, `30xxx` |
 | `KsefCertificateError` | `certificate_error` | `25xxx` |
-| `KsefValidationError` | `validation_failed` | `21001`, `21217`, `21405` |
-| `KsefInvoiceRejectedError` | `invoice_rejected` | `21401`–`21403` |
+| `KsefValidationError` | `validation_failed` | `21001`, `21217`, `21405`, `21401` poza auth/fakturami |
+| `KsefInvoiceRejectedError` | `invoice_rejected` | `21401` na ścieżkach faktur, `21402`–`21403` |
 | `KsefInvoiceNotFoundError` | `invoice_not_found` | `21164` |
 | `KsefInvoiceUnavailableError` | `invoice_unavailable` | `21165`–`21167` |
-| `KsefUpoNotFoundError` | `upo_not_found` | `21175`, `21178` |
+| `KsefUpoNotFoundError` | `upo_not_found` | `21178` |
 | `KsefSessionError` | `session_error` | błędy sesji (`21155`–`21208`) |
-| `KsefExportError` | `export_error` | `21181`–`21183` |
+| `KsefExportError` | `export_error` | `21175`, `21181`–`21183` |
 | `KsefCollectiveIdentifierError` | `collective_identifier_error` | `71xxx` |
 | `KsefInvalidContinuationTokenError` | `invalid_continuation_token` | `21418` |
 | `KsefResourceGoneError` | `not_found` | 410 bez rozpoznanego kodu |
@@ -54,7 +54,9 @@ Dla odpowiedzi z JSON-em SDK wybiera klasę na podstawie statusu i kodów KSeF:
 Gdy odpowiedź zawiera kilka kodów, pierwszeństwo ma pierwsza rodzina w kolejności:
 auth → autoryzacja → uprawnienia → certyfikaty → identyfikatory zbiorcze → eksport →
 sesja → faktura niedostępna → faktura nie istnieje → UPO → odrzucenie faktury →
-walidacja → token kontynuacji.
+walidacja → token kontynuacji. Kod `21401` jest wyjątkiem: na `/auth/...` oznacza błąd
+dokumentu uwierzytelniającego, na `/invoices/...` i `/sessions/...` — odrzucenie faktury,
+a bez kontekstu ścieżki — błąd walidacji.
 
 ### `KsefRateLimitError`
 
@@ -99,8 +101,8 @@ except KsefApiError as exc:                  # nadal łapie wszystkie podklasy
 
 ### `KsefExceptionCode` i `ForbiddenReason`
 
-`KsefExceptionCode` to `IntEnum` z 50 kodami `exceptionCode` z KSeF API 2.9.0
-(m.in. `INPUT_VALIDATION_FAILED = 21405`, `INVALID_CSR = 25004`,
+`KsefExceptionCode` to `IntEnum` z 54 kodami `exceptionCode` z KSeF API 2.9.0
+(m.in. `INVALID_SIGNATURE = 9105`, `INPUT_VALIDATION_FAILED = 21405`, `INVALID_CSR = 25004`,
 `PERMISSION_ALREADY_EXISTS = 30001`). Nowe kody przyszłych wersji API nie wywracają
 parsowania — pozostają jako `int` w `exc.exception_codes`.
 

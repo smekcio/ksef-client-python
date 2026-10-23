@@ -3,6 +3,9 @@ from __future__ import annotations
 import copy
 import json
 import pickle
+import re
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 import httpx
 import pytest
@@ -49,60 +52,8 @@ from ksef_client.models import (
     StatusInfo,
     UnknownApiProblem,
 )
+from ksef_client.retry import RetryConfig
 from ksef_client.services.workflows import AsyncAuthCoordinator, AuthCoordinator
-
-ALL_EXCEPTION_CODES = {
-    21001,
-    21111,
-    21115,
-    21117,
-    21155,
-    21157,
-    21161,
-    21164,
-    21165,
-    21166,
-    21167,
-    21173,
-    21175,
-    21178,
-    21180,
-    21181,
-    21182,
-    21183,
-    21184,
-    21205,
-    21208,
-    21217,
-    21301,
-    21304,
-    21308,
-    21401,
-    21402,
-    21403,
-    21405,
-    21406,
-    21418,
-    21470,
-    25001,
-    25002,
-    25003,
-    25004,
-    25005,
-    25006,
-    25007,
-    25008,
-    25009,
-    25010,
-    25011,
-    26001,
-    26002,
-    30001,
-    71001,
-    71002,
-    71004,
-    71005,
-}
 
 
 def _legacy_problem(*codes: int, description: str = "Opis błędu") -> ExceptionResponse:
@@ -188,10 +139,23 @@ class _FakeAsyncAuth:
 # --- enumy -----------------------------------------------------------------
 
 
+SNAPSHOT_PATH = (
+    Path(__file__).resolve().parents[1] / "specs" / "ksef-openapi.snapshot.json"
+)
+
+
+def _snapshot_exception_codes() -> set[int]:
+    """Kody z tabel ``ExceptionCode`` w snapshocie (≥9000 odsiewa inne tabele)."""
+    text = SNAPSHOT_PATH.read_text(encoding="utf-8")
+    codes = {int(match.group(1)) for match in re.finditer(r"\|\s*(\d{4,5})\s*\|", text)}
+    return {code for code in codes if code >= 9000}
+
+
 def test_exception_code_enum_matches_spec_catalog() -> None:
-    assert {member.value for member in KsefExceptionCode} == ALL_EXCEPTION_CODES
+    assert {member.value for member in KsefExceptionCode} == _snapshot_exception_codes()
     assert KsefExceptionCode.from_code(21405) is KsefExceptionCode.INPUT_VALIDATION_FAILED
     assert KsefExceptionCode.from_code(99999) is None
+    assert KsefExceptionCode.from_code(9105) is KsefExceptionCode.INVALID_SIGNATURE
 
 
 def test_error_codes_and_forbidden_reasons_are_stable() -> None:
@@ -254,8 +218,10 @@ def test_error_codes_and_forbidden_reasons_are_stable() -> None:
         (400, _legacy_problem(21155), KsefSessionError),
         (400, _legacy_problem(21165), KsefInvoiceUnavailableError),
         (400, _legacy_problem(21164), KsefInvoiceNotFoundError),
+        (400, _legacy_problem(21175), KsefExportError),
         (400, _legacy_problem(21178), KsefUpoNotFoundError),
-        (400, _legacy_problem(21401), KsefInvoiceRejectedError),
+        (400, _legacy_problem(9105), KsefAuthenticationError),
+        (400, _legacy_problem(21401), KsefValidationError),
         (400, _legacy_problem(21405), KsefValidationError),
         (400, _legacy_problem(21418), KsefInvalidContinuationTokenError),
         (400, _legacy_problem(99999), KsefBadRequestError),
@@ -278,6 +244,56 @@ def test_classify_http_error(
     assert classify_http_error(status, problem) is expected
 
 
+def test_21401_classification_depends_on_request_path() -> None:
+    problem = _legacy_problem(21401)
+
+    assert (
+        classify_http_error(400, problem, path="/auth/xades-signature")
+        is KsefAuthenticationError
+    )
+    assert (
+        classify_http_error(400, problem, path="/invoices/ksef/123")
+        is KsefInvoiceRejectedError
+    )
+    assert (
+        classify_http_error(400, problem, path="/sessions/online")
+        is KsefInvoiceRejectedError
+    )
+    assert classify_http_error(400, problem) is KsefValidationError
+
+
+def test_http_error_defaults_to_http_error_code() -> None:
+    error = KsefHttpError(500, "boom")
+
+    assert error.code is ErrorCode.HTTP_ERROR
+    assert error.to_dict()["code"] == "http_error"
+
+
+def test_overflowing_error_code_does_not_break_retry() -> None:
+    payload = b'{"errors":[{"code": 1e309, "description": "x"}]}'
+    response = httpx.Response(
+        503,
+        content=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    client = BaseHttpClient(
+        KsefClientOptions(
+            base_url="https://api-test.ksef.mf.gov.pl",
+            retry=RetryConfig(max_retries=1),
+        )
+    )
+    request = Mock(return_value=response)
+
+    with (
+        patch.object(client._client, "request", request),
+        patch("ksef_client.http.time.sleep"),pytest.raises(KsefHttpError) as excinfo
+    ):
+        client.request("GET", "/x")
+
+    assert isinstance(excinfo.value, KsefServiceUnavailableError)
+    assert request.call_count == 2
+
+
 def test_classification_precedence_is_deterministic() -> None:
     # certyfikat ma pierwszeństwo przed walidacją
     assert classify_http_error(400, _legacy_problem(21405, 25004)) is KsefCertificateError
@@ -294,6 +310,7 @@ def test_exception_codes_support_both_payload_formats() -> None:
     ) == (25004,)
     assert exception_codes(None) == ()
     assert exception_codes({"errors": [{"code": "x"}, {"code": True}]}) == ()
+    assert exception_codes({"errors": [{"code": float("inf")}]}) == ()
 
 
 # --- właściwości i to_dict -------------------------------------------------

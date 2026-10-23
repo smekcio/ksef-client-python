@@ -5,7 +5,7 @@
 ### Features
 
 * **sdk:** taksonomia błędów — `KsefError` + `ErrorCode`, `KsefExceptionCode`
-  (50 kodów `exceptionCode` z KSeF API 2.9.0), `ForbiddenReason` oraz podklasy HTTP
+  (54 kody `exceptionCode` z KSeF API 2.9.0, w tym `91xx` podpisu XAdES), `ForbiddenReason` oraz podklasy HTTP
   dla walidacji, uwierzytelnienia, uprawnień, sesji, eksportu, certyfikatów i faktur.
   `KsefApiError.exception_codes`/`details`/`reason_code`/`trace_id` i `to_dict()` dają
   stabilny kontrakt dla CLI i MCP; mapowanie jest addytywne, a 429 pozostaje
