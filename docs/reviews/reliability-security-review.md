@@ -1,7 +1,7 @@
 # Przegląd błędów i bezpieczeństwa: niezawodność SDK
 
-Data: 2026-10-23. Gałąź: `codex/reliability-pagination-release-gate`.
-Poprawki: commit `4acee3d`.
+Data: 2026-10-23. Gałąź: `reliability-pagination-release-gate`.
+Poprawki znajdują się w commitach tej gałęzi.
 
 Przegląd objął implementację paginacji i kursorów, redakcję danych,
 przykład checkpointów, bramę wydawniczą oraz powiązane ścieżki HTTP,
@@ -26,6 +26,7 @@ możliwych podatności.
 | P2 | Diagnostyka mogła uruchomić reprezentację obcego obiektu albo nadmiernie rozbudować wynik. | Ograniczenie głębokości, liczby elementów i długości danych, wykrywanie cykli, ścisłe typy oraz maskowanie dodatkowych nagłówków i adresów konfiguracji. |
 | P2 | Integralność sdist i zakres udostępniania sekretów CI wymagały wzmocnienia. | Kontrola metadanych sdist, odrzucanie niebezpiecznych nazw i symlinków manifestu, przypięcie akcji do SHA i sekrety ograniczone do wymagających ich kroków. |
 | P2 | Skan lokalnego środowiska wykazał znane podatności zależności. | Podniesiono minimalne wersje zależności podstawowych, CLI i narzędzi deweloperskich. Ponowny skan zaktualizowanego środowiska nie zgłasza znanych podatności. |
+| P2 | Końcowy przegląd wykazał, że konwersja modeli mogła ukryć błędny typ numeru KSeF, a zbyt długi numer tworzył nieodczytywalny następny kursor. | Nowe API sprawdza typ i długość identyfikatora oraz typy dat przed konwersją. Niepoprawne dane powodują jawny błąd niekompletności z kursorem powtórzenia, także w async. |
 
 Wszystkie powyższe pozycje mają status **naprawione** i testy regresji
 lub odpowiednią kontrolę narzędziową. Dodatkowo naprawiono izolację
@@ -48,9 +49,13 @@ testów platformowych zmieniających globalne `os.name` na Windows.
 
 ## Weryfikacja
 
-- Python 3.10, 3.11, 3.12 i 3.13 na Windows: po **2405 testów zaliczonych,
+- Pierwsza pełna kontrola na Pythonie 3.10, 3.11, 3.12 i 3.13 na Windows:
+  po **2405 testów zaliczonych,
   15 pominiętych**, 61 zaliczonych podtestów na każdej wersji.
-- Python 3.12: **100% pokrycia kodu źródłowego**, 15527 instrukcji.
+- Po poprawkach końcowego przeglądu: Python 3.12, **2426 testów zaliczonych,
+  15 pominiętych, 100% pokrycia kodu źródłowego**, 15529 instrukcji.
+  Na Pythonie 3.10, 3.11 i 3.13 ponownie zaliczono po 142 testy paginacji,
+  regresji przeglądu i bramy wydawniczej.
 - Testy obejmują utratę danych na granicach paginacji, restart,
   niepoprawne odpowiedzi, kursory, diagnostykę, SQLite i negatywne
   przypadki bramy wydawniczej; dodano deterministyczne mutacje kursorów.

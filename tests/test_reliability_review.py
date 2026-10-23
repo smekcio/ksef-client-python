@@ -188,7 +188,26 @@ def test_review_truncated_export_must_not_advance_to_hwm_without_a_last_record()
         {"hasMore": False, "isTruncated": 0, "invoices": []},
         {"hasMore": False, "isTruncated": False, "invoices": [None]},
         {"hasMore": False, "isTruncated": False, "invoices": "wrong"},
-        {"hasMore": False, "isTruncated": False, "invoices": [{"grossAmount": "bad"}]},
+        {
+            "hasMore": False,
+            "isTruncated": False,
+            "invoices": [{"ksefNumber": "1", "grossAmount": "bad"}],
+        },
+        *[
+            {
+                **response([invoice(1)]).to_dict(),
+                "invoices": [{**invoice(1).to_dict(), "ksefNumber": number}],
+            }
+            for number in cast(tuple[Any, ...], (0, True, [], {}, "", "x" * 257))
+        ],
+        *[
+            {
+                **response([invoice(1)]).to_dict(),
+                "invoices": [{**invoice(1).to_dict(), key: 20261001}],
+            }
+            for key in ("issueDate", "invoicingDate", "permanentStorageDate")
+        ],
+        {**response([invoice(1)]).to_dict(), "permanentStorageHwmDate": 20261001},
     ],
 )
 @pytest.mark.parametrize("asynchronous", [False, True])
@@ -340,3 +359,10 @@ def test_review_malformed_cursor_fuzz_always_has_a_typed_failure():
         state[rng.choice(keys)] = rng.choice(values)
         with suppress(KsefInvalidPaginationCursorError):
             walk.load(_dump(state))
+
+
+def test_final_review_oversized_invoice_identity_cannot_create_unreadable_cursor():
+    walk = machine()
+    with pytest.raises(KsefIncompletePaginationError, match="missing_ksef_number") as caught:
+        walk.advance(walk.load(None), response([invoice("x" * 257)], True))
+    assert walk.load(caught.value.last_cursor)["offset"] == 0

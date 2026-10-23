@@ -60,6 +60,21 @@ def _parse_metadata_response(raw: Any) -> QueryInvoicesMetadataResponse:
         or any(type(item) is not dict for item in raw["invoices"])
     ):
         raise _InvalidMetadataResponse("Invalid metadata response")
+    # Legacy models intentionally coerce strings. Identity and pagination dates
+    # must retain their wire types here, before that conversion can hide damage.
+    if any(
+        type(item.get("ksefNumber")) is not str
+        or not 1 <= len(item["ksefNumber"]) <= 256
+        or any(
+            item.get(key) is not None and type(item[key]) is not str
+            for key in ("issueDate", "invoicingDate", "permanentStorageDate")
+        )
+        for item in raw["invoices"]
+    ) or (
+        raw.get("permanentStorageHwmDate") is not None
+        and type(raw["permanentStorageHwmDate"]) is not str
+    ):
+        raise _InvalidMetadataResponse("Invalid metadata response")
     try:
         return QueryInvoicesMetadataResponse.from_dict(raw)
     except (ValueError, TypeError, KeyError, OverflowError):
@@ -285,7 +300,10 @@ class _MetadataMachine:
             )
         for invoice in response.invoices:
             boundary = getattr(invoice, _FIELDS[self.date_type])
-            if not isinstance(invoice.ksef_number, str) or not invoice.ksef_number:
+            if (
+                not isinstance(invoice.ksef_number, str)
+                or not 1 <= len(invoice.ksef_number) <= 256
+            ):
                 fail("missing_ksef_number")
             try:
                 if not isinstance(boundary, str):
