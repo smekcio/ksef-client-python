@@ -142,12 +142,22 @@ SENSITIVE_FIELD_NAMES: frozenset[str] = frozenset(
         "client_secret",
         "clientSecret",
         "key",
+        "authentication_token", "authenticationToken",
+        "encryptedSymmetricKey", "encryptedToken", "encryptedInvoiceContent",
+        "initializationVector", "iv", "url", "headers", "downloadUrl", "upoDownloadUrl",
     }
 )
 
 
-def _is_sensitive_field(prop_name: str, field_name: str) -> bool:
-    return prop_name in SENSITIVE_FIELD_NAMES or field_name in SENSITIVE_FIELD_NAMES
+SENSITIVE_MODEL_FIELDS: dict[str, frozenset[str]] = {
+    "PartUploadRequest": frozenset({"headers", "url"}),
+    "UpoPage": frozenset({"downloadUrl"}),
+}
+
+
+def _is_sensitive_field(prop_name: str, field_name: str, model_name: str = "") -> bool:
+    return (prop_name in SENSITIVE_FIELD_NAMES or field_name in SENSITIVE_FIELD_NAMES
+            or prop_name in SENSITIVE_MODEL_FIELDS.get(model_name, frozenset()))
 
 
 def _schema_type(schema: dict) -> str:
@@ -253,7 +263,7 @@ def _generate_object(name: str, schema: dict) -> list[str]:
         field_kwargs: list[str] = []
         if not is_required:
             field_kwargs.append("default=None")
-        if _is_sensitive_field(prop_name, field_name):
+        if _is_sensitive_field(prop_name, field_name, name):
             # Tokeny i klucze nie mogą wyciekać przez `repr()` (logi, wyjątki).
             field_kwargs.append("repr=False")
         if field_name != prop_name:

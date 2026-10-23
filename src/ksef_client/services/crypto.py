@@ -20,7 +20,7 @@ class EncryptionData:
     # `key` to klucz sesji (sekret), więc nie trafia do `repr` — logi i wyjątki nie
     # mogą wyciekać materiału klucza. IV jest jawny w `EncryptionInfo`, zostaje widoczny.
     key: bytes = field(repr=False)
-    iv: bytes
+    iv: bytes = field(repr=False)
     encryption_info: EncryptionInfo | None
 
 

@@ -804,7 +804,7 @@ class AuthenticationContextIdentifier(OpenApiModel):
 
 @dataclass(frozen=True)
 class AuthenticationInitResponse(OpenApiModel):
-    authentication_token: TokenInfo = field(metadata={"json_key": "authenticationToken"})
+    authentication_token: TokenInfo = field(repr=False, metadata={"json_key": "authenticationToken"})
     reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
 
 @dataclass(frozen=True)
@@ -1063,8 +1063,8 @@ class EffectiveSubjectLimits(OpenApiModel):
 
 @dataclass(frozen=True)
 class EncryptionInfo(OpenApiModel):
-    encrypted_symmetric_key: str = field(metadata={"json_key": "encryptedSymmetricKey"})
-    initialization_vector: str = field(metadata={"json_key": "initializationVector"})
+    encrypted_symmetric_key: str = field(repr=False, metadata={"json_key": "encryptedSymmetricKey"})
+    initialization_vector: str = field(repr=False, metadata={"json_key": "initializationVector"})
     public_key_id: Optional[str] = field(default=None, metadata={"json_key": "publicKeyId"})
 
 @dataclass(frozen=True)
@@ -1356,7 +1356,7 @@ class IndirectPermissionsTargetIdentifier(OpenApiModel):
 class InitTokenAuthenticationRequest(OpenApiModel):
     challenge: Challenge
     context_identifier: AuthenticationContextIdentifier = field(metadata={"json_key": "contextIdentifier"})
-    encrypted_token: str = field(metadata={"json_key": "encryptedToken"})
+    encrypted_token: str = field(repr=False, metadata={"json_key": "encryptedToken"})
     authorization_policy: Optional[AuthorizationPolicy] = field(default=None, metadata={"json_key": "authorizationPolicy"})
     public_key_id: Optional[str] = field(default=None, metadata={"json_key": "publicKeyId"})
 
@@ -1452,7 +1452,7 @@ class InvoicePackagePart(OpenApiModel):
     part_hash: Sha256HashBase64 = field(metadata={"json_key": "partHash"})
     part_name: str = field(metadata={"json_key": "partName"})
     part_size: int = field(metadata={"json_key": "partSize"})
-    url: str
+    url: str = field(repr=False)
 
 @dataclass(frozen=True)
 class InvoiceQueryAmount(OpenApiModel):
@@ -1531,10 +1531,10 @@ class OpenOnlineSessionResponse(OpenApiModel):
 
 @dataclass(frozen=True)
 class PartUploadRequest(OpenApiModel):
-    headers: dict[str, Optional[str]]
+    headers: dict[str, Optional[str]] = field(repr=False)
     method: str
     ordinal_number: int = field(metadata={"json_key": "ordinalNumber"})
-    url: str
+    url: str = field(repr=False)
 
 @dataclass(frozen=True)
 class PeppolProvider(OpenApiModel):
@@ -1839,7 +1839,7 @@ class RevokeCertificateRequest(OpenApiModel):
 
 @dataclass(frozen=True)
 class SendInvoiceRequest(OpenApiModel):
-    encrypted_invoice_content: str = field(metadata={"json_key": "encryptedInvoiceContent"})
+    encrypted_invoice_content: str = field(repr=False, metadata={"json_key": "encryptedInvoiceContent"})
     encrypted_invoice_hash: Sha256HashBase64 = field(metadata={"json_key": "encryptedInvoiceHash"})
     encrypted_invoice_size: int = field(metadata={"json_key": "encryptedInvoiceSize"})
     invoice_hash: Sha256HashBase64 = field(metadata={"json_key": "invoiceHash"})
@@ -1864,7 +1864,7 @@ class SessionInvoiceStatusResponse(OpenApiModel):
     invoicing_mode: Optional[InvoicingMode] = field(default=None, metadata={"json_key": "invoicingMode"})
     ksef_number: Optional[KsefNumber] = field(default=None, metadata={"json_key": "ksefNumber"})
     permanent_storage_date: Optional[str] = field(default=None, metadata={"json_key": "permanentStorageDate"})
-    upo_download_url: Optional[str] = field(default=None, metadata={"json_key": "upoDownloadUrl"})
+    upo_download_url: Optional[str] = field(default=None, repr=False, metadata={"json_key": "upoDownloadUrl"})
     upo_download_url_expiration_date: Optional[str] = field(default=None, metadata={"json_key": "upoDownloadUrlExpirationDate"})
 
 @dataclass(frozen=True)
@@ -2093,7 +2093,7 @@ class UnblockContextAuthenticationRequest(OpenApiModel):
 
 @dataclass(frozen=True)
 class UpoPageResponse(OpenApiModel):
-    download_url: str = field(metadata={"json_key": "downloadUrl"})
+    download_url: str = field(repr=False, metadata={"json_key": "downloadUrl"})
     download_url_expiration_date: str = field(metadata={"json_key": "downloadUrlExpirationDate"})
     reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
 

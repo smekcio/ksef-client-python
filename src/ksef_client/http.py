@@ -8,7 +8,7 @@ import math
 import random
 import re
 import time
-from dataclasses import MISSING, dataclass
+from dataclasses import MISSING, dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -730,8 +730,8 @@ def _build_http_error(
 @dataclass
 class HttpResponse:
     status_code: int
-    headers: httpx.Headers
-    content: bytes
+    headers: httpx.Headers = field(repr=False)
+    content: bytes = field(repr=False)
 
     def json(self) -> Any:
         return httpx.Response(self.status_code, headers=self.headers, content=self.content).json()

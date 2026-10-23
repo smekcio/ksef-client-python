@@ -14,6 +14,7 @@ from .client import (
     KsefClient,
 )
 from .config import KsefClientOptions, KsefEnvironment, KsefLighthouseEnvironment
+from .diagnostics import redact_sensitive
 from .exceptions import (
     ErrorCode,
     ForbiddenReason,
@@ -44,6 +45,7 @@ from .retry import RetryConfig
 from .token_manager import AsyncTokenManager, TokenManager, TokenManagerError
 
 __all__ = [
+    "redact_sensitive",
     "KsefClientOptions",
     "KsefEnvironment",
     "KsefLighthouseEnvironment",
