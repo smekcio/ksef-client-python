@@ -13,6 +13,7 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover - Python 3.10 nie ma `typing.Self`
     from typing_extensions import Self
 
+from ...exceptions import KsefDocumentValidationError
 from .models import (
     MONEY_QUANT,
     FA3InvoiceKind,
@@ -84,7 +85,9 @@ class FA3ValidationResult:
 
     def raise_for_errors(self) -> None:
         if self.errors:
-            raise ValueError("; ".join(issue.message for issue in self.errors))
+            raise KsefDocumentValidationError(
+                "; ".join(issue.message for issue in self.errors)
+            )
 
 
 @dataclass(frozen=True)

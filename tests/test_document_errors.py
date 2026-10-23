@@ -19,6 +19,8 @@ from ksef_client.cli.exit_codes import ExitCode, exit_code_for_error
 from ksef_client.documents.fa3 import (
     Fa3CurrencyMismatchError,
     FA3ParseError,
+    FA3ValidationIssue,
+    FA3ValidationResult,
     FA3XmlValidationError,
 )
 
@@ -102,6 +104,38 @@ def test_legacy_fa3_errors_are_document_validation_errors(
         raise error
     with pytest.raises(ValueError):
         raise error
+
+
+@pytest.mark.parametrize("error_cls", LEGACY_ERROR_CLASSES)
+def test_legacy_errors_keep_multi_argument_valueerror_semantics(
+    error_cls: type[KsefDocumentValidationError],
+) -> None:
+    error = error_cls("first", "second", details=("detail",))
+
+    assert error.args == ("first", "second")
+    assert error.message == "first"
+    assert str(error) == str(ValueError("first", "second"))
+    assert error.details == ("detail",)
+    assert type(pickle.loads(pickle.dumps(error))) is error_cls
+
+
+def test_document_error_repr_does_not_include_details() -> None:
+    error = FA3ParseError("bad", details=("SECRET-DOCUMENT-FRAGMENT",))
+
+    assert "SECRET-DOCUMENT-FRAGMENT" not in repr(error)
+
+
+def test_validation_result_raises_document_validation_error() -> None:
+    result = FA3ValidationResult(
+        errors=(FA3ValidationIssue("niepoprawna faktura"),),
+    )
+
+    with pytest.raises(KsefDocumentValidationError) as excinfo:
+        result.raise_for_errors()
+
+    assert isinstance(excinfo.value, ValueError)
+    assert str(excinfo.value) == "niepoprawna faktura"
+    assert excinfo.value.code is ErrorCode.DOCUMENT_VALIDATION_FAILED
 
 
 def test_fa3_parse_error_can_still_be_caught_by_its_own_class() -> None:

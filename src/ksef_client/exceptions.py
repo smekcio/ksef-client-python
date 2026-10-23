@@ -260,8 +260,10 @@ class KsefError(Exception):
 
     code: ClassVar[ErrorCode] = ErrorCode.ERROR
 
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
+    def __init__(self, message: str, *args: Any) -> None:
+        # ``*args`` zachowuje semantykę ``ValueError("a", "b")`` w podklasach
+        # dokumentowych; `message` pozostaje pierwszym, czytelnym opisem.
+        super().__init__(message, *args)
         self.message = message
 
     def __str__(self) -> str:
@@ -576,9 +578,18 @@ class KsefDocumentError(KsefError):
 
     code: ClassVar[ErrorCode] = ErrorCode.DOCUMENT_ERROR
 
-    def __init__(self, message: str, *, details: tuple[str, ...] = ()) -> None:
-        super().__init__(message)
+    def __init__(
+        self, message: str, *args: Any, details: tuple[str, ...] = ()
+    ) -> None:
+        super().__init__(message, *args)
         self.details = tuple(details)
+
+    def __str__(self) -> str:
+        # ``ValueError("a", "b")`` ma ``str`` równy krotce argumentów; zachowujemy
+        # to dla kompatybilności, ale dla typowego jednego argumentu zwracamy opis.
+        if len(self.args) > 1:
+            return Exception.__str__(self)
+        return self.message
 
 
 class KsefDocumentValidationError(KsefDocumentError, ValueError):

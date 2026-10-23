@@ -165,7 +165,9 @@ except KsefDocumentValidationError as exc:   # łapie też FA3ParseError
 ```
 
 Wszystkie błędy dokumentów obsługują `details` (krotka diagnostyczna) i `to_dict()`
-z tym samym schematem co błędy HTTP — bez `response_body`.
+z tym samym schematem co błędy HTTP — bez `response_body`. `message` i `details` mogą
+zawierać fragmenty dokumentu (np. ścieżki pól, opisy walidacji), więc w logach
+produkcyjnych stosuj redakcję.
 
 ### Kontrakt dla CLI i MCP
 
