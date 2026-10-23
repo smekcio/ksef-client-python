@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
@@ -46,11 +47,57 @@ _STATE_KEYS = {
 }
 
 
+class _InvalidMetadataResponse(ValueError):
+    """Internal sentinel: preserve strict search semantics without changing legacy parsers."""
+
+
+def _parse_metadata_response(raw: Any) -> QueryInvoicesMetadataResponse:
+    if (
+        type(raw) is not dict
+        or type(raw.get("hasMore")) is not bool
+        or type(raw.get("isTruncated")) is not bool
+        or type(raw.get("invoices")) is not list
+        or any(type(item) is not dict for item in raw["invoices"])
+    ):
+        raise _InvalidMetadataResponse("Invalid metadata response")
+    try:
+        return QueryInvoicesMetadataResponse.from_dict(raw)
+    except (ValueError, TypeError, KeyError, OverflowError):
+        raise _InvalidMetadataResponse("Invalid metadata response") from None
+
+
 def _date(value: str) -> tuple[datetime, Decimal]:
-    # Keep the server's sub-microsecond precision when comparing boundaries.
+    # Preserve sub-microsecond precision, but bound work on untrusted dates.
+    if type(value) is not str or len(value) > 128:
+        raise ValueError("Invalid pagination timestamp")
     fraction = re.search(r"\.(\d+)", value)
     remainder = fraction.group(1)[6:] if fraction else ""
-    return parse_api_datetime(value), Decimal("0." + (remainder or "0"))
+    try:
+        return parse_api_datetime(value), Decimal("0." + (remainder or "0"))
+    except OverflowError:
+        raise ValueError("Pagination timestamp exceeds UTC range") from None
+
+
+def _json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate cursor member")
+        result[key] = value
+    return result
+
+
+def _reject_constant(value: str) -> NoReturn:
+    raise ValueError("Non-finite cursor number")
+
+
+def _same_json(left: Any, right: Any) -> bool:
+    # Unlike Python equality, JSON comparison must distinguish True from 1.
+    return json.dumps(left, sort_keys=True, allow_nan=False) == json.dumps(
+        right,
+        sort_keys=True,
+        allow_nan=False,
+    )
 
 
 def _dump(state: dict[str, Any]) -> str:
@@ -87,12 +134,13 @@ class _MetadataMachine:
             raise ValueError("context_key must be a non-empty application context identifier")
         self.identity: dict[str, Any] = {
             "version": 1,
-            "environment": environment,
+            "environment": "sha256:" + hashlib.sha256(environment.encode()).hexdigest(),
             "context_key": context_key,
             "filters": deepcopy(filters),
             "page_size": page_size,
             "sort_order": sort_order,
         }
+        self._legacy_environment = environment
         self._validate_range(filters["dateRange"], allow_open=True)
         self.date_type = filters["dateRange"]["dateType"]
         self.ascending = sort_order == "Asc"
@@ -139,7 +187,9 @@ class _MetadataMachine:
             if not isinstance(cursor, str) or len(cursor) > MAX_CURSOR_BYTES:
                 raise ValueError("Cursor size or type")
             raw = base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True)
-            state = json.loads(raw)
+            state = json.loads(raw, object_pairs_hook=_json_object, parse_constant=_reject_constant)
+            if isinstance(state, dict) and state.get("environment") == self._legacy_environment:
+                state["environment"] = self.identity["environment"]
             self._validate_state(state)
             return state
         except (ValueError, TypeError, KeyError, AttributeError, RecursionError, binascii.Error):
@@ -153,7 +203,7 @@ class _MetadataMachine:
         if type(state["version"]) is not int or state["version"] != 1:
             raise ValueError("Unsupported version")
         for key, value in self.identity.items():
-            if state[key] != value or type(state[key]) is not type(value):
+            if not _same_json(state[key], value):
                 raise ValueError("Incompatible search")
         for key, maximum in (("offset", 999), ("empty", 2), ("stalled", 2)):
             if type(state[key]) is not int or not 0 <= state[key] <= maximum:
@@ -164,7 +214,7 @@ class _MetadataMachine:
         if not isinstance(request, dict) or set(request) != set(self.identity["filters"]):
             raise ValueError("Invalid request")
         for key, value in self.identity["filters"].items():
-            if key != "dateRange" and request[key] != value:
+            if key != "dateRange" and not _same_json(request[key], value):
                 raise ValueError("Changed filters")
         dr = request["dateRange"]
         self._validate_range(dr)
@@ -273,7 +323,12 @@ class _MetadataMachine:
                 new["truncated_boundary"]
             ):
                 fail("truncation_did_not_advance")
-            dr["from" if self.ascending else "to"] = last
+            # Issue metadata has day precision even when the original bounds
+            # have a time. Never widen or invert a range when narrowing it.
+            candidate = last
+            if _date(candidate) < _date(dr["from"]):
+                candidate = dr["from"]
+            dr["from" if self.ascending else "to"] = candidate
             new["truncated_boundary"], new["offset"] = last, 0
         else:
             new["offset"] += 1
@@ -292,12 +347,17 @@ class InvoiceMetadataSearch:
 
     def page(self, cursor: str | None = None) -> InvoiceMetadataPage:
         state = self._machine.load(cursor)
-        response = self._fetch(
-            InvoiceQueryFilters.from_dict(state["request"]),
-            page_offset=state["offset"],
-            page_size=state["page_size"],
-            sort_order=state["sort_order"],
-        )
+        try:
+            response = self._fetch(
+                InvoiceQueryFilters.from_dict(state["request"]),
+                page_offset=state["offset"],
+                page_size=state["page_size"],
+                sort_order=state["sort_order"],
+            )
+        except _InvalidMetadataResponse:
+            raise KsefIncompletePaginationError(
+                "invalid_response", last_cursor=_dump(state)
+            ) from None
         return self._machine.advance(state, response)
 
     def pages(self, cursor: str | None = None) -> Iterator[InvoiceMetadataPage]:
@@ -328,12 +388,17 @@ class AsyncInvoiceMetadataSearch:
 
     async def page(self, cursor: str | None = None) -> InvoiceMetadataPage:
         state = self._machine.load(cursor)
-        response = await self._fetch(
-            InvoiceQueryFilters.from_dict(state["request"]),
-            page_offset=state["offset"],
-            page_size=state["page_size"],
-            sort_order=state["sort_order"],
-        )
+        try:
+            response = await self._fetch(
+                InvoiceQueryFilters.from_dict(state["request"]),
+                page_offset=state["offset"],
+                page_size=state["page_size"],
+                sort_order=state["sort_order"],
+            )
+        except _InvalidMetadataResponse:
+            raise KsefIncompletePaginationError(
+                "invalid_response", last_cursor=_dump(state)
+            ) from None
         return self._machine.advance(state, response)
 
     async def pages(self, cursor: str | None = None) -> AsyncIterator[InvoiceMetadataPage]:

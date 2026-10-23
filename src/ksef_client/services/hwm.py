@@ -88,7 +88,9 @@ def update_continuation_point(
     fallback_date = _get_latest_invoice_permanent_storage_date(package)
 
     truncated_resume_point = last_permanent_storage_date or fallback_date
-    if is_truncated and truncated_resume_point:
+    if is_truncated:
+        if not truncated_resume_point:
+            raise ValueError("Truncated package has no safe continuation point")
         continuation_points[subject_type] = str(truncated_resume_point)
     elif hwm_date:
         continuation_points[subject_type] = str(hwm_date)

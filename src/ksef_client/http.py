@@ -121,6 +121,9 @@ def _validate_presigned_url_security(options: KsefClientOptions, url: str) -> No
     if not host:
         raise ValueError("Rejected insecure presigned URL: host is missing.")
 
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Rejected insecure presigned URL: userinfo is not allowed.")
+
     normalized_host = host.lower().rstrip(".")
     if normalized_host == "localhost" or normalized_host.endswith(".localhost"):
         raise ValueError(
@@ -248,15 +251,15 @@ def _wrap_transport_error(
 
     ``ConnectError``, timeouty i ``RemoteProtocolError`` (oraz ``TooManyRedirects``,
     który nie jest ``TransportError``) uciekały do użytkownika jako surowe wyjątki
-    ``httpx``, mimo że biblioteka obiecuje wyjątki ``Ksef*``. Oryginał zachowujemy
-    w ``__cause__``, a ``status_code`` to ``NO_HTTP_STATUS_CODE`` (brak odpowiedzi).
-    Do komunikatu trafia adres bez query — pre-signed URL nie może wyciec do logu.
+    ``httpx``, mimo że biblioteka obiecuje wyjątki ``Ksef*``. Status to
+    ``NO_HTTP_STATUS_CODE`` (brak odpowiedzi); surowy oryginał jest wyciszony.
+    Komunikat nie zawiera tekstu oryginału; może on nieść podpisane URL-e i sekrety.
     """
     return KsefTransportError(
         status_code=NO_HTTP_STATUS_CODE,
         message=(
             f"Network error during {method} {_loggable_url(url)}: "
-            f"{type(exc).__name__}: {exc}"
+            f"{type(exc).__name__}"
         ),
     )
 
@@ -702,8 +705,8 @@ def _build_http_error(
         # żeby nie zmieniać semantyki istniejących ``except``.
         return KsefHttpError(
             status_code=status_code,
-            message=text,
-            response_body=None,
+            message=f"HTTP {status_code} error (non-JSON response)",
+            response_body=text,
             problem=None,
             **retry_after_fields,
         )
@@ -892,7 +895,7 @@ class BaseHttpClient:
         except (httpx.TransportError, httpx.TooManyRedirects) as exc:
             # Błędy sieci i timeouty nie są wyjątkami SDK — opakowujemy je, żeby
             # wołający miał jeden kontrakt błędów (`KsefHttpError`).
-            raise _wrap_transport_error(exc, method=method, url=url) from exc
+            raise _wrap_transport_error(exc, method=method, url=url) from None
         logger.debug(
             "HTTP %s %s -> %s", method, _loggable_url(url), response.status_code
         )
@@ -1082,7 +1085,7 @@ class AsyncBaseHttpClient:
             )
         except (httpx.TransportError, httpx.TooManyRedirects) as exc:
             # Patrz `BaseHttpClient.request`: jeden kontrakt błędów także dla sieci.
-            raise _wrap_transport_error(exc, method=method, url=url) from exc
+            raise _wrap_transport_error(exc, method=method, url=url) from None
         logger.debug("HTTP %s %s -> %s", method, _loggable_url(url), response.status_code)
         _handle_system_warning(self._options, response)
 

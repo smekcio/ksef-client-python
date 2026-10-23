@@ -98,7 +98,9 @@ class BaseApiClientTests(unittest.TestCase):
         self.assertIn("HTTP 200", message)
         self.assertIn("/invoices/query/metadata", message)
         self.assertIn("text/html", message)
-        self.assertIn("Captive portal", message)
+        self.assertNotIn("Captive portal", message)
+        assert isinstance(ctx.exception.response_body, bytes)
+        self.assertIn(b"Captive portal", ctx.exception.response_body)
         self.assertEqual(ctx.exception.response_body, response.content)
 
     def test_request_bytes_and_raw(self):

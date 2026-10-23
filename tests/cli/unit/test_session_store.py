@@ -565,9 +565,7 @@ def test_list_unreadable_checkpoints_without_directory(monkeypatch, tmp_path: Pa
     assert session_store.list_unreadable_checkpoints("nie-ma") == []
 
 
-def test_delete_all_checkpoints_removes_the_profile_directory(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_delete_all_checkpoints_removes_the_profile_directory(monkeypatch, tmp_path: Path) -> None:
     """`profile delete` musi posprzątać sesje, żeby nowy profil ich nie dziedziczył."""
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
     checkpoint = _online_checkpoint()
@@ -580,3 +578,13 @@ def test_delete_all_checkpoints_removes_the_profile_directory(
     assert removed == 1
     assert not directory.exists()
     assert session_store.delete_all_checkpoints("demo") == 0
+
+
+@pytest.fixture(autouse=True)
+def _isolate_platform_os(monkeypatch):
+    """Simulate the module platform without changing pathlib/pytest global os.name."""
+    from types import ModuleType
+
+    isolated = ModuleType("isolated_os")
+    isolated.__dict__.update(vars(session_store.os))
+    monkeypatch.setattr(session_store, "os", isolated)

@@ -13,6 +13,7 @@ from ..invoice_search import (
     AsyncInvoiceMetadataSearch,
     InvoiceMetadataSearch,
     _MetadataMachine,
+    _parse_metadata_response,
 )
 from ..models import (
     BinaryContent,
@@ -88,7 +89,11 @@ def _normalize_datetime_without_offset(value: str) -> str:
     return naive.replace(tzinfo=timezone(offset)).isoformat()
 
 
-def _normalize_invoice_date_range_payload(request_payload: dict[str, Any]) -> dict[str, Any]:
+def _normalize_invoice_date_range_payload(
+    request_payload: dict[str, Any],
+    *,
+    allow_open_range: bool = False,
+) -> dict[str, Any]:
     normalized = deepcopy(request_payload)
     date_range_candidates: list[dict[str, Any]] = []
 
@@ -107,7 +112,8 @@ def _normalize_invoice_date_range_payload(request_payload: dict[str, Any]) -> di
             value = date_range.get(field_name)
             if isinstance(value, str):
                 date_range[field_name] = _normalize_datetime_without_offset(value)
-        _enforce_invoice_date_range_limit(date_range)
+        if not allow_open_range or date_range.get("to") is not None:
+            _enforce_invoice_date_range_limit(date_range)
     return normalized
 
 
@@ -186,11 +192,17 @@ def _build_invoice_query_filters(
     )
 
 
-def _serialize_invoice_payload(request_payload: Any) -> _SerializedInvoicePayload:
+def _serialize_invoice_payload(
+    request_payload: Any,
+    *,
+    allow_open_range: bool = False,
+) -> _SerializedInvoicePayload:
     serialized = _serialize_json_payload(request_payload)
     if serialized is None:
         raise TypeError("Invoice request payload is required.")
-    return _SerializedInvoicePayload(_normalize_invoice_date_range_payload(serialized))
+    return _SerializedInvoicePayload(
+        _normalize_invoice_date_range_payload(serialized, allow_open_range=allow_open_range)
+    )
 
 
 class InvoicesClient(BaseApiClient):
@@ -213,7 +225,7 @@ class InvoicesClient(BaseApiClient):
         if not isinstance(options, KsefClientOptions):
             raise ValueError("Resumable search requires HTTP client environment options")
         machine = _MetadataMachine(
-            dict(_serialize_invoice_payload(request_payload)),
+            dict(_serialize_invoice_payload(request_payload, allow_open_range=True)),
             environment=options.normalized_base_url(),
             context_key=context_key,
             page_size=page_size,
@@ -221,8 +233,26 @@ class InvoicesClient(BaseApiClient):
         )
         return InvoiceMetadataSearch(
             machine,
-            partial(self.query_invoice_metadata, access_token=access_token),
+            partial(self._query_invoice_metadata_search_page, access_token=access_token),
         )
+
+    def _query_invoice_metadata_search_page(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        page_offset: int,
+        page_size: int,
+        sort_order: str,
+        access_token: str | None = None,
+    ) -> QueryInvoicesMetadataResponse:
+        raw = self._request_json(
+            "POST",
+            "/invoices/query/metadata",
+            params={"pageOffset": page_offset, "pageSize": page_size, "sortOrder": sort_order},
+            json=_serialize_invoice_payload(request_payload),
+            access_token=access_token,
+        )
+        return _parse_metadata_response(raw)
 
     def get_invoice(self, ksef_number: str, *, access_token: str | None = None) -> InvoiceContent:
         response = self._request_raw(
@@ -530,7 +560,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         if not isinstance(options, KsefClientOptions):
             raise ValueError("Resumable search requires HTTP client environment options")
         machine = _MetadataMachine(
-            dict(_serialize_invoice_payload(request_payload)),
+            dict(_serialize_invoice_payload(request_payload, allow_open_range=True)),
             environment=options.normalized_base_url(),
             context_key=context_key,
             page_size=page_size,
@@ -538,8 +568,26 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         )
         return AsyncInvoiceMetadataSearch(
             machine,
-            partial(self.query_invoice_metadata, access_token=access_token),
+            partial(self._query_invoice_metadata_search_page, access_token=access_token),
         )
+
+    async def _query_invoice_metadata_search_page(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        page_offset: int,
+        page_size: int,
+        sort_order: str,
+        access_token: str | None = None,
+    ) -> QueryInvoicesMetadataResponse:
+        raw = await self._request_json(
+            "POST",
+            "/invoices/query/metadata",
+            params={"pageOffset": page_offset, "pageSize": page_size, "sortOrder": sort_order},
+            json=_serialize_invoice_payload(request_payload),
+            access_token=access_token,
+        )
+        return _parse_metadata_response(raw)
 
     async def get_invoice(
         self, ksef_number: str, *, access_token: str | None = None

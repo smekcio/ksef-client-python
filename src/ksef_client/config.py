@@ -46,9 +46,9 @@ def _default_user_agent() -> str:
 
 @dataclass(frozen=True)
 class KsefClientOptions:
-    base_url: str
-    base_qr_url: str | None = None
-    base_lighthouse_url: str | None = None
+    base_url: str = field(repr=False)
+    base_qr_url: str | None = field(default=None, repr=False)
+    base_lighthouse_url: str | None = field(default=None, repr=False)
     timeout_seconds: float = 30.0
     proxy: str | None = field(default=None, repr=False)
     custom_headers: dict[str, str] | None = field(default=None, repr=False)

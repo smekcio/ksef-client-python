@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Security and reliability review
+
+* Strict resumable-search response validation; malformed metadata never implies completion.
+* Fixed long-lived open-ended cursors, Issue-date boundaries and UTC-overflow handling.
+* Bounded diagnostic traversal and removed credential-bearing transport/body tracebacks.
+* Explicit SQLite page transactions in autocommit mode; fail closed on truncated export
+  without a continuation date.
+* Verified installed SDK bytes against the exact wheel, checked sdist identity,
+  scoped CI secrets to required steps and pinned release actions to commit SHAs.
+* Raised security floors for cryptography, existing HTTP dependencies and development tools.
+
 ### Features
 
 * **sdk:** `search_invoice_metadata()` w sync/async z wersjonowanym kursorem v1,

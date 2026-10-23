@@ -31,6 +31,14 @@ def required_tests(path: Path = MANIFEST) -> list[str]:
 
 def verify(report: Path, required: list[str]) -> None:
     root = ET.parse(report).getroot()
+    if root.tag not in {"testsuites", "testsuite"}:
+        raise ValueError("Invalid JUnit root")
+    for suite in root.iter():
+        if suite.tag in {"testsuite", "testsuites"}:
+            for counter in ("errors", "failures"):
+                value = suite.get(counter)
+                if value is not None and int(value) != 0:
+                    raise ValueError("JUnit suite reports errors or failures")
     outcomes: dict[str, list[bool]] = {}
     for case in root.iter("testcase"):
         node = case.get("classname", "").replace(".", "/") + ".py::" + case.get("name", "")

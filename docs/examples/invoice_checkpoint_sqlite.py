@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import sqlite3
+from contextlib import suppress
 from typing import Protocol
 
 from ksef_client import InvoiceMetadataPage, KsefClient, KsefClientOptions
@@ -31,6 +32,8 @@ def sync_pages(connection: sqlite3.Connection, search: MetadataSearch, *, sync_k
     Use one worker per sync_key. Do not log cursors or the database contents.
     A committed completed=1 row distinguishes completion from an unstarted scan.
     """
+    if connection.in_transaction:
+        raise ValueError("Use an idle connection; sync_pages owns its page transactions")
     connection.executescript("""
         CREATE TABLE IF NOT EXISTS invoices (
             sync_key TEXT NOT NULL, ksef_number TEXT NOT NULL, metadata TEXT NOT NULL,
@@ -50,7 +53,8 @@ def sync_pages(connection: sqlite3.Connection, search: MetadataSearch, *, sync_k
     processed = 0
     while True:
         page = search.page(cursor)
-        with connection:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
             for invoice in page.items:
                 if not invoice.ksef_number:
                     raise ValueError("Missing KSeF number; checkpoint was not advanced")
@@ -64,6 +68,11 @@ def sync_pages(connection: sqlite3.Connection, search: MetadataSearch, *, sync_k
                 "DO UPDATE SET cursor=excluded.cursor, completed=excluded.completed",
                 (sync_key, page.next_cursor, int(page.next_cursor is None)),
             )
+            connection.execute("COMMIT")
+        except BaseException:
+            with suppress(sqlite3.Error):
+                connection.execute("ROLLBACK")
+            raise
         processed += len(page.items)
         cursor = page.next_cursor
         if cursor is None:

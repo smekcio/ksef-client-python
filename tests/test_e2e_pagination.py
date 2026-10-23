@@ -32,12 +32,14 @@ pytestmark = pytest.mark.e2e
 # JSON credentials and cursors are passed through stdin, never process arguments.
 _CHILD = """
 import json, sys
+from importlib.metadata import distribution
 from pathlib import Path
 import ksef_client
 from ksef_client import KsefClient, KsefClientOptions, models as m
 request = json.load(sys.stdin)
 if request["installed"]:
-    assert "site-packages" in str(Path(ksef_client.__file__).resolve())
+    assert Path(ksef_client.__file__).resolve() == Path(
+        distribution("ksef-client").locate_file("ksef_client/__init__.py")).resolve()
 with KsefClient(KsefClientOptions(base_url=request["url"]), access_token=request["token"]) as c:
     search = c.invoices.search_invoice_metadata(m.InvoiceQueryFilters.from_dict(request["filters"]),
         context_key=request["context"], page_size=10)

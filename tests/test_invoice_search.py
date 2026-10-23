@@ -312,7 +312,7 @@ def test_client_facades_sync_and_async():
 
     http = SimpleNamespace(_options=options)
     client = InvoicesClient(http)
-    cast(Any, client).query_invoice_metadata = fetch
+    cast(Any, client)._query_invoice_metadata_search_page = fetch
     search = client.search_invoice_metadata(filters(), context_key="nip", page_size=10)
     assert calls == []
     first = search.page()
@@ -331,7 +331,7 @@ def test_client_facades_sync_and_async():
             return fetch(*args, **kwargs)
 
         client = AsyncInvoicesClient(http)
-        cast(Any, client).query_invoice_metadata = afetch
+        cast(Any, client)._query_invoice_metadata_search_page = afetch
         search = client.search_invoice_metadata(filters(), context_key="nip", page_size=10)
         first = await search.page()
         assert [i async for i in search.items(first.next_cursor)] == []

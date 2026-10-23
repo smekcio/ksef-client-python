@@ -2,8 +2,9 @@
 click>=8.1.0
 typer>=0.12.0
 rich>=13.7.0,<14
-keyring>=25.0.0
-pytest>=8.0.0
+keyring>=25.7.0
+jaraco.context>=6.1.0
+pytest>=9.0.3
 pytest-cov>=5.0.0
 ruff>=0.6.0
 mypy>=1.10.0
@@ -17,3 +18,7 @@ pillow>=10.0.0
 # `tomllib` istnieje dopiero od 3.11; bez `tomli` strażnicy deklaracji zależności
 # w `tests/test_packaging_dependencies.py` byli po cichu pomijani na Pythonie 3.10.
 tomli>=2.0.0; python_version < "3.11"
+
+# Security floors for development tools and their existing dependencies.
+pip>=26.2.0
+pygments>=2.20.0

@@ -64,7 +64,9 @@ filtry lub osobno użyć eksportu. SDK nie uruchamia eksportu automatycznie.
 ## Prywatność i trwałość kursora
 
 Kursor v1 to JSON w Base64URL, bez szyfrowania i podpisu. Zawiera filtry, kontekst,
-środowisko, efektywne granice, HWM i stan deduplikacji. Nie zawiera tokenów ani
+skrót środowiska, efektywne granice, HWM i stan deduplikacji. Odczyt starszego
+kursora v1 z jawnym URL-em środowiska pozostaje obsługiwany; następny kursor
+przechowuje już SHA-256 URL-a zamiast potencjalnych poświadczeń w jego treści. Nie zawiera tokenów ani
 kluczy. Nie umieszczaj go w logach, URL-ach ani niezaufanym wejściu użytkownika.
 Limit wynosi 2 MiB zakodowanego tekstu. Walidacja odbywa się przed HTTP i odrzuca
 niezgodność wersji, struktury, środowiska, filtrów, kontekstu, rozmiaru strony
@@ -89,7 +91,8 @@ kontynuacja od kolejnej strony. To idempotentny zapis w bazie, a nie gwarancja
 
 `repr()` modeli ukrywa tokeny, podpisane URL-e, poufne nagłówki i payloady.
 `ksef_client.redact_sensitive(value)` przygotowuje zredagowane struktury do
-jawnego logowania. Nie wywołuje `repr()` nieznanych obiektów i ogranicza głębokość.
+jawnego logowania. Nie wywołuje `repr()` nieznanych obiektów i ogranicza głębokość, szerokość, liczbę węzłów
+oraz długość tekstu. Podklasy typów prostych nie są przekazywane do formatterów.
 Nie wykrywa dowolnych sekretów w swobodnym tekście i nie jest formatem zapisu stanu.
 
 `to_dict()`/`to_json()` zachowują format transportowy oraz dane potrzebne do
@@ -119,11 +122,35 @@ przez istniejące scenariusze. Scenariusz kursora wysyła 11 faktur, aby potwier
 przekroczenie minimalnego rozmiaru strony.
 
 Do lokalnego odtworzenia bramy z zainstalowanym wheelem ustaw
-`KSEF_TEST_INSTALLED=1`, `KSEF_E2E=1` i wymagane dane środowiska, następnie uruchom:
+`KSEF_TEST_INSTALLED=1`, `KSEF_E2E=1` i wymagane dane środowiska, oraz `KSEF_TEST_WHEEL` wskazujące testowany plik `.whl`, następnie uruchom:
 
 ```bash
 python -m tools.verify_e2e_results output/required-test.xml --run
 ```
 
-W tym trybie testy odrzucają import z repozytoryjnego `src`. Raport JUnit i manifest
+W tym trybie testy sprawdzają miejsce importu oraz bajtową zgodność plików
+pakietu z podanym wheelem. Kontrola powtarza się po E2E. Raport JUnit i manifest
 artefaktów są zachowywane w CI; nie zawierają celowo zapisywanych tokenów i kursorów.
+
+
+## Zmiany po przeglądzie bezpieczeństwa
+
+Nowe wyszukiwanie odrzuca niekompletne lub niepoprawnie typowane odpowiedzi API,
+łącznie z brakiem `hasMore`/`isTruncated`/`invoices`; nie zamienia ich na sukces
+z pustym wynikiem. Odczyt starszego kursora bez jawnej daty końcowej wykorzystuje
+zapisany zakres zamiast ponownie porównywać jego początek z dzisiejszą datą.
+
+Przykład SQLite jawnie otwiera i zatwierdza transakcję także dla połączenia
+`isolation_level=None` lub `autocommit=True`. Odrzuca połączenie z aktywną
+transakcją, aby nie zatwierdzić cudzych zmian. `COMMIT` i `ROLLBACK` są jawne.
+
+Błędy transportu nie wyświetlają tekstu ani łańcucha oryginalnego wyjątku,
+ponieważ mogą zawierać podpisane adresy. Niepoprawne odpowiedzi niebędące JSON
+nie są wypisywane w komunikatach; ich treść pozostaje w `response_body` do
+świadomej diagnostyki. Funkcja `update_continuation_point()` zgłasza `ValueError`,
+jeśli paczka jest obcięta i nie ma bezpiecznej daty ostatniego rekordu, zamiast
+przesunąć checkpoint do HWM i pominąć brakujące faktury.
+
+Minimalne wersje `cryptography` i istniejących zależności HTTP zostały podniesione
+po audycie podatności. Ograniczenia tranzytywne nie dodają nowych bibliotek do
+rzeczywistego grafu HTTP, ale mogą wymagać aktualizacji lockfile aplikacji.

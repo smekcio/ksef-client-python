@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import subprocess
+import tarfile
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -86,7 +88,11 @@ def fake_dist(tmp_path, version="0.20.0"):
             "ksef_client.dist-info/METADATA",
             f"Metadata-Version: 2.1\nName: ksef-client\nVersion: {version}\n",
         )
-    (directory / "ksef_client.tar.gz").write_bytes(b"sdist")
+    with tarfile.open(directory / "ksef_client.tar.gz", "w:gz") as archive:
+        data = f"Metadata-Version: 2.1\nName: ksef-client\nVersion: {version}\n".encode()
+        entry = tarfile.TarInfo("ksef-client/PKG-INFO")
+        entry.size = len(data)
+        archive.addfile(entry, io.BytesIO(data))
     (tmp_path / "pyproject.toml").write_text('[project]\nversion="0.20.0"\n')
     return directory
 
@@ -100,7 +106,8 @@ def test_release_provenance_and_checksum(tmp_path, monkeypatch):
     release.verify(directory, sha)
     assert release.main(["verify", str(directory), "--sha", sha]) == 0
     assert release.main(["record", str(directory), "--sha", sha, "--tag", "v0.20.0"]) == 0
-    (directory / "ksef_client.tar.gz").write_bytes(b"changed")
+    with (directory / "ksef_client.tar.gz").open("ab") as output:
+        output.write(b"changed")
     with pytest.raises(ValueError, match="mismatch"):
         release.verify(directory, sha)
     with pytest.raises(ValueError):
@@ -173,3 +180,71 @@ def test_workflow_gate_dependencies():
     assert "cancel-in-progress: false" in reusable
     assert "uses: ./.github/workflows/required-test-e2e.yml" in daily
     assert "for attempt in" not in reusable
+
+
+def test_review_sdist_metadata_must_match_wheel(tmp_path):
+    directory = fake_dist(tmp_path)
+    with tarfile.open(directory / "ksef_client.tar.gz", "w:gz") as archive:
+        data = b"Name: ksef-client\nVersion: 0.19.0\n"
+        entry = tarfile.TarInfo("ksef-client/PKG-INFO")
+        entry.size = len(data)
+        archive.addfile(entry, io.BytesIO(data))
+    with pytest.raises(ValueError, match="disagree"):
+        release.describe(directory, "a" * 40)
+
+
+def test_review_installed_sdk_content_must_match_exact_wheel(tmp_path, monkeypatch):
+    import importlib.metadata
+
+    import ksef_client
+
+    root = tmp_path / "installed"
+    package = root / "ksef_client"
+    package.mkdir(parents=True)
+    init = package / "__init__.py"
+    init.write_bytes(b"original")
+    wheel = tmp_path / "sdk.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("ksef_client/__init__.py", b"original")
+    fake = SimpleNamespace(locate_file=lambda name: root)
+    monkeypatch.setattr(importlib.metadata, "distribution", lambda name: fake)
+    monkeypatch.setattr(ksef_client, "__file__", str(init))
+    release.verify_installed_wheel(wheel)
+    init.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="differs"):
+        release.verify_installed_wheel(wheel)
+    init.unlink()
+    with pytest.raises(ValueError, match="Missing"):
+        release.verify_installed_wheel(wheel)
+    monkeypatch.setattr(ksef_client, "__file__", str(tmp_path / "shadowed.py"))
+    with pytest.raises(ValueError, match="import"):
+        release.verify_installed_wheel(wheel)
+
+
+def test_review_release_workflow_scopes_secrets_and_pins_actions():
+    import re
+
+    root = Path(__file__).parents[1]
+    text = (root / ".github/workflows/required-test-e2e.yml").read_text(encoding="utf-8")
+    job_env = text.split("    env:\n", 1)[1].split("    steps:", 1)[0]
+    assert "secrets." not in job_env
+    assert "verify-installed dist" in text
+    assert "KSEF_TEST_WHEEL=" in text
+    for name in ["required-test-e2e.yml", "publish-pypi.yml", "python-e2e.yml"]:
+        workflow = (root / ".github/workflows" / name).read_text(encoding="utf-8")
+        for action in re.findall(r"uses: ([^\s]+)", workflow):
+            assert action.startswith("./") or re.search(r"@[0-9a-f]{40}$", action)
+
+
+def test_review_junit_suite_failures_cannot_be_hidden_by_passing_case_nodes(tmp_path):
+    path = tmp_path / "junit.xml"
+    names = gate.required_tests()
+    write_report(path, [(name, None) for name in names])
+    text = path.read_text()
+    for changed in [
+        text.replace("<testsuite>", '<testsuite errors="1">'),
+        text.replace("testsuites", "not-junit"),
+    ]:
+        path.write_text(changed)
+        with pytest.raises(ValueError):
+            gate.verify(path, names)
