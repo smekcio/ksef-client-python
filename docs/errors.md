@@ -76,7 +76,8 @@ Specjalny przypadek dla `429 Too Many Requests` (nie jest podklasą `KsefApiErro
 ```python
 exc.exception_codes          # tuple[int, ...] — wszystkie kody z payloadu
 exc.known_exception_codes    # tuple[KsefExceptionCode, ...] — tylko znane SDK
-exc.details                  # tuple[str, ...] — opisy z payloadu
+exc.details                  # tuple[str, ...] — opisy z errors/exceptionDetailList,
+                             #   a gdy ich brak — pole ``detail`` Problem Details
 exc.reason_code              # str | None — surowy reasonCode z 403
 exc.forbidden_reason         # ForbiddenReason | None — znana wartość reasonCode
 exc.trace_id                 # str | None — traceId z payloadu
@@ -118,6 +119,9 @@ zgodność z wbudowanymi typami:
 Dzięki temu `except RuntimeError`/`except TimeoutError` nadal działa, a jednocześnie
 można łapać `KsefError` i korzystać z `to_dict()`.
 
+Uwaga: w `KsefAuthenticationFailedError` pole `status_code` to **kod statusu
+autoryzacji KSeF** (np. `400`), a nie kod HTTP — request mógł zakończyć się `200`.
+
 ### Kontrakt dla CLI i MCP
 
 `to_dict()` zwraca stały zestaw kluczy (domyślnie także `None`):
@@ -138,7 +142,9 @@ można łapać `KsefError` i korzystać z `to_dict()`.
 - `code` jest stabilny — nowe wartości dodawajemy na końcu `ErrorCode`,
 - `to_dict(omit_none=True)` pomija `None` (wygodne dla CLI),
 - CLI ma `exit_code_for_error(exc)` mapujące `ErrorCode` na `ExitCode`,
-- w `to_dict()` nigdy nie ma `response_body` ani nagłówków.
+- w `to_dict()` nigdy nie ma `response_body` ani nagłówków,
+- `message` i `details` pochodzą z odpowiedzi KSeF i mogą zawierać fragmenty danych
+  biznesowych (np. opisy walidacji) — w logach produkcyjnych rozważ redakcję.
 
 ## Problem Details i `exc.problem`
 

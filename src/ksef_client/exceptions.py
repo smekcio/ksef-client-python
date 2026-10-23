@@ -206,6 +206,8 @@ def _problem_details(problem: Any | None) -> tuple[str, ...]:
 
     for item in _sequence(_problem_value(problem, "errors", "errors")):
         _add(_problem_value(item, "description", "description"))
+        for extra in _sequence(_problem_value(item, "details", "details")):
+            _add(extra)
 
     exception = _problem_value(problem, "exception", "exception")
     for item in _sequence(
@@ -214,6 +216,11 @@ def _problem_details(problem: Any | None) -> tuple[str, ...]:
         _add(_problem_value(item, "exception_description", "exceptionDescription"))
         for extra in _sequence(_problem_value(item, "details", "details")):
             _add(extra)
+
+    if not details:
+        # Problem Details (np. 5xx/403) często ma tylko ``detail`` — bez tego
+        # ``to_dict()`` gubiłby jedyny czytelny opis błędu.
+        _add(_problem_value(problem, "detail", "detail"))
 
     return tuple(details)
 
@@ -285,7 +292,7 @@ def _restore_workflow_error(
     return error
 
 
-@dataclass
+@dataclass(repr=False)
 class KsefHttpError(KsefError):
     status_code: int
     message: str
@@ -303,6 +310,17 @@ class KsefHttpError(KsefError):
 
     def __str__(self) -> str:
         return f"HTTP {self.status_code}: {self.message}"
+
+    def __repr__(self) -> str:
+        """Nie pokazuje ``response_body``/``problem`` — mogą zawierać dane biznesowe.
+
+        Repr trafia do logów częściej niż jawny ``to_dict()``; redakcja jest celowa.
+        """
+        problem_name = type(self.problem).__name__ if self.problem is not None else None
+        return (
+            f"{type(self).__name__}(status_code={self.status_code!r}, "
+            f"message={self.message!r}, problem={problem_name!r})"
+        )
 
     def __reduce__(self) -> tuple[Any, ...]:
         """Odtwarza wyjątek z kompletem pól (``pickle``, ``copy``, ``multiprocessing``).
@@ -357,7 +375,7 @@ class KsefHttpError(KsefError):
         return _problem_trace_id(self.problem)
 
 
-@dataclass
+@dataclass(repr=False)
 class KsefRateLimitError(KsefHttpError):
     """429 — przekroczony limit tempa.
 
@@ -382,7 +400,7 @@ class KsefRateLimitError(KsefHttpError):
             self.exception_response = self.problem
 
 
-@dataclass
+@dataclass(repr=False)
 class KsefApiError(KsefHttpError):
     code: ClassVar[ErrorCode] = ErrorCode.API_ERROR
     exception_response: ExceptionResponse | None = None
@@ -596,7 +614,9 @@ def classify_http_error(
         return KsefServiceUnavailableError
     if status_code >= 500:
         return KsefServerError
-    if status_code >= 400:
+    if status_code >= 300:
+        # Także 3xx z ciałem JSON było wcześniej ``KsefApiError`` — nie zmieniamy
+        # tego kontraktu (builder i tak wybiera ``KsefHttpError`` tylko bez body).
         return KsefApiError
     return KsefHttpError
 

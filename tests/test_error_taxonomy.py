@@ -267,7 +267,8 @@ def test_error_codes_and_forbidden_reasons_are_stable() -> None:
         (504, None, KsefServiceUnavailableError),
         (505, None, KsefServerError),
         (499, None, KsefApiError),
-        (302, None, KsefHttpError),
+        (302, None, KsefApiError),
+        (200, None, KsefHttpError),
         (400, UnknownApiProblem(status=400, title="x"), KsefBadRequestError),
     ],
 )
@@ -307,7 +308,7 @@ def test_api_error_properties() -> None:
 
     assert error.exception_codes == (21405,)
     assert error.known_exception_codes == (KsefExceptionCode.INPUT_VALIDATION_FAILED,)
-    assert error.details == ("błąd 21405",)
+    assert error.details == ("błąd 21405", "x")
     assert error.trace_id == "trace-1"
     assert error.reason_code is None
     assert error.forbidden_reason is None
@@ -342,6 +343,58 @@ def test_details_from_legacy_exception_payload() -> None:
     assert error.known_exception_codes == (KsefExceptionCode.INPUT_VALIDATION_FAILED,)
 
 
+def test_every_known_exception_code_has_a_specific_class() -> None:
+    for member in KsefExceptionCode:
+        error_cls = classify_http_error(400, _legacy_problem(member.value))
+        assert error_cls is not KsefBadRequestError, member
+        assert error_cls is not KsefApiError, member
+
+
+def test_repr_never_contains_response_body() -> None:
+    secret = "SECRET-TOKEN-123"
+    error = KsefValidationError(
+        status_code=400,
+        message="API error",
+        response_body={"accessToken": secret},
+    )
+
+    text = repr(error)
+
+    assert secret not in text
+    assert "response_body" not in text
+    assert "problem=" in text
+
+
+def test_to_dict_never_contains_response_body() -> None:
+    secret = "SECRET-TOKEN-123"
+    error = KsefValidationError(
+        status_code=400,
+        message="API error",
+        response_body={"accessToken": secret},
+    )
+
+    payload = error.to_dict()
+
+    assert "response_body" not in payload
+    assert secret not in json.dumps(payload)
+
+
+def test_details_fall_back_to_problem_detail() -> None:
+    problem = UnknownApiProblem(
+        status=500,
+        title="Service Unavailable",
+        detail="maintenance window",
+    )
+    error = KsefServerError(
+        status_code=500,
+        message="API error",
+        problem=problem,
+    )
+
+    assert error.details == ("maintenance window",)
+    assert error.to_dict()["details"] == ["maintenance window"]
+
+
 def test_to_dict_is_stable_and_json_serializable() -> None:
     error = KsefValidationError(
         status_code=400,
@@ -358,7 +411,7 @@ def test_to_dict_is_stable_and_json_serializable() -> None:
         "status_code": 400,
         "retry_after": None,
         "ksef_codes": [21405],
-        "details": ["błąd 21405"],
+        "details": ["błąd 21405", "x"],
         "reason_code": None,
         "trace_id": "trace-1",
     }
@@ -517,14 +570,26 @@ def test_errors_keep_legacy_base_classes() -> None:
     assert not isinstance(rate_limit, KsefApiError)
 
 
-def test_redirect_with_json_body_stays_http_error() -> None:
+def test_unexpected_success_status_with_body_stays_http_error() -> None:
     client = BaseHttpClient(
         KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
     )
-    response = httpx.Response(302, json={"detail": "redirect"})
+    response = httpx.Response(200, json={"detail": "unexpected"})
 
     with pytest.raises(KsefHttpError) as excinfo:
         client._raise_for_status(response)
 
     assert not isinstance(excinfo.value, KsefApiError)
+    assert excinfo.value.message == "API error"
+
+
+def test_redirect_with_json_body_stays_api_error() -> None:
+    client = BaseHttpClient(
+        KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+    )
+    response = httpx.Response(302, json={"detail": "redirect"})
+
+    with pytest.raises(KsefApiError) as excinfo:
+        client._raise_for_status(response)
+
     assert excinfo.value.message == "API error"
