@@ -9,11 +9,10 @@ import sys
 import time
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
-from functools import partial
 
 import pytest
 
-from ksef_client import KsefClient, KsefClientOptions
+from ksef_client import KsefClient, KsefClientOptions, RetryConfig
 from ksef_client import models as m
 from ksef_client.services import OnlineSessionWorkflow
 from tests.test_e2e_token_flows import (
@@ -21,6 +20,7 @@ from tests.test_e2e_token_flows import (
     _authenticate_access_token,
     _build_invoice_xml,
     _ensure_e2e_enabled,
+    _env_float,
     _load_test_token_config,
     _poll_for_ksef_number,
     _select_certificate,
@@ -29,18 +29,38 @@ from tests.test_e2e_token_flows import (
 
 pytestmark = pytest.mark.e2e
 
+
+def _metadata_options(base_url: str) -> KsefClientOptions:
+    # Only this read-only POST may be retried. In particular, do not replay
+    # invoice submissions or restart a completed prefix of a paginated read.
+    return KsefClientOptions(
+        base_url=base_url,
+        retry=RetryConfig(
+            max_retries=5,
+            base_delay_ms=5000,
+            max_delay_ms=60_000,
+            retryable_methods=frozenset(),
+            retryable_post_paths=frozenset({"/invoices/query/metadata"}),
+        ),
+    )
+
+
 # JSON credentials and cursors are passed through stdin, never process arguments.
 _CHILD = """
 import json, sys
 from importlib.metadata import distribution
 from pathlib import Path
 import ksef_client
-from ksef_client import KsefClient, KsefClientOptions, models as m
+from ksef_client import KsefClient, KsefClientOptions, RetryConfig, models as m
 request = json.load(sys.stdin)
 if request["installed"]:
     assert Path(ksef_client.__file__).resolve() == Path(
         distribution("ksef-client").locate_file("ksef_client/__init__.py")).resolve()
-with KsefClient(KsefClientOptions(base_url=request["url"]), access_token=request["token"]) as c:
+options = KsefClientOptions(base_url=request["url"], retry=RetryConfig(
+    max_retries=5, base_delay_ms=5000, max_delay_ms=60_000,
+    retryable_methods=frozenset(),
+    retryable_post_paths=frozenset({"/invoices/query/metadata"})))
+with KsefClient(options, access_token=request["token"]) as c:
     search = c.invoices.search_invoice_metadata(m.InvoiceQueryFilters.from_dict(request["filters"]),
         context_key=request["context"], page_size=10)
     numbers = [item.ksef_number for item in search.items(request["cursor"])]
@@ -52,7 +72,7 @@ def test_e2e_test_environment_cursor_restart(tmp_path) -> None:
     _ensure_e2e_enabled()
     config = _load_test_token_config()
     start = datetime.now(timezone.utc) - timedelta(minutes=5)
-    options = KsefClientOptions(base_url=config.base_url)
+    options = _metadata_options(config.base_url)
     with KsefClient(options) as client:
         certs = _with_rate_limit_retry(client.security.get_public_key_certificates)
         token = _authenticate_access_token(
@@ -97,16 +117,19 @@ def test_e2e_test_environment_cursor_restart(tmp_path) -> None:
                 search = client.invoices.search_invoice_metadata(
                     request, context_key=context, page_size=10, access_token=token
                 )
-                rows: list[m.InvoiceMetadata] = _with_rate_limit_retry(partial(list, search))
-                numbers = {row.ksef_number for row in rows}
+                # HTTP retries repeat the failed page and honor Retry-After.
+                # Keep the successful pages for the restart comparison, rather
+                # than issuing a second complete scan of the same documents.
+                pages = list(search.pages())
+                numbers = {row.ksef_number for page in pages for row in page.items}
                 if expected <= numbers:
                     break
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Submitted invoices did not reach metadata HWM")
-                time.sleep(5)
-            first = _with_rate_limit_retry(search.page)
+                time.sleep(_env_float("KSEF_E2E_METADATA_POLL_INTERVAL_SECONDS", 60.0))
+            first = pages[0]
             assert first.next_cursor is not None
-            parent_remaining = [row.ksef_number for row in search.items(first.next_cursor)]
+            parent_remaining = [row.ksef_number for page in pages[1:] for row in page.items]
             payload = {
                 "url": config.base_url,
                 "token": token,
@@ -130,7 +153,9 @@ def test_e2e_test_environment_cursor_restart(tmp_path) -> None:
                 capture_output=True,
                 cwd=tmp_path,
                 env=env,
-                timeout=180,
+                # Five bounded Retry-After waits (SDK cap: 300 seconds each)
+                # must fit even when the TEST hourly query quota is exhausted.
+                timeout=1800,
                 check=False,
             )
             assert process.returncode == 0, "Cursor child process failed (output withheld)"
