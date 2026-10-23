@@ -60,6 +60,11 @@ class ErrorCode(str, Enum):
     NOT_FOUND = "not_found"
     WORKFLOW_ERROR = "workflow_error"
     AUTHENTICATION_TIMEOUT = "authentication_timeout"
+    DOCUMENT_ERROR = "document_error"
+    DOCUMENT_VALIDATION_FAILED = "document_validation_failed"
+    DOCUMENT_RENDERING_FAILED = "document_rendering_failed"
+    VERIFICATION_FAILED = "verification_failed"
+    CHECKPOINT_FAILED = "checkpoint_failed"
 
     def __str__(self) -> str:
         return self.value
@@ -566,6 +571,46 @@ class KsefAuthenticationTimeoutError(KsefWorkflowError, TimeoutError):
         self.max_attempts = max_attempts
 
 
+class KsefDocumentError(KsefError):
+    """Bazowy błąd lokalnej warstwy dokumentów (bez odpowiedzi HTTP)."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.DOCUMENT_ERROR
+
+    def __init__(self, *args: Any, details: tuple[str, ...] = ()) -> None:
+        # Zachowujemy argumenty ValueError, również pustą krotkę i obiekty inne
+        # niż str. Kontrakt JSON wymaga tekstowego opisu pierwszego argumentu.
+        super().__init__(str(args[0]) if args else "")
+        self.args = args
+        self.details = tuple(details)
+
+    def __str__(self) -> str:
+        return Exception.__str__(self)
+
+
+class KsefDocumentValidationError(KsefDocumentError, ValueError):
+    """Dokument jest niepoprawny składniowo, semantycznie albo względem XSD."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.DOCUMENT_VALIDATION_FAILED
+
+
+class KsefRenderingError(KsefDocumentError, RuntimeError):
+    """Nie udało się wyrenderować dokumentu (HTML/PDF, brak zależności)."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.DOCUMENT_RENDERING_FAILED
+
+
+class KsefVerificationError(KsefDocumentError, ValueError):
+    """Weryfikacja dokumentu/UPO/hasha nie powiodła się."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.VERIFICATION_FAILED
+
+
+class KsefCheckpointError(KsefDocumentError, RuntimeError):
+    """Nie udało się zapisać lub odczytać checkpointu (eksport/wznawianie)."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.CHECKPOINT_FAILED
+
+
 _AUTHENTICATION_CODES = frozenset(
     {9101, 9102, 9103, 9105, 21111, 21115, 21117, 21304, 21308, 21406, 21470}
 )
@@ -680,7 +725,10 @@ __all__ = [
     "KsefAuthorizationError",
     "KsefBadRequestError",
     "KsefCertificateError",
+    "KsefCheckpointError",
     "KsefCollectiveIdentifierError",
+    "KsefDocumentError",
+    "KsefDocumentValidationError",
     "KsefError",
     "KsefExceptionCode",
     "KsefExportError",
@@ -691,6 +739,7 @@ __all__ = [
     "KsefInvoiceUnavailableError",
     "KsefPermissionError",
     "KsefRateLimitError",
+    "KsefRenderingError",
     "KsefResourceGoneError",
     "KsefServerError",
     "KsefServiceUnavailableError",
@@ -698,6 +747,7 @@ __all__ = [
     "KsefTransportError",
     "KsefUpoNotFoundError",
     "KsefValidationError",
+    "KsefVerificationError",
     "KsefWorkflowError",
     "classify_http_error",
     "exception_codes",
