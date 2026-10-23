@@ -21,6 +21,8 @@ Najważniejsze cechy:
 - **automatyczne odświeżanie tokena** — `AuthenticatedClient`/`TokenManager` (sync i async):
   token wstrzykiwany do żądań, refresh 60 s przed wygaśnięciem i po 401,
 - **retry HTTP** — `RetryConfig` (429/502/503/504, backoff z jitterem, `Retry-After`),
+- **taksonomia błędów** — `KsefError`/`ErrorCode`, `KsefExceptionCode` (54 kody KSeF)
+  i `to_dict()` dla CLI/MCP,
 - **uwierzytelnianie tokenem KSeF i XAdES**, w tym obsługa PKCS#12 oraz PEM,
 - **sesje online i wsadowe**, eksport faktur, UPO, linki weryfikacyjne, QR i Latarnia KSeF,
 - **FA(3)**: budowanie XML faktur, walidacja XSD, przygotowanie paczek ZIP/TarGz oraz **odczyt XML → model**,

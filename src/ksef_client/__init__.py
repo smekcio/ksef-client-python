@@ -14,7 +14,15 @@ from .client import (
     KsefClient,
 )
 from .config import KsefClientOptions, KsefEnvironment, KsefLighthouseEnvironment
-from .exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
+from .exceptions import (
+    ErrorCode,
+    ForbiddenReason,
+    KsefApiError,
+    KsefError,
+    KsefExceptionCode,
+    KsefHttpError,
+    KsefRateLimitError,
+)
 from .models import (
     AuthenticationChallengeResponse,
     AuthenticationInitResponse,
@@ -50,6 +58,10 @@ __all__ = [
     "KsefApiError",
     "KsefRateLimitError",
     "KsefHttpError",
+    "KsefError",
+    "ErrorCode",
+    "KsefExceptionCode",
+    "ForbiddenReason",
     "Profile",
     "ProfileError",
     "ProfileStore",
