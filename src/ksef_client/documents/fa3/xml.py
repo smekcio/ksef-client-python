@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from ...exceptions import KsefDocumentValidationError
 from .currency import (
     FA3_SCHEMA_FILE,
     Fa3CurrencyMismatchError,
@@ -127,8 +128,8 @@ def _warn_unsupported_currencies(xml: bytes | str) -> None:
             )
 
 
-class FA3XmlValidationError(ValueError):
-    pass
+class FA3XmlValidationError(KsefDocumentValidationError):
+    """XML nie przechodzi walidacji XSD FA(3)."""
 
 
 def _draft_root(draft: FA3Draft) -> ET.Element:

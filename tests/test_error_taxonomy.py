@@ -186,6 +186,11 @@ def test_error_codes_and_forbidden_reasons_are_stable() -> None:
         "not_found",
         "workflow_error",
         "authentication_timeout",
+        "document_error",
+        "document_validation_failed",
+        "document_rendering_failed",
+        "verification_failed",
+        "checkpoint_failed",
     }
     assert {member.value for member in ForbiddenReason} == {
         "missing-permissions",
@@ -586,7 +591,14 @@ def test_exit_code_for_error_covers_every_error_code() -> None:
         ErrorCode.NOT_FOUND: ExitCode.API_ERROR,
         ErrorCode.WORKFLOW_ERROR: ExitCode.API_ERROR,
         ErrorCode.AUTHENTICATION_TIMEOUT: ExitCode.AUTH_ERROR,
+        ErrorCode.DOCUMENT_ERROR: ExitCode.API_ERROR,
+        ErrorCode.DOCUMENT_VALIDATION_FAILED: ExitCode.VALIDATION_ERROR,
+        ErrorCode.DOCUMENT_RENDERING_FAILED: ExitCode.API_ERROR,
+        ErrorCode.VERIFICATION_FAILED: ExitCode.VALIDATION_ERROR,
+        ErrorCode.CHECKPOINT_FAILED: ExitCode.IO_ERROR,
     }
+
+    assert set(expected) == set(ErrorCode)
 
     for code, exit_code in expected.items():
         error_cls = type("_Error", (KsefError,), {"code": code})

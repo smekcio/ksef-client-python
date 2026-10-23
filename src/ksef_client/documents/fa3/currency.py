@@ -23,6 +23,7 @@ import re
 from functools import lru_cache
 from importlib import resources
 
+from ...exceptions import KsefDocumentValidationError
 from ...models import CurrencyCode
 
 FA3_SCHEMA_FILE = "schemat_FA(3)_v1-0E.xsd"
@@ -35,7 +36,7 @@ _KNOWN_OPENAPI_ONLY_CURRENCIES: frozenset[str] = frozenset(
 )
 
 
-class Fa3CurrencyMismatchError(ValueError):
+class Fa3CurrencyMismatchError(KsefDocumentValidationError):
     """Waluta jest znana OpenAPI, ale nie występuje w schemacie FA(3)."""
 
 
