@@ -260,10 +260,8 @@ class KsefError(Exception):
 
     code: ClassVar[ErrorCode] = ErrorCode.ERROR
 
-    def __init__(self, message: str, *args: Any) -> None:
-        # ``*args`` zachowuje semantykę ``ValueError("a", "b")`` w podklasach
-        # dokumentowych; `message` pozostaje pierwszym, czytelnym opisem.
-        super().__init__(message, *args)
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
         self.message = message
 
     def __str__(self) -> str:
@@ -578,18 +576,15 @@ class KsefDocumentError(KsefError):
 
     code: ClassVar[ErrorCode] = ErrorCode.DOCUMENT_ERROR
 
-    def __init__(
-        self, message: str, *args: Any, details: tuple[str, ...] = ()
-    ) -> None:
-        super().__init__(message, *args)
+    def __init__(self, *args: Any, details: tuple[str, ...] = ()) -> None:
+        # Zachowujemy argumenty ValueError, również pustą krotkę i obiekty inne
+        # niż str. Kontrakt JSON wymaga tekstowego opisu pierwszego argumentu.
+        super().__init__(str(args[0]) if args else "")
+        self.args = args
         self.details = tuple(details)
 
     def __str__(self) -> str:
-        # ``ValueError("a", "b")`` ma ``str`` równy krotce argumentów; zachowujemy
-        # to dla kompatybilności, ale dla typowego jednego argumentu zwracamy opis.
-        if len(self.args) > 1:
-            return Exception.__str__(self)
-        return self.message
+        return Exception.__str__(self)
 
 
 class KsefDocumentValidationError(KsefDocumentError, ValueError):

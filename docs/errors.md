@@ -152,6 +152,11 @@ a jednocześnie można łapać całość przez `KsefDocumentError`. `KsefRenderi
 i `KsefCheckpointError` są kontraktem dla przyszłych modułów PDF i wznawianego
 eksportu — obecnie SDK ich nie rzuca.
 
+Wyjątki dokumentowe zachowują także semantykę argumentów `ValueError`: można je
+tworzyć bez argumentów, z obiektem innym niż tekst albo z wieloma argumentami.
+`args` i `str(exc)` działają jak w wyjątku wbudowanym; `message` i pole `message`
+w `to_dict()` zawierają tekst pierwszego argumentu albo pusty tekst, gdy go brak.
+
 ```python
 from pathlib import Path
 

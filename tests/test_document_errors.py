@@ -119,6 +119,41 @@ def test_legacy_errors_keep_multi_argument_valueerror_semantics(
     assert type(pickle.loads(pickle.dumps(error))) is error_cls
 
 
+@pytest.mark.parametrize("error_cls", ALL_ERROR_CLASSES)
+@pytest.mark.parametrize("args", [(), (123,), (None,), ({"field": "bad"},), (1, None)])
+def test_document_errors_preserve_builtin_argument_semantics(
+    error_cls: type[KsefDocumentError], args: tuple[object, ...]
+) -> None:
+    error = error_cls(*args, details=("detail",))
+    expected_text = str(ValueError(*args))
+    expected_message = str(args[0]) if args else ""
+
+    for restored in (
+        error,
+        copy.copy(error),
+        copy.deepcopy(error),
+        _pickle_roundtrip(error),
+    ):
+        assert type(restored) is error_cls
+        assert restored.args == args
+        assert str(restored) == expected_text
+        assert restored.message == expected_message
+        assert restored.to_dict()["message"] == expected_message
+        assert restored.to_dict()["details"] == ["detail"]
+        assert json.loads(json.dumps(restored.to_dict())) == restored.to_dict()
+
+
+@pytest.mark.parametrize("error_cls", LEGACY_ERROR_CLASSES)
+def test_legacy_errors_can_be_raised_without_instantiation(
+    error_cls: type[KsefDocumentValidationError],
+) -> None:
+    with pytest.raises(error_cls) as excinfo:
+        raise error_cls
+
+    assert excinfo.value.args == ()
+    assert str(excinfo.value) == ""
+
+
 def test_document_error_repr_does_not_include_details() -> None:
     error = FA3ParseError("bad", details=("SECRET-DOCUMENT-FRAGMENT",))
 
