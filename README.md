@@ -380,3 +380,6 @@ Rekomendowany przebieg pracy:
 - dodaj testy dla zmian zachowania,
 - uruchom lokalnie `python tools/lint.py` oraz testy,
 - w PR opisz zakres zmiany, uzasadnienie i sposób weryfikacji.
+
+
+Zalecane API kompletnego pobierania: [paginacja z kursorami i checkpoint SQLite](docs/reliable-pagination.md).
