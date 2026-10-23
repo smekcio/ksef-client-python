@@ -18,7 +18,13 @@ import httpx
 
 from . import openapi_models as _openapi_models
 from .config import KsefClientOptions
-from .exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
+from .exceptions import (
+    KsefApiError,
+    KsefHttpError,
+    KsefRateLimitError,
+    KsefTransportError,
+    classify_http_error,
+)
 from .models import (
     BadRequestProblemDetails,
     ExceptionResponse,
@@ -246,7 +252,7 @@ def _wrap_transport_error(
     w ``__cause__``, a ``status_code`` to ``NO_HTTP_STATUS_CODE`` (brak odpowiedzi).
     Do komunikatu trafia adres bez query — pre-signed URL nie może wyciec do logu.
     """
-    return KsefHttpError(
+    return KsefTransportError(
         status_code=NO_HTTP_STATUS_CODE,
         message=(
             f"Network error during {method} {_loggable_url(url)}: "
@@ -669,6 +675,57 @@ def _parse_api_problem(status_code: int, body: Any) -> Any | None:
     return None
 
 
+def _build_http_error(
+    status_code: int,
+    text: str,
+    body: Any | None,
+    problem: Any | None,
+    retry_after_fields: dict[str, Any],
+) -> KsefHttpError:
+    """Buduje wyjątek SDK dla nieoczekiwanego statusu HTTP.
+
+    Zachowuje dotychczasowe ``message`` i pola, ale dobiera klasę z taksonomii.
+    """
+    if status_code == 429:
+        return KsefRateLimitError(
+            status_code=status_code,
+            message="Too Many Requests",
+            response_body=body,
+            problem=problem,
+            **retry_after_fields,
+        )
+
+    if body is None:
+        # Brak ciała JSON to najczęściej odpowiedź proxy/pośrednika, a nie kontrakt
+        # KSeF — zachowujemy dotychczasową klasę ``KsefHttpError`` (bez ``KsefApiError``),
+        # żeby nie zmieniać semantyki istniejących ``except``.
+        return KsefHttpError(
+            status_code=status_code,
+            message=text,
+            response_body=None,
+            problem=None,
+            **retry_after_fields,
+        )
+
+    error_cls = classify_http_error(status_code, problem)
+    if issubclass(error_cls, KsefApiError):
+        return error_cls(
+            status_code=status_code,
+            message="API error",
+            response_body=body,
+            problem=problem,
+            exception_response=problem if isinstance(problem, ExceptionResponse) else None,
+            **retry_after_fields,
+        )
+    return error_cls(
+        status_code=status_code,
+        message="API error",
+        response_body=body,
+        problem=problem,
+        **retry_after_fields,
+    )
+
+
 @dataclass
 class HttpResponse:
     status_code: int
@@ -867,32 +924,12 @@ class BaseHttpClient:
                 body = None
 
         problem = _parse_api_problem(response.status_code, body)
-
-        if response.status_code == 429:
-            raise KsefRateLimitError(
-                status_code=response.status_code,
-                message="Too Many Requests",
-                response_body=body,
-                problem=problem,
-                **retry_after_fields,
-            )
-
-        if body is not None:
-            raise KsefApiError(
-                status_code=response.status_code,
-                message="API error",
-                response_body=body,
-                problem=problem,
-                exception_response=problem if isinstance(problem, ExceptionResponse) else None,
-                **retry_after_fields,
-            )
-
-        raise KsefHttpError(
-            status_code=response.status_code,
-            message=response.text,
-            response_body=None,
-            problem=None,
-            **retry_after_fields,
+        raise _build_http_error(
+            response.status_code,
+            response.text,
+            body,
+            problem,
+            retry_after_fields,
         )
 
 
@@ -1074,30 +1111,10 @@ class AsyncBaseHttpClient:
                 body = None
 
         problem = _parse_api_problem(response.status_code, body)
-
-        if response.status_code == 429:
-            raise KsefRateLimitError(
-                status_code=response.status_code,
-                message="Too Many Requests",
-                response_body=body,
-                problem=problem,
-                **retry_after_fields,
-            )
-
-        if body is not None:
-            raise KsefApiError(
-                status_code=response.status_code,
-                message="API error",
-                response_body=body,
-                problem=problem,
-                exception_response=problem if isinstance(problem, ExceptionResponse) else None,
-                **retry_after_fields,
-            )
-
-        raise KsefHttpError(
-            status_code=response.status_code,
-            message=response.text,
-            response_body=None,
-            problem=None,
-            **retry_after_fields,
+        raise _build_http_error(
+            response.status_code,
+            response.text,
+            body,
+            problem,
+            retry_after_fields,
         )

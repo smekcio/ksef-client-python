@@ -4,6 +4,12 @@
 
 ### Features
 
+* **sdk:** taksonomia błędów — `KsefError` + `ErrorCode`, `KsefExceptionCode`
+  (50 kodów `exceptionCode` z KSeF API 2.9.0), `ForbiddenReason` oraz podklasy HTTP
+  dla walidacji, uwierzytelnienia, uprawnień, sesji, eksportu, certyfikatów i faktur.
+  `KsefApiError.exception_codes`/`details`/`reason_code`/`trace_id` i `to_dict()` dają
+  stabilny kontrakt dla CLI i MCP; mapowanie jest addytywne, a 429 pozostaje
+  `KsefRateLimitError`
 * **sdk:** klient uwierzytelniony z auto-refresh tokena — `AuthenticatedClient`/
   `AsyncAuthenticatedClient` i `TokenManager`/`AsyncTokenManager`. Token dostępowy jest
   wstrzykiwany w warstwie HTTP, odświeżany proaktywnie 60 s przed wygaśnięciem (`refresh_margin_seconds`)

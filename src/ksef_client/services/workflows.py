@@ -10,6 +10,10 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol, cast
 
 from ..clients.invoices import AsyncInvoicesClient, InvoicesClient
+from ..exceptions import (
+    KsefAuthenticationFailedError,
+    KsefAuthenticationTimeoutError,
+)
 from ..http import HttpResponse
 from ..models import (
     AuthenticationChallengeResponse,
@@ -437,14 +441,22 @@ class AuthCoordinator:
             if status_info.code == 200:
                 return
             if status_info.code != 100:
-                details = ""
+                details_text = ""
+                details: tuple[str, ...] = ()
                 if status_info.details:
-                    details = f" Details: {', '.join(status_info.details)}"
-                raise RuntimeError(
-                    f"Authentication failed: {status_info.code} {status_info.description}{details}"
+                    details = tuple(status_info.details)
+                    details_text = f" Details: {', '.join(status_info.details)}"
+                raise KsefAuthenticationFailedError(
+                    f"Authentication failed: {status_info.code} "
+                    f"{status_info.description}{details_text}",
+                    status_code=status_info.code,
+                    details=details,
                 )
             time.sleep(poll_interval_seconds)
-        raise TimeoutError("Authentication did not complete within max_attempts")
+        raise KsefAuthenticationTimeoutError(
+            "Authentication did not complete within max_attempts",
+            max_attempts=max_attempts,
+        )
 
 
 class AsyncAuthCoordinator:
@@ -580,14 +592,22 @@ class AsyncAuthCoordinator:
             if status_info.code == 200:
                 return
             if status_info.code != 100:
-                details = ""
+                details_text = ""
+                details: tuple[str, ...] = ()
                 if status_info.details:
-                    details = f" Details: {', '.join(status_info.details)}"
-                raise RuntimeError(
-                    f"Authentication failed: {status_info.code} {status_info.description}{details}"
+                    details = tuple(status_info.details)
+                    details_text = f" Details: {', '.join(status_info.details)}"
+                raise KsefAuthenticationFailedError(
+                    f"Authentication failed: {status_info.code} "
+                    f"{status_info.description}{details_text}",
+                    status_code=status_info.code,
+                    details=details,
                 )
             await asyncio.sleep(poll_interval_seconds)
-        raise TimeoutError("Authentication did not complete within max_attempts")
+        raise KsefAuthenticationTimeoutError(
+            "Authentication did not complete within max_attempts",
+            max_attempts=max_attempts,
+        )
 
 
 OnlineSessionResult = OnlineSessionHandle

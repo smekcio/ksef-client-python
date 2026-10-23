@@ -9,42 +9,136 @@ a treść JSON (jeśli występuje) jest dostępna w polach obiektu wyjątku.
 
 ## Typy wyjątków
 
-### `ValueError` (walidacja danych wejściowych)
+Wszystkie błędy biblioteki dziedziczą po `KsefError` (wyjątki walidacji danych
+wejściowych pozostają `ValueError`). Dzięki temu można łapać całość przez `KsefError`,
+a jednocześnie reagować na konkretną kategorię.
 
-- Pre-signed URL: dla żądań z `skip_auth=True` i absolutnym URL biblioteka wykonuje
-  walidację bezpieczeństwa. W przypadku niespełnienia reguł (np. host `localhost`,
-  loopback/private IP bez opt-in, host poza allowlistą, albo `http` przy
-  `strict_presigned_url_validation=True`) rzucany jest `ValueError` z komunikatem
-  bezpieczeństwa.
-- `json` i `data` w jednym żądaniu: `request(..., json=..., data=...)` rzuca
-  `ValueError: Pass either json or data, not both`. `httpx` wysyła wtedy tylko jedną
-  z tych wartości, więc bez tego błędu wołający nie wiedziałby, co trafiło do KSeF.
-  Dotyczy obu klientów (`BaseHttpClient` i `AsyncBaseHttpClient`).
+### `KsefError` (baza)
+
+- `code`: `ErrorCode` — stabilny identyfikator kategorii (`"validation_failed"`,
+  `"rate_limited"`, `"authentication_failed"`, …),
+- `message`: czytelny opis,
+- `to_dict(omit_none=False)`: stały kontrakt JSON dla CLI/MCP (bez `response_body`).
 
 ### `KsefHttpError`
 
-Bazowy błąd HTTP.
+Bazowy błąd HTTP (status >= 300 albo błąd transportu). Pola: `status_code`, `message`,
+`response_body`, `problem`, `retry_after`, `retry_after_raw`.
 
-- `status_code`: kod HTTP
-- `message`: tekst (dla odpowiedzi nie-JSON)
-- `response_body`: zwykle `None`
+### `KsefApiError` i podklasy
 
-### `KsefApiError`
+Dla odpowiedzi z JSON-em SDK wybiera klasę na podstawie statusu i kodów KSeF:
 
-Występuje, gdy odpowiedź ma `Content-Type: application/json` i status >= 300.
+| Klasa | `ErrorCode` | Kiedy |
+|---|---|---|
+| `KsefBadRequestError` | `bad_request` | 400 bez rozpoznanego kodu |
+| `KsefAuthenticationError` | `authentication_failed` | 401, 400 z kodami auth |
+| `KsefAuthorizationError` | `authorization_failed` | 403, 400/`21301` |
+| `KsefPermissionError` | `permission_error` | `26xxx`, `30xxx` |
+| `KsefCertificateError` | `certificate_error` | `25xxx` |
+| `KsefValidationError` | `validation_failed` | `21001`, `21217`, `21405` |
+| `KsefInvoiceRejectedError` | `invoice_rejected` | `21401`–`21403` |
+| `KsefInvoiceNotFoundError` | `invoice_not_found` | `21164` |
+| `KsefInvoiceUnavailableError` | `invoice_unavailable` | `21165`–`21167` |
+| `KsefUpoNotFoundError` | `upo_not_found` | `21175`, `21178` |
+| `KsefSessionError` | `session_error` | błędy sesji (`21155`–`21208`) |
+| `KsefExportError` | `export_error` | `21181`–`21183` |
+| `KsefCollectiveIdentifierError` | `collective_identifier_error` | `71xxx` |
+| `KsefInvalidContinuationTokenError` | `invalid_continuation_token` | `21418` |
+| `KsefResourceGoneError` | `not_found` | 410 bez rozpoznanego kodu |
+| `KsefServerError` | `server_error` | 5xx (poza 502/503/504) |
+| `KsefServiceUnavailableError` | `service_unavailable` | 502/503/504 |
+| `KsefApiError` | `api_error` | pozostałe odpowiedzi z JSON-em |
+| `KsefRateLimitError` | `rate_limited` | 429 — specjalny przypadek, bez zmian |
 
-- `exception_response`: legacy `ExceptionResponse`, jeśli API zwróci klasyczny format `application/json`
-- `problem`: zmapowany model błędu, jeśli odpowiedź daje się rozpoznać
+Gdy odpowiedź zawiera kilka kodów, pierwszeństwo ma pierwsza rodzina w kolejności:
+auth → autoryzacja → uprawnienia → certyfikaty → identyfikatory zbiorcze → eksport →
+sesja → faktura niedostępna → faktura nie istnieje → UPO → odrzucenie faktury →
+walidacja → token kontynuacji.
 
 ### `KsefRateLimitError`
 
-Specjalny przypadek dla `429 Too Many Requests`.
+Specjalny przypadek dla `429 Too Many Requests` (nie jest podklasą `KsefApiError`):
 
 - `retry_after`: wartość nagłówka `Retry-After` w sekundach, przycięta do zakresu
-  `0..MAX_RETRY_AFTER_SECONDS` (300 s). Nagłówek pochodzi od serwera, a bez sufitu
-  `Retry-After: 31536000` kazałoby czekać rok
-- `retry_after_raw`: surowa wartość nagłówka (do logów i własnej polityki retry)
-- `problem`: `TooManyRequestsResponse` albo `TooManyRequestsProblemDetails`
+  `0..MAX_RETRY_AFTER_SECONDS` (300 s),
+- `retry_after_raw`: surowa wartość nagłówka,
+- `problem`: `TooManyRequestsResponse` albo `TooManyRequestsProblemDetails`.
+
+### Błędy transportu i odpowiedzi bez JSON
+
+- `KsefTransportError` (`transport_error`) — status `0`; żądanie nie dotarło do KSeF.
+- Odpowiedzi bez JSON (proxy, HTML, puste body) pozostają `KsefHttpError` — nie niosą
+  kontraktu błędów KSeF, więc nie ma z czego wywnioskować kodu.
+
+### Właściwości `KsefApiError`
+
+```python
+exc.exception_codes          # tuple[int, ...] — wszystkie kody z payloadu
+exc.known_exception_codes    # tuple[KsefExceptionCode, ...] — tylko znane SDK
+exc.details                  # tuple[str, ...] — opisy z payloadu
+exc.reason_code              # str | None — surowy reasonCode z 403
+exc.forbidden_reason         # ForbiddenReason | None — znana wartość reasonCode
+exc.trace_id                 # str | None — traceId z payloadu
+```
+
+Przykład:
+
+```python
+from ksef_client.exceptions import KsefApiError, KsefExceptionCode, KsefValidationError
+
+try:
+    client.invoices.query_invoice_metadata(filters)
+except KsefValidationError as exc:
+    if KsefExceptionCode.INPUT_VALIDATION_FAILED in exc.known_exception_codes:
+        print("Błąd walidacji:", exc.details)
+except KsefApiError as exc:                  # nadal łapie wszystkie podklasy
+    print(exc.code, exc.status_code, exc.to_dict())
+```
+
+### `KsefExceptionCode` i `ForbiddenReason`
+
+`KsefExceptionCode` to `IntEnum` z 50 kodami `exceptionCode` z KSeF API 2.9.0
+(m.in. `INPUT_VALIDATION_FAILED = 21405`, `INVALID_CSR = 25004`,
+`PERMISSION_ALREADY_EXISTS = 30001`). Nowe kody przyszłych wersji API nie wywracają
+parsowania — pozostają jako `int` w `exc.exception_codes`.
+
+`ForbiddenReason` to enum wartości `reasonCode` z 403 (`missing-permissions`,
+`ip-not-allowed`, `insufficient-resource-access`, `auth-method-not-allowed`,
+`security-service-blocked`, `context-type-not-allowed`).
+
+### Błędy workflow
+
+Błędy lokalne (bez odpowiedzi HTTP) dziedziczą po `KsefWorkflowError` i zachowują
+zgodność z wbudowanymi typami:
+
+- `KsefAuthenticationFailedError` — dziedziczy po `RuntimeError`,
+- `KsefAuthenticationTimeoutError` — dziedziczy po `TimeoutError`.
+
+Dzięki temu `except RuntimeError`/`except TimeoutError` nadal działa, a jednocześnie
+można łapać `KsefError` i korzystać z `to_dict()`.
+
+### Kontrakt dla CLI i MCP
+
+`to_dict()` zwraca stały zestaw kluczy (domyślnie także `None`):
+
+```json
+{
+  "code": "validation_failed",
+  "message": "API error",
+  "status_code": 400,
+  "retry_after": null,
+  "ksef_codes": [21405],
+  "details": ["Błąd walidacji danych wejściowych."],
+  "reason_code": null,
+  "trace_id": "…"
+}
+```
+
+- `code` jest stabilny — nowe wartości dodawajemy na końcu `ErrorCode`,
+- `to_dict(omit_none=True)` pomija `None` (wygodne dla CLI),
+- CLI ma `exit_code_for_error(exc)` mapujące `ErrorCode` na `ExitCode`,
+- w `to_dict()` nigdy nie ma `response_body` ani nagłówków.
 
 ## Problem Details i `exc.problem`
 

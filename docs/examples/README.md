@@ -238,3 +238,14 @@ backoff i jak `Retry-After` wpływa na opóźnienie. Nie wymaga sieci ani tokena
 ```bash
 python docs/examples/retry_config.py
 ```
+
+### `error_handling.py`
+
+Pokazuje taksonomię błędów: kategorię `ErrorCode`, kody KSeF (`KsefExceptionCode`),
+`details`/`trace_id` i `to_dict()` gotowe dla CLI/MCP. Skrypt wykonuje żądanie bez
+tokena, więc oczekuje `401` i nie wymaga danych uwierzytelniających.
+
+```bash
+KSEF_BASE_URL=https://api-demo.ksef.mf.gov.pl \
+python docs/examples/error_handling.py
+```
