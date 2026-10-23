@@ -60,6 +60,9 @@ class ErrorCode(str, Enum):
     NOT_FOUND = "not_found"
     WORKFLOW_ERROR = "workflow_error"
     AUTHENTICATION_TIMEOUT = "authentication_timeout"
+    PAGINATION_ERROR = "pagination_error"
+    INVALID_PAGINATION_CURSOR = "invalid_pagination_cursor"
+    INCOMPLETE_PAGINATION = "incomplete_pagination"
 
     def __str__(self) -> str:
         return self.value
@@ -281,6 +284,29 @@ class KsefError(Exception):
         if omit_none:
             return {key: value for key, value in payload.items() if value is not None}
         return payload
+
+
+class KsefPaginationError(KsefError):
+    """Base error for the opt-in resumable metadata search."""
+
+    code = ErrorCode.PAGINATION_ERROR
+
+
+class KsefInvalidPaginationCursorError(KsefPaginationError):
+    """Invalid or incompatible cursor, rejected before HTTP."""
+
+    code = ErrorCode.INVALID_PAGINATION_CURSOR
+
+
+class KsefIncompletePaginationError(KsefPaginationError):
+    """Cannot prove completeness. last_cursor is private replay state."""
+
+    code = ErrorCode.INCOMPLETE_PAGINATION
+
+    def __init__(self, reason_code: str, *, last_cursor: str) -> None:
+        super().__init__(f"Incomplete invoice pagination: {reason_code}")
+        self.reason_code = reason_code
+        self.last_cursor = last_cursor
 
 
 def _restore_error(

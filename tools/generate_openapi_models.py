@@ -93,9 +93,7 @@ def _validate_identifier(
     w JSON jest poprawnym kluczem, a `_sanitize_field_name` dokłada mu `_`.
     """
     if not isinstance(name, str) or not name.isidentifier():
-        raise OpenApiSpecError(
-            f"{kind} {name!r} in {context} is not a valid Python identifier"
-        )
+        raise OpenApiSpecError(f"{kind} {name!r} in {context} is not a valid Python identifier")
     if keyword.iskeyword(name) and not allow_keyword:
         raise OpenApiSpecError(f"{kind} {name!r} in {context} is a reserved Python keyword")
     return name
@@ -142,9 +140,17 @@ SENSITIVE_FIELD_NAMES: frozenset[str] = frozenset(
         "client_secret",
         "clientSecret",
         "key",
-        "authentication_token", "authenticationToken",
-        "encryptedSymmetricKey", "encryptedToken", "encryptedInvoiceContent",
-        "initializationVector", "iv", "url", "headers", "downloadUrl", "upoDownloadUrl",
+        "authentication_token",
+        "authenticationToken",
+        "encryptedSymmetricKey",
+        "encryptedToken",
+        "encryptedInvoiceContent",
+        "initializationVector",
+        "iv",
+        "url",
+        "headers",
+        "downloadUrl",
+        "upoDownloadUrl",
     }
 )
 
@@ -156,8 +162,11 @@ SENSITIVE_MODEL_FIELDS: dict[str, frozenset[str]] = {
 
 
 def _is_sensitive_field(prop_name: str, field_name: str, model_name: str = "") -> bool:
-    return (prop_name in SENSITIVE_FIELD_NAMES or field_name in SENSITIVE_FIELD_NAMES
-            or prop_name in SENSITIVE_MODEL_FIELDS.get(model_name, frozenset()))
+    return (
+        prop_name in SENSITIVE_FIELD_NAMES
+        or field_name in SENSITIVE_FIELD_NAMES
+        or prop_name in SENSITIVE_MODEL_FIELDS.get(model_name, frozenset())
+    )
 
 
 def _schema_type(schema: dict) -> str:

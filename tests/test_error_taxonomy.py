@@ -186,6 +186,9 @@ def test_error_codes_and_forbidden_reasons_are_stable() -> None:
         "not_found",
         "workflow_error",
         "authentication_timeout",
+        "pagination_error",
+        "invalid_pagination_cursor",
+        "incomplete_pagination",
     }
     assert {member.value for member in ForbiddenReason} == {
         "missing-permissions",

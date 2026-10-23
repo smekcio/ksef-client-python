@@ -6,13 +6,38 @@ from dataclasses import fields, is_dataclass
 from enum import Enum
 from typing import Any
 
-_SENSITIVE = frozenset({
-    "token", "accesstoken", "refreshtoken", "authenticationtoken", "kseftoken",
-    "privatekey", "privatekeypem", "password", "secret", "clientsecret", "key",
-    "symmetrickeybase64", "iv", "ivbase64", "headers", "customheaders", "authorization",
-    "url", "uploadurl", "downloadurl", "upodownloadurl", "content", "payload",
-    "invoicexml", "responsebody", "cursor", "nextcursor", "lastcursor",
-})
+_SENSITIVE = frozenset(
+    {
+        "token",
+        "accesstoken",
+        "refreshtoken",
+        "authenticationtoken",
+        "kseftoken",
+        "privatekey",
+        "privatekeypem",
+        "password",
+        "secret",
+        "clientsecret",
+        "key",
+        "symmetrickeybase64",
+        "iv",
+        "ivbase64",
+        "headers",
+        "customheaders",
+        "authorization",
+        "url",
+        "uploadurl",
+        "downloadurl",
+        "upodownloadurl",
+        "content",
+        "payload",
+        "invoicexml",
+        "responsebody",
+        "cursor",
+        "nextcursor",
+        "lastcursor",
+    }
+)
 
 
 def _sensitive(name: str) -> bool:
@@ -26,6 +51,7 @@ def redact_sensitive(value: Any) -> Any:
     and excessive nesting are bounded. This is not a persistence format and does
     not inspect arbitrary strings for embedded credentials.
     """
+
     def visit(item: Any, depth: int) -> Any:
         if depth >= 20:
             return "<depth-limit>"
@@ -35,14 +61,16 @@ def redact_sensitive(value: Any) -> Any:
             return item
         if is_dataclass(item) and not isinstance(item, type):
             return {
-                f.name: "<redacted>" if not f.repr or _sensitive(f.name)
+                f.name: "<redacted>"
+                if not f.repr or _sensitive(f.name)
                 else visit(getattr(item, f.name), depth + 1)
                 for f in fields(item)
             }
         if isinstance(item, dict):
             return {
                 key: "<redacted>" if _sensitive(key) else visit(val, depth + 1)
-                for key, val in item.items() if isinstance(key, str)
+                for key, val in item.items()
+                if isinstance(key, str)
             }
         if isinstance(item, (list, tuple, set, frozenset)):
             return [visit(val, depth + 1) for val in item]
