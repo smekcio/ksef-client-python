@@ -156,6 +156,8 @@ def test_exception_code_enum_matches_spec_catalog() -> None:
     assert KsefExceptionCode.from_code(21405) is KsefExceptionCode.INPUT_VALIDATION_FAILED
     assert KsefExceptionCode.from_code(99999) is None
     assert KsefExceptionCode.from_code(9105) is KsefExceptionCode.INVALID_SIGNATURE
+    assert KsefExceptionCode.from_code(21405.0) is None  # type: ignore[arg-type]
+    assert KsefExceptionCode.from_code(True) is None
 
 
 def test_error_codes_and_forbidden_reasons_are_stable() -> None:
@@ -244,21 +246,38 @@ def test_classify_http_error(
     assert classify_http_error(status, problem) is expected
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/auth/xades-signature",
+        "auth/xades-signature",
+        "https://api-test.ksef.mf.gov.pl/auth/xades-signature",
+    ],
+)
+def test_21401_auth_path_forms_are_equivalent(path: str) -> None:
+    problem = _legacy_problem(21401)
+
+    assert classify_http_error(400, problem, path=path) is KsefAuthenticationError
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/invoices/ksef/123",
+        "invoices/ksef/123",
+        "/sessions/online/x",
+        "sessions/online/x",
+    ],
+)
+def test_21401_invoice_path_forms_are_equivalent(path: str) -> None:
+    problem = _legacy_problem(21401)
+
+    assert classify_http_error(400, problem, path=path) is KsefInvoiceRejectedError
+
+
 def test_21401_classification_depends_on_request_path() -> None:
     problem = _legacy_problem(21401)
 
-    assert (
-        classify_http_error(400, problem, path="/auth/xades-signature")
-        is KsefAuthenticationError
-    )
-    assert (
-        classify_http_error(400, problem, path="/invoices/ksef/123")
-        is KsefInvoiceRejectedError
-    )
-    assert (
-        classify_http_error(400, problem, path="/sessions/online")
-        is KsefInvoiceRejectedError
-    )
     assert classify_http_error(400, problem) is KsefValidationError
 
 
@@ -311,6 +330,9 @@ def test_exception_codes_support_both_payload_formats() -> None:
     assert exception_codes(None) == ()
     assert exception_codes({"errors": [{"code": "x"}, {"code": True}]}) == ()
     assert exception_codes({"errors": [{"code": float("inf")}]}) == ()
+    assert exception_codes({"errors": [{"code": 21304.9}]}) == ()
+    assert exception_codes({"errors": [{"code": 21405.0}]}) == ()
+    assert exception_codes({"errors": [{"code": "21405"}]}) == (21405,)
 
 
 # --- właściwości i to_dict -------------------------------------------------

@@ -56,7 +56,9 @@ auth → autoryzacja → uprawnienia → certyfikaty → identyfikatory zbiorcze
 sesja → faktura niedostępna → faktura nie istnieje → UPO → odrzucenie faktury →
 walidacja → token kontynuacji. Kod `21401` jest wyjątkiem: na `/auth/...` oznacza błąd
 dokumentu uwierzytelniającego, na `/invoices/...` i `/sessions/...` — odrzucenie faktury,
-a bez kontekstu ścieżki — błąd walidacji.
+a bez kontekstu ścieżki — błąd walidacji. Ścieżka jest normalizowana (dodawany jest
+leading slash, obsługiwany jest też pełny URL), więc `auth/...` i `/auth/...` dają
+identyczną klasyfikację.
 
 ### `KsefRateLimitError`
 
@@ -102,6 +104,8 @@ except KsefApiError as exc:                  # nadal łapie wszystkie podklasy
 ### `KsefExceptionCode` i `ForbiddenReason`
 
 `KsefExceptionCode` to `IntEnum` z 54 kodami `exceptionCode` z KSeF API 2.9.0
+(kody są przyjmowane jako `int` albo tekst liczbowy; `float` i `bool` są ignorowane,
+tak jak w CLI)
 (m.in. `INVALID_SIGNATURE = 9105`, `INPUT_VALIDATION_FAILED = 21405`, `INVALID_CSR = 25004`,
 `PERMISSION_ALREADY_EXISTS = 30001`). Nowe kody przyszłych wersji API nie wywracają
 parsowania — pozostają jako `int` w `exc.exception_codes`.

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 from enum import Enum, IntEnum
 from typing import Any, ClassVar, TypeAlias
+from urllib.parse import urlparse
 
 from .models import (
     BadRequestProblemDetails,
@@ -129,6 +130,8 @@ class KsefExceptionCode(IntEnum):
     @classmethod
     def from_code(cls, value: int) -> KsefExceptionCode | None:
         """Zwraca znany kod albo ``None`` (nie rzuca dla kodów z przyszłych wersji API)."""
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
         try:
             return cls(value)
         except ValueError:
@@ -180,13 +183,19 @@ def exception_codes(problem: Any | None) -> tuple[int, ...]:
     codes: list[int] = []
 
     def _add(value: Any) -> None:
+        # Kontrakt ``code``/``exceptionCode`` to ``int32``. Odrzucamy ``bool``
+        # (podklasa ``int``) oraz ``float`` — ``21304.9`` nie może stać się
+        # ``21304``. Tekstową liczbę przyjmujemy, tak jak robi to CLI.
         if isinstance(value, bool):
             return
-        try:
-            code = int(value)
-        except (TypeError, ValueError, OverflowError):
-            # ``json.loads`` potrafi zwrócić ``inf`` dla ``1e309`` — int(inf) rzuca
-            # OverflowError; bez tego wyjątek przerywałby pętlę retry.
+        if isinstance(value, int):
+            code = value
+        elif isinstance(value, str):
+            try:
+                code = int(value)
+            except ValueError:
+                return
+        else:
             return
         if code not in codes:
             codes.append(code)
@@ -599,12 +608,25 @@ def _class_for_codes(codes: tuple[int, ...]) -> type[KsefApiError] | None:
     return None
 
 
+def _normalized_path(path: str) -> str:
+    """Normalizuje ścieżkę tak jak warstwa HTTP (leading slash, bez query).
+
+    ``"auth/x"`` i ``"/auth/x"`` prowadzą do tego samego URL, więc muszą też
+    dawać tę samą klasyfikację błędu.
+    """
+    if path.startswith(("http://", "https://")):
+        return urlparse(path).path or "/"
+    return "/" + path.split("?", 1)[0].lstrip("/")
+
+
 def _is_auth_path(path: str) -> bool:
-    return "/auth/" in path or path.startswith("/auth")
+    normalized = _normalized_path(path)
+    return normalized == "/auth" or normalized.startswith("/auth/")
 
 
 def _is_invoice_path(path: str) -> bool:
-    return "/invoices" in path or "/sessions" in path
+    normalized = _normalized_path(path)
+    return "/invoices" in normalized or "/sessions" in normalized
 
 
 def classify_http_error(
