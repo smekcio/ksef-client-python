@@ -17,7 +17,8 @@ import os
 import sqlite3
 from typing import Protocol
 
-from ksef_client import InvoiceMetadataPage, KsefClient, KsefClientOptions, models as m
+from ksef_client import InvoiceMetadataPage, KsefClient, KsefClientOptions
+from ksef_client import models as m
 
 
 class MetadataSearch(Protocol):
@@ -33,7 +34,7 @@ def sync_pages(connection: sqlite3.Connection, search: MetadataSearch, *, sync_k
     connection.executescript("""
         CREATE TABLE IF NOT EXISTS invoices (
             sync_key TEXT NOT NULL, ksef_number TEXT NOT NULL, metadata TEXT NOT NULL,
-            PRIMARY KEY (sync_key, ksef_number)
+            PRIMARY KEY (ksef_number)
         );
         CREATE TABLE IF NOT EXISTS checkpoints (
             sync_key TEXT PRIMARY KEY, cursor TEXT, completed INTEGER NOT NULL
@@ -55,7 +56,7 @@ def sync_pages(connection: sqlite3.Connection, search: MetadataSearch, *, sync_k
                     raise ValueError("Missing KSeF number; checkpoint was not advanced")
                 connection.execute(
                     "INSERT INTO invoices VALUES (?, ?, ?) "
-                    "ON CONFLICT(sync_key, ksef_number) DO UPDATE SET metadata=excluded.metadata",
+                    "ON CONFLICT(ksef_number) DO UPDATE SET metadata=excluded.metadata",
                     (sync_key, invoice.ksef_number, json.dumps(invoice.to_dict())),
                 )
             connection.execute(

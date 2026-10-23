@@ -56,3 +56,9 @@ def test_diagnostics_are_bounded_and_never_call_unknown_repr():
     assert result["obj"] == "<Hostile>"
     assert result["nested"] == [{"secret_value": "<redacted>"}, "one"]
     assert "<depth-limit>" in str(result)
+
+
+def test_generated_field_policy_is_also_redacted_in_dictionary_diagnostics():
+    from tools.generate_openapi_models import SENSITIVE_FIELD_NAMES
+    payload = dict.fromkeys(SENSITIVE_FIELD_NAMES, "DUMMY_SECRET")
+    assert "DUMMY_SECRET" not in str(redact_sensitive(payload))

@@ -1,0 +1,7 @@
+[
+  "tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_token",
+  "tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_xades",
+  "tests/test_e2e_resume_flows.py::test_e2e_test_environment_online_resume_token",
+  "tests/test_e2e_resume_flows.py::test_e2e_test_environment_batch_resume_token",
+  "tests/test_e2e_pagination.py::test_e2e_test_environment_cursor_restart"
+]

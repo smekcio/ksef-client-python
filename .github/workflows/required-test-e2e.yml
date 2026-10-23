@@ -1,0 +1,116 @@
+name: Required TEST E2E
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+      artifact-name:
+        type: string
+        default: ""
+    secrets:
+      KSEF_TEST_TOKEN:
+        required: true
+      KSEF_TEST_CONTEXT_TYPE:
+        required: true
+      KSEF_TEST_CONTEXT_VALUE:
+        required: true
+      KSEF_TEST_XADES_CERT_CRT:
+        required: false
+      KSEF_TEST_XADES_CERT_CRT_B64:
+        required: false
+      KSEF_TEST_XADES_PRIVATE_KEY_PEM:
+        required: false
+      KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64:
+        required: false
+      KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  required-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: ksef-test-live
+      cancel-in-progress: false
+    env:
+      KSEF_TEST_INSTALLED: "1"
+      KSEF_E2E: "1"
+      KSEF_TEST_BASE_URL: https://api-test.ksef.mf.gov.pl
+      KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
+      KSEF_TEST_CONTEXT_TYPE: ${{ secrets.KSEF_TEST_CONTEXT_TYPE }}
+      KSEF_TEST_CONTEXT_VALUE: ${{ secrets.KSEF_TEST_CONTEXT_VALUE }}
+      KSEF_TEST_SUBJECT_TYPE: Subject1
+      KSEF_TEST_XADES_CERT_CRT: ${{ secrets.KSEF_TEST_XADES_CERT_CRT }}
+      KSEF_TEST_XADES_CERT_CRT_B64: ${{ secrets.KSEF_TEST_XADES_CERT_CRT_B64 }}
+      KSEF_TEST_XADES_PRIVATE_KEY_PEM: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM }}
+      KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64 }}
+      KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD }}
+      KSEF_TEST_XADES_SUBJECT_IDENTIFIER_TYPE: certificateSubject
+      KSEF_E2E_RATE_LIMIT_RETRIES: "5"
+      KSEF_E2E_INVOICE_MAX_ATTEMPTS: "120"
+      KSEF_E2E_UPO_MAX_ATTEMPTS: "90"
+      KSEF_E2E_SESSION_MAX_ATTEMPTS: "120"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Validate required secrets
+        run: |
+          python - <<'PY'
+          import os
+          for name in ("KSEF_TEST_TOKEN", "KSEF_TEST_CONTEXT_TYPE", "KSEF_TEST_CONTEXT_VALUE"):
+              if not os.environ.get(name):
+                  raise SystemExit(f"Missing required secret: {name}")
+          for name in ("KSEF_TEST_XADES_CERT_CRT", "KSEF_TEST_XADES_PRIVATE_KEY_PEM"):
+              if not (os.environ.get(name) or os.environ.get(name + "_B64")):
+                  raise SystemExit(f"Missing required secret: {name} or its Base64 variant")
+          PY
+      - name: Install test and build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxmlsec1-dev libxmlsec1-openssl pkg-config
+          python -m pip install -r requirements-dev.txt build
+      - uses: actions/download-artifact@v6
+        if: inputs.artifact-name != ''
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist
+      - name: Build development wheel
+        if: inputs.artifact-name == ''
+        run: |
+          python -m build
+          python -m tools.release_artifacts record dist --sha "$GITHUB_SHA"
+      - name: Verify and install exact wheel
+        env:
+          EXPECTED_SHA: ${{ inputs.ref }}
+        run: |
+          python -m tools.release_artifacts verify dist --sha "$EXPECTED_SHA"
+          python - <<'PY'
+          import subprocess, sys
+          from pathlib import Path
+          wheel = next(Path("dist").glob("*.whl")).resolve()
+          subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", f"{wheel}[xml]"], check=True)
+          PY
+      - name: Run required scenarios once and verify JUnit
+        run: python -m tools.verify_e2e_results output/required-test.xml --run
+      - name: Verify artifacts after E2E
+        env:
+          EXPECTED_SHA: ${{ inputs.ref }}
+        run: python -m tools.release_artifacts verify dist --sha "$EXPECTED_SHA"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: required-test-evidence
+          path: |
+            output/required-test.xml
+            dist/release-manifest.json
+          if-no-files-found: error

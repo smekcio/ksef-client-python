@@ -4,7 +4,7 @@ import asyncio
 import base64
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -312,7 +312,7 @@ def test_client_facades_sync_and_async():
 
     http = SimpleNamespace(_options=options)
     client = InvoicesClient(http)
-    client.query_invoice_metadata = fetch
+    cast(Any, client).query_invoice_metadata = fetch
     search = client.search_invoice_metadata(filters(), context_key="nip", page_size=10)
     assert calls == []
     first = search.page()
@@ -331,7 +331,7 @@ def test_client_facades_sync_and_async():
             return fetch(*args, **kwargs)
 
         client = AsyncInvoicesClient(http)
-        client.query_invoice_metadata = afetch
+        cast(Any, client).query_invoice_metadata = afetch
         search = client.search_invoice_metadata(filters(), context_key="nip", page_size=10)
         first = await search.page()
         assert [i async for i in search.items(first.next_cursor)] == []
@@ -370,3 +370,13 @@ def test_repeated_nonempty_pages_fail_instead_of_looping():
         page = walk.advance(walk.load(page.next_cursor), response([invoice(1)], True))
     with pytest.raises(KsefIncompletePaginationError, match="repeated_page"):
         walk.advance(walk.load(page.next_cursor), response([invoice(1)], True))
+
+
+def test_cursor_offset_must_fit_the_server_result_limit():
+    walk = _MetadataMachine(
+        filters().to_dict(), environment="test", context_key="nip", page_size=250, sort_order="Asc"
+    )
+    state = walk.load(None)
+    state["offset"] = 40
+    with pytest.raises(KsefInvalidPaginationCursorError):
+        walk.load(_dump(state))

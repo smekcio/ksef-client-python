@@ -77,8 +77,8 @@ muszą czytać v1 lub udostępnić udokumentowaną migrację.
 ## Transakcyjny checkpoint
 
 [Przykład SQLite](examples/invoice_checkpoint_sqlite.py) zapisuje faktury i następny
-kursor w jednej transakcji. Klucz unikalny obejmuje identyfikator przebiegu i numer
-KSeF. Osobne `completed` odróżnia koniec od braku checkpointu. Jeden worker obsługuje
+kursor w jednej transakcji. Klucz unikalny faktury to numer
+KSeF; checkpoint jest przypisany do identyfikatora przebiegu. Osobne `completed` odróżnia koniec od braku checkpointu. Jeden worker obsługuje
 jeden przebieg. Baza zawiera prywatne dane faktur; przechowuj ją z odpowiednią ochroną.
 
 Po awarii przed commit strona jest przetwarzana ponownie; po commit następuje
@@ -95,3 +95,35 @@ Nie wykrywa dowolnych sekretów w swobodnym tekście i nie jest formatem zapisu 
 `to_dict()`/`to_json()` zachowują format transportowy oraz dane potrzebne do
 wznowienia, w tym sekrety. Nie należy ich logować. Zmiana diagnostyki nie zmienia
 kontraktu serializacji dotychczasowych integracji.
+
+## Publikacja potwierdzona rzeczywistym TEST
+
+Workflow publikacji przyjmuje wyłącznie istniejący tag wersji zgodny z
+`pyproject.toml`. Buduje wheel i sdist, zapisuje commit oraz sumy SHA-256 w
+`release-manifest.json`, a następnie instaluje dokładnie ten wheel w bramie E2E.
+PyPI otrzymuje te same pliki po ponownej kontroli sum; manifest nie jest wysyłany
+jako dystrybucja. Ręczne uruchomienie wymaga podania taga i przechodzi te same kontrole.
+
+Manifest obowiązkowych scenariuszy znajduje się w `tests/required_test_e2e.json`.
+TEST wymaga pełnego przepływu token/XAdES, wznowienia online/batch i kontynuacji
+paginacji w nowym procesie. Każdy scenariusz jest wykonywany raz. Brak raportu,
+brak testu, pominięcie, xfail lub błąd blokują publikację. Awaria TEST lub brak
+sekretów także blokują publikację; DEMO nie zastępuje tej kontroli.
+
+Wymagane sekrety GitHub: `KSEF_TEST_TOKEN`, `KSEF_TEST_CONTEXT_TYPE`,
+`KSEF_TEST_CONTEXT_VALUE`, certyfikat i klucz XAdES jako
+`KSEF_TEST_XADES_CERT_CRT`/`KSEF_TEST_XADES_PRIVATE_KEY_PEM` albo odpowiednie
+warianty z sufiksem `_B64`. Hasło klucza jest opcjonalnym
+`KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD`. Konto TEST musi mieć uprawnienia używane
+przez istniejące scenariusze. Scenariusz kursora wysyła 11 faktur, aby potwierdzić
+przekroczenie minimalnego rozmiaru strony.
+
+Do lokalnego odtworzenia bramy z zainstalowanym wheelem ustaw
+`KSEF_TEST_INSTALLED=1`, `KSEF_E2E=1` i wymagane dane środowiska, następnie uruchom:
+
+```bash
+python -m tools.verify_e2e_results output/required-test.xml --run
+```
+
+W tym trybie testy odrzucają import z repozytoryjnego `src`. Raport JUnit i manifest
+artefaktów są zachowywane w CI; nie zawierają celowo zapisywanych tokenów i kursorów.

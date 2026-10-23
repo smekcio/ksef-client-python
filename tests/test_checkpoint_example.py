@@ -63,3 +63,22 @@ def test_restart_after_successful_commit(tmp_path):
         assert sync_pages(con, search, sync_key="test") == 1
         assert search.calls == ["next"]
         assert con.execute("SELECT count(*) FROM invoices").fetchone()[0] == 1
+
+
+def test_distinct_scans_upsert_the_same_invoice(tmp_path):
+    with sqlite3.connect(tmp_path / "scans.sqlite") as con:
+        sync_pages(con, Search(), sync_key="first")
+        sync_pages(con, Search(), sync_key="second")
+        assert con.execute("SELECT count(*) FROM invoices").fetchone()[0] == 1
+        assert con.execute("SELECT count(*) FROM checkpoints").fetchone()[0] == 2
+
+
+def test_missing_number_never_advances_checkpoint(tmp_path):
+    class InvalidSearch:
+        def page(self, cursor=None):
+            return InvoiceMetadataPage([m.InvoiceMetadata()], None)
+
+    with sqlite3.connect(tmp_path / "invalid.sqlite") as con:
+        with pytest.raises(ValueError, match="Missing KSeF number"):
+            sync_pages(con, InvalidSearch(), sync_key="first")
+        assert con.execute("SELECT count(*) FROM checkpoints").fetchone()[0] == 0

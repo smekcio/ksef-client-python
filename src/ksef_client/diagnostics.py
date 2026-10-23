@@ -36,6 +36,13 @@ _SENSITIVE = frozenset(
         "cursor",
         "nextcursor",
         "lastcursor",
+        "encryptedtoken",
+        "encryptedsymmetrickey",
+        "encryptedinvoicecontent",
+        "initializationvector",
+        "pkcs12password",
+        "privatekeypassword",
+        "invoicexmlfiles",
     }
 )
 

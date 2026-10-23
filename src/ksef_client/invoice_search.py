@@ -158,6 +158,8 @@ class _MetadataMachine:
         for key, maximum in (("offset", 999), ("empty", 2), ("stalled", 2)):
             if type(state[key]) is not int or not 0 <= state[key] <= maximum:
                 raise ValueError("Invalid counter")
+        if state["offset"] * state["page_size"] >= 10000:
+            raise ValueError("Offset exceeds metadata result limit")
         request = state["request"]
         if not isinstance(request, dict) or set(request) != set(self.identity["filters"]):
             raise ValueError("Invalid request")
