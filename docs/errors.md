@@ -128,6 +128,52 @@ można łapać `KsefError` i korzystać z `to_dict()`.
 Uwaga: w `KsefAuthenticationFailedError` pole `status_code` to **kod statusu
 autoryzacji KSeF** (np. `400`), a nie kod HTTP — request mógł zakończyć się `200`.
 
+### Błędy dokumentów
+
+Błędy lokalnej warstwy dokumentów (bez odpowiedzi HTTP) dziedziczą po
+`KsefDocumentError`:
+
+| Klasa | `ErrorCode` | Dodatkowo dziedziczy | Rola |
+|---|---|---|---|
+| `KsefDocumentError` | `document_error` | — | baza |
+| `KsefDocumentValidationError` | `document_validation_failed` | `ValueError` | parser, XSD, waluta, semantyka |
+| `KsefRenderingError` | `document_rendering_failed` | `RuntimeError` | PDF/HTML, brak zależności |
+| `KsefVerificationError` | `verification_failed` | `ValueError` | `verify`/`diff` |
+| `KsefCheckpointError` | `checkpoint_failed` | `RuntimeError` | checkpointy eksportu |
+
+Istniejące błędy FA(3) są podklasami `KsefDocumentValidationError`:
+
+- `FA3ParseError`,
+- `FA3XmlValidationError`,
+- `Fa3CurrencyMismatchError`.
+
+Dzięki temu nadal działają `except ValueError` i dotychczasowe `except FA3ParseError`,
+a jednocześnie można łapać całość przez `KsefDocumentError`. `KsefRenderingError`
+i `KsefCheckpointError` są kontraktem dla przyszłych modułów PDF i wznawianego
+eksportu — obecnie SDK ich nie rzuca.
+
+Wyjątki dokumentowe zachowują także semantykę argumentów `ValueError`: można je
+tworzyć bez argumentów, z obiektem innym niż tekst albo z wieloma argumentami.
+`args` i `str(exc)` działają jak w wyjątku wbudowanym; `message` i pole `message`
+w `to_dict()` zawierają tekst pierwszego argumentu albo pusty tekst, gdy go brak.
+
+```python
+from pathlib import Path
+
+from ksef_client import KsefDocumentValidationError
+from ksef_client.documents.fa3 import parse_invoice_xml
+
+try:
+    invoice = parse_invoice_xml(Path("fa.xml").read_bytes())
+except KsefDocumentValidationError as exc:   # łapie też FA3ParseError
+    print(exc.code, exc.to_dict())
+```
+
+Wszystkie błędy dokumentów obsługują `details` (krotka diagnostyczna) i `to_dict()`
+z tym samym schematem co błędy HTTP — bez `response_body`. `message` i `details` mogą
+zawierać fragmenty dokumentu (np. ścieżki pól, opisy walidacji), więc w logach
+produkcyjnych stosuj redakcję.
+
 ### Kontrakt dla CLI i MCP
 
 `to_dict()` zwraca stały zestaw kluczy (domyślnie także `None`):

@@ -36,6 +36,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from ...exceptions import KsefDocumentValidationError
 from ...utils.datetime_parsing import parse_api_datetime
 from .domain import (
     SETTLEMENT_SCALE_KINDS,
@@ -166,7 +167,7 @@ _ADVANCE_NET_TAGS: tuple[str, ...] = (
 )
 
 
-class FA3ParseError(ValueError):
+class FA3ParseError(KsefDocumentValidationError):
     """Dokument nie jest poprawnym XML-em FA(3) albo brakuje wymaganego pola."""
 
 

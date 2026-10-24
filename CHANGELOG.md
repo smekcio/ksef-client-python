@@ -29,6 +29,11 @@
   `KsefApiError.exception_codes`/`details`/`reason_code`/`trace_id` i `to_dict()` dają
   stabilny kontrakt dla CLI i MCP; mapowanie jest addytywne, a 429 pozostaje
   `KsefRateLimitError`
+* **sdk:** taksonomia błędów dokumentów — `KsefDocumentError` + `KsefDocumentValidationError`,
+  `KsefRenderingError`, `KsefVerificationError`, `KsefCheckpointError`. `FA3ParseError`,
+  `FA3XmlValidationError` i `Fa3CurrencyMismatchError` są teraz podklasami bazy, więc
+  `except ValueError` i dotychczasowe `except FA3ParseError` zachowują zgodność, a nowe
+  kody (`document_validation_failed`, `verification_failed`, …) trafiają do CLI/MCP
 * **sdk:** klient uwierzytelniony z auto-refresh tokena — `AuthenticatedClient`/
   `AsyncAuthenticatedClient` i `TokenManager`/`AsyncTokenManager`. Token dostępowy jest
   wstrzykiwany w warstwie HTTP, odświeżany proaktywnie 60 s przed wygaśnięciem (`refresh_margin_seconds`)
