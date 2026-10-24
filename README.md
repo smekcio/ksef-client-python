@@ -13,11 +13,12 @@ składania żądań HTTP, szyfrowania, podpisów, obsługi sesji i pobierania pa
 
 Najważniejsze cechy:
 
-- **typowane modele** `ksef_client.models` zamiast surowych słowników dla publicznych żądań SDK,
+- **typowane modele** `ksef_client.models` dla publicznych żądań i odpowiedzi SDK,
 - **klient synchroniczny i asynchroniczny**: `KsefClient` oraz `AsyncKsefClient`,
 - **CLI `ksef`** do konfiguracji, diagnostyki, uwierzytelniania, wysyłki i pobierania faktur,
 - **profile i magazyn certyfikatów w SDK** — te same dane co CLI, bez zależności od `typer`/`keyring`,
-- **paginacja metadanych faktur** — iteratory `iter_invoice_metadata*` w wersji sync i async,
+- **kompletne pobieranie metadanych faktur** — `search_invoice_metadata()` w wersji sync i async,
+  z paginacją, trwałymi kursorami, deduplikacją granic i kontrolą HWM,
 - **automatyczne odświeżanie tokena** — `AuthenticatedClient`/`TokenManager` (sync i async):
   token wstrzykiwany do żądań, refresh 60 s przed wygaśnięciem i po 401,
 - **retry HTTP** — `RetryConfig` (429/502/503/504, backoff z jitterem, `Retry-After`),
@@ -47,15 +48,14 @@ Użyj `ksef-client`, jeżeli potrzebujesz:
 - zbudować integrację z KSeF API w aplikacji napisanej w Pythonie,
 - szybko sprawdzić konfigurację środowiska KSeF z terminala,
 - obsłużyć pełny przepływ uwierzytelnienia, wysyłki faktury i pobrania UPO,
-- pracować na typowanych modelach zamiast utrzymywać własne słowniki i mapowania JSON,
+- pracować na typowanych modelach żądań i odpowiedzi,
 - zautomatyzować odświeżanie tokena i ponawianie przejściowych błędów HTTP,
 - korzystać z gotowych scenariuszy dla sesji online, sesji wsadowych i eksportu faktur,
 - przygotowywać XML FA(3) programistycznie i walidować go z oficjalnym XSD,
 - testować integrację w środowiskach TEST/DEMO przed przejściem na PROD.
 
-Publiczny kontrakt SDK jest typowany: do metod klientów przekazuj obiekty `ksef_client.models.*`,
-a nie surowe `dict`. Jeżeli migrujesz starszą integrację, zacznij od
-[`docs/migration-typed-model-api.md`](docs/migration-typed-model-api.md).
+Publiczny kontrakt SDK korzysta z modeli `ksef_client.models.*`.
+Typy żądań, odpowiedzi i parametrów opisuje [referencja API](docs/api/README.md).
 
 ## 📦 Instalacja
 
@@ -87,7 +87,7 @@ Dodatki opcjonalne:
 - `qr` — generowanie kodów QR w PNG przez `qrcode` i `pillow`.
 
 Po instalacji samego `ksef-client` SDK jest gotowe do użycia w kodzie. Jeżeli uruchomisz wtedy
-komendę `ksef`, otrzymasz czytelną instrukcję doinstalowania dodatku `cli`, zamiast tracebacka.
+komendę `ksef`, otrzymasz instrukcję doinstalowania dodatku `cli`.
 
 ## 🚀 Szybki start: CLI
 
@@ -158,7 +158,9 @@ from ksef_client.services import AuthCoordinator
 
 options = KsefClientOptions(
     base_url=KsefEnvironment.DEMO.value,
-    retry=RetryConfig(),          # 429/502/503/504 + Retry-After
+    retry=RetryConfig(
+        retryable_post_paths=frozenset({"/invoices/query/metadata"}),
+    ),                           # 429/502/503/504 + Retry-After
 )
 
 with KsefClient(options) as anonymous:
@@ -173,15 +175,24 @@ with KsefClient(options) as anonymous:
     )
 
 with AuthenticatedClient.from_auth_result(options, auth_result) as client:
-    metadata = client.invoices.query_invoice_metadata_by_date_range(
+    filters = m.InvoiceQueryFilters(
         subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
-        date_type=m.InvoiceQueryDateType.ISSUE,
-        date_from="2026-01-01T00:00:00Z",
-        date_to="2026-01-31T23:59:59Z",
-        page_size=10,
-    )                             # bez access_token
+        date_range=m.InvoiceQueryDateRange(
+            date_type=m.InvoiceQueryDateType.PERMANENTSTORAGE,
+            from_="2026-01-01T00:00:00Z",
+            to="2026-01-31T23:59:59Z",
+            restrict_to_permanent_storage_hwm_date=True,
+        ),
+    )
+    search = client.invoices.search_invoice_metadata(
+        filters,
+        context_key="Nip:5265877635",
+        page_size=100,
+        sort_order="Asc",
+    )
+    invoice_count = sum(1 for invoice in search)  # odczyt wszystkich stron do HWM
 
-print(f"Liczba faktur: {len(metadata.invoices)}")
+print(f"Liczba faktur: {invoice_count}")
 ```
 
 Szczegóły: [token-manager.md](docs/token-manager.md), [retry.md](docs/retry.md).
@@ -209,22 +220,46 @@ Szczegóły i granice (zaliczki, marża, daty): [`docs/fa3-parsing.md`](docs/fa3
 
 ### 📄 Paginacja metadanych faktur
 
-Zamiast ręcznej pętli po `pageOffset` użyj iteratora — sam pilnuje `hasMore`, limitu
-10 000 wyników i pustych stron:
+`search_invoice_metadata()` pobiera kolejne strony i kontynuuje po obcięciu wyników.
+Obiekt wyszukiwania jest leniwy: żądanie HTTP następuje podczas odczytu strony lub iteracji.
+Możesz przetwarzać pojedyncze faktury przez `for invoice in search` albo pracować na stronach
+i zapisywać checkpoint po każdej z nich.
+
+Poniższy fragment korzysta z `options`, `auth_result` i `filters` z szybkiego startu:
 
 ```python
-for invoice in client.invoices.iter_invoice_metadata_by_date_range(
-    subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
-    date_type=m.InvoiceQueryDateType.ISSUE,
-    date_from="2026-01-01T00:00:00Z",
-    date_to="2026-01-31T23:59:59Z",
-    page_size=250,
-):
-    print(invoice.ksef_number)
+cursor = None  # Przy wznowieniu odczytaj kursor zapisany przez aplikację.
+
+with AuthenticatedClient.from_auth_result(options, auth_result) as client:
+    search = client.invoices.search_invoice_metadata(
+        filters, context_key="Nip:5265877635", page_size=100, sort_order="Asc",
+    )
+    page = search.page(cursor=cursor)
+    for invoice in page.items:
+        print(invoice.ksef_number)
+    next_cursor = page.next_cursor
 ```
 
-Wersje `iter_invoice_metadata_pages` (strony) i `iter_invoice_metadata` (filtry) oraz ich
-odpowiedniki async są opisane w [`docs/api/invoices.md`](docs/api/invoices.md).
+Zapisuj `page.items` i `page.next_cursor` w jednej transakcji. Kursor pozwala odtworzyć
+wyszukiwanie po restarcie z tymi samymi filtrami, kontekstem, środowiskiem i rozmiarem strony.
+`next_cursor=None` potwierdza koniec odczytu; osobny znacznik ukończenia odróżnia go od
+pierwszego uruchomienia. `pages(cursor=...)` i `items(cursor=...)` obsługują dalszą iterację.
+Wersja async udostępnia `await search.page(...)` oraz `async for`.
+
+Stabilny zbiór zapewnia `PermanentStorage` z ograniczeniem HWM. Wynik jest kompletny do
+granicy `page.permanent_storage_hwm_date`, która może poprzedzać żądaną datę końcową.
+Jeśli SDK nie może potwierdzić kompletności, zgłasza `KsefIncompletePaginationError`.
+Kursory zawierają dane zapytania — przechowuj je prywatnie i nie umieszczaj ich w logach.
+
+Gotowy przykład transakcyjnego zapisu faktur i checkpointu:
+[`invoice_checkpoint_sqlite.py`](docs/examples/invoice_checkpoint_sqlite.py).
+Szczegóły API sync/async i gwarancji: [paginacja z kursorami](docs/reliable-pagination.md).
+
+### 🔐 Diagnostyka i sekrety
+
+Do diagnostyki używaj `repr()` modeli i `ksef_client.redact_sensitive(value)`.
+Ukrywają znane pola z tokenami, kluczami, podpisanymi adresami i payloadami.
+`to_dict()` i `to_json()` służą do transportu i zapisu stanu, mogą więc zawierać sekrety.
 
 ### 🗂️ Profile i certyfikaty poza CLI
 
@@ -307,7 +342,7 @@ Przykłady uruchomieniowe:
 | Modele | Typowane modele żądań i odpowiedzi w `ksef_client.models`. |
 | Uwierzytelnianie | Token KSeF, XAdES, odświeżanie tokenów i unieważnianie bieżącego tokena. |
 | Sesje | Sesje online i wsadowe, obsługa ZIP, części, szyfrowania i zamykania sesji. |
-| Faktury | Lista metadanych, iteratory paginacji (sync/async), pobieranie faktur, eksport paczek i narzędzia do ich przetwarzania. |
+| Faktury | Wyszukiwanie metadanych z pełną paginacją, kursorami i HWM (sync/async), pobieranie faktur, eksport paczek i narzędzia do ich przetwarzania. |
 | FA(3) | Buildery, drafty, XML, walidacja XSD, **odczyt XML → model** i ZIP do sesji wsadowych. |
 | Konfiguracja | Profile klienta wspólne z CLI oraz magazyn certyfikatów XAdES (`0600`). |
 | UPO | Sprawdzanie statusów i pobieranie urzędowego poświadczenia odbioru. |
@@ -324,14 +359,14 @@ Główna dokumentacja znajduje się w katalogu [`docs/`](docs/README.md):
 - [błędy, retry i limity](docs/errors.md),
 - [automatyczne odświeżanie tokena i klient uwierzytelniony](docs/token-manager.md),
 - [retry HTTP (backoff, `Retry-After`)](docs/retry.md),
+- [paginacja z kursorami, HWM i checkpoint SQLite](docs/reliable-pagination.md),
 - [referencja API](docs/api/README.md),
 - [profile klienta](docs/profiles.md),
 - [magazyn certyfikatów](docs/certificate-store.md),
 - [scenariusze sesji i eksportu](docs/workflows/README.md),
 - [usługi pomocnicze](docs/services/README.md),
 - [narzędzia użytkowe](docs/utils/README.md),
-- [przykłady Python](docs/examples/README.md),
-- [migracja z `dict` na typowane modele](docs/migration-typed-model-api.md).
+- [przykłady Python](docs/examples/README.md).
 
 ## 🧪 Jakość i rozwój
 
@@ -369,6 +404,11 @@ uruchomić.
 Testy E2E wymagają osobnej konfiguracji środowiska KSeF i danych dostępowych. Szczegóły scenariuszy oraz
 zmiennych środowiskowych są opisane w dokumentacji i testach.
 
+Publikację uruchamiaj z `main`, wskazując istniejący tag wersji. Brama wydawnicza wymaga
+pięciu rzeczywistych scenariuszy KSeF TEST na dokładnie tym pliku wheel, który trafi na PyPI.
+Konfiguracja środowisk GitHub, sekretów i Trusted Publishera:
+[publikacja potwierdzona TEST](docs/reliable-pagination.md#publikacja-potwierdzona-rzeczywistym-test).
+
 ## 🤝 Kontrybucja
 
 Zgłoszenia błędów, propozycje zmian i pull requesty są mile widziane.
@@ -380,6 +420,3 @@ Rekomendowany przebieg pracy:
 - dodaj testy dla zmian zachowania,
 - uruchom lokalnie `python tools/lint.py` oraz testy,
 - w PR opisz zakres zmiany, uzasadnienie i sposób weryfikacji.
-
-
-Zalecane API kompletnego pobierania: [paginacja z kursorami i checkpoint SQLite](docs/reliable-pagination.md).
