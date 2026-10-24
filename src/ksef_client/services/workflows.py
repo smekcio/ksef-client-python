@@ -1096,7 +1096,7 @@ class ExportWorkflow:
 
         metadata_summaries: list[dict[str, Any]] = []
         invoice_xml_files: dict[str, str] = {}
-        metadata_raw: bytes | None = field(default=None, repr=False)
+        metadata_raw: bytes | None = None
 
         for name, content in unzipped.items():
             if name.lower() == "_metadata.json":
@@ -1159,7 +1159,7 @@ class AsyncExportWorkflow:
 
         metadata_summaries: list[dict[str, Any]] = []
         invoice_xml_files: dict[str, str] = {}
-        metadata_raw: bytes | None = field(default=None, repr=False)
+        metadata_raw: bytes | None = None
 
         for name, content in unzipped.items():
             if name.lower() == "_metadata.json":

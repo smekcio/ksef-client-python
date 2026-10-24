@@ -205,6 +205,29 @@ def _serialize_invoice_payload(
     )
 
 
+def _serialize_search_filters(payload: InvoiceQueryFilters) -> dict[str, Any]:
+    serialized = dict(_serialize_invoice_payload(payload, allow_open_range=True))
+    if type(serialized.get("dateRange")) is not dict:
+        raise ValueError("Invoice search requires a dateRange object")
+    try:
+        restored = InvoiceQueryFilters.from_dict(serialized).to_dict(omit_none=False)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise ValueError("Invalid invoice search filters") from None
+
+    def check_retained(original: Any, parsed: Any) -> None:
+        if isinstance(original, dict):
+            if not isinstance(parsed, dict) or original.keys() - parsed.keys():
+                raise ValueError("Unknown invoice search filter")
+            for key, value in original.items():
+                check_retained(value, parsed[key])
+        elif isinstance(original, list) and isinstance(parsed, list):
+            for value, parsed_value in zip(original, parsed, strict=True):
+                check_retained(value, parsed_value)
+
+    check_retained(serialized, restored)
+    return serialized
+
+
 class InvoicesClient(BaseApiClient):
     def search_invoice_metadata(
         self,
@@ -225,7 +248,7 @@ class InvoicesClient(BaseApiClient):
         if not isinstance(options, KsefClientOptions):
             raise ValueError("Resumable search requires HTTP client environment options")
         machine = _MetadataMachine(
-            dict(_serialize_invoice_payload(request_payload, allow_open_range=True)),
+            _serialize_search_filters(request_payload),
             environment=options.normalized_base_url(),
             context_key=context_key,
             page_size=page_size,
@@ -560,7 +583,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         if not isinstance(options, KsefClientOptions):
             raise ValueError("Resumable search requires HTTP client environment options")
         machine = _MetadataMachine(
-            dict(_serialize_invoice_payload(request_payload, allow_open_range=True)),
+            _serialize_search_filters(request_payload),
             environment=options.normalized_base_url(),
             context_key=context_key,
             page_size=page_size,

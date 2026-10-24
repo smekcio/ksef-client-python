@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -11,6 +12,28 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 MANIFEST = Path(__file__).resolve().parents[1] / "tests/required_test_e2e.json"
+REQUIRED = [
+    "tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_token",
+    "tests/test_e2e_token_flows.py::test_e2e_test_environment_full_flow_xades",
+    "tests/test_e2e_resume_flows.py::test_e2e_test_environment_online_resume_token",
+    "tests/test_e2e_resume_flows.py::test_e2e_test_environment_batch_resume_token",
+    "tests/test_e2e_pagination.py::test_e2e_test_environment_cursor_restart",
+]
+
+
+def validate_live_install(required: list[str]) -> None:
+    from tools.release_artifacts import verify_installed_wheel
+
+    if (
+        required != REQUIRED
+        or os.environ.get("KSEF_TEST_INSTALLED") != "1"
+        or os.environ.get("KSEF_E2E") != "1"
+    ):
+        raise ValueError("Live gate requires the approved TEST manifest and installed wheel mode")
+    wheel = os.environ.get("KSEF_TEST_WHEEL")
+    if not wheel:
+        raise ValueError("Missing exact wheel")
+    verify_installed_wheel(Path(wheel))
 
 
 def required_tests(path: Path = MANIFEST) -> list[str]:
@@ -46,6 +69,11 @@ def verify(report: Path, required: list[str]) -> None:
         outcomes.setdefault(node, []).append(passed)
     if list(root.iter("error")) or list(root.iter("failure")):
         raise ValueError("E2E report contains errors or failures")
+    if any(
+        node.tag in {"rerunFailure", "rerunError", "flakyFailure", "flakyError"}
+        for node in root.iter()
+    ):
+        raise ValueError("E2E scenarios must pass without scenario reruns")
     failed = [name for name in required if outcomes.get(name) != [True]]
     if failed:
         raise ValueError("Required E2E tests missing, repeated or not passed: " + ", ".join(failed))
@@ -62,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         required = required_tests(args.manifest)
         if args.run:
+            validate_live_install(required)
             args.report.parent.mkdir(parents=True, exist_ok=True)
             args.report.unlink(missing_ok=True)
             result = subprocess.run(

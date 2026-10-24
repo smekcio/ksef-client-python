@@ -18,7 +18,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, NoReturn
 
-from .exceptions import KsefIncompletePaginationError, KsefInvalidPaginationCursorError
+from .exceptions import (
+    KsefIncompletePaginationError,
+    KsefInvalidPaginationCursorError,
+    KsefPaginationError,
+)
 from .models import InvoiceMetadata, InvoiceQueryFilters, QueryInvoicesMetadataResponse
 from .pagination import validate_page_size
 from .utils.datetime_parsing import parse_api_datetime
@@ -44,6 +48,7 @@ _STATE_KEYS = {
     "truncated_boundary",
     "stalled",
     "hwm",
+    "last_page",
 }
 
 
@@ -156,6 +161,8 @@ class _MetadataMachine:
             "sort_order": sort_order,
         }
         self._legacy_environment = environment
+        if type(filters.get("dateRange")) is not dict:
+            raise ValueError("Invoice search requires a dateRange object")
         self._validate_range(filters["dateRange"], allow_open=True)
         self.date_type = filters["dateRange"]["dateType"]
         self.ascending = sort_order == "Asc"
@@ -187,7 +194,7 @@ class _MetadataMachine:
             if not request["dateRange"].get("to"):
                 request["dateRange"]["to"] = datetime.now(timezone.utc).isoformat()
             self._validate_range(request["dateRange"])
-            return {
+            state = {
                 **deepcopy(self.identity),
                 "request": request,
                 "offset": 0,
@@ -197,12 +204,22 @@ class _MetadataMachine:
                 "seen": [],
                 "truncated_boundary": None,
                 "hwm": None,
+                "last_page": None,
             }
+            try:
+                _dump(state)
+            except KsefInvalidPaginationCursorError:
+                raise KsefPaginationError(
+                    "Search state exceeds pagination cursor size limit"
+                ) from None
+            return state
         try:
             if not isinstance(cursor, str) or len(cursor) > MAX_CURSOR_BYTES:
                 raise ValueError("Cursor size or type")
             raw = base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True)
             state = json.loads(raw, object_pairs_hook=_json_object, parse_constant=_reject_constant)
+            if isinstance(state, dict):
+                state.setdefault("last_page", None)  # Read earlier v1 cursors.
             if isinstance(state, dict) and state.get("environment") == self._legacy_environment:
                 state["environment"] = self.identity["environment"]
             self._validate_state(state)
@@ -225,6 +242,11 @@ class _MetadataMachine:
                 raise ValueError("Invalid counter")
         if state["offset"] * state["page_size"] >= 10000:
             raise ValueError("Offset exceeds metadata result limit")
+        if state["last_page"] is not None and (
+            type(state["last_page"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", state["last_page"]) is None
+        ):
+            raise ValueError("Invalid last page fingerprint")
         request = state["request"]
         if not isinstance(request, dict) or set(request) != set(self.identity["filters"]):
             raise ValueError("Invalid request")
@@ -279,7 +301,11 @@ class _MetadataMachine:
             try:
                 if not isinstance(hwm, str):
                     raise ValueError("Missing HWM")
-                if new["hwm"] is not None and _date(hwm) < _date(new["hwm"]):
+                # Historical queries report their own effective upper bound.
+                # Desc truncation deliberately lowers that bound; compare to
+                # the current request, not the original snapshot watermark.
+                expected_hwm = min(_date(new["hwm"]), _date(dr["to"])) if new["hwm"] else None
+                if expected_hwm is not None and _date(hwm) < expected_hwm:
                     fail("hwm_regressed")
                 if new["hwm"] is None:
                     new["hwm"] = hwm
@@ -300,10 +326,7 @@ class _MetadataMachine:
             )
         for invoice in response.invoices:
             boundary = getattr(invoice, _FIELDS[self.date_type])
-            if (
-                not isinstance(invoice.ksef_number, str)
-                or not 1 <= len(invoice.ksef_number) <= 256
-            ):
+            if not isinstance(invoice.ksef_number, str) or not 1 <= len(invoice.ksef_number) <= 256:
                 fail("missing_ksef_number")
             try:
                 if not isinstance(boundary, str):
@@ -327,7 +350,21 @@ class _MetadataMachine:
             fail("boundary_limit_exceeded")
         new["last_date"], new["seen"] = last, sorted(seen)
         new["empty"] = 0 if response.invoices else new["empty"] + 1
-        new["stalled"] = new["stalled"] + 1 if response.invoices and not items else 0
+        # Re-reading known boundary records at increasing offsets is progress.
+        # Only repeated wire pages (same boundary AND same page identifiers)
+        # are suspicious; the seen set alone cannot distinguish overlap pages.
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                [
+                    (item.ksef_number, getattr(item, _FIELDS[self.date_type]))
+                    for item in response.invoices
+                ]
+            ).encode()
+        ).hexdigest()
+        new["stalled"] = (
+            new["stalled"] + 1 if response.invoices and fingerprint == new["last_page"] else 0
+        )
+        new["last_page"] = fingerprint
         if not response.has_more:
             return InvoiceMetadataPage(items, None, new["hwm"])
         if new["empty"] >= 3:
@@ -352,7 +389,11 @@ class _MetadataMachine:
             new["offset"] += 1
             if new["offset"] * new["page_size"] >= 10000:
                 fail("result_limit_without_truncation")
-        return InvoiceMetadataPage(items, _dump(new), new["hwm"])
+        try:
+            next_cursor = _dump(new)
+        except KsefInvalidPaginationCursorError:
+            fail("cursor_size_limit")
+        return InvoiceMetadataPage(items, next_cursor, new["hwm"])
 
 
 class InvoiceMetadataSearch:

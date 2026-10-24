@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ..exceptions import KsefDocumentValidationError
 from ..utils.datetime_parsing import try_parse_api_datetime
 
 
@@ -90,7 +91,7 @@ def update_continuation_point(
     truncated_resume_point = last_permanent_storage_date or fallback_date
     if is_truncated:
         if not truncated_resume_point:
-            raise ValueError("Truncated package has no safe continuation point")
+            raise KsefDocumentValidationError("Truncated package has no safe continuation point")
         continuation_points[subject_type] = str(truncated_resume_point)
     elif hwm_date:
         continuation_points[subject_type] = str(hwm_date)

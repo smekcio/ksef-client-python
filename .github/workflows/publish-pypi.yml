@@ -1,8 +1,6 @@
 name: Publish to PyPI
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -14,11 +12,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-${{ inputs.tag || github.event.release.tag_name }}
+  group: publish-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   resolve:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.release.outputs.sha }}
@@ -26,7 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: refs/tags/${{ inputs.tag || github.event.release.tag_name }}
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          path: release-source
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -34,20 +39,14 @@ jobs:
           python-version: "3.12"
       - id: release
         env:
-          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           python - <<'PY'
-          import os, subprocess, tomllib
+          import os
           from pathlib import Path
-          from tools.release_artifacts import TAG
+          from tools.release_artifacts import resolve_tag
           tag = os.environ["RELEASE_TAG"]
-          if not TAG.fullmatch(tag):
-              raise SystemExit("An existing version tag is required")
-          sha = subprocess.check_output(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"], text=True).strip()
-          head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
-          if head != sha or tag.removeprefix("v") != version:
-              raise SystemExit("Tag, commit and package version must agree")
+          sha = resolve_tag(Path("release-source"), tag)
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write(f"sha={sha}\ntag={tag}\n")
           PY
@@ -91,21 +90,28 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
           ref: ${{ needs.resolve.outputs.sha }}
+          path: release-source
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
-      - run: python -m pip install build twine
+      - run: python -m pip install --require-hashes -r requirements-ci.lock
       - name: Build and record immutable distributions
+        working-directory: release-source
         env:
           RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
           RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          python -m build
-          python -m twine check dist/*
-          python -m tools.release_artifacts record dist --sha "$RELEASE_SHA" --tag "$RELEASE_TAG"
+          python -m build --no-isolation --outdir ../dist
+          python -m twine check ../dist/*
+          python ../tools/release_artifacts.py record ../dist --sha "$RELEASE_SHA" --tag "$RELEASE_TAG"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: release-dist
@@ -118,18 +124,14 @@ jobs:
     with:
       ref: ${{ needs.resolve.outputs.sha }}
       artifact-name: release-dist
-    secrets: inherit
 
-  publish:
+  prepare:
     needs: [resolve, checks, build, e2e]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -145,6 +147,23 @@ jobs:
           python -m tools.release_artifacts verify dist --sha "$RELEASE_SHA"
           mkdir publish-dist
           cp dist/*.whl dist/*.tar.gz publish-dist/
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: publish-dist
+          path: publish-dist/
+          if-no-files-found: error
+
+  publish:
+    needs: [resolve, checks, build, e2e, prepare]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: publish-dist
+          path: publish-dist
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           packages-dir: publish-dist/

@@ -1,0 +1,7 @@
+# Linux Python 3.12 release and live E2E runners only. Regenerate with uv pip compile.
+-r requirements-dev.txt
+build
+twine
+setuptools>=77
+wheel
+xmlsec>=1.3.13

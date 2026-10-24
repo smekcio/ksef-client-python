@@ -2124,7 +2124,7 @@ def run_health_check(
         {
             "name": "base_url",
             "status": "PASS" if bool(base_url.strip()) else "FAIL",
-            "message": base_url.strip() or "Missing base URL",
+            "message": "Base URL configured" if base_url.strip() else "Missing base URL",
         }
     )
 

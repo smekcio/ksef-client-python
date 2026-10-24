@@ -33,6 +33,7 @@ _SENSITIVE = frozenset(
         "apikey",
         "xapikey",
         "baseurl",
+        "proxy",
         "baseqrurl",
         "baselighthouseurl",
         "url",

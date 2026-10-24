@@ -41,6 +41,9 @@ być pusta po deduplikacji i nadal mieć następny kursor.
 SDK kontynuuje po `isTruncated` od ostatniej daty, z granicą inkluzywną i offsetem
 zero. Duplikaty na nakładającej się granicy usuwa po numerze KSeF. Nie przesuwa daty
 o mikrosekundę. Przechowuje identyfikatory aktualnej granicy, a nie całego zbioru.
+Nakładanie może obejmować wiele stron: rosnący offset i różne zestawy identyfikatorów
+nie oznaczają braku postępu. `hasMore=false` kończy odczyt zgodnie z kontraktem MF,
+także przy `isTruncated=true`. Samo osiągnięcie limitu nie dowodzi istnienia dalszych danych.
 Zakres pojedynczego wyszukiwania nadal wynosi maksymalnie 100 dni UTC. Domyślny
 rozmiar strony to 100, dopuszczalne 10–250; kierunki: `Asc` i `Desc`.
 
@@ -50,6 +53,10 @@ i ogranicza dalsze żądania do tej granicy. Wynik potwierdza kompletność do H
 który może być wcześniejszy od żądanej daty końcowej; HWM jest dostępny jako
 `page.permanent_storage_hwm_date`, także na ostatniej stronie.
 Zakończony przebieg nie oznacza, że KSeF zakończył przetwarzanie nowszych dokumentów.
+Brak poprawnego HWM, również na pustej stronie, powoduje jawny błąd niekompletności
+w trybie wymagającym HWM. SDK nie potwierdza wtedy stabilności nieznanej granicy.
+W kierunku `Desc` HWM kolejnego zawężonego zapytania może odpowiadać jego niższej
+granicy `to`; początkowa granica kompletności pozostaje w stanie kursora.
 `Issue`, `Invoicing` i zapytania bez ograniczenia HWM dotyczą zmieniającego się
 zbioru: paginacja nie tworzy migawki serwera i nie gwarantuje stabilnych offsetów.
 
@@ -106,6 +113,28 @@ Workflow publikacji przyjmuje wyłącznie istniejący tag wersji zgodny z
 `release-manifest.json`, a następnie instaluje dokładnie ten wheel w bramie E2E.
 PyPI otrzymuje te same pliki po ponownej kontroli sum; manifest nie jest wysyłany
 jako dystrybucja. Ręczne uruchomienie wymaga podania taga i przechodzi te same kontrole.
+
+Publikację uruchamia się przez `workflow_dispatch` z gałęzi `main`; samo utworzenie
+release nie publikuje pakietu. Tag musi wskazywać commit należący do historii `main`.
+Narzędzia weryfikujące, manifest i testy pochodzą z commita zaufanego workflow,
+a nie z wydawanego taga. Kod budowania działa w osobnym jobie bez sekretów TEST.
+Job posiadający OIDC pobiera tylko zweryfikowane artefakty i uruchamia przypiętą
+akcję publikacji, bez checkoutu i wykonywania kodu repozytorium.
+
+Przed użyciem administrator musi skonfigurować środowiska `ksef-test`, `ksef-demo`
+i `pypi` z regułami dopuszczającymi wyłącznie gałąź `main`, a także ochronę samego
+`main` i tagów wersji. Sekrety KSeF należy przenieść do odpowiedniego środowiska
+TEST/DEMO i usunąć ich kopie z poziomu repozytorium. Konfiguracja Trusted Publisher
+w PyPI musi wskazywać środowisko `pypi`. Bez tych ustawień zmiana YAML nie stanowi
+pełnej granicy bezpieczeństwa przed osobą mogącą zmieniać workflow na własnej gałęzi.
+PR-y nie uruchamiają scenariuszy z sekretami; wymagany TEST nadal blokuje publikację.
+
+Zależności runnerów Linux/Python 3.12 są przypięte wraz z hashami w
+`requirements-ci.lock`; instalacja używa `--require-hashes`, a budowanie wyłącza
+izolowaną instalację dodatkowych narzędzi. Aktualizacja lockfile:
+`uv pip compile requirements-ci.in --python-version 3.12 --python-platform x86_64-manylinux_2_28 --generate-hashes --output-file requirements-ci.lock`.
+Kontrola wheela przed instalacją odrzuca pliki `.pth`, nieoczekiwane pliki poza SDK,
+symlinki i rozbieżności nazw dystrybucji z METADATA. Nie jest to skaner złośliwego kodu.
 
 Manifest obowiązkowych scenariuszy znajduje się w `tests/required_test_e2e.json`.
 TEST wymaga pełnego przepływu token/XAdES, wznowienia online/batch i kontynuacji
