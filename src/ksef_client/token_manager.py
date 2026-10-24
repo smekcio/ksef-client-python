@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 class _SyncNotificationState(threading.local):
     """Per-wątkowy znacznik „trwa callback on_refresh” (wariant sync)."""
 
@@ -305,6 +306,19 @@ class TokenManager:
         self._notify(info)
         return token
 
+    def _is_access_token_current(self, token: str | None) -> bool:
+        """Check an admitted token without waiting or refreshing under a lease."""
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            return token == self._access_token and (
+                not self.can_refresh
+                or self._access_token_expires_at is None
+                or self._access_token_expires_at > self._now()
+            )
+        finally:
+            self._lock.release()
+
     def force_refresh(self, *, stale_token: str | None = None) -> str:
         """Wymusza odświeżenie tokena (używane po odpowiedzi 401).
 
@@ -499,6 +513,16 @@ class AsyncTokenManager:
         await self._notify(info)
         return token
 
+    def _is_access_token_current(self, token: str | None) -> bool:
+        """Check atomically within the event loop, without awaiting a refresh."""
+        if self._lock.locked():
+            return False
+        return token == self._access_token and (
+            not self.can_refresh
+            or self._access_token_expires_at is None
+            or self._access_token_expires_at > self._now()
+        )
+
     async def force_refresh(self, *, stale_token: str | None = None) -> str:
         """Wymusza odświeżenie tokena po 401 (z deduplikacją po ``stale_token``)."""
         async with self._lock:
@@ -540,11 +564,44 @@ class TokenRefreshingHttpClient(BaseHttpClient):
     def __init__(self, options: KsefClientOptions, token_manager: TokenManager) -> None:
         super().__init__(options)
         self._token_manager = token_manager
+        self._request_token: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+            "ksef_wire_token", default=None
+        )
 
     @property
     def token_manager(self) -> TokenManager:
         """Manager, z którego klient pobiera token (do weryfikacji spójności)."""
         return self._token_manager
+
+    def _resolve_request_token(
+        self,
+        *,
+        access_token: str | None,
+        refresh_token: str | None,
+        skip_auth: bool,
+    ) -> str | None:
+        if skip_auth or access_token is not None or refresh_token is not None:
+            return super()._resolve_request_token(
+                access_token=access_token, refresh_token=refresh_token, skip_auth=skip_auth
+            )
+        # A proactive refresh can perform its own HTTP. A failure from that
+        # request must not be mistaken for a 401 from this business request.
+        self._request_token.set(None)
+        token = self._token_manager.get_access_token()
+        self._request_token.set(token)
+        return token
+
+    def _request_token_is_current(
+        self,
+        token: str | None,
+        *,
+        access_token: str | None,
+        refresh_token: str | None,
+        skip_auth: bool,
+    ) -> bool:
+        if skip_auth or access_token is not None or refresh_token is not None:
+            return True
+        return self._token_manager._is_access_token_current(token)
 
     def _request_once(
         self,
@@ -574,34 +631,41 @@ class TokenRefreshingHttpClient(BaseHttpClient):
                 expected_status=expected_status,
             )
 
-        token = self._token_manager.get_access_token()
+        marker = self._request_token.set(None)
         try:
-            return super()._request_once(
-                method,
-                path,
-                params=params,
-                headers=headers,
-                json=json,
-                data=data,
-                access_token=token,
-                skip_auth=skip_auth,
-                expected_status=expected_status,
-            )
-        except KsefHttpError as exc:
-            if exc.status_code != 401 or not self._token_manager.can_refresh:
-                raise
-            fresh = self._token_manager.force_refresh(stale_token=token)
-            return super()._request_once(
-                method,
-                path,
-                params=params,
-                headers=headers,
-                json=json,
-                data=data,
-                access_token=fresh,
-                skip_auth=skip_auth,
-                expected_status=expected_status,
-            )
+            try:
+                return super()._request_once(
+                    method,
+                    path,
+                    params=params,
+                    headers=headers,
+                    json=json,
+                    data=data,
+                    skip_auth=skip_auth,
+                    expected_status=expected_status,
+                )
+            except KsefHttpError as exc:
+                if (
+                    exc.status_code != 401
+                    or self._request_token.get() is None
+                    or not self._token_manager.can_refresh
+                ):
+                    raise
+                self._token_manager.force_refresh(stale_token=self._request_token.get())
+                # The second admission may wait too. Sample the current token
+                # after that wait instead of holding the just-refreshed value.
+                return super()._request_once(
+                    method,
+                    path,
+                    params=params,
+                    headers=headers,
+                    json=json,
+                    data=data,
+                    skip_auth=skip_auth,
+                    expected_status=expected_status,
+                )
+        finally:
+            self._request_token.reset(marker)
 
 
 class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
@@ -610,11 +674,42 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
     def __init__(self, options: KsefClientOptions, token_manager: AsyncTokenManager) -> None:
         super().__init__(options)
         self._token_manager = token_manager
+        self._request_token: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+            "ksef_wire_token", default=None
+        )
 
     @property
     def token_manager(self) -> AsyncTokenManager:
         """Manager, z którego klient pobiera token (do weryfikacji spójności)."""
         return self._token_manager
+
+    async def _resolve_request_token(
+        self,
+        *,
+        access_token: str | None,
+        refresh_token: str | None,
+        skip_auth: bool,
+    ) -> str | None:
+        if skip_auth or access_token is not None or refresh_token is not None:
+            return await super()._resolve_request_token(
+                access_token=access_token, refresh_token=refresh_token, skip_auth=skip_auth
+            )
+        self._request_token.set(None)
+        token = await self._token_manager.get_access_token()
+        self._request_token.set(token)
+        return token
+
+    async def _request_token_is_current(
+        self,
+        token: str | None,
+        *,
+        access_token: str | None,
+        refresh_token: str | None,
+        skip_auth: bool,
+    ) -> bool:
+        if skip_auth or access_token is not None or refresh_token is not None:
+            return True
+        return self._token_manager._is_access_token_current(token)
 
     async def _request_once(
         self,
@@ -644,34 +739,41 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
                 expected_status=expected_status,
             )
 
-        token = await self._token_manager.get_access_token()
+        marker = self._request_token.set(None)
         try:
-            return await super()._request_once(
-                method,
-                path,
-                params=params,
-                headers=headers,
-                json=json,
-                data=data,
-                access_token=token,
-                skip_auth=skip_auth,
-                expected_status=expected_status,
-            )
-        except KsefHttpError as exc:
-            if exc.status_code != 401 or not self._token_manager.can_refresh:
-                raise
-            fresh = await self._token_manager.force_refresh(stale_token=token)
-            return await super()._request_once(
-                method,
-                path,
-                params=params,
-                headers=headers,
-                json=json,
-                data=data,
-                access_token=fresh,
-                skip_auth=skip_auth,
-                expected_status=expected_status,
-            )
+            try:
+                return await super()._request_once(
+                    method,
+                    path,
+                    params=params,
+                    headers=headers,
+                    json=json,
+                    data=data,
+                    skip_auth=skip_auth,
+                    expected_status=expected_status,
+                )
+            except KsefHttpError as exc:
+                if (
+                    exc.status_code != 401
+                    or self._request_token.get() is None
+                    or not self._token_manager.can_refresh
+                ):
+                    raise
+                await self._token_manager.force_refresh(stale_token=self._request_token.get())
+                # The second admission may wait too. Sample the current token
+                # after that wait instead of holding the just-refreshed value.
+                return await super()._request_once(
+                    method,
+                    path,
+                    params=params,
+                    headers=headers,
+                    json=json,
+                    data=data,
+                    skip_auth=skip_auth,
+                    expected_status=expected_status,
+                )
+        finally:
+            self._request_token.reset(marker)
 
 
 __all__ = [

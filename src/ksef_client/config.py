@@ -10,6 +10,7 @@ from .retry import RetryConfig
 
 if TYPE_CHECKING:
     from .profiles import Profile, ProfileStore
+    from .rate_limiting import RateLimitBudget
 
 
 class KsefEnvironment(str, Enum):
@@ -71,10 +72,40 @@ class KsefClientOptions:
     #: Retry jest opt-in, bo ponawianie ``POST`` (wysyłka faktury, redeem tokena)
     #: wymaga świadomej decyzji wołającego.
     retry: RetryConfig | None = None
+    #: Optional shared proactive budget. Explicit application scope is required.
+    rate_limit_budget: RateLimitBudget | None = field(default=None, repr=False)
+    rate_limit_context_key: str | None = field(default=None, repr=False)
+    #: Label of the actual egress IP/proxy route; no IP discovery is performed.
+    rate_limit_egress_key: str = field(default="default", repr=False)
 
     def __post_init__(self) -> None:
         if self.retry is not None and not isinstance(self.retry, RetryConfig):
             raise TypeError("retry must be a RetryConfig instance or None")
+        if self.rate_limit_budget is not None:
+            from .rate_limiting import RateLimitBudget
+
+            if not isinstance(self.rate_limit_budget, RateLimitBudget):
+                raise TypeError("rate_limit_budget must be a RateLimitBudget instance or None")
+            if self.follow_redirects:
+                raise ValueError(
+                    "Automatic redirects are incompatible with per-request rate budgets"
+                )
+            if (
+                not isinstance(self.rate_limit_context_key, str)
+                or not self.rate_limit_context_key.strip()
+                or len(self.rate_limit_context_key) > 4096
+            ):
+                raise ValueError(
+                    "A non-empty rate_limit_context_key (up to 4096 characters) is required"
+                )
+            if (
+                not isinstance(self.rate_limit_egress_key, str)
+                or not self.rate_limit_egress_key.strip()
+                or len(self.rate_limit_egress_key) > 4096
+            ):
+                raise ValueError(
+                    "A non-empty rate_limit_egress_key (up to 4096 characters) is required"
+                )
 
     def normalized_base_url(self) -> str:
         url = self.base_url.rstrip("/")

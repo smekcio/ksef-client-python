@@ -19,6 +19,10 @@ Najważniejsze cechy:
 - **profile i magazyn certyfikatów w SDK** — te same dane co CLI, bez zależności od `typer`/`keyring`,
 - **kompletne pobieranie metadanych faktur** — `search_invoice_metadata()` w wersji sync i async,
   z paginacją, trwałymi kursorami, deduplikacją granic i kontrolą HWM,
+- **wieloletnia historia** — `search_invoice_metadata_range()` z automatycznymi oknami dat
+  i jednym checkpointem dla całego przebiegu,
+- **aktywne limity API** — współdzielony `RateLimitBudget` dla klientów sync/async,
+  z terminem oczekiwania i anulowaniem,
 - **automatyczne odświeżanie tokena** — `AuthenticatedClient`/`TokenManager` (sync i async):
   token wstrzykiwany do żądań, refresh 60 s przed wygaśnięciem i po 401,
 - **retry HTTP** — `RetryConfig` (429/502/503/504, backoff z jitterem, `Retry-After`),
@@ -261,6 +265,18 @@ Do diagnostyki używaj `repr()` modeli i `ksef_client.redact_sensitive(value)`.
 Ukrywają znane pola z tokenami, kluczami, podpisanymi adresami i payloadami.
 `to_dict()` i `to_json()` służą do transportu i zapisu stanu, mogą więc zawierać sekrety.
 
+### 🗓️ Historia wielu lat i współbieżne pobieranie
+
+Do odczytu dowolnie długiego okresu użyj `search_invoice_metadata_range()`.
+SDK dzieli zakres na okna po maksymalnie 100 dni UTC i deduplikuje ich granice.
+Jeden kursor pozwala wznowić cały przebieg po restarcie.
+[API i checkpointy historii](docs/invoice-range-search.md).
+
+`RateLimitBudget` współdzielony przez klientów i wątki planuje żądania według
+aktualnych limitów kontekstu i adresu wyjściowego. `request_control()` pozwala
+ograniczyć czas oczekiwania i przekazać sygnał anulowania. Budżet jest opcjonalny
+i działa w jednym procesie. [Konfiguracja budżetów API](docs/rate-budgets.md).
+
 ### 🗂️ Profile i certyfikaty poza CLI
 
 SDK czyta te same profile, które zapisuje `ksef init`, i potrafi przechować parę
@@ -360,6 +376,8 @@ Główna dokumentacja znajduje się w katalogu [`docs/`](docs/README.md):
 - [automatyczne odświeżanie tokena i klient uwierzytelniony](docs/token-manager.md),
 - [retry HTTP (backoff, `Retry-After`)](docs/retry.md),
 - [paginacja z kursorami, HWM i checkpoint SQLite](docs/reliable-pagination.md),
+- [wieloletnie zakresy z jednym checkpointem](docs/invoice-range-search.md),
+- [współdzielone budżety limitów i anulowanie](docs/rate-budgets.md),
 - [referencja API](docs/api/README.md),
 - [profile klienta](docs/profiles.md),
 - [magazyn certyfikatów](docs/certificate-store.md),
