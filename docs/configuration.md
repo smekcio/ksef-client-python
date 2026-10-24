@@ -22,6 +22,9 @@ options = KsefClientOptions(
     base_qr_url=None,
     base_lighthouse_url=None,
     retry=None,  # RetryConfig() włącza automatyczne ponawianie
+    rate_limit_budget=None,  # wspólna instancja RateLimitBudget włącza planowanie żądań
+    rate_limit_context_key=None,
+    rate_limit_egress_key="default",
 )
 ```
 
@@ -201,3 +204,14 @@ with AuthenticatedClient.from_auth_result(options, auth_result) as client:
 ```
 
 Szczegóły: [token-manager.md](token-manager.md).
+
+## Budżet żądań i termin oczekiwania
+
+`rate_limit_budget` jest opcjonalną, współdzieloną instancją `RateLimitBudget`.
+Przy jej użyciu wymagany jest `rate_limit_context_key` zgodny z kontekstem
+uwierzytelnienia. `rate_limit_egress_key` identyfikuje wyjściowy adres IP lub proxy.
+Automatyczne przekierowania (`follow_redirects=True`) są wtedy niedozwolone.
+
+Aktualne limity można pobrać przez `client.rate_limits.get_rate_limits()`.
+Konfigurację sync/async, `request_control()` z terminem i anulowaniem oraz granice
+współdzielenia opisuje [zarządzanie limitami API](rate-budgets.md).

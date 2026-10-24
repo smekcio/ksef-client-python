@@ -223,6 +223,9 @@ class _MetadataMachine:
             if isinstance(state, dict) and state.get("environment") == self._legacy_environment:
                 state["environment"] = self.identity["environment"]
             self._validate_state(state)
+            # A compact UTF-8 cursor can expand when canonical JSON escapes
+            # Unicode. Ensure its replay cursor fits before performing HTTP.
+            _dump(state)
             return state
         except (ValueError, TypeError, KeyError, AttributeError, RecursionError, binascii.Error):
             raise KsefInvalidPaginationCursorError(
@@ -285,6 +288,12 @@ class _MetadataMachine:
     def advance(
         self, state: dict[str, Any], response: QueryInvoicesMetadataResponse
     ) -> InvoiceMetadataPage:
+        return self.advance_state(state, response)[0]
+
+    def advance_state(
+        self, state: dict[str, Any], response: QueryInvoicesMetadataResponse
+    ) -> tuple[InvoiceMetadataPage, dict[str, Any]]:
+        """Advance one request and retain terminal boundary state for windowing."""
         replay = _dump(state)
 
         def fail(reason: str) -> NoReturn:
@@ -366,7 +375,7 @@ class _MetadataMachine:
         )
         new["last_page"] = fingerprint
         if not response.has_more:
-            return InvoiceMetadataPage(items, None, new["hwm"])
+            return InvoiceMetadataPage(items, None, new["hwm"]), new
         if new["empty"] >= 3:
             fail("empty_pages")
         if new["stalled"] >= 3:
@@ -393,7 +402,7 @@ class _MetadataMachine:
             next_cursor = _dump(new)
         except KsefInvalidPaginationCursorError:
             fail("cursor_size_limit")
-        return InvoiceMetadataPage(items, next_cursor, new["hwm"])
+        return InvoiceMetadataPage(items, next_cursor, new["hwm"]), new
 
 
 class InvoiceMetadataSearch:

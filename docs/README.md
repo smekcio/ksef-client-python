@@ -47,6 +47,8 @@ Biblioteka udostępnia trzy poziomy użycia:
 
 ## Nawigacja
 
+- [Historia wielu lat z jednym checkpointem](invoice-range-search.md)
+- [Aktywne budżety limitów sync/async](rate-budgets.md)
 - [Start](getting-started.md)
 - [Migracja typed model API](migration-typed-model-api.md)
 - [Konfiguracja klienta](configuration.md)

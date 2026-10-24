@@ -9,6 +9,11 @@ from functools import partial
 from typing import Any
 
 from ..config import KsefClientOptions
+from ..invoice_range_search import (
+    AsyncInvoiceMetadataRangeSearch,
+    InvoiceMetadataRangeSearch,
+    _RangeMachine,
+)
 from ..invoice_search import (
     AsyncInvoiceMetadataSearch,
     InvoiceMetadataSearch,
@@ -93,6 +98,7 @@ def _normalize_invoice_date_range_payload(
     request_payload: dict[str, Any],
     *,
     allow_open_range: bool = False,
+    allow_long_range: bool = False,
 ) -> dict[str, Any]:
     normalized = deepcopy(request_payload)
     date_range_candidates: list[dict[str, Any]] = []
@@ -112,7 +118,7 @@ def _normalize_invoice_date_range_payload(
             value = date_range.get(field_name)
             if isinstance(value, str):
                 date_range[field_name] = _normalize_datetime_without_offset(value)
-        if not allow_open_range or date_range.get("to") is not None:
+        if not allow_long_range and (not allow_open_range or date_range.get("to") is not None):
             _enforce_invoice_date_range_limit(date_range)
     return normalized
 
@@ -196,17 +202,28 @@ def _serialize_invoice_payload(
     request_payload: Any,
     *,
     allow_open_range: bool = False,
+    allow_long_range: bool = False,
 ) -> _SerializedInvoicePayload:
     serialized = _serialize_json_payload(request_payload)
     if serialized is None:
         raise TypeError("Invoice request payload is required.")
     return _SerializedInvoicePayload(
-        _normalize_invoice_date_range_payload(serialized, allow_open_range=allow_open_range)
+        _normalize_invoice_date_range_payload(
+            serialized, allow_open_range=allow_open_range, allow_long_range=allow_long_range
+        )
     )
 
 
-def _serialize_search_filters(payload: InvoiceQueryFilters) -> dict[str, Any]:
-    serialized = dict(_serialize_invoice_payload(payload, allow_open_range=True))
+def _serialize_search_filters(
+    payload: InvoiceQueryFilters,
+    *,
+    allow_long_range: bool = False,
+) -> dict[str, Any]:
+    serialized = dict(
+        _serialize_invoice_payload(
+            payload, allow_open_range=True, allow_long_range=allow_long_range
+        )
+    )
     if type(serialized.get("dateRange")) is not dict:
         raise ValueError("Invoice search requires a dateRange object")
     try:
@@ -229,6 +246,37 @@ def _serialize_search_filters(payload: InvoiceQueryFilters) -> dict[str, Any]:
 
 
 class InvoicesClient(BaseApiClient):
+    def search_invoice_metadata_range(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        context_key: str,
+        page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
+        sort_order: str = "Asc",
+        window_days: int = 100,
+        access_token: str | None = None,
+    ) -> InvoiceMetadataRangeSearch:
+        """Search an arbitrary period through inclusive windows and one durable cursor.
+
+        The application commits each page and next_cursor together. Restricted
+        PermanentStorage searches confirm completeness only up to the reported HWM.
+        """
+        options = getattr(self._http, "_options", None)
+        if not isinstance(options, KsefClientOptions):
+            raise ValueError("Resumable search requires HTTP client environment options")
+        machine = _RangeMachine(
+            _serialize_search_filters(request_payload, allow_long_range=True),
+            environment=options.normalized_base_url(),
+            context_key=context_key,
+            page_size=page_size,
+            sort_order=sort_order,
+            window_days=window_days,
+        )
+        return InvoiceMetadataRangeSearch(
+            machine,
+            partial(self._query_invoice_metadata_search_page, access_token=access_token),
+        )
+
     def search_invoice_metadata(
         self,
         request_payload: InvoiceQueryFilters,
@@ -564,6 +612,33 @@ class InvoicesClient(BaseApiClient):
 
 
 class AsyncInvoicesClient(AsyncBaseApiClient):
+    def search_invoice_metadata_range(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        context_key: str,
+        page_size: int = INVOICE_METADATA_PAGE_SIZE_DEFAULT,
+        sort_order: str = "Asc",
+        window_days: int = 100,
+        access_token: str | None = None,
+    ) -> AsyncInvoiceMetadataRangeSearch:
+        """Async multi-year search with inclusive windows and one durable cursor."""
+        options = getattr(self._http, "_options", None)
+        if not isinstance(options, KsefClientOptions):
+            raise ValueError("Resumable search requires HTTP client environment options")
+        machine = _RangeMachine(
+            _serialize_search_filters(request_payload, allow_long_range=True),
+            environment=options.normalized_base_url(),
+            context_key=context_key,
+            page_size=page_size,
+            sort_order=sort_order,
+            window_days=window_days,
+        )
+        return AsyncInvoiceMetadataRangeSearch(
+            machine,
+            partial(self._query_invoice_metadata_search_page, access_token=access_token),
+        )
+
     def search_invoice_metadata(
         self,
         request_payload: InvoiceQueryFilters,

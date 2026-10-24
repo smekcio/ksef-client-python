@@ -1,4 +1,4 @@
-"""Transactional metadata checkpoints. See docs/reliable-pagination.md.
+"""Transactional range checkpoints. See docs/invoice-range-search.md.
 
 Example:
   Set KSEF_ACCESS_TOKEN in the environment, then run:
@@ -6,6 +6,8 @@ Example:
     --context-key Nip:5265877635 --from 2026-10-01 --to 2026-10-02
 
 Use a TokenManager/AuthenticatedClient for long-running applications.
+Use a separate database per KSeF environment. This example does not schedule
+incremental synchronization after a completed range.
 """
 
 from __future__ import annotations
@@ -86,6 +88,7 @@ def main() -> None:
     parser.add_argument("--base-url", default="https://api-test.ksef.mf.gov.pl")
     parser.add_argument("--from", dest="date_from", required=True)
     parser.add_argument("--to", dest="date_to", required=True)
+    parser.add_argument("--window-days", type=int, default=100)
     args = parser.parse_args()
     request = m.InvoiceQueryFilters(
         subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
@@ -96,12 +99,16 @@ def main() -> None:
             restrict_to_permanent_storage_hwm_date=True,
         ),
     )
-    identity = json.dumps([args.base_url, args.context_key, request.to_dict()], sort_keys=True)
+    identity = json.dumps(
+        [args.base_url, args.context_key, request.to_dict(), args.window_days], sort_keys=True
+    )
     sync_key = hashlib.sha256(identity.encode()).hexdigest()
     with KsefClient(
         KsefClientOptions(base_url=args.base_url), access_token=os.environ["KSEF_ACCESS_TOKEN"]
     ) as client:
-        search = client.invoices.search_invoice_metadata(request, context_key=args.context_key)
+        search = client.invoices.search_invoice_metadata_range(
+            request, context_key=args.context_key, window_days=args.window_days
+        )
         with sqlite3.connect(args.database) as connection:
             print(f"Processed {sync_pages(connection, search, sync_key=sync_key)} metadata records")
 

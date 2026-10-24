@@ -32,6 +32,7 @@ from .exceptions import (
     KsefRenderingError,
     KsefVerificationError,
 )
+from .invoice_range_search import AsyncInvoiceMetadataRangeSearch, InvoiceMetadataRangeSearch
 from .invoice_search import (
     AsyncInvoiceMetadataSearch,
     InvoiceMetadataPage,
@@ -54,12 +55,42 @@ from .models import (
     TokenInfo,
 )
 from .profiles import Profile, ProfileError, ProfileStore
+from .rate_limiting import (
+    CancellationToken,
+    KsefRateLimitCapacityError,
+    KsefRateLimitWaitTimeout,
+    KsefRequestCancelledError,
+    RateLimitAdmission,
+    RateLimitBudget,
+    RateLimitPolicy,
+    RateLimitScope,
+    RateLimitValues,
+    RequestControl,
+)
+from .request_control import request_control
 from .retry import RetryConfig
 from .token_manager import AsyncTokenManager, TokenManager, TokenManagerError
 
 __all__ = [
-    "InvoiceMetadataPage", "InvoiceMetadataSearch", "AsyncInvoiceMetadataSearch",
-    "KsefPaginationError", "KsefInvalidPaginationCursorError", "KsefIncompletePaginationError",
+    "InvoiceMetadataRangeSearch",
+    "AsyncInvoiceMetadataRangeSearch",
+    "RateLimitBudget",
+    "RateLimitAdmission",
+    "RateLimitPolicy",
+    "RateLimitScope",
+    "RateLimitValues",
+    "RequestControl",
+    "CancellationToken",
+    "request_control",
+    "KsefRateLimitCapacityError",
+    "KsefRateLimitWaitTimeout",
+    "KsefRequestCancelledError",
+    "InvoiceMetadataPage",
+    "InvoiceMetadataSearch",
+    "AsyncInvoiceMetadataSearch",
+    "KsefPaginationError",
+    "KsefInvalidPaginationCursorError",
+    "KsefIncompletePaginationError",
     "redact_sensitive",
     "KsefClientOptions",
     "KsefEnvironment",
