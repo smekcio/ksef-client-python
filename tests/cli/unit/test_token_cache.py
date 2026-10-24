@@ -272,9 +272,7 @@ def test_token_cache_process_state_reports_alive_and_gone(monkeypatch, tmp_path:
     assert token_cache._process_state(1234) == "unknown"
 
 
-def test_token_cache_lock_owner_state_handles_unreadable_lock(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_token_cache_lock_owner_state_handles_unreadable_lock(monkeypatch, tmp_path: Path) -> None:
     """Nieczytelny plik blokady to „nie wiem”, nie „wolne”."""
     lock_path = tmp_path / "cache.json.lock"
     lock_path.write_text("1 1.0", encoding="utf-8")
@@ -357,9 +355,7 @@ def test_token_cache_chmod_failure_is_tolerated(monkeypatch, tmp_path: Path) -> 
     assert token_cache.get_cached_metadata("demo") is not None
 
 
-def test_token_cache_set_write_failure_is_wrapped_in_cli_error(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_token_cache_set_write_failure_is_wrapped_in_cli_error(monkeypatch, tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     monkeypatch.setattr(token_cache, "cache_file", lambda: cache_path)
 
@@ -402,3 +398,13 @@ def test_token_cache_clear_write_failure_is_wrapped_in_cli_error(
     assert exc.value.code == ExitCode.CONFIG_ERROR
     assert exc.value.hint is not None
     assert "cache" in exc.value.message.lower()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_platform_os(monkeypatch):
+    """Simulate the module platform without changing pathlib/pytest global os.name."""
+    from types import ModuleType
+
+    isolated = ModuleType("isolated_os")
+    isolated.__dict__.update(vars(token_cache.os))
+    monkeypatch.setattr(token_cache, "os", isolated)

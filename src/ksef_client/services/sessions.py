@@ -478,7 +478,7 @@ class OnlineSessionHandle:
     form_code: m.FormCode
     valid_until: str | None
     encryption_data: EncryptionData
-    _access_token: str | None = None
+    _access_token: str | None = field(default=None, repr=False)
     upo_v43: bool = False
 
     @property
@@ -632,7 +632,7 @@ class AsyncOnlineSessionHandle:
     form_code: m.FormCode
     valid_until: str | None
     encryption_data: EncryptionData
-    _access_token: str | None = None
+    _access_token: str | None = field(default=None, repr=False)
     upo_v43: bool = False
 
     @property
@@ -792,10 +792,10 @@ class BatchSessionHandle:
     batch_file: m.BatchFileInfo
     part_upload_requests: list[m.PartUploadRequest]
     encryption_data: EncryptionData
-    _access_token: str | None = None
+    _access_token: str | None = field(default=None, repr=False)
     upo_v43: bool = False
     offline_mode: bool | None = None
-    _encrypted_parts: list[tuple[int, bytes]] | None = None
+    _encrypted_parts: list[tuple[int, bytes]] | None = field(default=None, repr=False)
 
     @property
     def session_reference_number(self) -> str:
@@ -941,10 +941,10 @@ class AsyncBatchSessionHandle:
     batch_file: m.BatchFileInfo
     part_upload_requests: list[m.PartUploadRequest]
     encryption_data: EncryptionData
-    _access_token: str | None = None
+    _access_token: str | None = field(default=None, repr=False)
     upo_v43: bool = False
     offline_mode: bool | None = None
-    _encrypted_parts: list[tuple[int, bytes]] | None = None
+    _encrypted_parts: list[tuple[int, bytes]] | None = field(default=None, repr=False)
 
     @property
     def session_reference_number(self) -> str:

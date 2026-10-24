@@ -102,3 +102,6 @@ Biblioteka udostępnia trzy poziomy użycia:
 **Przykłady (skrypty):**
 
 - [Przykłady](examples/README.md)
+
+
+Zalecane API kompletnego pobierania: [paginacja z kursorami i checkpoint SQLite](reliable-pagination.md).

@@ -249,3 +249,6 @@ tokena, więc oczekuje `401` i nie wymaga danych uwierzytelniających.
 KSEF_BASE_URL=https://api-demo.ksef.mf.gov.pl \
 python docs/examples/error_handling.py
 ```
+
+
+Zalecane API kompletnego pobierania: [paginacja z kursorami i checkpoint SQLite](../reliable-pagination.md).

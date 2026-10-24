@@ -83,9 +83,7 @@ def test_keyring_store_clear_reports_a_failed_delete(monkeypatch, tmp_path) -> N
         keyring_store.clear_tokens("demo")
 
 
-def test_keyring_store_partial_save_falls_back_to_the_complete_copy(
-    monkeypatch, tmp_path
-) -> None:
+def test_keyring_store_partial_save_falls_back_to_the_complete_copy(monkeypatch, tmp_path) -> None:
     """Częściowy zapis do keyringu nie może zostawić pary „nowy access + stary refresh".
 
     Wcześniej taki zapis wracał bez błędu, a `get_tokens` zwracał mieszankę nigdy
@@ -244,9 +242,7 @@ def test_keyring_store_encrypted_fallback_invalid_token(monkeypatch, tmp_path) -
     assert keyring_store.get_tokens("demo") is None
 
 
-def test_keyring_store_fallback_lock_heals_after_a_killed_process(
-    monkeypatch, tmp_path
-) -> None:
+def test_keyring_store_fallback_lock_heals_after_a_killed_process(monkeypatch, tmp_path) -> None:
     """Ta sama klasa błędu co w blokadzie cache: osierocona blokada nie może trwać.
 
     Proces zabity w trakcie nie sprząta `tokens.json.lock`, więc zapis i usunięcie
@@ -298,9 +294,7 @@ def test_keyring_store_fallback_lock_steals_are_bounded(monkeypatch, tmp_path) -
     assert len(attempts) <= keyring_store._FALLBACK_LOCK_MAX_STEALS
 
 
-def test_keyring_store_fallback_lock_is_not_stale_when_stat_fails(
-    monkeypatch, tmp_path
-) -> None:
+def test_keyring_store_fallback_lock_is_not_stale_when_stat_fails(monkeypatch, tmp_path) -> None:
     """Gdy nie da się odczytać wieku blokady fallbacku, nie przejmujemy jej na ślepo."""
     lock_path = tmp_path / f"tokens.json{keyring_store._FALLBACK_LOCK_SUFFIX}"
     lock_path.write_text("1 1.0", encoding="utf-8")
@@ -782,3 +776,13 @@ def test_keyring_store_plaintext_fallback_warns_once_on_use(monkeypatch, tmp_pat
         warnings.simplefilter("always")
         keyring_store.get_tokens("demo")
     assert len(recorded) == 0
+
+
+@pytest.fixture(autouse=True)
+def _isolate_platform_os(monkeypatch):
+    """Simulate the module platform without changing pathlib/pytest global os.name."""
+    from types import ModuleType
+
+    isolated = ModuleType("isolated_os")
+    isolated.__dict__.update(vars(keyring_store.os))
+    monkeypatch.setattr(keyring_store, "os", isolated)

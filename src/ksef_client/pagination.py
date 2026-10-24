@@ -48,7 +48,7 @@ class KsefPaginationWarning(RuntimeWarning):
     """
 
 
-class InvoiceMetadataPage(Protocol):
+class InvoiceMetadataPageProtocol(Protocol):
     """Minimalny kontrakt strony metadanych faktur.
 
     Protokół zamiast konkretnego modelu, żeby moduł nie zależał od
@@ -66,6 +66,10 @@ class InvoiceMetadataPage(Protocol):
     @property
     def is_truncated(self) -> bool:
         """Czy osiągnięto limit 10 000 wyników zapytania."""
+
+
+# Compatibility alias for existing imports; the new public search page is a dataclass.
+InvoiceMetadataPage = InvoiceMetadataPageProtocol
 
 
 def validate_page_size(
@@ -255,6 +259,7 @@ __all__ = [
     "INVOICE_METADATA_RESULT_LIMIT",
     "PAGE_SIZE_MIN",
     "InvoiceMetadataPage",
+    "InvoiceMetadataPageProtocol",
     "KsefPaginationWarning",
     "iter_page_offsets",
     "page_should_continue",

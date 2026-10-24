@@ -2,7 +2,26 @@
 
 ## Unreleased
 
+### Security and reliability review
+
+* Strict resumable-search response validation; malformed metadata never implies completion.
+* Fixed long-lived open-ended cursors, Issue-date boundaries and UTC-overflow handling.
+* Bounded diagnostic traversal and removed credential-bearing transport/body tracebacks.
+* Explicit SQLite page transactions in autocommit mode; fail closed on truncated export
+  without a continuation date.
+* Verified installed SDK bytes against the exact wheel, checked sdist identity,
+  scoped CI secrets to required steps and pinned release actions to commit SHAs.
+* Raised security floors for cryptography, existing HTTP dependencies and development tools.
+
 ### Features
+
+* **sdk:** `search_invoice_metadata()` w sync/async z wersjonowanym kursorem v1,
+  kontynuacją po obcięciu, deduplikacją granic i kontrolą HWM. Istniejące iteratory
+  zachowują zachowanie. Dodano błędy paginacji i przykład transakcyjnego checkpointu SQLite.
+* **security:** rozszerzona redakcja `repr()` tokenów, podpisanych URL-i, nagłówków
+  i payloadów oraz `redact_sensitive()` do diagnostyki; serializacja transportowa bez zmian.
+* **ci:** publikacja wyłącznie z taga, po obowiązkowym E2E TEST z zainstalowanego
+  wheela, kontroli wymaganych scenariuszy JUnit i zgodności sum dystrybucji.
 
 * **sdk:** taksonomia błędów — `KsefError` + `ErrorCode`, `KsefExceptionCode`
   (54 kody `exceptionCode` z KSeF API 2.9.0, w tym `91xx` podpisu XAdES), `ForbiddenReason` oraz podklasy HTTP

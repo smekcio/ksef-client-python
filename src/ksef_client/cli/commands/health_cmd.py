@@ -6,6 +6,7 @@ import typer
 
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
 
+from ...diagnostics import redact_sensitive
 from ..auth.keyring_store import get_token_store_mode
 from ..auth.manager import resolve_base_url
 from ..context import profile_label, require_context, require_profile
@@ -153,4 +154,4 @@ def health_check(
         _raise_for_failed_checks(result)
     except Exception as exc:
         _render_error(ctx, "health.check", exc)
-    renderer.success(command="health.check", profile=profile, data=result)
+    renderer.success(command="health.check", profile=profile, data=redact_sensitive(result))

@@ -213,3 +213,6 @@ Async odpowiednik: `AsyncExportWorkflow`.
 
 - `metadata_summaries: list[dict[str, Any]]`
 - `invoice_xml_files: dict[str, str]`
+- `metadata_raw: bytes | None` — oryginalne bajty `_metadata.json`; `None`, jeśli
+  paczka nie zawiera tego pliku. Pole jest ukryte w `repr()`, ale zachowuje pełną
+  treść do świadomego zapisu przez aplikację.

@@ -970,7 +970,7 @@ class TransportErrorTests(unittest.TestCase):
 
     Dokumentacja obiecuje wyjątki `Ksef*`, a `ConnectError`/`ReadTimeout`/
     `RemoteProtocolError` (i `TooManyRedirects`) leciały do użytkownika bez zmian.
-    Oryginał zostaje w `__cause__`, a `status_code` to `NO_HTTP_STATUS_CODE`.
+    Tekst oryginału nie trafia do tracebacku, a status to `NO_HTTP_STATUS_CODE`.
     """
 
     def setUp(self):
@@ -995,7 +995,7 @@ class TransportErrorTests(unittest.TestCase):
         ):
             with self.subTest(error=type(error).__name__):
                 wrapped = self._request_with_error(error)
-                self.assertIs(wrapped.__cause__, error)
+                self.assertIsNone(wrapped.__cause__)
                 self.assertEqual(wrapped.status_code, NO_HTTP_STATUS_CODE)
                 self.assertIsNone(wrapped.problem)
                 self.assertIn(type(error).__name__, str(wrapped))
@@ -1078,7 +1078,7 @@ class AsyncTransportAndAuthTests(unittest.IsolatedAsyncioTestCase):
                     self.assertRaises(KsefHttpError) as ctx,
                 ):
                     await client.request("GET", "/path")
-                self.assertIs(ctx.exception.__cause__, error)
+                self.assertIsNone(ctx.exception.__cause__)
                 self.assertEqual(ctx.exception.status_code, NO_HTTP_STATUS_CODE)
 
     async def test_async_5xx_carries_retry_after(self):

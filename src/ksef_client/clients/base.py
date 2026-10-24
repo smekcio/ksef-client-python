@@ -51,14 +51,13 @@ def _parse_json_response(response: HttpResponse, *, path: str) -> Any:
     """
     try:
         return response.json()
-    except ValueError as exc:  # json.JSONDecodeError jest podklasą ValueError
+    except ValueError:  # json.JSONDecodeError jest podklasą ValueError
         content_type = response.headers.get("Content-Type", "unknown content type")
-        preview = response.content[:120].decode("utf-8", errors="replace")
         raise KsefHttpError(
             response.status_code,
-            f"Expected a JSON response from {path}, got {content_type}: {preview!r}",
+            f"Expected a JSON response from {path}, got {content_type}",
             response_body=response.content,
-        ) from exc
+        ) from None
 
 
 def _validate_model_payload(payload: Any, *, path: str) -> dict[str, Any]:

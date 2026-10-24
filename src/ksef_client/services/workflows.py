@@ -6,7 +6,7 @@ import hashlib
 import time
 from collections.abc import Callable, Collection, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol, cast
 
 from ..clients.invoices import AsyncInvoicesClient, InvoicesClient
@@ -296,7 +296,7 @@ class AsyncBatchUploadHelper:
 @dataclass(frozen=True)
 class AuthResult:
     reference_number: str
-    authentication_token: str
+    authentication_token: str = field(repr=False)
     tokens: AuthenticationTokensResponse
 
     @property
@@ -1037,12 +1037,12 @@ class AsyncExportDownloadHelper:
 @dataclass(frozen=True)
 class PackageProcessingResult:
     metadata_summaries: list[dict[str, Any]]
-    invoice_xml_files: dict[str, str]
+    invoice_xml_files: dict[str, str] = field(repr=False)
     #: Surowa treść `_metadata.json` z paczki KSeF. CLI zapisuje ją **verbatim**,
     #: bo rekonstrukcja z listy faktur gubiła pozostałe klucze najwyższego poziomu
     #: (`isTruncated`, `permanentStorageHwmDate`, klucze przyszłych wersji API).
     #: `None` oznacza, że paczka nie zawierała pliku metadanych.
-    metadata_raw: bytes | None = None
+    metadata_raw: bytes | None = field(default=None, repr=False)
 
 
 def _require_encryption_info(encryption_data: EncryptionData) -> EncryptionInfo:

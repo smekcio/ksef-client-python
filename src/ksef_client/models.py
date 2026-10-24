@@ -85,13 +85,13 @@ class FileMetadata:
 
 @dataclass(frozen=True)
 class InvoiceContent:
-    content: str
+    content: str = field(repr=False)
     sha256_base64: str | None = None
 
 
 @dataclass(frozen=True)
 class BinaryContent:
-    content: bytes
+    content: bytes = field(repr=False)
     sha256_base64: str | None = None
 
 
@@ -673,7 +673,7 @@ class SessionInvoiceStatusResponse:
     invoicing_mode: InvoicingMode | None = None
     ksef_number: str | None = None
     permanent_storage_date: str | None = None
-    upo_download_url: str | None = None
+    upo_download_url: str | None = field(default=None, repr=False)
     upo_download_url_expiration_date: str | None = None
 
     @staticmethod

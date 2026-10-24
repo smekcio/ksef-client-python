@@ -14,6 +14,7 @@ from .client import (
     KsefClient,
 )
 from .config import KsefClientOptions, KsefEnvironment, KsefLighthouseEnvironment
+from .diagnostics import redact_sensitive
 from .exceptions import (
     ErrorCode,
     ForbiddenReason,
@@ -24,9 +25,17 @@ from .exceptions import (
     KsefError,
     KsefExceptionCode,
     KsefHttpError,
+    KsefIncompletePaginationError,
+    KsefInvalidPaginationCursorError,
+    KsefPaginationError,
     KsefRateLimitError,
     KsefRenderingError,
     KsefVerificationError,
+)
+from .invoice_search import (
+    AsyncInvoiceMetadataSearch,
+    InvoiceMetadataPage,
+    InvoiceMetadataSearch,
 )
 from .models import (
     AuthenticationChallengeResponse,
@@ -49,6 +58,9 @@ from .retry import RetryConfig
 from .token_manager import AsyncTokenManager, TokenManager, TokenManagerError
 
 __all__ = [
+    "InvoiceMetadataPage", "InvoiceMetadataSearch", "AsyncInvoiceMetadataSearch",
+    "KsefPaginationError", "KsefInvalidPaginationCursorError", "KsefIncompletePaginationError",
+    "redact_sensitive",
     "KsefClientOptions",
     "KsefEnvironment",
     "KsefLighthouseEnvironment",

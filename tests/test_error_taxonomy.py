@@ -186,6 +186,9 @@ def test_error_codes_and_forbidden_reasons_are_stable() -> None:
         "not_found",
         "workflow_error",
         "authentication_timeout",
+        "pagination_error",
+        "invalid_pagination_cursor",
+        "incomplete_pagination",
         "document_error",
         "document_validation_failed",
         "document_rendering_failed",
@@ -596,6 +599,9 @@ def test_exit_code_for_error_covers_every_error_code() -> None:
         ErrorCode.DOCUMENT_RENDERING_FAILED: ExitCode.API_ERROR,
         ErrorCode.VERIFICATION_FAILED: ExitCode.VALIDATION_ERROR,
         ErrorCode.CHECKPOINT_FAILED: ExitCode.IO_ERROR,
+        ErrorCode.PAGINATION_ERROR: ExitCode.API_ERROR,
+        ErrorCode.INVALID_PAGINATION_CURSOR: ExitCode.VALIDATION_ERROR,
+        ErrorCode.INCOMPLETE_PAGINATION: ExitCode.API_ERROR,
     }
 
     assert set(expected) == set(ErrorCode)

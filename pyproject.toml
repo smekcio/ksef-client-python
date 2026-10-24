@@ -18,9 +18,13 @@ classifiers = [
 ]
 
 dependencies = [
-  "httpx>=0.27.0",
-  "cryptography>=42.0.0",
+  "httpx>=0.28.1",
+  "cryptography>=50.0.0",
   "typing-extensions>=4.5.0",
+  # Security floors for dependencies already pulled in by httpx.
+  "anyio>=4.14.2",
+  "certifi>=2026.10.19",
+  "idna>=3.15",
 ]
 
 [project.optional-dependencies]
@@ -38,7 +42,8 @@ qr = [
 cli = [
   "typer>=0.12.0",
   "rich>=13.7.0,<14",
-  "keyring>=25.0.0",
+  "keyring>=25.7.0",
+  "jaraco.context>=6.1.0",
 ]
 
 [project.urls]

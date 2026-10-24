@@ -538,7 +538,7 @@ class SessionInvoiceStatusResponse:
     invoicing_mode: InvoicingMode | None = None
     ksef_number: str | None = None
     permanent_storage_date: str | None = None
-    upo_download_url: str | None = None
+    upo_download_url: str | None = ...
     upo_download_url_expiration_date: str | None = None
     @staticmethod
     def from_dict(data: dict[str, _Any]) -> SessionInvoiceStatusResponse:

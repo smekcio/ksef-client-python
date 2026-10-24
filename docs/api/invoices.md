@@ -134,3 +134,6 @@ Alias funkcjonalny dla `download_export_part(url)` (pobranie partu z pre-signed 
 ## `download_export_part_with_hash(url)`
 
 Jak wyżej, ale dodatkowo zwraca `BinaryContent` z hashem z `x-ms-meta-hash` (jeśli był).
+
+
+Zalecane API kompletnego pobierania: [paginacja z kursorami i checkpoint SQLite](../reliable-pagination.md).
