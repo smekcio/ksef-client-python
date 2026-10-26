@@ -1,5 +1,6 @@
 """KSeF Python SDK."""
 
+from .async_facade import AsyncKsef
 from .certificates import (
     CertificateRecord,
     CertificateStore,
@@ -32,6 +33,7 @@ from .exceptions import (
     KsefRenderingError,
     KsefVerificationError,
 )
+from .facade import Ksef, TokenCredentials, XadesCredentials
 from .invoice_range_search import AsyncInvoiceMetadataRangeSearch, InvoiceMetadataRangeSearch
 from .invoice_search import (
     AsyncInvoiceMetadataSearch,
@@ -54,6 +56,13 @@ from .models import (
     StatusInfo,
     TokenInfo,
 )
+from .operations import (
+    AsyncOperation,
+    KsefOperationError,
+    KsefOperationTimeout,
+    Operation,
+    OperationState,
+)
 from .profiles import Profile, ProfileError, ProfileStore
 from .rate_limiting import (
     CancellationToken,
@@ -69,9 +78,18 @@ from .rate_limiting import (
 )
 from .request_control import request_control
 from .retry import RetryConfig
+from .streaming_export import (
+    AsyncExportOperation,
+    ExportFiles,
+    ExportOperation,
+    KsefExportTransferError,
+)
 from .token_manager import AsyncTokenManager, TokenManager, TokenManagerError
 
 __all__ = [
+    "Ksef", "AsyncKsef", "TokenCredentials", "XadesCredentials",
+    "Operation", "AsyncOperation", "OperationState", "KsefOperationError", "KsefOperationTimeout",
+    "ExportFiles", "ExportOperation", "AsyncExportOperation", "KsefExportTransferError",
     "InvoiceMetadataRangeSearch",
     "AsyncInvoiceMetadataRangeSearch",
     "RateLimitBudget",

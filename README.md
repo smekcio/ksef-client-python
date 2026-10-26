@@ -11,6 +11,12 @@ Pakiet jest publikowany na PyPI jako **`ksef-client`** i obsługuje aktualny kon
 Biblioteka pomaga integrować aplikacje napisane w Pythonie z KSeF bez ręcznego
 składania żądań HTTP, szyfrowania, podpisów, obsługi sesji i pobierania paczek faktur.
 
+Do nowych integracji użyj fasady **`Ksef` / `AsyncKsef`**: połączenie z profilu
+lub jawnych poświadczeń, konteksty sesji i operacje z `.wait()` oraz wznowieniem.
+Eksport można pobierać na dysk strumieniowo, ze wznowieniem od bajtu i weryfikacją
+hashy. [Przewodnik fasady i uruchamialne przykłady](docs/facade.md).
+Pełne dotychczasowe API jest dostępne przez `client.api`.
+
 Najważniejsze cechy:
 
 - **typowane modele** `ksef_client.models` dla publicznych żądań i odpowiedzi SDK,
@@ -145,7 +151,27 @@ Pełna specyfikacja CLI: [`docs/cli/README.md`](docs/cli/README.md).
 
 ## 🧩 Szybki start: SDK
 
-Najkrótsza droga: uwierzytelnij się raz, a `AuthenticatedClient` sam wstrzykuje
+Do nowej integracji użyj fasady i profilu utworzonego przez CLI lub SDK:
+
+```python
+import os
+from pathlib import Path
+from ksef_client import Ksef, TokenCredentials
+
+with Ksef.connect(
+    profile="firma",
+    credentials=TokenCredentials(os.environ["KSEF_TOKEN"]),
+) as client:
+    with client.online_session() as session:
+        invoice = session.send_invoice(Path("invoice.xml").read_bytes()).wait(timeout=120)
+    session.wait(timeout=120)
+    print(invoice.ksef_number)
+```
+
+Fasada obsługuje też XAdES, async, batch, UPO, operacje uprawnień i certyfikatów
+oraz wznawialny eksport na dysk. [Przykłady i zasady wznowienia](docs/facade.md).
+
+Przy bezpośrednim użyciu SDK `AuthenticatedClient` sam wstrzykuje
 i odświeża token dostępowy (60 s przed wygaśnięciem i po 401). Retry HTTP włączasz
 jednym polem konfiguracji:
 
@@ -423,7 +449,7 @@ Testy E2E wymagają osobnej konfiguracji środowiska KSeF i danych dostępowych.
 zmiennych środowiskowych są opisane w dokumentacji i testach.
 
 Publikację uruchamiaj z `main`, wskazując istniejący tag wersji. Brama wydawnicza wymaga
-pięciu rzeczywistych scenariuszy KSeF TEST na dokładnie tym pliku wheel, który trafi na PyPI.
+sześciu rzeczywistych scenariuszy KSeF TEST na dokładnie tym pliku wheel, który trafi na PyPI.
 Konfiguracja środowisk GitHub, sekretów i Trusted Publishera:
 [publikacja potwierdzona TEST](docs/reliable-pagination.md#publikacja-potwierdzona-rzeczywistym-test).
 

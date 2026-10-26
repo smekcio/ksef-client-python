@@ -47,6 +47,8 @@ Biblioteka udostępnia trzy poziomy użycia:
 
 ## Nawigacja
 
+- [Fasada klienta, operacje `.wait()` i eksport strumieniowy](facade.md)
+
 - [Historia wielu lat z jednym checkpointem](invoice-range-search.md)
 - [Aktywne budżety limitów sync/async](rate-budgets.md)
 - [Start](getting-started.md)
