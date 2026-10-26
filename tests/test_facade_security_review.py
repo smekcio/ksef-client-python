@@ -81,6 +81,18 @@ def test_posix_lock_is_released_and_links_are_rejected(tmp_path, monkeypatch):
         safe_path(tmp_path)
 
 
+def test_windows_lock_protocol_is_verified_on_every_platform(tmp_path, monkeypatch):
+    import ksef_client.streaming_export as module
+
+    fake = SimpleNamespace(locking=Mock(), LK_NBLCK=1, LK_UNLCK=2)
+    monkeypatch.setattr(module, "os", SimpleNamespace(name="nt"))
+    with patch.dict("sys.modules", {"msvcrt": fake}):
+        with directory_lock(tmp_path):
+            assert fake.locking.call_count == 1
+        assert fake.locking.call_count == 2
+        assert fake.locking.call_args.args[1:] == (fake.LK_UNLCK, 1)
+
+
 @pytest.mark.parametrize("action", ["send", "upload", "close_started", "incomplete"])
 def test_async_session_rejects_unsafe_actions(action):
 
