@@ -35,6 +35,9 @@ from .models import (
     UnauthorizedProblemDetails,
     UnknownApiProblem,
 )
+from .rate_limit_routing import canonical_rate_limit_environment, classify_rate_limit_groups
+from .rate_limiting import KsefRateLimitWaitTimeout, RateLimitAdmission, RateLimitScope
+from .request_control import current_request_control, wait_seconds, wait_seconds_async
 from .retry import (
     MAX_RETRY_AFTER_SECONDS,
     RETRYABLE_STATUS_CODES,
@@ -43,6 +46,59 @@ from .retry import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _budget_parameters(
+    options: KsefClientOptions, method: str, path: str, *, skip_auth: bool
+) -> tuple[RateLimitScope, tuple[str, ...]] | None:
+    if options.rate_limit_budget is None:
+        return None
+    groups = classify_rate_limit_groups(
+        method, path, options.normalized_base_url(), skip_auth=skip_auth
+    )
+    if groups is None:
+        return None
+    return (
+        RateLimitScope(
+            environment=canonical_rate_limit_environment(options.normalized_base_url()),
+            context_key=options.rate_limit_context_key or "",
+            client_ip=options.rate_limit_egress_key,
+        ),
+        groups,
+    )
+
+
+def _wire_timeout(options: KsefClientOptions) -> dict[str, Any]:
+    control = current_request_control()
+    if control is None:
+        return {}
+    control.check()
+    remaining = control.remaining()
+    if remaining is None:
+        return {}
+    control.check()
+    configured = options.timeout_seconds
+    return {"timeout": min(configured, remaining) if configured is not None else remaining}
+
+
+def _budget_retry_after(value: str | None) -> float:
+    """Keep the complete server cooldown; individual waits remain cancellable."""
+    if value is None or not value.strip():
+        return 1.0
+    text = value.strip()
+    if text.isascii() and text.isdigit():
+        seconds = float(text)
+    else:
+        try:
+            until = parsedate_to_datetime(text)
+            if until.tzinfo is None:
+                until = until.replace(tzinfo=timezone.utc)
+            seconds = (until - datetime.now(timezone.utc)).total_seconds()
+        except (ValueError, TypeError, IndexError, OverflowError):
+            return 1.0
+    if not math.isfinite(seconds):
+        raise KsefRateLimitWaitTimeout("Server cooldown exceeds supported numeric range")
+    return max(0.0, seconds)
 
 
 def _loggable_url(url: str) -> str:
@@ -61,7 +117,6 @@ def _loggable_url(url: str) -> str:
     if parsed.port:
         host = f"{host}:{parsed.port}"
     return f"{parsed.scheme}://{host}{parsed.path}"
-
 
 
 def _merge_headers(base: dict[str, str], extra: dict[str, str] | None) -> dict[str, str]:
@@ -161,9 +216,8 @@ def _validate_presigned_url_security(options: KsefClientOptions, url: str) -> No
                 "Rejected insecure presigned URL: loopback addresses are not allowed "
                 "for skip_auth requests."
             )
-        if (
-            not options.allow_private_network_presigned_urls
-            and (host_ip.is_private or host_ip.is_link_local or host_ip.is_reserved)
+        if not options.allow_private_network_presigned_urls and (
+            host_ip.is_private or host_ip.is_link_local or host_ip.is_reserved
         ):
             raise ValueError(
                 "Rejected insecure presigned URL: private, link-local, and reserved "
@@ -198,9 +252,7 @@ def _handle_system_warning(options: KsefClientOptions, response: httpx.Response)
 NO_HTTP_STATUS_CODE = 0
 
 
-def _reject_json_and_data_together(
-    json: dict[str, Any] | None, data: bytes | None
-) -> None:
+def _reject_json_and_data_together(json: dict[str, Any] | None, data: bytes | None) -> None:
     """`json` i `data` wykluczają się — `httpx` cicho wybrałby jedno z nich.
 
     Wcześniej żądanie z oboma parametrami wysyłało treść `json` (albo `data`,
@@ -257,10 +309,7 @@ def _wrap_transport_error(
     """
     return KsefTransportError(
         status_code=NO_HTTP_STATUS_CODE,
-        message=(
-            f"Network error during {method} {_loggable_url(url)}: "
-            f"{type(exc).__name__}"
-        ),
+        message=(f"Network error during {method} {_loggable_url(url)}: {type(exc).__name__}"),
     )
 
 
@@ -830,8 +879,67 @@ class BaseHttpClient:
                     delay,
                     exc.status_code,
                 )
-                time.sleep(delay)
+                wait_seconds(delay, sleep=time.sleep)
                 attempt += 1
+
+    def _resolve_request_token(
+        self,
+        *,
+        access_token: str | None,
+        refresh_token: str | None,
+        skip_auth: bool,
+    ) -> str | None:
+        if skip_auth:
+            return None
+        return refresh_token or access_token or self._access_token
+
+    def _request_token_is_current(
+        self,
+        token: str | None,
+        *,
+        access_token: str | None,
+        refresh_token: str | None,
+        skip_auth: bool,
+    ) -> bool:
+        return True
+
+    def _admit_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        access_token: str | None,
+        refresh_token: str | None,
+        skip_auth: bool,
+    ) -> tuple[
+        str | None, tuple[RateLimitScope, tuple[str, ...]] | None, RateLimitAdmission | None
+    ]:
+        parameters = _budget_parameters(self._options, method, path, skip_auth=skip_auth)
+        while True:
+            control = current_request_control()
+            if control is not None:
+                control.check()
+            # A refresh may itself perform HTTP and wait for its own budget.
+            # Never hold a business-request admission while refreshing tokens.
+            token = self._resolve_request_token(
+                access_token=access_token, refresh_token=refresh_token, skip_auth=skip_auth
+            )
+            if parameters is None:
+                return token, None, None
+            assert self._options.rate_limit_budget is not None
+            admission = self._options.rate_limit_budget.acquire(*parameters, control=control)
+            try:
+                if self._request_token_is_current(
+                    token,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    skip_auth=skip_auth,
+                ):
+                    return token, parameters, admission
+            except BaseException:
+                admission.cancel()
+                raise
+            admission.cancel()
 
     def _request_once(
         self,
@@ -854,28 +962,39 @@ class BaseHttpClient:
         elif skip_auth:
             _validate_presigned_url_security(self._options, url)
 
-        base_headers = {
-            "User-Agent": self._options.user_agent,
-            "Accept": "application/json",
-            "Accept-Encoding": "identity",
-        }
-        if json is not None:
-            base_headers["Content-Type"] = "application/json"
+        token, budget_parameters, admission = self._admit_request(
+            method,
+            path,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            skip_auth=skip_auth,
+        )
+        try:
+            base_headers = {
+                "User-Agent": self._options.user_agent,
+                "Accept": "application/json",
+                "Accept-Encoding": "identity",
+            }
+            if json is not None:
+                base_headers["Content-Type"] = "application/json"
 
-        if not skip_auth:
-            token = access_token or self._access_token
-            if refresh_token:
-                token = refresh_token
             if token:
                 base_headers["Authorization"] = f"Bearer {token}"
 
-        base_headers = _merge_headers(base_headers, self._options.custom_headers)
-        final_headers = _merge_headers(base_headers, headers)
-        if skip_auth:
-            # Presigned URL idzie na obcy host — token KSeF (także ten z `custom_headers`
-            # albo z nagłówków pojedynczego żądania) nie może tam trafić.
-            final_headers = _without_authorization(final_headers)
+            base_headers = _merge_headers(base_headers, self._options.custom_headers)
+            final_headers = _merge_headers(base_headers, headers)
+            if skip_auth:
+                # Presigned URL idzie na obcy host — token KSeF (także ten z `custom_headers`
+                # albo z nagłówków pojedynczego żądania) nie może tam trafić.
+                final_headers = _without_authorization(final_headers)
 
+            wire_options = _wire_timeout(self._options)
+        except BaseException:
+            if admission is not None:
+                admission.cancel()
+            raise
+        if admission is not None:
+            admission.commit()
         try:
             response = self._client.request(
                 method=method,
@@ -891,14 +1010,18 @@ class BaseHttpClient:
                 # wynik. Dlatego dla presigned URL przekierowań nie śledzimy
                 # niezależnie od `options.follow_redirects`.
                 follow_redirects=False if skip_auth else self._options.follow_redirects,
+                **wire_options,
             )
         except (httpx.TransportError, httpx.TooManyRedirects) as exc:
             # Błędy sieci i timeouty nie są wyjątkami SDK — opakowujemy je, żeby
             # wołający miał jeden kontrakt błędów (`KsefHttpError`).
             raise _wrap_transport_error(exc, method=method, url=url) from None
-        logger.debug(
-            "HTTP %s %s -> %s", method, _loggable_url(url), response.status_code
-        )
+        logger.debug("HTTP %s %s -> %s", method, _loggable_url(url), response.status_code)
+        if budget_parameters is not None and response.status_code == 429:
+            assert self._options.rate_limit_budget is not None
+            self._options.rate_limit_budget.defer(
+                *budget_parameters, _budget_retry_after(response.headers.get("Retry-After"))
+            )
         _handle_system_warning(self._options, response)
 
         if (
@@ -1025,8 +1148,69 @@ class AsyncBaseHttpClient:
                     delay,
                     exc.status_code,
                 )
-                await asyncio.sleep(delay)
+                await wait_seconds_async(delay, sleep=asyncio.sleep)
                 attempt += 1
+
+    async def _resolve_request_token(
+        self,
+        *,
+        access_token: str | None,
+        refresh_token: str | None,
+        skip_auth: bool,
+    ) -> str | None:
+        if skip_auth:
+            return None
+        return refresh_token or access_token or self._access_token
+
+    async def _request_token_is_current(
+        self,
+        token: str | None,
+        *,
+        access_token: str | None,
+        refresh_token: str | None,
+        skip_auth: bool,
+    ) -> bool:
+        return True
+
+    async def _admit_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        access_token: str | None,
+        refresh_token: str | None,
+        skip_auth: bool,
+    ) -> tuple[
+        str | None, tuple[RateLimitScope, tuple[str, ...]] | None, RateLimitAdmission | None
+    ]:
+        parameters = _budget_parameters(self._options, method, path, skip_auth=skip_auth)
+        while True:
+            control = current_request_control()
+            if control is not None:
+                control.check()
+            # A refresh may itself perform HTTP and wait for its own budget.
+            # Never hold a business-request admission while refreshing tokens.
+            token = await self._resolve_request_token(
+                access_token=access_token, refresh_token=refresh_token, skip_auth=skip_auth
+            )
+            if parameters is None:
+                return token, None, None
+            assert self._options.rate_limit_budget is not None
+            admission = await self._options.rate_limit_budget.acquire_async(
+                *parameters, control=control
+            )
+            try:
+                if await self._request_token_is_current(
+                    token,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    skip_auth=skip_auth,
+                ):
+                    return token, parameters, admission
+            except BaseException:
+                admission.cancel()
+                raise
+            admission.cancel()
 
     async def _request_once(
         self,
@@ -1049,28 +1233,39 @@ class AsyncBaseHttpClient:
         elif skip_auth:
             _validate_presigned_url_security(self._options, url)
 
-        base_headers = {
-            "User-Agent": self._options.user_agent,
-            "Accept": "application/json",
-            "Accept-Encoding": "identity",
-        }
-        if json is not None:
-            base_headers["Content-Type"] = "application/json"
+        token, budget_parameters, admission = await self._admit_request(
+            method,
+            path,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            skip_auth=skip_auth,
+        )
+        try:
+            base_headers = {
+                "User-Agent": self._options.user_agent,
+                "Accept": "application/json",
+                "Accept-Encoding": "identity",
+            }
+            if json is not None:
+                base_headers["Content-Type"] = "application/json"
 
-        if not skip_auth:
-            token = access_token or self._access_token
-            if refresh_token:
-                token = refresh_token
             if token:
                 base_headers["Authorization"] = f"Bearer {token}"
 
-        base_headers = _merge_headers(base_headers, self._options.custom_headers)
-        final_headers = _merge_headers(base_headers, headers)
-        if skip_auth:
-            # Patrz `BaseHttpClient.request`: presigned URL idzie na obcy host, więc
-            # token KSeF nie może trafić do nagłówków — także z `custom_headers`.
-            final_headers = _without_authorization(final_headers)
+            base_headers = _merge_headers(base_headers, self._options.custom_headers)
+            final_headers = _merge_headers(base_headers, headers)
+            if skip_auth:
+                # Patrz `BaseHttpClient.request`: presigned URL idzie na obcy host, więc
+                # token KSeF nie może trafić do nagłówków — także z `custom_headers`.
+                final_headers = _without_authorization(final_headers)
 
+            wire_options = _wire_timeout(self._options)
+        except BaseException:
+            if admission is not None:
+                admission.cancel()
+            raise
+        if admission is not None:
+            admission.commit()
         try:
             response = await self._client.request(
                 method=method,
@@ -1082,11 +1277,17 @@ class AsyncBaseHttpClient:
                 # Patrz `BaseHttpClient.request`: presigned URL nigdy nie podąża za
                 # przekierowaniem, bo walidacja dotyczy tylko adresu początkowego.
                 follow_redirects=False if skip_auth else self._options.follow_redirects,
+                **wire_options,
             )
         except (httpx.TransportError, httpx.TooManyRedirects) as exc:
             # Patrz `BaseHttpClient.request`: jeden kontrakt błędów także dla sieci.
             raise _wrap_transport_error(exc, method=method, url=url) from None
         logger.debug("HTTP %s %s -> %s", method, _loggable_url(url), response.status_code)
+        if budget_parameters is not None and response.status_code == 429:
+            assert self._options.rate_limit_budget is not None
+            self._options.rate_limit_budget.defer(
+                *budget_parameters, _budget_retry_after(response.headers.get("Retry-After"))
+            )
         _handle_system_warning(self._options, response)
 
         if (

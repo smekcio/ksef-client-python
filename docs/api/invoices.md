@@ -137,3 +137,8 @@ Jak wyżej, ale dodatkowo zwraca `BinaryContent` z hashem z `x-ms-meta-hash` (je
 
 
 Zalecane API kompletnego pobierania: [paginacja z kursorami i checkpoint SQLite](../reliable-pagination.md).
+
+`search_invoice_metadata_range(filters, context_key=..., window_days=100, ...)`
+obsługuje także zakresy wieloletnie i jeden checkpoint dla wszystkich okien.
+W sync zwraca `InvoiceMetadataRangeSearch`, w async `AsyncInvoiceMetadataRangeSearch`.
+[Szczegóły zakresów](../invoice-range-search.md) i [budżety limitów HTTP](../rate-budgets.md).

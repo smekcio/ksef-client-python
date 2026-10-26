@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Range searches and proactive rate budgets
+
+* Added sync/async `search_invoice_metadata_range()` with inclusive UTC windows,
+  one restartable checkpoint, boundary deduplication and HWM-aware completion.
+* Added process-local shared `RateLimitBudget` with effective server policies,
+  global/IP/context accounting, cooperative deadlines and cancellation.
+* Each HTTP attempt receives a budget admission; unused admissions are refunded
+  before token refresh, and complete server cooldowns are shared across callers.
+* Added multi-year SQLite example support and documented distributed-scope limits.
+
 ### Security and reliability review
 
 * Strict resumable-search response validation; malformed metadata never implies completion.
