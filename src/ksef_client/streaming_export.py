@@ -65,7 +65,7 @@ def directory_lock(directory: Path) -> Iterator[None]:
     with path.open("a+b") as stream:
         stream.seek(0)
         if os.name == "nt":
-            import msvcrt
+            msvcrt = importlib.import_module("msvcrt")
 
             stream.write(b"0")
             stream.flush()
