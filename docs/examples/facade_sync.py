@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -27,7 +28,19 @@ def main() -> None:
     parser.add_argument(
         "--save-state", type=Path, help="Explicitly persist private state for this example"
     )
+    parser.add_argument(
+        "--state-key-env",
+        default="KSEF_STATE_KEY",
+        help="Environment variable containing a separately stored Base64 32-byte state key",
+    )
     args = parser.parse_args()
+    state_key = b""
+    if args.save_state or args.resume_state:
+        if args.action != "export":
+            parser.error("State persistence is supported for the export action")
+        state_key = base64.b64decode(os.environ[args.state_key_env], validate=True)
+        if len(state_key) != 32:
+            parser.error("The state key must contain exactly 32 bytes")
     with Ksef.connect(
         options=KsefClientOptions(base_url=KsefEnvironment.TEST.value),
         context_type="nip",
@@ -46,16 +59,17 @@ def main() -> None:
             )
             operation = (
                 client.resume_operation(
-                    OperationState.from_dict(json.loads(args.resume_state.read_text()))
+                    OperationState.from_encrypted_bytes(args.resume_state.read_bytes(), state_key)
                 )
                 if args.resume_state
                 else client.exports.start(filters)
             )
             if args.save_state:
                 # The example application owns persistence; SDK never writes keys automatically.
-                with args.save_state.open("x", encoding="utf-8") as output:
-                    os.chmod(args.save_state, 0o600)
-                    output.write(operation.resume_state().to_json())
+                encrypted = operation.resume_state().to_encrypted_bytes(state_key)
+                fd = os.open(args.save_state, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "wb") as output:
+                    output.write(encrypted)
             result = operation.download_to(args.destination, work_dir=args.work_dir, timeout=600)
             print(len(result.files))
         elif args.action in {"online", "batch"}:

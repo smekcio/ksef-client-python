@@ -62,7 +62,9 @@ python docs/examples/facade_sync.py export --from 2026-01-01 --to 2026-02-01 --d
 ```
 
 Katalog docelowy musi być nowy. Opcje `--save-state` i `--resume-state` pozwalają
-jawnie zapisać oraz wczytać poufny stan eksportu; chroń go jak klucz dostępu.
+zapisać oraz wczytać **zaszyfrowany** stan eksportu. Wymagają `KSEF_STATE_KEY`:
+32 losowych bajtów zakodowanych w Base64, przechowywanych oddzielnie od pliku stanu.
+Nazwę zmiennej można zmienić przez `--state-key-env`; klucza nie podaje się w argumentach.
 Przy wznowieniu podaj ten sam `--work-dir`. Akcje `permission` i `certificate`
 przyjmują JSON requestu przez `--input` i wysyłają odpowiednio nadanie uprawnień
 lub wniosek certyfikacyjny. [Opis przepływów i wznowienia](../facade.md).

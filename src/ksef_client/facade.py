@@ -24,6 +24,7 @@ from .operations import (
 from .profiles import Profile, ProfileStore
 from .request_control import request_control
 from .services.auth import (
+    DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION,
     build_auth_token_request_xml,
     build_ksef_token_auth_request,
     encrypt_ksef_token,
@@ -32,6 +33,7 @@ from .services.crypto import build_encryption_data
 from .services.sessions import BatchSessionState, OnlineSessionState
 from .services.workflows import AuthResult, BatchSessionWorkflow, OnlineSessionWorkflow
 from .services.xades import XadesKeyPair, sign_xades_enveloped
+from .token_manager import DEFAULT_REFRESH_MARGIN_SECONDS
 
 FA3 = m.FormCode(system_code="FA (3)", schema_version="1-0E", value="FA")
 
@@ -42,10 +44,17 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class TokenCredentials:
     token: str = field(repr=False)
+    public_key_id: str | None = None
+    public_certificate: str | None = field(default=None, repr=False)
+    method: str = "rsa"
+    ec_output_format: str = "java"
+    authorization_policy: m.AuthorizationPolicy | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if type(self.token) is not str or not self.token:
             raise ValueError("A KSeF token is required")
+        if self.method not in {"rsa", "ec", "ecdsa"}:
+            raise ValueError("Unsupported token encryption method: use rsa or ec")
 
 
 @dataclass(frozen=True)
@@ -54,6 +63,8 @@ class XadesCredentials:
     subject_identifier_type: str = "certificateSubject"
     verify_certificate_chain: bool | None = None
     enforce_xades_compliance: bool = False
+    authorization_policy_xml: str | None = field(default=None, repr=False)
+    auth_request_schema_version: str = DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION
 
     @classmethod
     def from_store(
@@ -77,12 +88,13 @@ Credentials = TokenCredentials | XadesCredentials
 
 
 def safe_options(options: KsefClientOptions) -> KsefClientOptions:
-    """The facade must never replay a mutation, even with a broad SDK retry policy."""
+    """Preserve idempotent PUT uploads, never replay non-idempotent API mutations."""
     if options.retry is None:
         return options
     retry = replace(
         options.retry,
-        retryable_methods=options.retry.retryable_methods & frozenset({"GET", "HEAD", "OPTIONS"}),
+        retryable_methods=options.retry.retryable_methods
+        & frozenset({"GET", "HEAD", "OPTIONS", "PUT"}),
         retryable_post_paths=options.retry.retryable_post_paths
         & frozenset({"/invoices/query/metadata"}),
     )
@@ -135,7 +147,11 @@ def auth_payload(
                 public_certificate=certificate,
                 token=credentials.token,
                 timestamp_ms=challenge.timestamp_ms,
+                method=credentials.method,
+                ec_output_format=credentials.ec_output_format,
             ),
+            public_key_id=credentials.public_key_id,
+            authorization_policy=credentials.authorization_policy,
         )
     if not isinstance(credentials, XadesCredentials):
         raise TypeError("Use TokenCredentials or XadesCredentials")
@@ -144,6 +160,8 @@ def auth_payload(
         context_identifier_type=context_type,
         context_identifier_value=context_value,
         subject_identifier_type=credentials.subject_identifier_type,
+        authorization_policy_xml=credentials.authorization_policy_xml,
+        schema_version=credentials.auth_request_schema_version,
     )
     return sign_xades_enveloped(
         xml, credentials.key_pair.certificate_pem, credentials.key_pair.private_key_pem
@@ -256,6 +274,8 @@ class Session(Operation[m.SessionStatusResponse]):
     ) -> None:
         if not self.batch or self._close_started:
             raise ValueError("Uploading requires an open batch session")
+        if self.completed_parts == {p.ordinal_number for p in self.handle.part_upload_requests}:
+            return
 
         def confirmed(ordinal: int) -> None:
             self.completed_parts.add(ordinal)
@@ -312,10 +332,15 @@ class Exports:
         *,
         only_metadata: bool = False,
         compression_type: m.CompressionType = m.CompressionType.ZIP,
+        public_certificate: str | None = None,
+        public_key_id: str | None = None,
     ) -> ExportOperation:
         from .streaming_export import ExportOperation
 
-        encryption = build_encryption_data(self.owner._certificate())
+        encryption = build_encryption_data(
+            public_certificate or self.owner._certificate(public_key_id=public_key_id),
+            public_key_id=public_key_id,
+        )
         assert encryption.encryption_info is not None
         response = self.owner.api.invoices.export_invoices(
             m.InvoiceExportRequest(
@@ -375,8 +400,11 @@ class Ksef:
         try:
             challenge = api.auth.get_challenge()
             certificate = (
-                api.security.get_public_key_certificate_pem(
-                    m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION
+                credentials.public_certificate
+                or api.security.get_public_key_certificate_pem(
+                    m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
+                    algorithm=credentials.method,
+                    public_key_id=credentials.public_key_id,
                 )
                 if isinstance(credentials, TokenCredentials)
                 else None
@@ -417,6 +445,8 @@ class Ksef:
         context_type: str | None = None,
         context_value: str | None = None,
         profile_store: ProfileStore | None = None,
+        refresh_margin_seconds: float = DEFAULT_REFRESH_MARGIN_SECONDS,
+        on_refresh: Callable[[m.TokenInfo], None] | None = None,
     ) -> Ksef:
         validate_wait(timeout, poll_interval)
         with request_control(timeout_seconds=timeout):  # noqa: SIM117
@@ -430,17 +460,32 @@ class Ksef:
             ) as operation:
                 result = operation.wait(timeout, poll_interval)
                 return cls.from_auth_result(
-                    operation.options, result, context_key=operation.resume_state().context_key
+                    operation.options,
+                    result,
+                    context_key=operation.resume_state().context_key,
+                    refresh_margin_seconds=refresh_margin_seconds,
+                    on_refresh=on_refresh,
                 )
 
     @classmethod
     def from_auth_result(
-        cls, options: KsefClientOptions, result: AuthResult, *, context_key: str
+        cls,
+        options: KsefClientOptions,
+        result: AuthResult,
+        *,
+        context_key: str,
+        refresh_margin_seconds: float = DEFAULT_REFRESH_MARGIN_SECONDS,
+        on_refresh: Callable[[m.TokenInfo], None] | None = None,
     ) -> Ksef:
         options = safe_options(options)
         kind, value = context_key.split(":", 1)
         return cls(
-            AuthenticatedClient.from_auth_result(options, result),
+            AuthenticatedClient.from_auth_result(
+                options,
+                result,
+                refresh_margin_seconds=refresh_margin_seconds,
+                on_refresh=on_refresh,
+            ),
             options,
             context_type=kind,
             context_value=value,
@@ -449,14 +494,26 @@ class Ksef:
     def _state(self, kind: str, reference: str, **payload: Any) -> OperationState:
         return OperationState(kind, self.environment, self.context_key, reference, payload)
 
-    def _certificate(self) -> str:
+    def _certificate(self, *, public_key_id: str | None = None) -> str:
         return self.api.security.get_public_key_certificate_pem(
-            m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION
+            m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION,
+            algorithm="rsa",
+            public_key_id=public_key_id,
         )
 
-    def online_session(self, *, form_code: m.FormCode = FA3, upo_v43: bool = False) -> Session:
+    def online_session(
+        self,
+        *,
+        form_code: m.FormCode = FA3,
+        upo_v43: bool = False,
+        public_certificate: str | None = None,
+        public_key_id: str | None = None,
+    ) -> Session:
         handle = OnlineSessionWorkflow(self.api.sessions).open_session(
-            form_code=form_code, public_certificate=self._certificate(), upo_v43=upo_v43
+            form_code=form_code,
+            public_certificate=public_certificate or self._certificate(public_key_id=public_key_id),
+            public_key_id=public_key_id,
+            upo_v43=upo_v43,
         )
         return Session(self, handle)
 
@@ -468,12 +525,15 @@ class Ksef:
         compression_type: m.CompressionType = m.CompressionType.ZIP,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
+        public_certificate: str | None = None,
+        public_key_id: str | None = None,
     ) -> Session:
         handle = BatchSessionWorkflow(self.api.sessions, self.api.http_client).open_session(
             form_code=form_code,
             archive_bytes=archive_bytes,
             compression_type=compression_type,
-            public_certificate=self._certificate(),
+            public_certificate=public_certificate or self._certificate(public_key_id=public_key_id),
+            public_key_id=public_key_id,
             offline_mode=offline_mode,
             upo_v43=upo_v43,
         )
@@ -486,6 +546,8 @@ class Ksef:
         if state.kind not in {"online", "batch"}:
             raise ValueError("Expected a session state")
         saved = state.payload
+        if type(saved.get("session")) is not dict:
+            raise ValueError("Invalid session state payload")
         if type(saved.get("close_started", False)) is not bool:
             raise ValueError("Invalid session close attempt state")
         handle: Any

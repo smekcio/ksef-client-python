@@ -5,17 +5,23 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
 
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 from .exceptions import ErrorCode, KsefError, KsefHttpError
 from .rate_limiting import KsefRateLimitWaitTimeout
 from .request_control import request_control, wait_seconds, wait_seconds_async
 
 T = TypeVar("T")
+STATE_MAX_BYTES = 4 * 1024 * 1024
+STATE_ENVELOPE = b"KSEFSTATE\x01"
 KINDS = frozenset(
     {"auth", "invoice", "online", "batch", "upo", "export", "permission", "certificate"}
 )
@@ -82,7 +88,11 @@ class OperationState:
         ):
             raise ValueError("Invalid invoice session reference")
         # Validate JSON and bound input before copying or replaying it.
-        if len(json.dumps(self.to_dict(), allow_nan=False).encode()) > 4 * 1024 * 1024:
+        try:
+            encoded = json.dumps(self.to_dict(), allow_nan=False).encode()
+        except (TypeError, ValueError, RecursionError):
+            raise ValueError("Operation payload must contain finite JSON values") from None
+        if len(encoded) > STATE_MAX_BYTES:
             raise ValueError("Operation state exceeds size limit")
         object.__setattr__(self, "payload", deepcopy(self.payload))
 
@@ -98,6 +108,47 @@ class OperationState:
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), allow_nan=False)
+
+    def to_encrypted_bytes(self, encryption_key: bytes) -> bytes:
+        """Authenticated persistence; the application keeps the key separately."""
+        if type(encryption_key) is not bytes or len(encryption_key) != 32:
+            raise ValueError("State encryption requires a 32-byte key")
+        nonce = os.urandom(12)
+        return (
+            STATE_ENVELOPE
+            + nonce
+            + AESGCM(encryption_key).encrypt(nonce, self.to_json().encode(), STATE_ENVELOPE)
+        )
+
+    @classmethod
+    def from_json(cls, value: str) -> OperationState:
+        if type(value) is not str or len(value.encode()) > STATE_MAX_BYTES:
+            raise ValueError("Invalid or oversized operation state JSON")
+        try:
+            payload = json.loads(value)
+        except (ValueError, RecursionError):
+            raise ValueError("Invalid operation state JSON") from None
+        return cls.from_dict(payload)
+
+    @classmethod
+    def from_encrypted_bytes(cls, value: bytes, encryption_key: bytes) -> OperationState:
+        if type(encryption_key) is not bytes or len(encryption_key) != 32:
+            raise ValueError("State encryption requires a 32-byte key")
+        header_size = len(STATE_ENVELOPE)
+        if (
+            type(value) is not bytes
+            or not header_size + 28 <= len(value) <= STATE_MAX_BYTES + header_size + 28
+            or not value.startswith(STATE_ENVELOPE)
+        ):
+            raise ValueError("Invalid encrypted operation state envelope")
+        nonce = value[header_size : header_size + 12]
+        try:
+            plaintext = AESGCM(encryption_key).decrypt(
+                nonce, value[header_size + 12 :], STATE_ENVELOPE
+            )
+            return cls.from_json(plaintext.decode())
+        except (InvalidTag, UnicodeError):
+            raise ValueError("Operation state authentication failed") from None
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> OperationState:

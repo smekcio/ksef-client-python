@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
@@ -39,6 +39,7 @@ from .services.workflows import (
     AsyncOnlineSessionWorkflow,
     AuthResult,
 )
+from .token_manager import DEFAULT_REFRESH_MARGIN_SECONDS
 
 if TYPE_CHECKING:
     from .streaming_export import AsyncExportOperation
@@ -157,6 +158,8 @@ class AsyncSession(AsyncOperation[m.SessionStatusResponse]):
     ) -> None:
         if not self.batch or self._close_started:
             raise ValueError("Uploading requires an open batch session")
+        if self.completed_parts == {p.ordinal_number for p in self.handle.part_upload_requests}:
+            return
 
         def confirmed(ordinal: int) -> None:
             self.completed_parts.add(ordinal)
@@ -217,10 +220,15 @@ class AsyncExports:
         *,
         only_metadata: bool = False,
         compression_type: m.CompressionType = m.CompressionType.ZIP,
+        public_certificate: str | None = None,
+        public_key_id: str | None = None,
     ) -> AsyncExportOperation:
         from .streaming_export import AsyncExportOperation
 
-        encryption = build_encryption_data(await self.owner._certificate())
+        encryption = build_encryption_data(
+            public_certificate or await self.owner._certificate(public_key_id=public_key_id),
+            public_key_id=public_key_id,
+        )
         assert encryption.encryption_info is not None
         response = await self.owner.api.invoices.export_invoices(
             m.InvoiceExportRequest(
@@ -280,8 +288,11 @@ class AsyncKsef:
         try:
             challenge = await api.auth.get_challenge()
             certificate = (
-                await api.security.get_public_key_certificate_pem(
-                    m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION
+                credentials.public_certificate
+                or await api.security.get_public_key_certificate_pem(
+                    m.PublicKeyCertificateUsage.KSEFTOKENENCRYPTION,
+                    algorithm=credentials.method,
+                    public_key_id=credentials.public_key_id,
                 )
                 if isinstance(credentials, TokenCredentials)
                 else None
@@ -324,6 +335,8 @@ class AsyncKsef:
         context_type: str | None = None,
         context_value: str | None = None,
         profile_store: ProfileStore | None = None,
+        refresh_margin_seconds: float = DEFAULT_REFRESH_MARGIN_SECONDS,
+        on_refresh: Callable[[m.TokenInfo], Awaitable[None] | None] | None = None,
     ) -> AsyncKsef:
         validate_wait(timeout, poll_interval)
         with request_control(timeout_seconds=timeout):
@@ -337,17 +350,32 @@ class AsyncKsef:
             ) as operation:
                 result = await operation.wait(timeout, poll_interval)
                 return cls.from_auth_result(
-                    operation.options, result, context_key=operation.resume_state().context_key
+                    operation.options,
+                    result,
+                    context_key=operation.resume_state().context_key,
+                    refresh_margin_seconds=refresh_margin_seconds,
+                    on_refresh=on_refresh,
                 )
 
     @classmethod
     def from_auth_result(
-        cls, options: KsefClientOptions, result: AuthResult, *, context_key: str
+        cls,
+        options: KsefClientOptions,
+        result: AuthResult,
+        *,
+        context_key: str,
+        refresh_margin_seconds: float = DEFAULT_REFRESH_MARGIN_SECONDS,
+        on_refresh: Callable[[m.TokenInfo], Awaitable[None] | None] | None = None,
     ) -> AsyncKsef:
         options = safe_options(options)
         kind, value = context_key.split(":", 1)
         return cls(
-            AsyncAuthenticatedClient.from_auth_result(options, result),
+            AsyncAuthenticatedClient.from_auth_result(
+                options,
+                result,
+                refresh_margin_seconds=refresh_margin_seconds,
+                on_refresh=on_refresh,
+            ),
             options,
             context_type=kind,
             context_value=value,
@@ -356,16 +384,27 @@ class AsyncKsef:
     def _state(self, kind: str, reference: str, **payload: Any) -> OperationState:
         return OperationState(kind, self.environment, self.context_key, reference, payload)
 
-    async def _certificate(self) -> str:
+    async def _certificate(self, *, public_key_id: str | None = None) -> str:
         return await self.api.security.get_public_key_certificate_pem(
-            m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION
+            m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION,
+            algorithm="rsa",
+            public_key_id=public_key_id,
         )
 
     async def online_session(
-        self, *, form_code: m.FormCode = FA3, upo_v43: bool = False
+        self,
+        *,
+        form_code: m.FormCode = FA3,
+        upo_v43: bool = False,
+        public_certificate: str | None = None,
+        public_key_id: str | None = None,
     ) -> AsyncSession:
         handle = await AsyncOnlineSessionWorkflow(self.api.sessions).open_session(
-            form_code=form_code, public_certificate=await self._certificate(), upo_v43=upo_v43
+            form_code=form_code,
+            public_certificate=public_certificate
+            or await self._certificate(public_key_id=public_key_id),
+            public_key_id=public_key_id,
+            upo_v43=upo_v43,
         )
         return AsyncSession(self, handle)
 
@@ -377,6 +416,8 @@ class AsyncKsef:
         compression_type: m.CompressionType = m.CompressionType.ZIP,
         offline_mode: bool | None = None,
         upo_v43: bool = False,
+        public_certificate: str | None = None,
+        public_key_id: str | None = None,
     ) -> AsyncSession:
         handle = await AsyncBatchSessionWorkflow(
             self.api.sessions, self.api.http_client
@@ -384,7 +425,9 @@ class AsyncKsef:
             form_code=form_code,
             archive_bytes=archive_bytes,
             compression_type=compression_type,
-            public_certificate=await self._certificate(),
+            public_certificate=public_certificate
+            or await self._certificate(public_key_id=public_key_id),
+            public_key_id=public_key_id,
             offline_mode=offline_mode,
             upo_v43=upo_v43,
         )
@@ -397,6 +440,8 @@ class AsyncKsef:
         if state.kind not in {"online", "batch"}:
             raise ValueError("Expected a session state")
         saved = state.payload
+        if type(saved.get("session")) is not dict:
+            raise ValueError("Invalid session state payload")
         if type(saved.get("close_started", False)) is not bool:
             raise ValueError("Invalid session close attempt state")
         handle: Any
@@ -434,7 +479,7 @@ class AsyncKsef:
                 state, lambda: self.api.sessions.get_session_invoice_status(session_ref, ref)
             )
         if state.kind in {"online", "batch", "upo"}:
-            finish = (_upo_result) if state.kind == "upo" else None
+            finish = _upo_result if state.kind == "upo" else None
             return AsyncOperation(state, lambda: self.api.sessions.get_session_status(ref), finish)
         if state.kind == "permission":
             return AsyncOperation[m.PermissionsOperationStatusResponse](

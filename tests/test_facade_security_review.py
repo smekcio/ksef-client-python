@@ -6,6 +6,7 @@ import asyncio
 import base64
 import io
 import json
+import os
 import stat
 import tarfile
 import threading
@@ -69,7 +70,7 @@ def test_posix_lock_is_released_and_links_are_rejected(tmp_path, monkeypatch):
     import ksef_client.streaming_export as module
 
     fake = SimpleNamespace(flock=Mock(), LOCK_EX=1, LOCK_NB=2, LOCK_UN=4)
-    monkeypatch.setattr(module, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(module, "os", SimpleNamespace(name="posix", path=os.path))
     monkeypatch.setattr(module.importlib, "import_module", lambda name: fake)
     with directory_lock(tmp_path):
         assert fake.flock.call_count == 1
@@ -85,7 +86,7 @@ def test_windows_lock_protocol_is_verified_on_every_platform(tmp_path, monkeypat
     import ksef_client.streaming_export as module
 
     fake = SimpleNamespace(locking=Mock(), LK_NBLCK=1, LK_UNLCK=2)
-    monkeypatch.setattr(module, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(module, "os", SimpleNamespace(name="nt", path=os.path))
     with patch.dict("sys.modules", {"msvcrt": fake}):
         with directory_lock(tmp_path):
             assert fake.locking.call_count == 1
@@ -403,7 +404,7 @@ def test_async_url_refresh_and_cancel_join_worker(tmp_path, storage, cancel):
                     await task
                 assert not (tmp_path / "result").exists()
             elif cancel == "deadline":
-                with pytest.raises(TimeoutError, match="refresh deadline"):
+                with pytest.raises(KsefExportTransferError, match="TimeoutError"):
                     await task
             else:
                 assert (await task).files

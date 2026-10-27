@@ -9,6 +9,11 @@ on:
     # Daily run at 05:15 UTC
     - cron: "15 5 * * *"
   workflow_dispatch:
+    inputs:
+      test-only:
+        description: Run only the installed-wheel TEST gate
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,12 +27,21 @@ jobs:
     name: E2E TEST (required wheel gate)
     if: github.event_name != 'pull_request'
     uses: ./.github/workflows/required-test-e2e.yml
+    secrets:
+      KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
+      KSEF_TEST_CONTEXT_TYPE: ${{ secrets.KSEF_TEST_CONTEXT_TYPE }}
+      KSEF_TEST_CONTEXT_VALUE: ${{ secrets.KSEF_TEST_CONTEXT_VALUE }}
+      KSEF_TEST_XADES_CERT_CRT: ${{ secrets.KSEF_TEST_XADES_CERT_CRT }}
+      KSEF_TEST_XADES_CERT_CRT_B64: ${{ secrets.KSEF_TEST_XADES_CERT_CRT_B64 }}
+      KSEF_TEST_XADES_PRIVATE_KEY_PEM: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM }}
+      KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64 }}
+      KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD }}
     with:
       ref: ${{ github.sha }}
 
   e2e-demo-token:
     name: E2E DEMO (token)
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && inputs.test-only != true
     runs-on: ubuntu-latest
     environment: ksef-demo
     timeout-minutes: 50
@@ -101,7 +115,7 @@ jobs:
 
   e2e-demo-xades:
     name: E2E DEMO (xades)
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && inputs.test-only != true
     runs-on: ubuntu-latest
     environment: ksef-demo
     timeout-minutes: 40

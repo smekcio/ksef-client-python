@@ -51,6 +51,16 @@ XAdES wymaga dodatku `xml`. Użyj `XadesCredentials(XadesKeyPair(...))`,
 `XadesCredentials.from_store("certyfikat", password=...)`. Magazyn certyfikatów
 jest niezależny od CLI i keyringa. Hasła i klucze nigdy nie trafiają do `repr`.
 
+`TokenCredentials` przyjmuje także `public_key_id`, własny `public_certificate`,
+`method="rsa"` lub `"ec"`, `ec_output_format="java"` lub `"csharp"` oraz
+typowane `authorization_policy`. Automatyczny wybór certyfikatu uwzględnia algorytm
+i wskazany identyfikator klucza, więc nowszy certyfikat EC nie zastępuje klucza RSA.
+`XadesCredentials` obsługuje `authorization_policy_xml` i `auth_request_schema_version`.
+`connect()` oraz `from_auth_result()` przyjmują `refresh_margin_seconds` i `on_refresh`;
+w async callback może być zwykłą funkcją lub funkcją asynchroniczną.
+`online_session()`, `batch_session()` i `exports.start()` pozwalają jawnie przekazać
+`public_certificate` i `public_key_id` dla szyfrowania klucza sesji.
+
 ## Sesja online i wynik faktury
 
 ```python
@@ -102,6 +112,11 @@ with resumed:
 resumed.wait()
 ```
 
+Jeżeli upload wszystkich części już się zakończył, samo `client.resume_session(state)`
+wystarcza do zamknięcia sesji, odczytu jej statusu lub pobrania UPO. Archiwum jest
+wymagane wyłącznie do wysłania brakujących części. Równoległy upload odbiera wyniki
+wszystkich zadań przed zwróceniem błędu; potwierdzone sukcesy pozostają w stanie.
+
 Niepewnego wyniku zamknięcia SDK nie ponawia automatycznie. Odtworzony uchwyt
 pozwala sprawdzić status i oczekiwać na wynik. Decyzję o ewentualnym ponowieniu
 zmiany stanu podejmuje aplikacja po uzgodnieniu stanu z KSeF.
@@ -135,7 +150,8 @@ zaloguj się ponownie i odtwórz uchwyt z wcześniej zapisanego stanu w tym samy
 Stan eksportu wznawia transfer, stan faktury wznawia sprawdzanie jej wyniku;
 `resume_session()` odtwarza sesję do dalszej pracy.
 
-Fasada zawęża przekazaną konfigurację retry do GET/HEAD/OPTIONS i jawnie dozwolonego
+Fasada zawęża przekazaną konfigurację retry do GET/HEAD/OPTIONS, idempotentnych
+uploadów PUT i jawnie dozwolonego
 odczytu `/invoices/query/metadata`. Nie przejmuje szerokiej polityki ponawiania
 POST/DELETE z SDK. Oryginalne opcje pozostają niezmienione.
 
@@ -145,6 +161,22 @@ ale nie zastępuje autoryzacji. `OperationState.from_dict(...)` wczytuje wersję
 Stany są prywatnymi danymi aplikacji: nie są podpisane ani zaszyfrowane.
 `to_dict()`/`to_json()` to jawny eksport, który może zawierać token uwierzytelniania,
 klucze AES i podpisane URL-e. Nie loguj ani nie udostępniaj tych danych.
+
+Do utrwalania plikowego użyj uwierzytelnionego szyfrowania stanu zamiast jawnego JSON:
+
+```python
+from ksef_client import OperationState
+
+# state_key: 32 losowe bajty z magazynu sekretów aplikacji, przechowywane osobno.
+encrypted = operation.resume_state().to_encrypted_bytes(state_key)
+restored = OperationState.from_encrypted_bytes(encrypted, state_key)
+resumed = client.resume_operation(restored)
+```
+
+Format szyfrowany używa AES-256-GCM, losowego nonce oraz uwierzytelnionej wersji
+koperty. Zmieniony szyfrogram, błędny klucz i nieznana wersja są odrzucane.
+`from_json()` ogranicza rozmiar wejścia przed parsowaniem. Wersja schematu stanu to 1;
+nieznane wersje wymagają jawnej migracji przez aplikację i nie są automatycznie odtwarzane.
 
 Logowanie ma również uchwyt: `Ksef.begin_auth(...)` / `Ksef.resume_auth(state, ...)`.
 Użyj go jako kontekstu, aby zamknąć transport. `wait()` zwraca `AuthResult`;
@@ -188,10 +220,38 @@ print(result.files)
 ```
 
 `wait()` eksportu czeka tylko na gotową paczkę. `download_to()` obejmuje jednym
-terminem oczekiwanie i pobieranie. Cel musi być nowym katalogiem, oddzielnym od
+terminem oczekiwanie i pobieranie; domyślnie jest to **600 sekund**.
+Cel musi być nowym katalogiem, oddzielnym od
 `work_dir`. Wynik pojawia się dopiero po pełnej walidacji; istniejący katalog nie
 jest nadpisywany. `work_dir` jest przeznaczony dla jednego eksportu i jednego
 aktywnego procesu; blokada jest zwalniana również po zakończeniu procesu.
+
+`work_dir` przechowuje zaszyfrowane części i manifest umożliwiający wznowienie.
+Odszyfrowane archiwum powstaje wyłącznie w prywatnym katalogu tymczasowym i jest
+usuwane po sukcesie lub błędzie. Katalog wynikowy zawiera jawne faktury, zgodnie
+z żądaniem pobrania. Na POSIX istniejący `work_dir` musi mieć uprawnienia `0700`;
+na Windows aplikacja powinna wskazać katalog z prywatnymi ACL. Symlinki w przodkach
+(np. systemowy `/tmp`) są rozwiązywane; końcowy plik lub katalog będący dowiązaniem
+albo punktem ponownej analizy jest odrzucany.
+
+Transfer ma osobne limity dyskowe: domyślnie **64 MiB na odszyfrowaną część**
+i **1 GiB na całe archiwum**, z uwzględnieniem dopełnienia CBC dla zaszyfrowanych części.
+Rozmiary i ich sumy są sprawdzane przed żądaniami storage, a odczyty nie mogą
+przekroczyć rozmiaru zadeklarowanego przez API. Politykę można jawnie zmienić:
+
+```python
+from ksef_client import ExportLimits
+
+result = operation.download_to(
+    "output/export-2", work_dir="work/export-2",
+    limits=ExportLimits(max_part_bytes=64 * 1024**2, max_archive_bytes=1024**3),
+)
+```
+
+Uszkodzony checkpoint lub archiwum i błędy plikowe podczas transferu zgłaszają
+`KsefExportTransferError` z oryginalnym wyjątkiem w `__cause__`.
+Timeout zachowuje osobny typ `KsefOperationTimeout`; błędne argumenty wywołania
+pozostają `ValueError` lub `TypeError`.
 
 Transfer używa buforów 1 MiB. Pobieranie wznawia zaszyfrowaną część przez
 Range/If-Range z silnym ETag. Brak wsparcia, zmieniony ETag lub niepoprawna
@@ -207,6 +267,8 @@ ZIP obsługuje metody Stored i Deflate; BZIP2/LZMA są odrzucane przed dekompres
 Przed utworzeniem obiektów wpisów ZIP sprawdza rzeczywistą liczbę nagłówków katalogu
 centralnego (do 10 001, wliczając katalogi), jego rozmiar (do 16 MiB) i zgodność
 z licznikiem końca archiwum. Obsługuje także ZIP64 i archiwa z prefiksem.
+Odczyt tych rekordów nie korzysta z prywatnego parsera `zipfile`; archiwa wielodyskowe
+i rozszerzone rekordy końcowe ZIP64 są odrzucane przed utworzeniem `ZipFile`.
 TarGz ogranicza również nagłówki rozszerzone (1 MiB na nagłówek, 16 MiB łącznie),
 liczbę nagłówków i katalogów oraz rozmiar strumienia po dekompresji.
 Termin transferu jest sprawdzany po każdym odczycie sieciowym, przed złożeniem

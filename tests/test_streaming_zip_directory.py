@@ -3,8 +3,7 @@
 import io
 import struct
 import zipfile
-from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -82,23 +81,20 @@ def test_mismatched_entry_count_is_rejected(reported_count):
         )
 
 
-@pytest.mark.parametrize("record_signature", [b"PK\x05\x06", b"PK\x06\x06"])
 @pytest.mark.parametrize("prefix", [b"", b"executable stub"])
 @pytest.mark.parametrize("over_limit", [False, True])
-def test_zip64_directory_handles_both_stdlib_location_conventions(
-    monkeypatch, record_signature, prefix, over_limit
-):
-    data = zip_bytes(["folder/", "folder/invoice.xml"], zip64=True, prefix=prefix)
-    zip_module: Any = zipfile
-    end_record = zip_module._EndRecData(io.BytesIO(data))
-    end_record[9] = data.rfind(record_signature)
-    monkeypatch.setattr(zipfile, "_EndRecData", lambda source: end_record)
+def test_zip64_validation_does_not_depend_on_stdlib_private_parser(monkeypatch, prefix, over_limit):
+    data = zip_bytes(
+        ["folder/", "folder/invoice.xml"],
+        zip64=True,
+        prefix=prefix,
+        reported_count=1 if over_limit else None,
+    )
+    monkeypatch.setattr(zipfile, "_EndRecData", Mock(side_effect=AssertionError("private parser")))
     monkeypatch.setattr(
         "ksef_client.streaming_export.EXPORT_MAX_ARCHIVE_ENTRIES", 1 if over_limit else 2
     )
     if over_limit:
-        # Underreporting must still be rejected for either stdlib convention.
-        end_record[4] = 1
         with pytest.raises(KsefExportTransferError, match="safety limits"):
             validate_zip_directory(io.BytesIO(data))
     else:
@@ -118,5 +114,49 @@ def test_invalid_directory_is_rejected_before_parsing(corruption):
         data[central] = 0
     else:
         struct.pack_into("<H", data, central + 28, 65535)
+    with pytest.raises(KsefExportTransferError):
+        validate_zip_directory(io.BytesIO(data))
+
+
+@pytest.mark.parametrize(
+    "corruption", ["split", "record-size", "record-signature", "locator-offset"]
+)
+def test_zip64_rejects_unsupported_or_inconsistent_end_records(corruption):
+    data = bytearray(zip_bytes(["invoice.xml"], zip64=True))
+    locator = data.rfind(b"PK\x06\x07")
+    record = data.rfind(b"PK\x06\x06")
+    if corruption == "split":
+        struct.pack_into("<L", data, locator + 4, 1)
+    elif corruption == "record-size":
+        struct.pack_into("<Q", data, record + 4, 45)
+    elif corruption == "record-signature":
+        data[record] = 0
+    else:
+        struct.pack_into("<Q", data, locator + 8, len(data) + 1)
+    with pytest.raises(KsefExportTransferError):
+        validate_zip_directory(io.BytesIO(data))
+
+
+def test_zip64_rejects_truncated_record():
+    data = struct.pack("<4sLQL", b"PK\x06\x07", 0, 0, 1)
+    data += struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 0, 0, 0, 0, 0)
+    with pytest.raises(KsefExportTransferError, match="Truncated ZIP64"):
+        validate_zip_directory(io.BytesIO(data))
+
+
+@pytest.mark.parametrize(
+    "corruption", ["comment", "split", "overreported-count", "directory-budget"]
+)
+def test_zip_rejects_bad_end_records_and_directory_budgets(corruption, monkeypatch):
+    data = bytearray(zip_bytes(["invoice.xml"]))
+    end = data.rfind(b"PK\x05\x06")
+    if corruption == "comment":
+        data.extend(b"trailing data")
+    elif corruption == "split":
+        struct.pack_into("<H", data, end + 4, 1)
+    elif corruption == "overreported-count":
+        struct.pack_into("<HH", data, end + 8, 10002, 10002)
+    else:
+        monkeypatch.setattr("ksef_client.streaming_export.BUFFER_SIZE", 1)
     with pytest.raises(KsefExportTransferError):
         validate_zip_directory(io.BytesIO(data))

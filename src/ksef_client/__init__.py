@@ -81,12 +81,14 @@ from .retry import RetryConfig
 from .streaming_export import (
     AsyncExportOperation,
     ExportFiles,
+    ExportLimits,
     ExportOperation,
     KsefExportTransferError,
 )
 from .token_manager import AsyncTokenManager, TokenManager, TokenManagerError
 
 __all__ = [
+    "ExportLimits",
     "Ksef", "AsyncKsef", "TokenCredentials", "XadesCredentials",
     "Operation", "AsyncOperation", "OperationState", "KsefOperationError", "KsefOperationTimeout",
     "ExportFiles", "ExportOperation", "AsyncExportOperation", "KsefExportTransferError",

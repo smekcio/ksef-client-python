@@ -30,13 +30,41 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from . import models as m
 from .exceptions import ErrorCode, KsefError
 from .http import _validate_presigned_url_security, _wire_timeout
-from .operations import AsyncOperation, KsefOperationTimeout, Operation, OperationState
+from .operations import (
+    AsyncOperation,
+    KsefOperationTimeout,
+    Operation,
+    OperationState,
+    validate_wait,
+)
 from .rate_limiting import CancellationToken, KsefRateLimitWaitTimeout
 from .request_control import current_request_control, request_control, wait_seconds
 from .utils.zip_utils import EXPORT_MAX_ARCHIVE_ENTRIES, _sanitize_archive_entry_name
 
 BUFFER_SIZE = 1024 * 1024
 TAR_MAX_METADATA = 16 * BUFFER_SIZE
+
+
+@dataclass(frozen=True)
+class ExportLimits:
+    """Disk transfer policy, enforced before downloading any package bytes."""
+
+    max_part_bytes: int = 64 * BUFFER_SIZE
+    max_archive_bytes: int = 1024 * BUFFER_SIZE
+
+    def __post_init__(self) -> None:
+        if any(
+            type(value) is not int or value <= 0
+            for value in (self.max_part_bytes, self.max_archive_bytes)
+        ):
+            raise ValueError("Export limits must be positive integer byte counts")
+
+
+DEFAULT_EXPORT_LIMITS = ExportLimits()
+ZIP_EOCD = struct.Struct("<4s4H2LH")
+ZIP64_EOCD = struct.Struct("<4sQ2H2L4Q")
+ZIP64_LOCATOR = struct.Struct("<4sLQL")
+ZIP_CENTRAL_HEADER_BYTES = 46
 
 
 class _ExportTarInfo(tarfile.TarInfo):
@@ -107,15 +135,17 @@ def check_control() -> None:
 
 
 def safe_path(path: Path) -> Path:
-    absolute = path.absolute()
-    for item in (absolute, *absolute.parents):
+    # The caller may intentionally use a symlinked home or /tmp on macOS.
+    # Canonicalize ancestors, but never follow the final export file/directory.
+    absolute = Path(os.path.abspath(path))
+    for item in (absolute,):
         if item.is_symlink() or (
             item.exists() and getattr(item.lstat(), "st_file_attributes", 0) & 1024
         ):
             raise KsefExportTransferError(
                 "Links and reparse points are not allowed in export paths"
             )
-    return absolute
+    return absolute.parent.resolve() / absolute.name
 
 
 @contextmanager
@@ -168,7 +198,9 @@ def digest(path: Path) -> tuple[int, str]:
     return size, base64.b64encode(sha.digest()).decode()
 
 
-def part_identity(part: m.InvoicePackagePart) -> dict[str, Any]:
+def part_identity(
+    part: m.InvoicePackagePart, limits: ExportLimits = DEFAULT_EXPORT_LIMITS
+) -> dict[str, Any]:
     if (
         type(part.ordinal_number) is not int
         or not 1 <= part.ordinal_number <= 10001
@@ -179,6 +211,12 @@ def part_identity(part: m.InvoicePackagePart) -> dict[str, Any]:
         or part.part_size <= 0
     ):
         raise KsefExportTransferError("Invalid export part descriptor")
+    if (
+        part.part_size > limits.max_part_bytes
+        or part.encrypted_part_size > limits.max_part_bytes + 16
+        or part.encrypted_part_size != (part.part_size // 16 + 1) * 16
+    ):
+        raise KsefExportTransferError("Export part size exceeds transfer limits or CBC size")
     for value in (part.encrypted_part_hash, part.part_hash):
         try:
             if len(base64.b64decode(value, validate=True)) != 32:
@@ -194,7 +232,9 @@ def part_identity(part: m.InvoicePackagePart) -> dict[str, Any]:
     }
 
 
-def package_identity(package: m.InvoicePackage) -> list[dict[str, Any]]:
+def package_identity(
+    package: m.InvoicePackage, limits: ExportLimits = DEFAULT_EXPORT_LIMITS
+) -> list[dict[str, Any]]:
     if len(package.parts) > 10001:
         raise KsefExportTransferError("Too many export parts")
     parts = sorted(package.parts, key=lambda part: part.ordinal_number)
@@ -202,7 +242,16 @@ def package_identity(package: m.InvoicePackage) -> list[dict[str, Any]]:
         raise KsefExportTransferError("Export part sequence is invalid")
     if package.invoice_count and not parts:
         raise KsefExportTransferError("Nonempty export has no parts")
-    return [part_identity(part) for part in parts]
+    identities = [part_identity(part, limits) for part in parts]
+    if (
+        type(package.size) is not int
+        or not 0 <= package.size <= limits.max_archive_bytes
+        or sum(part.part_size for part in parts) != package.size
+        or sum(part.encrypted_part_size for part in parts)
+        > limits.max_archive_bytes + 16 * len(parts)
+    ):
+        raise KsefExportTransferError("Export package size exceeds transfer limits or descriptor")
+    return identities
 
 
 @dataclass(frozen=True)
@@ -257,11 +306,15 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
             response.close()
 
     def _download_part(
-        self, part: m.InvoicePackagePart, directory: Path, manifest: dict[str, Any]
+        self,
+        part: m.InvoicePackagePart,
+        directory: Path,
+        manifest: dict[str, Any],
+        limits: ExportLimits = DEFAULT_EXPORT_LIMITS,
     ) -> None:
         path = safe_path(directory / f"part-{part.ordinal_number}.bin")
         expected = (part.encrypted_part_size, part.encrypted_part_hash)
-        if path.exists() and digest(path) == expected:
+        if path.exists() and path.stat().st_size == expected[0] and digest(path) == expected:
             return
         key = str(part.ordinal_number)
         saved = manifest["progress"].get(key, {})
@@ -286,7 +339,9 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
                             raise KsefExportTransferError("Export is no longer available")
                         candidates = {p.ordinal_number: p for p in fresh.package.parts}
                         replacement = candidates.get(part.ordinal_number)
-                        if replacement is None or part_identity(replacement) != part_identity(part):
+                        if replacement is None or part_identity(
+                            replacement, limits
+                        ) != part_identity(part, limits):
                             raise KsefExportTransferError(
                                 "Export part changed while refreshing its URL"
                             )
@@ -383,36 +438,53 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
         destination: str | Path,
         *,
         work_dir: str | Path,
-        timeout: float = 120,
+        timeout: float = 600,
         poll_interval: float = 2,
+        limits: ExportLimits = DEFAULT_EXPORT_LIMITS,
     ) -> ExportFiles:
+        validate_wait(timeout, poll_interval)
+        if not isinstance(limits, ExportLimits):
+            raise TypeError("limits must be ExportLimits")
         try:
             with request_control(timeout_seconds=timeout):
                 return self._download_to(
-                    destination, work_dir=work_dir, timeout=timeout, poll_interval=poll_interval
+                    destination,
+                    work_dir=work_dir,
+                    timeout=timeout,
+                    poll_interval=poll_interval,
+                    limits=limits,
                 )
         except KsefRateLimitWaitTimeout:
             raise KsefOperationTimeout("timeout", self.resume_state(), self._last_status) from None
+        except KsefOperationTimeout:
+            raise
+        except (OSError, ValueError, zipfile.BadZipFile, tarfile.TarError, EOFError) as exc:
+            raise KsefExportTransferError(
+                f"Export transfer failed ({type(exc).__name__}); inspect the chained cause"
+            ) from exc
 
     def _download_to(
         self,
         destination: str | Path,
         *,
         work_dir: str | Path,
-        timeout: float = 120,
+        timeout: float = 600,
         poll_interval: float = 2,
+        limits: ExportLimits = DEFAULT_EXPORT_LIMITS,
     ) -> ExportFiles:
         status = self.wait(timeout, poll_interval)
         if status.package is None:
             raise KsefExportTransferError("Successful export has no package")
         package = status.package
-        parts = package_identity(package)
+        parts = package_identity(package, limits)
         target, work = safe_path(Path(destination)), safe_path(Path(work_dir))
         if target.exists() or target == work or target in work.parents or work in target.parents:
             raise KsefExportTransferError(
                 "Destination must be new and separate from the working directory"
             )
         work.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name == "posix" and stat.S_IMODE(work.stat().st_mode) & 0o077:
+            raise KsefExportTransferError("Working directory must be private (mode 0700)")
         target.parent.mkdir(parents=True, exist_ok=True)
         identity = {
             "version": 1,
@@ -424,6 +496,8 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
             "key_fingerprint": hashlib.sha256(self._key + self._iv).hexdigest(),
         }
         with directory_lock(work):
+            legacy_archive = safe_path(work / "archive.bin")
+            legacy_archive.unlink(missing_ok=True)
             checkpoint = safe_path(work / "progress.json")
             if checkpoint.exists():
                 if checkpoint.stat().st_size > 4 * 1024 * 1024:
@@ -441,16 +515,18 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
                 manifest = {"identity": identity, "progress": {}}
                 atomic_json(checkpoint, manifest)
             for part in sorted(package.parts, key=lambda part: part.ordinal_number):
-                self._download_part(part, work, manifest)
-            archive = safe_path(work / "archive.bin")
-            with archive.open("wb") as output:
-                for part in sorted(package.parts, key=lambda part: part.ordinal_number):
-                    decrypt_part(
-                        work / f"part-{part.ordinal_number}.bin", output, part, self._key, self._iv
-                    )
-            if archive.stat().st_size != package.size:
-                raise KsefExportTransferError("Archive size disagrees with package descriptor")
+                self._download_part(part, work, manifest, limits)
             with tempfile.TemporaryDirectory(dir=target.parent, prefix=".ksef-export-") as staging:
+                archive = Path(staging) / "archive.bin"
+                with archive.open("wb") as output:
+                    for part in sorted(package.parts, key=lambda part: part.ordinal_number):
+                        decrypt_part(
+                            work / f"part-{part.ordinal_number}.bin",
+                            output,
+                            part,
+                            self._key,
+                            self._iv,
+                        )
                 stage = Path(staging) / "result"
                 stage.mkdir(mode=0o700)
                 files = (
@@ -508,13 +584,21 @@ class AsyncExportOperation(AsyncOperation[m.InvoiceExportStatusResponse]):
         destination: str | Path,
         *,
         work_dir: str | Path,
-        timeout: float = 120,
+        timeout: float = 600,
         poll_interval: float = 2,
+        limits: ExportLimits = DEFAULT_EXPORT_LIMITS,
     ) -> ExportFiles:
+        validate_wait(timeout, poll_interval)
+        if not isinstance(limits, ExportLimits):
+            raise TypeError("limits must be ExportLimits")
         try:
             with request_control(timeout_seconds=timeout):
                 return await self._download_to(
-                    destination, work_dir=work_dir, timeout=timeout, poll_interval=poll_interval
+                    destination,
+                    work_dir=work_dir,
+                    timeout=timeout,
+                    poll_interval=poll_interval,
+                    limits=limits,
                 )
         except KsefRateLimitWaitTimeout:
             raise KsefOperationTimeout("timeout", self.resume_state(), self._last_status) from None
@@ -524,8 +608,9 @@ class AsyncExportOperation(AsyncOperation[m.InvoiceExportStatusResponse]):
         destination: str | Path,
         *,
         work_dir: str | Path,
-        timeout: float = 120,
+        timeout: float = 600,
         poll_interval: float = 2,
+        limits: ExportLimits = DEFAULT_EXPORT_LIMITS,
     ) -> ExportFiles:
         from .http import BaseHttpClient
 
@@ -566,7 +651,11 @@ class AsyncExportOperation(AsyncOperation[m.InvoiceExportStatusResponse]):
                 operation._result, operation._last_status, operation._done = status, status, True
                 with request_control(cancellation=cancelled):
                     return operation.download_to(
-                        destination, work_dir=work_dir, timeout=timeout, poll_interval=poll_interval
+                        destination,
+                        work_dir=work_dir,
+                        timeout=timeout,
+                        poll_interval=poll_interval,
+                        limits=limits,
                     )
             finally:
                 http.close()
@@ -615,43 +704,71 @@ def decrypt_part(
         raise KsefExportTransferError("Decrypted export part failed integrity verification")
 
 
+def _zip_directory_location(source: BinaryIO) -> tuple[int, int, int]:
+    """Read bounded public ZIP records, independently of zipfile's private API."""
+    source.seek(0, os.SEEK_END)
+    size = source.tell()
+    tail_size = min(size, ZIP_EOCD.size + 65535)
+    source.seek(size - tail_size)
+    tail = source.read(tail_size)
+    offset = tail.rfind(b"PK\x05\x06")
+    if offset < 0 or len(tail) - offset < ZIP_EOCD.size:
+        raise KsefExportTransferError("Missing ZIP end record")
+    record = ZIP_EOCD.unpack_from(tail, offset)
+    if offset + ZIP_EOCD.size + record[7] != len(tail):
+        raise KsefExportTransferError("Invalid ZIP comment length or trailing data")
+    end_position = size - tail_size + offset
+    entries, directory_size, reported_offset = record[4:7]
+    disk, directory_disk, entries_on_disk = record[1:4]
+    if end_position >= ZIP64_LOCATOR.size:
+        source.seek(end_position - ZIP64_LOCATOR.size)
+        locator = ZIP64_LOCATOR.unpack(source.read(ZIP64_LOCATOR.size))
+        if locator[0] == b"PK\x06\x07":
+            if locator[1] != 0 or locator[3] != 1:
+                raise KsefExportTransferError("Split ZIP64 archives are not supported")
+            end_position -= ZIP64_LOCATOR.size + ZIP64_EOCD.size
+            if end_position < 0:
+                raise KsefExportTransferError("Truncated ZIP64 end record")
+            source.seek(end_position)
+            extended = ZIP64_EOCD.unpack(source.read(ZIP64_EOCD.size))
+            if (
+                extended[0] != b"PK\x06\x06"
+                or extended[1] != ZIP64_EOCD.size - 12
+                or extended[8] + extended[9] != locator[2]
+                or locator[2] > end_position
+            ):
+                raise KsefExportTransferError("Invalid or unsupported ZIP64 end record")
+            disk, directory_disk, entries_on_disk, entries = extended[4:8]
+            directory_size, reported_offset = extended[8:10]
+    start = end_position - directory_size
+    if disk != 0 or directory_disk != 0 or entries_on_disk != entries:
+        raise KsefExportTransferError("Split ZIP archives are not supported")
+    if start < 0 or reported_offset > start:
+        raise KsefExportTransferError("Invalid ZIP directory offset")
+    return start, directory_size, entries
+
+
 def validate_zip_directory(source: BinaryIO) -> None:
     """Count central headers on disk before ZipFile allocates its entry objects."""
-    zip_module: Any = zipfile
-    end_record = zip_module._EndRecData(source)
-    if (
-        end_record is None
-        or end_record[4] > EXPORT_MAX_ARCHIVE_ENTRIES
-        or end_record[5] > 16 * 1024 * 1024
-    ):
+    start, remaining, declared_count = _zip_directory_location(source)
+    if declared_count > EXPORT_MAX_ARCHIVE_ENTRIES or remaining > 16 * BUFFER_SIZE:
         raise KsefExportTransferError("ZIP directory exceeds safety limits")
-    remaining = end_record[5]
-    # Older zipfile versions report the ordinary EOCD position for ZIP64;
-    # newer patch releases report the ZIP64 EOCD position instead. Inspect the
-    # actual record so both layouts work without Python-version assumptions.
-    start = end_record[9] - remaining
-    if end_record[0] == b"PK\x06\x06":
-        source.seek(end_record[9])
-        if source.read(4) == b"PK\x05\x06":
-            start -= 56 + 20
-    if start < 0:
-        raise KsefExportTransferError("Invalid ZIP directory offset")
     source.seek(start)
     count = 0
     while remaining:
         check_control()
-        header = source.read(min(46, remaining))
-        if len(header) != 46 or header[:4] != b"PK\x01\x02":
+        header = source.read(min(ZIP_CENTRAL_HEADER_BYTES, remaining))
+        if len(header) != ZIP_CENTRAL_HEADER_BYTES or header[:4] != b"PK\x01\x02":
             raise KsefExportTransferError("Invalid ZIP directory header")
-        entry_size = 46 + sum(struct.unpack_from("<HHH", header, 28))
+        entry_size = ZIP_CENTRAL_HEADER_BYTES + sum(struct.unpack_from("<HHH", header, 28))
         if entry_size > remaining:
             raise KsefExportTransferError("Truncated ZIP directory entry")
         count += 1
         if count > EXPORT_MAX_ARCHIVE_ENTRIES:
             raise KsefExportTransferError("ZIP directory exceeds safety limits")
-        source.seek(entry_size - 46, os.SEEK_CUR)
+        source.seek(entry_size - ZIP_CENTRAL_HEADER_BYTES, os.SEEK_CUR)
         remaining -= entry_size
-    if count != end_record[4]:
+    if count != declared_count:
         raise KsefExportTransferError("ZIP directory entry count disagrees with end record")
 
 

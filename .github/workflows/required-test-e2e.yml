@@ -10,6 +10,24 @@ on:
         type: string
         default: ""
 
+    secrets:
+      KSEF_TEST_TOKEN:
+        required: true
+      KSEF_TEST_CONTEXT_TYPE:
+        required: true
+      KSEF_TEST_CONTEXT_VALUE:
+        required: true
+      KSEF_TEST_XADES_CERT_CRT:
+        required: false
+      KSEF_TEST_XADES_CERT_CRT_B64:
+        required: false
+      KSEF_TEST_XADES_PRIVATE_KEY_PEM:
+        required: false
+      KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64:
+        required: false
+      KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD:
+        required: false
+
 permissions:
   contents: read
 

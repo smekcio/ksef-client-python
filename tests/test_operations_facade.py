@@ -304,7 +304,7 @@ def test_facade_cannot_inherit_mutation_retries_from_sdk_options():
         options=configured, context_type="nip", context_value="DUMMY"
     )
     assert guarded.retry is not None and configured.retry is not None
-    assert guarded.retry.retryable_methods == frozenset({"GET"})
+    assert guarded.retry.retryable_methods == frozenset({"GET", "PUT"})
     assert guarded.retry.retryable_post_paths == frozenset({"/invoices/query/metadata"})
     assert "DELETE" in configured.retry.retryable_methods
 
