@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ksef-client"
-version = "0.20.0"
+version = "0.21.0"
 description = "Typed sync/async Python SDK and CLI for Poland's KSeF e-invoicing API v2"
 readme = "README.md"
 requires-python = ">=3.10"
