@@ -233,6 +233,8 @@ z żądaniem pobrania. Na POSIX istniejący `work_dir` musi mieć uprawnienia `0
 na Windows aplikacja powinna wskazać katalog z prywatnymi ACL. Symlinki w przodkach
 (np. systemowy `/tmp`) są rozwiązywane; końcowy plik lub katalog będący dowiązaniem
 albo punktem ponownej analizy jest odrzucany.
+Pliki robocze muszą być zwykłymi plikami z jednym dowiązaniem: FIFO, urządzenia
+i twarde dowiązania są odrzucane przed odczytem lub zapisem.
 
 Transfer ma osobne limity dyskowe: domyślnie **64 MiB na odszyfrowaną część**
 i **1 GiB na całe archiwum**, z uwzględnieniem dopełnienia CBC dla zaszyfrowanych części.

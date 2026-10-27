@@ -366,3 +366,41 @@ def test_async_worker_initialization_errors_follow_the_transfer_contract(tmp_pat
         assert isinstance(caught.value.__cause__, OSError)
     finally:
         op.owner.api.http_client.close()
+
+
+@pytest.mark.parametrize("entry", ["part-1.bin", "progress.json", ".lock", "archive.bin"])
+def test_hard_linked_work_files_cannot_modify_other_files(tmp_path, storage, entry):
+    op = operation(storage, make_package(size=100)[3])
+    work = tmp_path / "work"
+    work.mkdir(mode=0o700)
+    victim = tmp_path / "other-file"
+    victim.write_bytes(b"must remain unchanged")
+    os.link(victim, work / entry)
+    try:
+        with pytest.raises(KsefExportTransferError, match="hard links"):
+            op.download_to(tmp_path / "result", work_dir=work)
+        assert victim.read_bytes() == b"must remain unchanged"
+        assert storage.requests == []
+    finally:
+        op.owner.api.http_client.close()
+
+
+def test_work_directories_are_not_accepted_as_regular_files(tmp_path):
+    from ksef_client.streaming_export import safe_file
+
+    with pytest.raises(KsefExportTransferError, match="regular files"):
+        safe_file(tmp_path)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO support required")
+def test_fifo_checkpoint_is_rejected_without_blocking(tmp_path, storage):
+    work = tmp_path / "work"
+    work.mkdir(mode=0o700)
+    getattr(os, "mkfifo")(work / "progress.json")
+    op = operation(storage, make_package(size=100)[3])
+    try:
+        with pytest.raises(KsefExportTransferError, match="regular files"):
+            op.download_to(tmp_path / "result", work_dir=work)
+        assert storage.requests == []
+    finally:
+        op.owner.api.http_client.close()

@@ -152,10 +152,19 @@ def safe_path(path: Path) -> Path:
     return absolute.parent.resolve() / absolute.name
 
 
+def safe_file(path: Path) -> Path:
+    absolute = safe_path(path)
+    if absolute.exists():
+        info = absolute.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise KsefExportTransferError("Export files must be regular files without hard links")
+    return absolute
+
+
 @contextmanager
 def directory_lock(directory: Path) -> Iterator[None]:
     """OS lock is released even if the process dies; the marker contains no secrets."""
-    path = safe_path(directory / ".lock")
+    path = safe_file(directory / ".lock")
     with path.open("a+b") as stream:
         stream.seek(0)
         if os.name == "nt":
@@ -180,7 +189,7 @@ def directory_lock(directory: Path) -> Iterator[None]:
 
 
 def atomic_json(path: Path, value: dict[str, Any]) -> None:
-    safe_path(path)
+    safe_file(path)
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=".checkpoint-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as output:
@@ -194,7 +203,7 @@ def atomic_json(path: Path, value: dict[str, Any]) -> None:
 
 def digest(path: Path) -> tuple[int, str]:
     size, sha = 0, hashlib.sha256()
-    with safe_path(path).open("rb") as source:
+    with safe_file(path).open("rb") as source:
         while chunk := source.read(BUFFER_SIZE):
             check_control()
             size += len(chunk)
@@ -326,7 +335,7 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
         manifest: dict[str, Any],
         limits: ExportLimits = DEFAULT_EXPORT_LIMITS,
     ) -> None:
-        path = safe_path(directory / f"part-{part.ordinal_number}.bin")
+        path = safe_file(directory / f"part-{part.ordinal_number}.bin")
         expected = (part.encrypted_part_size, part.encrypted_part_hash)
         if path.exists() and path.stat().st_size == expected[0] and digest(path) == expected:
             return
@@ -510,9 +519,9 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
             "key_fingerprint": hashlib.sha256(self._key + self._iv).hexdigest(),
         }
         with directory_lock(work):
-            legacy_archive = safe_path(work / "archive.bin")
+            legacy_archive = safe_file(work / "archive.bin")
             legacy_archive.unlink(missing_ok=True)
-            checkpoint = safe_path(work / "progress.json")
+            checkpoint = safe_file(work / "progress.json")
             if checkpoint.exists():
                 if checkpoint.stat().st_size > 4 * 1024 * 1024:
                     raise KsefExportTransferError("Transfer checkpoint exceeds size limit")
@@ -532,7 +541,7 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
                 self._download_part(part, work, manifest, limits)
             with tempfile.TemporaryDirectory(dir=target.parent, prefix=".ksef-export-") as staging:
                 archive = Path(staging) / "archive.bin"
-                with archive.open("wb") as output:
+                with archive.open("xb") as output:
                     for part in sorted(package.parts, key=lambda part: part.ordinal_number):
                         decrypt_part(
                             work / f"part-{part.ordinal_number}.bin",
@@ -734,7 +743,7 @@ def decrypt_part(
         output.write(chunk)
 
     try:
-        with safe_path(path).open("rb") as source:
+        with safe_file(path).open("rb") as source:
             while chunk := source.read(BUFFER_SIZE):
                 check_control()
                 write(unpadder.update(decryptor.update(chunk)))
