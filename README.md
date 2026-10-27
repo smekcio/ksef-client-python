@@ -11,10 +11,32 @@ Pakiet jest publikowany na PyPI jako **`ksef-client`** i obsługuje aktualny kon
 Biblioteka pomaga integrować aplikacje napisane w Pythonie z KSeF bez ręcznego
 składania żądań HTTP, szyfrowania, podpisów, obsługi sesji i pobierania paczek faktur.
 
+**Od logowania do numeru KSeF w jednym przepływie.** Klient **`Ksef`** dobiera
+certyfikaty, szyfruje wysyłkę i odświeża tokeny. Ty przekazujesz XML i czekasz na wynik:
+
+```python
+from ksef_client import Ksef, TokenCredentials
+
+with Ksef.connect(profile="firma", credentials=TokenCredentials(token)) as client:
+    with client.online_session() as session:
+        invoice = session.send_invoice(xml_bytes).wait()
+    session.wait()
+    print(invoice.ksef_number)
+```
+
+To skrót dla istniejącego profilu; **[kompletny przykład bez CLI i profilu](#szybki-start-sdk)**
+znajdziesz poniżej. `AsyncKsef` udostępnia ten sam przepływ z `await`.
+Duże eksporty pobierzesz na dysk ze wznowieniem od bajtu i weryfikacją hashy,
+bez ładowania całej paczki do pamięci.
+[Poznaj fasadę, wznowienie i eksport](docs/facade.md).
+
 Najważniejsze cechy:
 
+- **prosty klient `Ksef` / `AsyncKsef`** — logowanie, sesje i wynik faktury przez `.wait()`,
+- **eksport na dysk ze wznowieniem** — pobieranie, weryfikacja, odszyfrowanie i rozpakowanie,
+- **stan operacji do wznowienia** — kontynuacja oczekiwania lub transferu po przerwaniu,
 - **typowane modele** `ksef_client.models` dla publicznych żądań i odpowiedzi SDK,
-- **klient synchroniczny i asynchroniczny**: `KsefClient` oraz `AsyncKsefClient`,
+- **pełny dostęp do API** przez `client.api` oraz samodzielne `KsefClient` / `AsyncKsefClient`,
 - **CLI `ksef`** do konfiguracji, diagnostyki, uwierzytelniania, wysyłki i pobierania faktur,
 - **profile i magazyn certyfikatów w SDK** — te same dane co CLI, bez zależności od `typer`/`keyring`,
 - **kompletne pobieranie metadanych faktur** — `search_invoice_metadata()` w wersji sync i async,
@@ -93,6 +115,9 @@ Dodatki opcjonalne:
 Po instalacji samego `ksef-client` SDK jest gotowe do użycia w kodzie. Jeżeli uruchomisz wtedy
 komendę `ksef`, otrzymasz instrukcję doinstalowania dodatku `cli`.
 
+Przykłady opisują bieżący kod repozytorium. Jeśli zainstalowana wersja PyPI nie
+zawiera jeszcze `Ksef`, zainstaluj checkout repozytorium przez `pip install -e .`.
+
 ## 🚀 Szybki start: CLI
 
 CLI jest najkrótszą ścieżką do sprawdzenia profilu, uwierzytelnienia i podstawowych operacji bez pisania kodu.
@@ -143,9 +168,56 @@ Komendy Latarni są publiczne i działają bez logowania. Jeżeli nie masz aktyw
 
 Pełna specyfikacja CLI: [`docs/cli/README.md`](docs/cli/README.md).
 
+<a id="szybki-start-sdk"></a>
+
 ## 🧩 Szybki start: SDK
 
-Najkrótsza droga: uwierzytelnij się raz, a `AuthenticatedClient` sam wstrzykuje
+Do nowej integracji użyj `Ksef`. Wystarczy podstawowe `pip install ksef-client`;
+CLI i profil nie są wymagane. Ustaw zmienne środowiskowe `KSEF_NIP` oraz `KSEF_TOKEN`
+dla środowiska **TEST** i przygotuj poprawny plik `invoice.xml` w formacie FA(3).
+Poniższy kod wysyła tę fakturę do TEST:
+
+```python
+import os
+from pathlib import Path
+from ksef_client import Ksef, KsefClientOptions, KsefEnvironment, TokenCredentials
+
+with Ksef.connect(
+    options=KsefClientOptions(base_url=KsefEnvironment.TEST.value),
+    context_type="nip",
+    context_value=os.environ["KSEF_NIP"],
+    credentials=TokenCredentials(os.environ["KSEF_TOKEN"]),
+) as client:
+    with client.online_session() as session:
+        invoice = session.send_invoice(Path("invoice.xml").read_bytes()).wait(timeout=120)
+    session.wait(timeout=120)
+    upo = session.upo().wait(timeout=120)
+    print(invoice.ksef_number)
+    print(f"Liczba stron UPO: {len(upo.pages)}")
+```
+
+Wyjście z `with client.online_session()` zamyka sesję; `.wait()` czeka na jej wynik.
+Nie musisz samodzielnie pobierać certyfikatów publicznych, szyfrować XML ani pisać
+pętli sprawdzającej status. Odrzucenie faktury zgłasza wyjątek.
+
+Masz już profil? Zastąp `options`, `context_type` i `context_value` przez
+`profile="firma"` — [konfiguracja profili](docs/profiles.md).
+
+| Chcesz… | Użyj |
+| --- | --- |
+| Wysłać paczkę faktur | `client.batch_session(archive_bytes)` i `session.upload_parts()` |
+| Pobrać XML faktury | `client.invoices.download(ksef_number)` |
+| Pobrać eksport na dysk | `client.exports.start(filters).download_to(destination, work_dir=work)` |
+| Kontynuować po przerwaniu | `operation.resume_state()` i `client.resume_operation(state)` |
+| Korzystać z asyncio | `AsyncKsef` oraz `await` dla operacji HTTP i `.wait()` |
+| Wywołać dowolny endpoint SDK | `client.api`, np. `client.api.limits.get_context_limits()` |
+
+[Pełny przewodnik: XAdES, batch, eksport, timeout i wznowienie](docs/facade.md).
+Przy wznowieniu stan przechowuje aplikacja; może on zawierać klucze i tokeny.
+
+### Bezpośredni dostęp do API
+
+Przy bezpośrednim użyciu SDK `AuthenticatedClient` sam wstrzykuje
 i odświeża token dostępowy (60 s przed wygaśnięciem i po 401). Retry HTTP włączasz
 jednym polem konfiguracji:
 
@@ -203,13 +275,14 @@ Szczegóły: [token-manager.md](docs/token-manager.md), [retry.md](docs/retry.md
 
 ### 🔎 Odczyt faktury FA(3) (XML → model)
 
-Dokument pobrany z KSeF można odczytać do tego samego modelu, którego używają buildery:
+Dokument pobrany z KSeF można odczytać do tego samego modelu, którego używają buildery.
+Poniższy fragment używa klienta `Ksef` z głównego przykładu szybkiego startu:
 
 ```python
 from ksef_client.documents.fa3 import FA3Invoice, parse_invoice_xml
 
-content = client.invoices.get_invoice_bytes(ksef_number)
-invoice = parse_invoice_xml(content.content)
+xml = client.invoices.download(ksef_number)  # klient Ksef z szybkiego startu
+invoice = parse_invoice_xml(xml)
 
 print(invoice.invoice_number, invoice.total_gross)
 for line in invoice.lines:
@@ -217,7 +290,7 @@ for line in invoice.lines:
 for warning in invoice.warnings:  # elementy spoza modelu — nigdy po cichu
     print(warning.message)
 
-assert FA3Invoice.from_xml(content.content).to_xml()  # roundtrip
+assert FA3Invoice.from_xml(xml).to_xml()  # roundtrip
 ```
 
 Szczegóły i granice (zaliczki, marża, daty): [`docs/fa3-parsing.md`](docs/fa3-parsing.md).
@@ -299,33 +372,21 @@ Bez dodatku `cli` i bez nowych zależności. Opis: [`docs/profiles.md`](docs/pro
 
 ### 📤 Wysyłka faktury w sesji online
 
-Do wysyłki faktur używaj scenariusza `OnlineSessionWorkflow`. Aktualny model pracy to:
-`open_session() -> session.send_invoice() -> session.close()`.
+Z klientem `Ksef` wysyłka i oczekiwanie na UPO wyglądają tak:
 
-Poniższy fragment zakłada, że jesteś wewnątrz bloku `with ... as client:` z szybkiego startu.
+Poniższy fragment zakłada, że jesteś wewnątrz bloku `with Ksef.connect(...) as client:`
+z głównego przykładu szybkiego startu.
 
 ```python
 from pathlib import Path
 
-from ksef_client import models as m
-from ksef_client.services import OnlineSessionWorkflow
-
 invoice_xml = Path("./fa.xml").read_bytes()
 
-symmetric_cert_pem = client.security.get_public_key_certificate_pem(
-    m.PublicKeyCertificateUsage.SYMMETRICKEYENCRYPTION,
-)
-
-workflow = OnlineSessionWorkflow(client.sessions)
-session = workflow.open_session(
-    form_code=m.FormCode(system_code="FA (3)", schema_version="1-0E", value="FA"),
-    public_certificate=symmetric_cert_pem,
-)
-
-send_result = session.send_invoice(invoice_xml)
-session.close()
-
-print(send_result.reference_number)
+with client.online_session() as session:
+    invoice = session.send_invoice(invoice_xml).wait()
+session.wait()
+upo = session.upo().wait()
+print(invoice.ksef_number, len(upo.pages))
 ```
 
 Pełne, uruchamialne przykłady znajdują się w [`docs/examples/`](docs/examples/README.md).
@@ -354,6 +415,8 @@ Przykłady uruchomieniowe:
 
 | Obszar | Co dostajesz |
 | --- | --- |
+| Fasada aplikacyjna | `Ksef` / `AsyncKsef`: połączenie, konteksty sesji, operacje `.wait()` i wznowienie. |
+| Eksport na dysk | Strumieniowy transfer ze wznowieniem, weryfikacją hashy i rozpakowaniem ZIP/TarGz. |
 | Klienci API | `KsefClient`, `AsyncKsefClient` i podklienci mapujący endpointy KSeF. |
 | Modele | Typowane modele żądań i odpowiedzi w `ksef_client.models`. |
 | Uwierzytelnianie | Token KSeF, XAdES, odświeżanie tokenów i unieważnianie bieżącego tokena. |
@@ -371,6 +434,7 @@ Przykłady uruchomieniowe:
 Główna dokumentacja znajduje się w katalogu [`docs/`](docs/README.md):
 
 - [pierwsze kroki](docs/getting-started.md),
+- [prosty klient `Ksef` / `AsyncKsef`, eksport i wznowienie](docs/facade.md),
 - [konfiguracja klienta](docs/configuration.md),
 - [błędy, retry i limity](docs/errors.md),
 - [automatyczne odświeżanie tokena i klient uwierzytelniony](docs/token-manager.md),
@@ -423,7 +487,7 @@ Testy E2E wymagają osobnej konfiguracji środowiska KSeF i danych dostępowych.
 zmiennych środowiskowych są opisane w dokumentacji i testach.
 
 Publikację uruchamiaj z `main`, wskazując istniejący tag wersji. Brama wydawnicza wymaga
-pięciu rzeczywistych scenariuszy KSeF TEST na dokładnie tym pliku wheel, który trafi na PyPI.
+sześciu rzeczywistych scenariuszy KSeF TEST na dokładnie tym pliku wheel, który trafi na PyPI.
 Konfiguracja środowisk GitHub, sekretów i Trusted Publishera:
 [publikacja potwierdzona TEST](docs/reliable-pagination.md#publikacja-potwierdzona-rzeczywistym-test).
 

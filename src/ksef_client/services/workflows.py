@@ -234,10 +234,21 @@ class BatchUploadHelper:
 
         with ThreadPoolExecutor(max_workers=parallelism) as executor:
             futures = {executor.submit(_send, req, part): req.ordinal_number for req, part in pairs}
+            failure: BaseException | None = None
             for fut in as_completed(futures):
-                fut.result()
-                if progress_callback is not None:
-                    progress_callback(futures[fut])
+                if fut.cancelled():
+                    continue
+                try:
+                    fut.result()
+                    if progress_callback is not None:
+                        progress_callback(futures[fut])
+                except BaseException as exc:
+                    if failure is None:
+                        failure = exc
+                        for pending in futures:
+                            pending.cancel()
+            if failure is not None:
+                raise failure
 
 
 class AsyncBatchUploadHelper:
@@ -284,13 +295,28 @@ class AsyncBatchUploadHelper:
 
         async def _send_with_ordinal(req: PartUploadRequest, content: bytes) -> int:
             await _send(req, content)
+            # Record completion in the worker, even if another worker has failed.
+            if progress_callback is not None:
+                progress_callback(req.ordinal_number)
             return req.ordinal_number
 
         tasks = [asyncio.create_task(_send_with_ordinal(req, part)) for req, part in pairs]
-        for task in asyncio.as_completed(tasks):
-            ordinal_number = await task
-            if progress_callback is not None:
-                progress_callback(ordinal_number)
+        running = asyncio.gather(*tasks)
+        try:
+            await asyncio.shield(running)
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            cleanup = asyncio.gather(*tasks, return_exceptions=True)
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    continue
+            cleanup.result()
+            if not running.cancelled():
+                running.exception()
+            raise
 
 
 @dataclass(frozen=True)
@@ -825,9 +851,10 @@ class BatchSessionWorkflow:
         access_token: str | None = None,
     ) -> BatchSessionHandle:
         normalized_compression_type = _normalize_compression_type(compression_type)
-        payload_bytes = self._resolve_archive_bytes(
-            zip_bytes=zip_bytes,
-            archive_bytes=archive_bytes,
+        payload_bytes = (
+            self._resolve_archive_bytes(zip_bytes=zip_bytes, archive_bytes=archive_bytes)
+            if zip_bytes is not None or archive_bytes is not None
+            else None
         )
         return BatchSessionHandle.from_state(
             state,
@@ -941,9 +968,10 @@ class AsyncBatchSessionWorkflow:
         access_token: str | None = None,
     ) -> AsyncBatchSessionHandle:
         normalized_compression_type = _normalize_compression_type(compression_type)
-        payload_bytes = self._resolve_archive_bytes(
-            zip_bytes=zip_bytes,
-            archive_bytes=archive_bytes,
+        payload_bytes = (
+            self._resolve_archive_bytes(zip_bytes=zip_bytes, archive_bytes=archive_bytes)
+            if zip_bytes is not None or archive_bytes is not None
+            else None
         )
         return AsyncBatchSessionHandle.from_state(
             state,

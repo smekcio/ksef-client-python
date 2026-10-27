@@ -6,6 +6,11 @@ Opis kontraktu API (OpenAPI) oraz dokumenty procesowe i ograniczenia systemu zna
 
 Kompatybilność SDK: **KSeF API `v2.9.0`**.
 
+**Zacznij od [`Ksef` / `AsyncKsef`](getting-started.md#zalecany-start-ksef)**:
+połącz się, wyślij XML i odbierz wynik przez `.wait()`.
+[Przewodnik klienta](facade.md) pokazuje również batch, UPO, eksport na dysk
+i wznowienie po przerwaniu.
+
 Publiczny kontrakt SDK używa typowanych modeli `ksef_client.models`. Payloady requestów są
 `typed-only`, a wiele metod klientów zwraca modele odpowiedzi zamiast surowych `dict`. Jeśli
 migrujesz starszą integrację, zobacz [`migration-typed-model-api.md`](migration-typed-model-api.md).
@@ -39,14 +44,16 @@ albo pełnego zestawu extras.
 
 ## Struktura SDK
 
-Biblioteka udostępnia trzy poziomy użycia:
+Wybierz sposób pracy:
 
-1) **Klient API (cienka warstwa)** – `KsefClient` / `AsyncKsefClient` oraz podklienci (`.auth`, `.sessions`, …); `AuthenticatedClient` / `AsyncAuthenticatedClient` dodają automatyczne wstrzykiwanie i odświeżanie tokena. Metody odpowiadają endpointom KSeF, przyjmują typowane modele requestów z `ksef_client.models` i w wielu przypadkach zwracają typowane modele odpowiedzi. Wyjątki dotyczą endpointów binarnych lub pomocniczych.
-2) **Scenariusze (workflow)** – klasy z `ksef_client.services`, m.in. `AuthCoordinator`, `OnlineSessionWorkflow`, `BatchSessionWorkflow`, `ExportWorkflow`. Warstwa workflow łączy kilka wywołań API z operacjami lokalnymi (szyfrowanie, ZIP) i porządkuje typowe przepływy.
-3) **Dokumenty FA(3)** – moduł `ksef_client.documents.fa3` buduje faktury, serializuje XML i opcjonalnie waliduje XSD przed wysyłką online/batch.
+- **Klient aplikacyjny (zalecany start)** – `Ksef` / `AsyncKsef` łączą logowanie, sesje, oczekiwanie i wznowienie operacji. Pełne SDK jest dostępne pod `client.api`.
+- **Klient API** – `KsefClient` / `AsyncKsefClient` oraz podklienci (`.auth`, `.sessions`, …) odpowiadają endpointom KSeF; `AuthenticatedClient` / `AsyncAuthenticatedClient` dodają automatyczne wstrzykiwanie i odświeżanie tokena. Metody przyjmują typowane requesty z `ksef_client.models` i zwracają modele lub dane binarne.
+- **Scenariusze (workflow)** – klasy z `ksef_client.services`, m.in. `AuthCoordinator`, `OnlineSessionWorkflow`, `BatchSessionWorkflow`, `ExportWorkflow`, pozwalają osobno składać kroki operacji API, szyfrowania i archiwizacji.
+- **Dokumenty FA(3)** – moduł `ksef_client.documents.fa3` buduje faktury, serializuje XML i opcjonalnie waliduje XSD przed wysyłką online/batch.
 
 ## Nawigacja
 
+- [Fasada klienta, operacje `.wait()` i eksport strumieniowy](facade.md)
 - [Historia wielu lat z jednym checkpointem](invoice-range-search.md)
 - [Aktywne budżety limitów sync/async](rate-budgets.md)
 - [Start](getting-started.md)

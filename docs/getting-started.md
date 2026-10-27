@@ -1,6 +1,49 @@
 # Pierwsze kroki
 
-## 1) Konfiguracja klienta
+## Zalecany start: `Ksef`
+
+`Ksef` łączy logowanie, szyfrowanie, wysyłkę i oczekiwanie na wynik.
+Zainstaluj `pip install ksef-client`, przygotuj poprawny XML FA(3) w `invoice.xml`
+i ustaw `KSEF_NIP` oraz `KSEF_TOKEN` dla środowiska TEST. Przy pracy z niewydanymi
+jeszcze zmianami z repozytorium użyj `pip install -e .` w jego katalogu.
+Ten przykład wysyła fakturę do TEST:
+
+```python
+import os
+from pathlib import Path
+
+from ksef_client import Ksef, KsefClientOptions, KsefEnvironment, TokenCredentials
+
+with Ksef.connect(
+    options=KsefClientOptions(base_url=KsefEnvironment.TEST.value),
+    context_type="nip",
+    context_value=os.environ["KSEF_NIP"],
+    credentials=TokenCredentials(os.environ["KSEF_TOKEN"]),
+) as client:
+    with client.online_session() as session:
+        invoice = session.send_invoice(Path("invoice.xml").read_bytes()).wait(timeout=120)
+    session.wait(timeout=120)
+    upo = session.upo().wait(timeout=120)
+    print(invoice.ksef_number, len(upo.pages))
+```
+
+`with` zamyka sesję i połączenia HTTP. `.wait()` zwraca typowany wynik albo zgłasza
+błąd odrzucenia lub timeout. Dane zwrócone w `upo.pages` opisują strony UPO;
+pobranie ich XML pokazuje [przewodnik fasady](facade.md#sesja-online-i-wynik-faktury).
+
+Masz już [profil](profiles.md)? Zamiast `options`, `context_type` i `context_value`
+przekaż `profile="firma"`. Do pracy asynchronicznej użyj `AsyncKsef` —
+[przykład asyncio](facade.md#async).
+
+Dalsze kroki: [batch, eksport na dysk, timeout i wznowienie](facade.md),
+[przygotowanie XML FA(3)](fa3-sdk.md) oraz [uruchamialne skrypty](examples/README.md).
+
+## Bezpośrednie SDK
+
+Poniższe sekcje pokazują osobne kroki logowania i klientów mapujących endpointy API.
+Przy kliencie `Ksef` ten sam dostęp masz przez `client.api`.
+
+### 1) Konfiguracja klienta
 
 Konfiguracja opiera się o `base_url` (środowisko). Endpointy chronione wymagają tokena —
 możesz przekazać go jawnie (`KsefClient(options, access_token=...)`) albo użyć
@@ -22,7 +65,7 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
     ...
 ```
 
-## 2) Uwierzytelnianie tokenem KSeF
+### 2) Uwierzytelnianie tokenem KSeF
 
 Typowy przebieg:
 1) pobranie certyfikatów publicznych KSeF,
@@ -51,7 +94,7 @@ with KsefClient(KsefClientOptions(base_url=KsefEnvironment.DEMO.value)) as clien
 `auth_result` zawiera parę tokenów (`auth_result.tokens`) oraz wygodne pola
 `auth_result.access_token` i `auth_result.refresh_token`.
 
-## 3) Klient z automatycznym odświeżaniem tokena (zalecany)
+### 3) Klient API z automatycznym odświeżaniem tokena
 
 `AuthenticatedClient` wstrzykuje token do każdego żądania i odświeża go 60 s przed
 wygaśnięciem oraz po 401 — nie musisz przekazywać `access_token` do metod:
@@ -80,7 +123,7 @@ nadal działa i ma pierwszeństwo.
 Retry HTTP (429/502/503/504) włączysz przez `KsefClientOptions(retry=RetryConfig())` —
 szczegóły: [retry.md](retry.md).
 
-## 4) Pierwsze wywołanie API
+### 4) Pierwsze wywołanie API
 
 `client` z poprzedniego kroku nie wymaga tokena w metodach:
 
@@ -97,7 +140,7 @@ metadata = client.invoices.query_invoice_metadata_by_date_range(
 Przy klasycznym `KsefClient` dodaj `access_token=auth_result.access_token` — metody
 nadal go przyjmują.
 
-## 5) Wariant synchroniczny i asynchroniczny
+### 5) Wariant synchroniczny i asynchroniczny
 
 Każdy podklient ma odpowiednik asynchroniczny:
 - `KsefClient` – wywołania synchroniczne
@@ -116,7 +159,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-## 6) Istotne zachowania API
+### 6) Istotne zachowania API
 
 - `POST /auth/token/redeem` jest **jednorazowe** dla danego `authenticationToken` (kolejne wywołanie → błąd 400).
 - `POST /auth/token/refresh` wymaga przekazania refresh tokena w `Authorization: Bearer <refreshToken>` (metoda `refresh_access_token()` mapuje to poprawnie).

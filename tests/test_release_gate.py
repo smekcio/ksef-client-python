@@ -184,6 +184,30 @@ def test_workflow_gate_dependencies():
     assert "for attempt in" not in reusable
 
 
+def test_test_gate_forwards_only_named_secrets_and_keeps_environment_protection():
+    root = Path(__file__).parents[1] / ".github/workflows"
+    reusable = (root / "required-test-e2e.yml").read_text(encoding="utf-8")
+    callers = [
+        (root / name).read_text(encoding="utf-8") for name in ("python-e2e.yml", "publish-pypi.yml")
+    ]
+    names = [
+        "KSEF_TEST_TOKEN",
+        "KSEF_TEST_CONTEXT_TYPE",
+        "KSEF_TEST_CONTEXT_VALUE",
+        "KSEF_TEST_XADES_CERT_CRT",
+        "KSEF_TEST_XADES_CERT_CRT_B64",
+        "KSEF_TEST_XADES_PRIVATE_KEY_PEM",
+        "KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64",
+        "KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD",
+    ]
+    assert "environment: ksef-test" in reusable
+    for name in names:
+        assert f"      {name}:\n        required:" in reusable
+        for caller in callers:
+            assert f"      {name}: ${{{{ secrets.{name} }}}}" in caller
+            assert "secrets: inherit" not in caller
+
+
 def test_review_sdist_metadata_must_match_wheel(tmp_path):
     directory = fake_dist(tmp_path)
     with tarfile.open(directory / "ksef_client-0.20.0.tar.gz", "w:gz") as archive:

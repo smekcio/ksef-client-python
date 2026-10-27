@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+
 from ..models import PublicKeyCertificate, PublicKeyCertificateUsage
+from ..services.crypto import _load_public_key_from_cert
 from ..utils.datetime_parsing import try_parse_api_datetime
 from .base import AsyncBaseApiClient, BaseApiClient
 
@@ -63,7 +66,11 @@ def _select_public_key_certificate(
     usage: PublicKeyCertificateUsage | str,
     *,
     now: datetime | None = None,
+    algorithm: str | None = None,
+    public_key_id: str | None = None,
 ) -> PublicKeyCertificate:
+    if algorithm not in {None, "rsa", "ec", "ecdsa"}:
+        raise ValueError("Unsupported certificate algorithm: use rsa or ec")
     normalized_usage = _normalize_certificate_usage(usage)
     current_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     candidates = [
@@ -72,7 +79,15 @@ def _select_public_key_certificate(
         if normalized_usage in certificate.usage
         and certificate.certificate
         and _is_current_certificate(certificate, current_now)
+        and (public_key_id is None or certificate.public_key_id == public_key_id)
     ]
+    if algorithm is not None:
+        key_type = rsa.RSAPublicKey if algorithm == "rsa" else ec.EllipticCurvePublicKey
+        candidates = [
+            certificate
+            for certificate in candidates
+            if isinstance(_load_public_key_from_cert(certificate.certificate), key_type)
+        ]
     if not candidates:
         raise ValueError(f"Missing KSeF public certificate for usage: {normalized_usage.value}")
     return max(candidates, key=_certificate_sort_key)
@@ -90,14 +105,27 @@ class SecurityClient(BaseApiClient):
     def get_public_key_certificate(
         self,
         usage: PublicKeyCertificateUsage | str,
+        *,
+        algorithm: str | None = None,
+        public_key_id: str | None = None,
     ) -> PublicKeyCertificate:
-        return _select_public_key_certificate(self.get_public_key_certificates(), usage)
+        return _select_public_key_certificate(
+            self.get_public_key_certificates(),
+            usage,
+            algorithm=algorithm,
+            public_key_id=public_key_id,
+        )
 
     def get_public_key_certificate_pem(
         self,
         usage: PublicKeyCertificateUsage | str,
+        *,
+        algorithm: str | None = None,
+        public_key_id: str | None = None,
     ) -> str:
-        return self.get_public_key_certificate(usage).certificate
+        return self.get_public_key_certificate(
+            usage, algorithm=algorithm, public_key_id=public_key_id
+        ).certificate
 
 
 class AsyncSecurityClient(AsyncBaseApiClient):
@@ -112,11 +140,26 @@ class AsyncSecurityClient(AsyncBaseApiClient):
     async def get_public_key_certificate(
         self,
         usage: PublicKeyCertificateUsage | str,
+        *,
+        algorithm: str | None = None,
+        public_key_id: str | None = None,
     ) -> PublicKeyCertificate:
-        return _select_public_key_certificate(await self.get_public_key_certificates(), usage)
+        return _select_public_key_certificate(
+            await self.get_public_key_certificates(),
+            usage,
+            algorithm=algorithm,
+            public_key_id=public_key_id,
+        )
 
     async def get_public_key_certificate_pem(
         self,
         usage: PublicKeyCertificateUsage | str,
+        *,
+        algorithm: str | None = None,
+        public_key_id: str | None = None,
     ) -> str:
-        return (await self.get_public_key_certificate(usage)).certificate
+        return (
+            await self.get_public_key_certificate(
+                usage, algorithm=algorithm, public_key_id=public_key_id
+            )
+        ).certificate
