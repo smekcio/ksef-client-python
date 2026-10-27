@@ -344,7 +344,7 @@ def test_archive_special_members_limits_and_truncated_payloads(tmp_path, monkeyp
             return Short(b"x")
 
     with (
-        patch("zipfile._EndRecData", return_value=[0, 0, 0, 0, 1, 1]),
+        patch("ksef_client.streaming_export.validate_zip_directory"),
         patch("zipfile.ZipFile", return_value=FakeZip()),
         pytest.raises(KsefExportTransferError, match="inconsistent size"),
     ):

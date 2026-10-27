@@ -12,6 +12,7 @@ import json
 import os
 import re
 import stat
+import struct
 import tarfile
 import tempfile
 import zipfile
@@ -614,6 +615,43 @@ def decrypt_part(
         raise KsefExportTransferError("Decrypted export part failed integrity verification")
 
 
+def validate_zip_directory(source: BinaryIO) -> None:
+    """Count central headers on disk before ZipFile allocates its entry objects."""
+    zip_module: Any = zipfile
+    end_record = zip_module._EndRecData(source)
+    if (
+        end_record is None
+        or end_record[4] > EXPORT_MAX_ARCHIVE_ENTRIES
+        or end_record[5] > 16 * 1024 * 1024
+    ):
+        raise KsefExportTransferError("ZIP directory exceeds safety limits")
+    remaining = end_record[5]
+    # Match ZipFile's inferred directory position, including prefixed archives
+    # and ZIP64's fixed end record and locator.
+    start = end_record[9] - remaining
+    if end_record[0] == b"PK\x06\x06":
+        start -= 56 + 20
+    if start < 0:
+        raise KsefExportTransferError("Invalid ZIP directory offset")
+    source.seek(start)
+    count = 0
+    while remaining:
+        check_control()
+        header = source.read(min(46, remaining))
+        if len(header) != 46 or header[:4] != b"PK\x01\x02":
+            raise KsefExportTransferError("Invalid ZIP directory header")
+        entry_size = 46 + sum(struct.unpack_from("<HHH", header, 28))
+        if entry_size > remaining:
+            raise KsefExportTransferError("Truncated ZIP directory entry")
+        count += 1
+        if count > EXPORT_MAX_ARCHIVE_ENTRIES:
+            raise KsefExportTransferError("ZIP directory exceeds safety limits")
+        source.seek(entry_size - 46, os.SEEK_CUR)
+        remaining -= entry_size
+    if count != end_record[4]:
+        raise KsefExportTransferError("ZIP directory entry count disagrees with end record")
+
+
 def extract_archive(archive: Path, target: Path, compression: m.CompressionType) -> tuple[str, ...]:
     files: list[str] = []
     names: set[str] = set()
@@ -658,15 +696,7 @@ def extract_archive(archive: Path, target: Path, compression: m.CompressionType)
 
     if compression == m.CompressionType.ZIP:
         with archive.open("rb") as source:
-            zip_module: Any = zipfile
-            end_record = zip_module._EndRecData(source)
-        # Bound central-directory allocation before ZipFile reads it into memory.
-        if (
-            end_record is None
-            or end_record[4] > EXPORT_MAX_ARCHIVE_ENTRIES
-            or end_record[5] > 16 * 1024 * 1024
-        ):
-            raise KsefExportTransferError("ZIP directory exceeds safety limits")
+            validate_zip_directory(source)
         with zipfile.ZipFile(archive) as zipped:
             for entry in zipped.infolist():
                 if entry.filename.endswith("/"):
