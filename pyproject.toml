@@ -5,16 +5,37 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ksef-client"
 version = "0.20.0"
-description = "Client SDK for KSeF API v2"
+description = "Typed sync/async Python SDK and CLI for Poland's KSeF e-invoicing API v2"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [{name = "Mateusz Smektała (smekcio)", email = "mateusz@smkc.dev"}]
-keywords = ["ksef", "e-invoice", "poland", "api"]
+keywords = [
+  "ksef",
+  "krajowy-system-e-faktur",
+  "e-invoicing",
+  "e-invoice",
+  "poland",
+  "sdk",
+  "cli",
+  "async",
+  "fa3",
+  "xades",
+]
 classifiers = [
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Operating System :: OS Independent",
+  "Intended Audience :: Developers",
+  "Environment :: Console",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Office/Business :: Financial :: Accounting",
+  "Typing :: Typed",
 ]
 
 dependencies = [
@@ -50,6 +71,7 @@ cli = [
 Repository = "https://github.com/smekcio/ksef-client-python"
 Documentation = "https://github.com/smekcio/ksef-client-python/blob/main/docs/README.md"
 Issues = "https://github.com/smekcio/ksef-client-python/issues"
+Changelog = "https://github.com/smekcio/ksef-client-python/blob/main/CHANGELOG.md"
 
 [project.scripts]
 ksef = "ksef_client.cli.bootstrap:app_entrypoint"
