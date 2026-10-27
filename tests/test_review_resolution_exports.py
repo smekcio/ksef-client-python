@@ -396,7 +396,9 @@ def test_work_directories_are_not_accepted_as_regular_files(tmp_path):
 def test_fifo_checkpoint_is_rejected_without_blocking(tmp_path, storage):
     work = tmp_path / "work"
     work.mkdir(mode=0o700)
-    getattr(os, "mkfifo")(work / "progress.json")
+    fifo_factory = getattr(os, "mkfifo", None)
+    assert fifo_factory is not None
+    fifo_factory(work / "progress.json")
     op = operation(storage, make_package(size=100)[3])
     try:
         with pytest.raises(KsefExportTransferError, match="regular files"):
