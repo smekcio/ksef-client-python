@@ -573,7 +573,13 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
 
 
 def strong_etag(value: Any) -> bool:
-    return type(value) is str and re.fullmatch(r'"[\x21\x23-\x7e]+"', value) is not None
+    # A storage-controlled validator must not inflate every checkpoint entry.
+    # Oversized validators simply disable byte resume; full verified GET still works.
+    return (
+        type(value) is str
+        and len(value) <= 128
+        and re.fullmatch(r'"[\x21\x23-\x7e]+"', value) is not None
+    )
 
 
 def validate_export_files(

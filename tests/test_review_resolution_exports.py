@@ -406,3 +406,20 @@ def test_fifo_checkpoint_is_rejected_without_blocking(tmp_path, storage):
         assert storage.requests == []
     finally:
         op.owner.api.http_client.close()
+
+
+def test_oversized_etag_does_not_inflate_checkpoint_or_prevent_download(tmp_path, storage):
+    from ksef_client.streaming_export import strong_etag
+
+    _, _, encrypted, package = make_package(size=100)
+    storage.body, storage.hash, storage.etag = encrypted, sha(encrypted), '"' + "x" * 4096 + '"'
+    assert not strong_etag(storage.etag)
+    op = operation(storage, package)
+    try:
+        result = op.download_to(tmp_path / "result", work_dir=tmp_path / "work")
+        assert result.files
+        manifest = json.loads((tmp_path / "work/progress.json").read_text(encoding="utf-8"))
+        assert manifest["progress"]["1"]["etag"] is None
+        assert (tmp_path / "work/progress.json").stat().st_size < 4096
+    finally:
+        op.owner.api.http_client.close()
