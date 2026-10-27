@@ -39,7 +39,11 @@ from .operations import (
 )
 from .rate_limiting import CancellationToken, KsefRateLimitWaitTimeout
 from .request_control import current_request_control, request_control, wait_seconds
-from .utils.zip_utils import EXPORT_MAX_ARCHIVE_ENTRIES, _sanitize_archive_entry_name
+from .utils.zip_utils import (
+    EXPORT_MAX_ARCHIVE_ENTRIES,
+    EXPORT_MAX_INVOICES,
+    _sanitize_archive_entry_name,
+)
 
 BUFFER_SIZE = 1024 * 1024
 TAR_MAX_METADATA = 16 * BUFFER_SIZE
@@ -235,6 +239,11 @@ def part_identity(
 def package_identity(
     package: m.InvoicePackage, limits: ExportLimits = DEFAULT_EXPORT_LIMITS
 ) -> list[dict[str, Any]]:
+    if (
+        type(package.invoice_count) is not int
+        or not 0 <= package.invoice_count <= EXPORT_MAX_INVOICES
+    ):
+        raise KsefExportTransferError("Invalid export invoice count")
     if len(package.parts) > 10001:
         raise KsefExportTransferError("Too many export parts")
     parts = sorted(package.parts, key=lambda part: part.ordinal_number)
@@ -265,6 +274,11 @@ class ExportFiles:
 class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
     def __init__(self, owner: Any, state: OperationState) -> None:
         self.owner = owner
+        if (
+            state.payload.get("only_metadata") is not None
+            and type(state.payload["only_metadata"]) is not bool
+        ):
+            raise ValueError("Invalid export metadata-only state")
         try:
             self._key = base64.b64decode(state.payload["key"], validate=True)
             self._iv = base64.b64decode(state.payload["iv"], validate=True)
@@ -534,6 +548,10 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
                     if package.parts
                     else ()
                 )
+                if package.parts:
+                    validate_export_files(
+                        files, package.invoice_count, self._state.payload.get("only_metadata")
+                    )
                 # Atomic directory rename; never replace an existing result directory.
                 check_control()
                 if target.exists():
@@ -547,6 +565,23 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
 
 def strong_etag(value: Any) -> bool:
     return type(value) is str and re.fullmatch(r'"[\x21\x23-\x7e]+"', value) is not None
+
+
+def validate_export_files(
+    files: tuple[str, ...], invoice_count: int, only_metadata: bool | None
+) -> None:
+    """Check package contents before publishing; None preserves legacy state compatibility."""
+    if "_metadata.json" not in {name.lower() for name in files}:
+        raise KsefExportTransferError("Export archive has no metadata file")
+    invoices = [name for name in files if name.lower() != "_metadata.json"]
+    if len(invoices) > EXPORT_MAX_INVOICES or any(
+        not name.lower().endswith(".xml") for name in invoices
+    ):
+        raise KsefExportTransferError("Export archive has too many invoices or unexpected files")
+    if only_metadata is not None and len(invoices) != (0 if only_metadata else invoice_count):
+        raise KsefExportTransferError(
+            "Export archive invoice count disagrees with the request or API"
+        )
 
 
 def publish_directory(stage: Path, target: Path) -> None:
@@ -602,6 +637,12 @@ class AsyncExportOperation(AsyncOperation[m.InvoiceExportStatusResponse]):
                 )
         except KsefRateLimitWaitTimeout:
             raise KsefOperationTimeout("timeout", self.resume_state(), self._last_status) from None
+        except KsefOperationTimeout:
+            raise
+        except (OSError, ValueError, zipfile.BadZipFile, tarfile.TarError, EOFError) as exc:
+            raise KsefExportTransferError(
+                f"Export transfer failed ({type(exc).__name__}); inspect the chained cause"
+            ) from exc
 
     async def _download_to(
         self,

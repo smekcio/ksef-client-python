@@ -10,6 +10,14 @@ from pathlib import Path
 
 from ksef_client import Ksef, KsefClientOptions, KsefEnvironment, OperationState, TokenCredentials
 from ksef_client import models as m
+from ksef_client.operations import STATE_MAX_BYTES
+
+
+def _load_export_state(path: Path, key: bytes) -> OperationState:
+    # Read at most the payload budget plus a bounded envelope, even for a bad file.
+    with path.open("rb") as source:
+        encrypted = source.read(STATE_MAX_BYTES + 128)
+    return OperationState.from_encrypted_bytes(encrypted, key)
 
 
 def main() -> None:
@@ -58,9 +66,7 @@ def main() -> None:
                 ),
             )
             operation = (
-                client.resume_operation(
-                    OperationState.from_encrypted_bytes(args.resume_state.read_bytes(), state_key)
-                )
+                client.resume_operation(_load_export_state(args.resume_state, state_key))
                 if args.resume_state
                 else client.exports.start(filters)
             )

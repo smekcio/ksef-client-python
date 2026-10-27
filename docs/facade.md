@@ -248,6 +248,12 @@ result = operation.download_to(
 )
 ```
 
+Przed publikacją paczka musi zawierać `_metadata.json` i wyłącznie oczekiwane XML-e.
+Stan nowego eksportu zachowuje `only_metadata`, więc liczba XML-i jest porównywana
+z liczbą faktur z API albo musi wynosić zero dla eksportu samych metadanych.
+Starsze stany wersji 1 bez tego pola nadal można wznowić; dla nich sprawdzane są
+obecność metadanych, dozwolone pliki oraz limit 10 000 faktur.
+
 Uszkodzony checkpoint lub archiwum i błędy plikowe podczas transferu zgłaszają
 `KsefExportTransferError` z oryginalnym wyjątkiem w `__cause__`.
 Timeout zachowuje osobny typ `KsefOperationTimeout`; błędne argumenty wywołania

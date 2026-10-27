@@ -123,6 +123,8 @@ def test_package_limits_include_sum_of_parts_and_cbc_padding():
     with pytest.raises(KsefExportTransferError, match="CBC"):
         part_identity(replace(package.parts[0], encrypted_part_size=1))
     assert package_identity(package)
+    with pytest.raises(KsefExportTransferError, match="invoice count"):
+        package_identity(replace(package, invoice_count=10001))
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
@@ -256,5 +258,111 @@ def test_pending_export_keeps_timeout_exception_type(tmp_path, storage, asynchro
                 op.download_to(
                     tmp_path / "out", work_dir=tmp_path / "work", timeout=0.02, poll_interval=0.005
                 )
+    finally:
+        op.owner.api.http_client.close()
+
+
+@pytest.mark.parametrize(
+    "files,count,mode",
+    [
+        ((), 1, False),
+        (("invoice.xml",), 1, False),
+        (("_metadata.json",), 1, False),
+        (("_metadata.json", "invoice.xml"), 1, True),
+        (("_metadata.json", "unexpected.exe"), 1, None),
+    ],
+)
+def test_package_contents_cannot_report_false_success(files, count, mode):
+    from ksef_client.streaming_export import validate_export_files
+
+    with pytest.raises(KsefExportTransferError):
+        validate_export_files(files, count, mode)
+
+
+@pytest.mark.parametrize("mode", [None, False])
+def test_valid_package_contents_and_legacy_state_are_supported(mode):
+    from ksef_client.streaming_export import validate_export_files
+
+    validate_export_files(("_metadata.json", "invoice.xml"), 1, mode)
+    validate_export_files(("_metadata.json",), 10, True)
+
+
+def test_invalid_metadata_only_state_is_rejected_before_http(storage):
+    from ksef_client.streaming_export import ExportOperation
+
+    op = operation(storage, make_package(size=100)[3])
+    state = op.resume_state().to_dict()
+    state["payload"]["only_metadata"] = "invalid"
+    try:
+        from ksef_client import OperationState
+
+        with pytest.raises(ValueError, match="metadata-only"):
+            ExportOperation(op.owner, OperationState.from_dict(state))
+        op.owner.api.invoices.get_export_status.assert_not_called()
+    finally:
+        op.owner.api.http_client.close()
+
+
+@pytest.mark.parametrize("scenario", ["missing-metadata", "wrong-count", "metadata-only"])
+def test_verified_storage_package_is_checked_before_publication(tmp_path, storage, scenario):
+    from ksef_client import OperationState
+    from ksef_client.streaming_export import ExportOperation
+    from ksef_client.utils.zip_utils import build_zip
+
+    files = {"_metadata.json": b"{}", "one.xml": os.urandom(100)}
+    if scenario == "missing-metadata":
+        del files["_metadata.json"]
+    elif scenario == "wrong-count":
+        files["two.xml"] = os.urandom(100)
+    else:
+        del files["one.xml"]
+    archive = build_zip(files)
+    encrypted = encrypt_aes_cbc_pkcs7(archive, KEY, IV)
+    template = make_package(size=100)[3]
+    part = replace(
+        template.parts[0],
+        part_size=len(archive),
+        part_hash=sha(archive),
+        encrypted_part_size=len(encrypted),
+        encrypted_part_hash=sha(encrypted),
+    )
+    package = replace(template, size=len(archive), parts=[part])
+    storage.body, storage.hash = encrypted, sha(encrypted)
+    initial = operation(storage, package)
+    saved = initial.resume_state().to_dict()
+    saved["payload"]["only_metadata"] = scenario == "metadata-only"
+    op = ExportOperation(initial.owner, OperationState.from_dict(saved))
+    try:
+        if scenario == "metadata-only":
+            result = op.download_to(tmp_path / "result", work_dir=tmp_path / "work")
+            assert result.files == ("_metadata.json",)
+        else:
+            with pytest.raises(KsefExportTransferError):
+                op.download_to(tmp_path / "result", work_dir=tmp_path / "work")
+            assert not (tmp_path / "result").exists()
+        assert not (tmp_path / "work/archive.bin").exists()
+    finally:
+        op.owner.api.http_client.close()
+
+
+def test_async_worker_initialization_errors_follow_the_transfer_contract(tmp_path, storage):
+    op = operation(storage, make_package(size=100)[3])
+    owner = SimpleNamespace(
+        options=op.owner.options,
+        api=SimpleNamespace(
+            invoices=SimpleNamespace(get_export_status=AsyncMock(return_value=op.get_status()))
+        ),
+    )
+    try:
+        with (
+            patch("ksef_client.http.BaseHttpClient", side_effect=OSError("transport setup")),
+            pytest.raises(KsefExportTransferError) as caught,
+        ):
+            asyncio.run(
+                AsyncExportOperation(owner, op.resume_state()).download_to(
+                    tmp_path / "result", work_dir=tmp_path / "work"
+                )
+            )
+        assert isinstance(caught.value.__cause__, OSError)
     finally:
         op.owner.api.http_client.close()

@@ -243,6 +243,7 @@ class AsyncExports:
             response.reference_number,
             key=base64.b64encode(encryption.key).decode(),
             iv=base64.b64encode(encryption.iv).decode(),
+            only_metadata=only_metadata,
         )
         return AsyncExportOperation(self.owner, state)
 
@@ -444,6 +445,8 @@ class AsyncKsef:
             raise ValueError("Invalid session state payload")
         if type(saved.get("close_started", False)) is not bool:
             raise ValueError("Invalid session close attempt state")
+        if saved.get("closed") is True and saved.get("close_started") is False:
+            raise ValueError("Closed session cannot have an unstarted close attempt")
         handle: Any
         if state.kind == "online":
             handle = AsyncOnlineSessionWorkflow(self.api.sessions).resume_session(

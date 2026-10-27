@@ -10,16 +10,24 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import pytest
 
-from ksef_client import OperationState, TokenCredentials, XadesCredentials
+from ksef_client import (
+    AsyncKsef,
+    Ksef,
+    KsefClientOptions,
+    OperationState,
+    TokenCredentials,
+    XadesCredentials,
+)
 from ksef_client import models as m
 from ksef_client.clients.security import _select_public_key_certificate
 from ksef_client.facade import auth_payload
 from ksef_client.operations import STATE_ENVELOPE, STATE_MAX_BYTES
 from ksef_client.services.crypto import EncryptionData
 from ksef_client.services.sessions import AsyncBatchSessionHandle, BatchSessionHandle
-from ksef_client.services.workflows import AsyncBatchUploadHelper, BatchUploadHelper
+from ksef_client.services.workflows import AsyncBatchUploadHelper, AuthResult, BatchUploadHelper
 from ksef_client.services.xades import XadesKeyPair
 from tests.helpers import generate_ec_cert, generate_rsa_cert
 from tests.test_e2e_facade import _wait_for_invoice_at_hwm
@@ -184,6 +192,9 @@ def test_completed_batch_can_resume_and_close_without_archive(asynchronous):
     invalid = saved.to_dict()
     invalid["payload"]["close_started"] = "invalid"
     with pytest.raises(ValueError, match="close attempt"):
+        client.resume_session(OperationState.from_dict(invalid))
+    invalid["payload"].update(closed=True, close_started=False)
+    with pytest.raises(ValueError, match="Closed session"):
         client.resume_session(OperationState.from_dict(invalid))
     resumed = client.resume_session(saved)
     assert resumed.handle._encrypted_parts is None
@@ -359,3 +370,60 @@ def newly_added_method(self):
     return self.owner.api.invoices.get_export_status("REF")
 """)
         )
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_facade_refresh_margin_and_callback_work_through_real_token_transport(asynchronous):
+    expiry = (datetime.now(timezone.utc) + timedelta(seconds=120)).isoformat()
+    result = AuthResult(
+        "AUTH",
+        "AUTHENTICATION",
+        m.AuthenticationTokensResponse(
+            access_token=m.TokenInfo("OLD", expiry),
+            refresh_token=m.TokenInfo("REFRESH", "2099-01-01T00:00:00Z"),
+        ),
+    )
+    notifications: list[str] = []
+    headers: list[str] = []
+
+    def serve(request):
+        headers.append(request.headers["Authorization"])
+        if request.url.path.endswith("/auth/token/refresh"):
+            return httpx.Response(
+                200, json={"accessToken": {"token": "NEW", "validUntil": "2099-01-01T00:00:00Z"}}
+            )
+        return httpx.Response(200, json={})
+
+    options = KsefClientOptions(base_url="https://api-test.ksef.mf.gov.pl")
+    if asynchronous:
+
+        async def callback(info):
+            notifications.append(info.token)
+
+        async def run():
+            client = AsyncKsef.from_auth_result(
+                options,
+                result,
+                context_key="Nip:123",
+                refresh_margin_seconds=180,
+                on_refresh=callback,
+            )
+            await client.api.http_client._client.aclose()
+            client.api.http_client._client = httpx.AsyncClient(transport=httpx.MockTransport(serve))
+            async with client:
+                await client.api.http_client.request("GET", "/limits/context")
+
+        asyncio.run(run())
+    else:
+        with Ksef.from_auth_result(
+            options,
+            result,
+            context_key="Nip:123",
+            refresh_margin_seconds=180,
+            on_refresh=lambda info: notifications.append(info.token),
+        ) as client:
+            client.api.http_client._client.close()
+            client.api.http_client._client = httpx.Client(transport=httpx.MockTransport(serve))
+            client.api.http_client.request("GET", "/limits/context")
+    assert notifications == ["NEW"]
+    assert headers == ["Bearer REFRESH", "Bearer NEW"]
