@@ -2,6 +2,7 @@
 
 Katalog zawiera minimalne skrypty uruchomieniowe prezentujące podstawowe scenariusze:
 
+- prosty klient `Ksef` / `AsyncKsef`: wysyłka, oczekiwanie, batch i eksport na dysk,
 - autoryzacja tokenem KSeF (uzyskanie `accessToken` i `refreshToken`),
 - autoryzacja podpisem XAdES (certyfikat + klucz prywatny albo kontener PKCS#12),
 - wyszukiwanie metadanych faktur,
@@ -41,6 +42,30 @@ Autoryzacja tokenem:
 - `KSEF_TOKEN` – token KSeF (systemowy)
 
 ## Skrypty
+
+### `facade_sync.py` i `facade_async.py` — zalecany start
+
+Oba skrypty korzystają z **TEST** i zmiennych `KSEF_NIP` oraz `KSEF_TOKEN`.
+Nie wymagają profilu ani dodatku CLI. Przykłady `online` i `batch` wysyłają
+przekazany dokument lub archiwum do KSeF:
+
+```bash
+python docs/examples/facade_sync.py online --input invoice.xml
+python docs/examples/facade_sync.py batch --input invoices.zip
+python docs/examples/facade_async.py invoice.xml
+```
+
+Eksport na dysk z wybranego okresu:
+
+```bash
+python docs/examples/facade_sync.py export --from 2026-01-01 --to 2026-02-01 --destination export-result --work-dir export-work
+```
+
+Katalog docelowy musi być nowy. Opcje `--save-state` i `--resume-state` pozwalają
+jawnie zapisać oraz wczytać poufny stan eksportu; chroń go jak klucz dostępu.
+Przy wznowieniu podaj ten sam `--work-dir`. Akcje `permission` i `certificate`
+przyjmują JSON requestu przez `--input` i wysyłają odpowiednio nadanie uprawnień
+lub wniosek certyfikacyjny. [Opis przepływów i wznowienia](../facade.md).
 
 ### `auth_xades_cert_key.py`
 

@@ -4,7 +4,30 @@
 Pełne dotychczasowe SDK pozostaje dostępne przez `client.api`; jego sygnatury
 i typy wyników nie zmieniają się. Fasada wymaga Pythona 3.10+ i nie importuje CLI.
 
+[Pierwszy przykład od instalacji do numeru KSeF](getting-started.md#zalecany-start-ksef)
+działa bez profilu. Poniższe przykłady używają profilu `firma` albo już połączonego
+klienta `client` wewnątrz jego bloku `with`.
+
+| Zadanie | Punkt wejścia |
+| --- | --- |
+| Logowanie tokenem lub XAdES | `Ksef.connect(credentials=..., ...)` |
+| Wysyłka XML i wynik faktury | `client.online_session()`, `session.send_invoice(xml).wait()` |
+| Wysyłka archiwum | `client.batch_session(archive)`, `session.upload_parts()` |
+| Pobranie XML faktury | `client.invoices.download(ksef_number)` |
+| Eksport na dysk | `client.exports.start(filters).download_to(destination, work_dir=work)` |
+| Wznowienie | `client.resume_operation(state)` lub `client.resume_session(state, ...)` |
+| Pozostałe endpointy SDK | `client.api` |
+
 ## Połączenie
+
+Profil `firma` utwórz przez [SDK](profiles.md) albo CLI:
+
+```bash
+ksef init --non-interactive --name firma --env TEST --context-type nip --context-value <NIP> --set-active
+```
+
+Komenda wymaga dodatku `cli`; sam klient Python go nie potrzebuje.
+Token w `KSEF_TOKEN` musi dotyczyć tego samego środowiska i kontekstu co profil.
 
 ```python
 import os
@@ -47,6 +70,18 @@ również podejmuje próbę zamknięcia, zachowując pierwotny wyjątek.
 `session.wait()` nie ukrywa odrzuconych faktur, nawet jeśli sesja ma status 200.
 UPO ma osobny uchwyt, bo może stać się dostępne później; wynik opisuje wszystkie strony.
 
+`upo.pages` zawiera informacje o stronach, a nie ich XML. Aby zapisać dokumenty,
+po uzyskaniu `upo` użyj klienta API w tym samym połączeniu:
+
+```python
+from pathlib import Path
+
+reference = session.resume_state().reference_number
+for index, page in enumerate(upo.pages, start=1):
+    content = client.api.sessions.get_session_upo(reference, page.reference_number)
+    Path(f"upo-{index}.xml").write_bytes(content)
+```
+
 ## Batch i wznowienie
 
 ```python
@@ -83,6 +118,23 @@ oczekiwanie, nie anuluje operacji w KSeF. `KsefOperationError` zachowuje wynik
 odrzucenia; nieznany kod statusu nie jest traktowany jako sukces.
 Powtórne `wait()` na zakończonym uchwycie zwraca zapamiętany wynik.
 
+Przykład dłuższego oczekiwania po lokalnym timeoutcie, bez ponownej wysyłki faktury:
+
+```python
+from ksef_client import KsefOperationTimeout
+
+try:
+    invoice = operation.wait(timeout=120)
+except KsefOperationTimeout as exc:
+    resumed = client.resume_operation(exc.state)
+    invoice = resumed.wait(timeout=300)
+```
+
+Tutaj `operation` jest wynikiem `session.send_invoice(...)`. Po restarcie aplikacji
+zaloguj się ponownie i odtwórz uchwyt z wcześniej zapisanego stanu w tym samym kontekście.
+Stan eksportu wznawia transfer, stan faktury wznawia sprawdzanie jej wyniku;
+`resume_session()` odtwarza sesję do dalszej pracy.
+
 Fasada zawęża przekazaną konfigurację retry do GET/HEAD/OPTIONS i jawnie dozwolonego
 odczytu `/invoices/query/metadata`. Nie przejmuje szerokiej polityki ponawiania
 POST/DELETE z SDK. Oryginalne opcje pozostają niezmienione.
@@ -113,7 +165,21 @@ zapisze certyfikat lub prywatny klucz.
 
 ## Eksport na dysk
 
+Wewnątrz połączenia `with ... as client` wybierz zakres i stronę transakcji.
+Ten przykład eksportuje faktury sprzedażowe z podanego okresu:
+
 ```python
+from ksef_client import models as m
+
+filters = m.InvoiceQueryFilters(
+    subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
+    date_range=m.InvoiceQueryDateRange(
+        date_type=m.InvoiceQueryDateType.PERMANENTSTORAGE,
+        from_="2026-01-01T00:00:00Z",
+        to="2026-02-01T00:00:00Z",
+        restrict_to_permanent_storage_hwm_date=True,
+    ),
+)
 operation = client.exports.start(filters)
 # Aplikacja jawnie zapisuje operation.resume_state() w swoim magazynie sekretów.
 result = operation.download_to("output/export-1", work_dir="work/export-1", timeout=600)
@@ -138,6 +204,9 @@ odszyfrowuje części i rozpakowuje ZIP/TarGz na dysku. Nie materializuje paczki
 ani metadanych w RAM. Zachowuje limity archiwów: 10 001 plików, 500 MB na plik,
 2 GB łącznie i stosunek dekompresji do 200. Odrzuca dowiązania i niebezpieczne nazwy.
 ZIP obsługuje metody Stored i Deflate; BZIP2/LZMA są odrzucane przed dekompresją.
+Przed utworzeniem obiektów wpisów ZIP sprawdza rzeczywistą liczbę nagłówków katalogu
+centralnego (do 10 001, wliczając katalogi), jego rozmiar (do 16 MiB) i zgodność
+z licznikiem końca archiwum. Obsługuje także ZIP64 i archiwa z prefiksem.
 TarGz ogranicza również nagłówki rozszerzone (1 MiB na nagłówek, 16 MiB łącznie),
 liczbę nagłówków i katalogów oraz rozmiar strumienia po dekompresji.
 Termin transferu jest sprawdzany po każdym odczycie sieciowym, przed złożeniem
@@ -156,12 +225,27 @@ uruchamia kolejnych eksportów ani synchronizacji przyrostowej automatycznie.
 ## Async
 
 ```python
-client = await AsyncKsef.connect(profile="firma", credentials=credentials)
-async with client:
-    session = await client.online_session()
-    async with session:
-        invoice = await (await session.send_invoice(xml_bytes)).wait()
-    await session.wait()
+import asyncio
+import os
+from pathlib import Path
+
+from ksef_client import AsyncKsef, TokenCredentials
+
+async def main():
+    xml = await asyncio.to_thread(Path("invoice.xml").read_bytes)
+    client = await AsyncKsef.connect(
+        profile="firma",
+        credentials=TokenCredentials(os.environ["KSEF_TOKEN"]),
+    )
+    async with client:
+        session = await client.online_session()
+        async with session:
+            operation = await session.send_invoice(xml)
+            invoice = await operation.wait()
+        await session.wait()
+        print(invoice.ksef_number)
+
+asyncio.run(main())
 ```
 
 Metody wykonujące HTTP wymagają `await`. Tworzenie uchwytów z lokalnego stanu,
