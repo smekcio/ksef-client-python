@@ -3,6 +3,7 @@
 import io
 import struct
 import zipfile
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -79,6 +80,29 @@ def test_mismatched_entry_count_is_rejected(reported_count):
         validate_zip_directory(
             io.BytesIO(zip_bytes(["invoice.xml"], reported_count=reported_count))
         )
+
+
+@pytest.mark.parametrize("record_signature", [b"PK\x05\x06", b"PK\x06\x06"])
+@pytest.mark.parametrize("prefix", [b"", b"executable stub"])
+@pytest.mark.parametrize("over_limit", [False, True])
+def test_zip64_directory_handles_both_stdlib_location_conventions(
+    monkeypatch, record_signature, prefix, over_limit
+):
+    data = zip_bytes(["folder/", "folder/invoice.xml"], zip64=True, prefix=prefix)
+    zip_module: Any = zipfile
+    end_record = zip_module._EndRecData(io.BytesIO(data))
+    end_record[9] = data.rfind(record_signature)
+    monkeypatch.setattr(zipfile, "_EndRecData", lambda source: end_record)
+    monkeypatch.setattr(
+        "ksef_client.streaming_export.EXPORT_MAX_ARCHIVE_ENTRIES", 1 if over_limit else 2
+    )
+    if over_limit:
+        # Underreporting must still be rejected for either stdlib convention.
+        end_record[4] = 1
+        with pytest.raises(KsefExportTransferError, match="safety limits"):
+            validate_zip_directory(io.BytesIO(data))
+    else:
+        validate_zip_directory(io.BytesIO(data))
 
 
 @pytest.mark.parametrize("corruption", ["offset", "short", "signature", "lengths", "size"])

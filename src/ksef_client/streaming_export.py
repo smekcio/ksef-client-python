@@ -626,11 +626,14 @@ def validate_zip_directory(source: BinaryIO) -> None:
     ):
         raise KsefExportTransferError("ZIP directory exceeds safety limits")
     remaining = end_record[5]
-    # Match ZipFile's inferred directory position, including prefixed archives
-    # and ZIP64's fixed end record and locator.
+    # Older zipfile versions report the ordinary EOCD position for ZIP64;
+    # newer patch releases report the ZIP64 EOCD position instead. Inspect the
+    # actual record so both layouts work without Python-version assumptions.
     start = end_record[9] - remaining
     if end_record[0] == b"PK\x06\x06":
-        start -= 56 + 20
+        source.seek(end_record[9])
+        if source.read(4) == b"PK\x05\x06":
+            start -= 56 + 20
     if start < 0:
         raise KsefExportTransferError("Invalid ZIP directory offset")
     source.seek(start)
