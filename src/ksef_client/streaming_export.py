@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import concurrent.futures
+import gzip
 import hashlib
 import importlib
 import json
@@ -19,7 +20,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
-from typing import IO, Any, BinaryIO
+from typing import IO, Any, BinaryIO, cast
 
 import httpx
 from cryptography.hazmat.primitives import padding
@@ -28,12 +29,70 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from . import models as m
 from .exceptions import ErrorCode, KsefError
 from .http import _validate_presigned_url_security, _wire_timeout
-from .operations import AsyncOperation, Operation, OperationState
-from .rate_limiting import CancellationToken
+from .operations import AsyncOperation, KsefOperationTimeout, Operation, OperationState
+from .rate_limiting import CancellationToken, KsefRateLimitWaitTimeout
 from .request_control import current_request_control, request_control, wait_seconds
 from .utils.zip_utils import EXPORT_MAX_ARCHIVE_ENTRIES, _sanitize_archive_entry_name
 
 BUFFER_SIZE = 1024 * 1024
+TAR_MAX_METADATA = 16 * BUFFER_SIZE
+
+
+class _ExportTarInfo(tarfile.TarInfo):
+    def _proc_gnusparse_00(self, *args: Any) -> Any:
+        raise KsefExportTransferError("Sparse archive members are not allowed")
+
+    _proc_gnusparse_01 = _proc_gnusparse_00
+    _proc_gnusparse_10 = _proc_gnusparse_00
+
+    def _proc_member(self, archive: tarfile.TarFile) -> tarfile.TarInfo:
+        bounded = cast(_ExportTarFile, archive)
+        bounded.header_count += 1
+        check_control()
+        if bounded.header_count > 3 * EXPORT_MAX_ARCHIVE_ENTRIES:
+            raise KsefExportTransferError("Too many TAR headers")
+        if self.type in {
+            tarfile.XHDTYPE,
+            tarfile.XGLTYPE,
+            tarfile.GNUTYPE_LONGNAME,
+            tarfile.GNUTYPE_LONGLINK,
+        }:
+            bounded.metadata_size += self.size
+            if self.size > BUFFER_SIZE or bounded.metadata_size > TAR_MAX_METADATA:
+                raise KsefExportTransferError("TAR metadata exceeds safety limits")
+        elif self.type not in {tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE}:
+            # Reject sparse and special members before their stdlib parsers run.
+            raise KsefExportTransferError("Only regular archive files are allowed")
+        else:
+            bounded.member_count += 1
+            if bounded.member_count > EXPORT_MAX_ARCHIVE_ENTRIES:
+                raise KsefExportTransferError("Too many TAR members")
+        # The stdlib streaming parser hook is absent from typeshed.
+        parser: Any = super()
+        return parser._proc_member(archive)
+
+
+class _ExportTarFile(tarfile.TarFile):
+    tarinfo = _ExportTarInfo
+    members: list[tarfile.TarInfo]
+    header_count = 0
+    member_count = 0
+    metadata_size = 0
+
+
+class _TarStream:
+    """GzipFile bounds decompressor output; budget includes headers and padding."""
+
+    def __init__(self, source: gzip.GzipFile, compressed_size: int) -> None:
+        self.source, self.compressed_size, self.total = source, compressed_size, 0
+
+    def read(self, size: int) -> bytes:
+        check_control()
+        chunk = self.source.read(min(size, BUFFER_SIZE))
+        self.total += len(chunk)
+        if self.total > 2_032_000_000 or self.total / self.compressed_size > 200:
+            raise KsefExportTransferError("TAR expansion exceeds safety limits")
+        return chunk
 
 
 class KsefExportTransferError(KsefError):
@@ -274,24 +333,43 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
                     with path.open("r+b" if path.exists() else "w+b") as output:
                         output.truncate(offset)
                         output.seek(offset)
-                        for chunk in response.iter_raw(BUFFER_SIZE):
-                            check_control()
-                            if offset + len(chunk) > part.encrypted_part_size:
-                                raise KsefExportTransferError(
-                                    "Storage part exceeds its declared size"
-                                )
+
+                        def persist(chunk: bytes | bytearray, validator: str | None = etag) -> None:
+                            nonlocal offset
                             output.write(chunk)
                             output.flush()
                             os.fsync(output.fileno())
                             offset += len(chunk)
-                            manifest["progress"][key] = {"offset": offset, "etag": etag}
+                            manifest["progress"][key] = {"offset": offset, "etag": validator}
                             atomic_json(directory / "progress.json", manifest)
+
+                        pending = bytearray()
+                        # Observe each network read before HTTPX coalesces 1 MiB.
+                        # Otherwise a trickling peer can evade the total deadline.
+                        for chunk in response.iter_raw():
+                            check_control()
+                            if offset + len(pending) + len(chunk) > part.encrypted_part_size:
+                                raise KsefExportTransferError(
+                                    "Storage part exceeds its declared size"
+                                )
+                            remaining = memoryview(chunk)
+                            while remaining:
+                                count = min(BUFFER_SIZE - len(pending), len(remaining))
+                                pending.extend(remaining[:count])
+                                remaining = remaining[count:]
+                                if len(pending) == BUFFER_SIZE:
+                                    persist(pending)
+                                    pending.clear()
+                        check_control()
+                        if pending:
+                            persist(pending)
                     if digest(path) != expected:
                         raise KsefExportTransferError(
                             "Encrypted export part failed integrity verification"
                         )
                     return
             except httpx.TransportError:
+                check_control()
                 if attempt == 2:
                     raise KsefExportTransferError(
                         "Storage transfer interrupted; resume with the same state"
@@ -307,10 +385,13 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
         timeout: float = 120,
         poll_interval: float = 2,
     ) -> ExportFiles:
-        with request_control(timeout_seconds=timeout):
-            return self._download_to(
-                destination, work_dir=work_dir, timeout=timeout, poll_interval=poll_interval
-            )
+        try:
+            with request_control(timeout_seconds=timeout):
+                return self._download_to(
+                    destination, work_dir=work_dir, timeout=timeout, poll_interval=poll_interval
+                )
+        except KsefRateLimitWaitTimeout:
+            raise KsefOperationTimeout("timeout", self.resume_state(), self._last_status) from None
 
     def _download_to(
         self,
@@ -377,6 +458,7 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
                     else ()
                 )
                 # Atomic directory rename; never replace an existing result directory.
+                check_control()
                 if target.exists():
                     raise KsefExportTransferError("Destination already exists")
                 publish_directory(stage, target)
@@ -428,10 +510,13 @@ class AsyncExportOperation(AsyncOperation[m.InvoiceExportStatusResponse]):
         timeout: float = 120,
         poll_interval: float = 2,
     ) -> ExportFiles:
-        with request_control(timeout_seconds=timeout):
-            return await self._download_to(
-                destination, work_dir=work_dir, timeout=timeout, poll_interval=poll_interval
-            )
+        try:
+            with request_control(timeout_seconds=timeout):
+                return await self._download_to(
+                    destination, work_dir=work_dir, timeout=timeout, poll_interval=poll_interval
+                )
+        except KsefRateLimitWaitTimeout:
+            raise KsefOperationTimeout("timeout", self.resume_state(), self._last_status) from None
 
     async def _download_to(
         self,
@@ -477,7 +562,7 @@ class AsyncExportOperation(AsyncOperation[m.InvoiceExportStatusResponse]):
                     ),
                 )
                 operation = ExportOperation(proxy, self.resume_state())
-                operation._result, operation._done = status, True
+                operation._result, operation._last_status, operation._done = status, status, True
                 with request_control(cancellation=cancelled):
                     return operation.download_to(
                         destination, work_dir=work_dir, timeout=timeout, poll_interval=poll_interval
@@ -588,20 +673,27 @@ def extract_archive(archive: Path, target: Path, compression: m.CompressionType)
                     continue
                 if stat.S_ISLNK(entry.external_attr >> 16):
                     raise KsefExportTransferError("Archive symlinks are not allowed")
+                if entry.compress_type not in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}:
+                    raise KsefExportTransferError("Unsupported ZIP compression method")
                 with zipped.open(entry) as zip_source:
                     extract(entry.filename, entry.file_size, zip_source)
     elif compression == m.CompressionType.TARGZ:
-        with tarfile.open(archive, mode="r|gz") as tar:
-            for tar_entry in tar:
-                if tar_entry.isdir():
-                    continue
-                if not tar_entry.isfile():
-                    raise KsefExportTransferError("Only regular archive files are allowed")
-                tar_source = tar.extractfile(tar_entry)
-                if tar_source is None:
-                    raise KsefExportTransferError("Unreadable archive entry")
-                with tar_source:
-                    extract(tar_entry.name, tar_entry.size, tar_source)
+        with gzip.open(archive, "rb") as decompressed:
+            reader = _TarStream(decompressed, compressed_size)
+            with _ExportTarFile.open(fileobj=cast(Any, reader), mode="r|") as tar:
+                for tar_entry in tar:
+                    # Streaming TarFile still caches members on Python 3.10-3.12.
+                    tar.members.clear()
+                    if tar_entry.isdir():
+                        continue
+                    tar_source = tar.extractfile(tar_entry)
+                    if tar_source is None:
+                        raise KsefExportTransferError("Unreadable archive entry")
+                    with tar_source:
+                        extract(tar_entry.name, tar_entry.size, tar_source)
+            # Verify the gzip trailer and budget trailing padding as well.
+            while reader.read(BUFFER_SIZE):
+                pass
     else:
         raise KsefExportTransferError("Unsupported export compression")
     return tuple(files)

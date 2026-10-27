@@ -332,7 +332,11 @@ def test_archive_special_members_limits_and_truncated_payloads(tmp_path, monkeyp
         def infolist(self):
             return [
                 SimpleNamespace(
-                    filename="short.xml", file_size=3, external_attr=0, is_dir=lambda: False
+                    filename="short.xml",
+                    file_size=3,
+                    external_attr=0,
+                    compress_type=zipfile.ZIP_STORED,
+                    is_dir=lambda: False,
                 )
             ]
 

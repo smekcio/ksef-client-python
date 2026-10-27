@@ -9,6 +9,7 @@ import io
 import json
 import os
 import threading
+import time
 from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -118,7 +119,13 @@ def storage():
                 body = body[: 1024 * 1024]
                 self.close_connection = True
             with suppress(ConnectionError, OSError):
-                self.wfile.write(body)
+                if mode == "trickle":
+                    for offset in range(0, len(body), 1024):
+                        self.wfile.write(body[offset : offset + 1024])
+                        self.wfile.flush()
+                        time.sleep(0.02)
+                else:
+                    self.wfile.write(body)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

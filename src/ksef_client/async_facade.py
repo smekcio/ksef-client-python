@@ -6,6 +6,7 @@ import asyncio
 import base64
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from . import models as m
@@ -31,8 +32,13 @@ from .operations import (
 from .profiles import Profile, ProfileStore
 from .request_control import request_control
 from .services.crypto import build_encryption_data
-from .services.sessions import BatchSessionState, OnlineSessionState
-from .services.workflows import AsyncBatchSessionWorkflow, AsyncOnlineSessionWorkflow, AuthResult
+from .services.sessions import AsyncBatchSessionHandle, BatchSessionState, OnlineSessionState
+from .services.workflows import (
+    AsyncBatchSessionWorkflow,
+    AsyncBatchUploadHelper,
+    AsyncOnlineSessionWorkflow,
+    AuthResult,
+)
 
 if TYPE_CHECKING:
     from .streaming_export import AsyncExportOperation
@@ -40,6 +46,18 @@ if TYPE_CHECKING:
 
 async def _upo_result(status: Any) -> m.UpoResponse:
     return status.upo
+
+
+async def _upload_batch_parts(
+    handle: AsyncBatchSessionHandle,
+    http: Any,
+    *,
+    parallelism: int,
+    skip_ordinals: set[int],
+    progress_callback: Callable[[int], None],
+) -> None:
+    configured = replace(handle, _uploader=AsyncBatchUploadHelper(http, parallelism=parallelism))
+    await configured.upload_parts(skip_ordinals=skip_ordinals, progress_callback=progress_callback)
 
 
 class AsyncAuthenticationOperation(AsyncOperation[AuthResult]):
@@ -145,8 +163,12 @@ class AsyncSession(AsyncOperation[m.SessionStatusResponse]):
             if progress_callback is not None:
                 progress_callback(ordinal)
 
-        await self.handle.upload_parts(
-            parallelism=parallelism, skip_ordinals=self.completed_parts, progress_callback=confirmed
+        await _upload_batch_parts(
+            self.handle,
+            self.owner.api.http_client,
+            parallelism=parallelism,
+            skip_ordinals=self.completed_parts,
+            progress_callback=confirmed,
         )
 
     async def close(self) -> None:

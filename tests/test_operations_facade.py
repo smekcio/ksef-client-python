@@ -182,7 +182,7 @@ def test_session_context_close_upload_checkpoint_and_no_wait(batch, asynchronous
     handle.get_state.return_value.to_dict.return_value = {"saved": "state"}
     calls: list[int] = []
 
-    def upload(**kwargs):
+    def upload(*args, **kwargs):
         kwargs["progress_callback"](1)
 
     if asynchronous:
@@ -193,12 +193,13 @@ def test_session_context_close_upload_checkpoint_and_no_wait(batch, asynchronous
 
         async def run():
             session = AsyncSession(facade, handle, batch=batch)
-            async with session:
-                if batch:
-                    await session.upload_parts(progress_callback=calls.append)
-                else:
-                    result = await session.send_invoice(b"<xml/>")
-                    assert await result.wait() is not None
+            with patch("ksef_client.async_facade._upload_batch_parts", handle.upload_parts):
+                async with session:
+                    if batch:
+                        await session.upload_parts(progress_callback=calls.append)
+                    else:
+                        result = await session.send_invoice(b"<xml/>")
+                        assert await result.wait() is not None
             await session.close()
             assert session.resume_state().payload["closed"]
             handle.close.assert_awaited_once()

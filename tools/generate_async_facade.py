@@ -101,6 +101,17 @@ class Convert(ast.NodeTransformer):
     def visit_Call(self, node):
         path = ast.unparse(node.func)
         self.generic_visit(node)
+        if self.active and path == "self.handle.upload_parts":
+            return ast.Await(
+                value=ast.Call(
+                    func=ast.Name(id="_upload_batch_parts", ctx=ast.Load()),
+                    args=[
+                        ast.parse("self.handle", mode="eval").body,
+                        ast.parse("self.owner.api.http_client", mode="eval").body,
+                    ],
+                    keywords=node.keywords,
+                )
+            )
         if path == "cls.from_auth_result":
             return node
         if self.active and (
@@ -162,6 +173,7 @@ import asyncio
 import base64
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 from . import models as m
 from .client import AsyncAuthenticatedClient, AsyncKsefClient
@@ -177,14 +189,23 @@ from .facade import (
     safe_options,
 )
 from .services.crypto import build_encryption_data
-from .services.sessions import OnlineSessionState, BatchSessionState
-from .services.workflows import AuthResult, AsyncOnlineSessionWorkflow, AsyncBatchSessionWorkflow
+from .services.sessions import OnlineSessionState, BatchSessionState, AsyncBatchSessionHandle
+from .services.workflows import (
+    AuthResult, AsyncOnlineSessionWorkflow, AsyncBatchSessionWorkflow, AsyncBatchUploadHelper,
+)
 
 if TYPE_CHECKING:
     from .streaming_export import AsyncExportOperation
 
 async def _upo_result(status: Any) -> m.UpoResponse:
     return status.upo
+
+async def _upload_batch_parts(
+    handle: AsyncBatchSessionHandle, http: Any, *, parallelism: int,
+    skip_ordinals: set[int], progress_callback: Callable[[int], None],
+) -> None:
+    configured = replace(handle, _uploader=AsyncBatchUploadHelper(http, parallelism=parallelism))
+    await configured.upload_parts(skip_ordinals=skip_ordinals, progress_callback=progress_callback)
 
 '''
     # Signing and encryption may be CPU-bound; execute helper off the event loop.

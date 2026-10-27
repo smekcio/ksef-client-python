@@ -137,6 +137,11 @@ SDK sprawdza rozmiary, hashe z API i dostępny nagłówek storage, oddzielnie
 odszyfrowuje części i rozpakowuje ZIP/TarGz na dysku. Nie materializuje paczki
 ani metadanych w RAM. Zachowuje limity archiwów: 10 001 plików, 500 MB na plik,
 2 GB łącznie i stosunek dekompresji do 200. Odrzuca dowiązania i niebezpieczne nazwy.
+ZIP obsługuje metody Stored i Deflate; BZIP2/LZMA są odrzucane przed dekompresją.
+TarGz ogranicza również nagłówki rozszerzone (1 MiB na nagłówek, 16 MiB łącznie),
+liczbę nagłówków i katalogów oraz rozmiar strumienia po dekompresji.
+Termin transferu jest sprawdzany po każdym odczycie sieciowym, przed złożeniem
+bufora zapisu 1 MiB. Timeout pobierania zawiera stan wznowienia i ostatni status.
 
 Manifest postępu w `work_dir` nie zawiera tokenów, kluczy ani URL-i. Zawiera
 techniczne identyfikatory i hashe, więc również należy go chronić. Klucze
