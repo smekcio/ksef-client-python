@@ -584,6 +584,24 @@
   enforces per pre-encryption part; `build_zip` sanitises entry names like `build_tar_gz`, and both
   readers reject duplicate entry names instead of silently dropping content
 
+## 0.21.0 (2026-10-27)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* feat(sdk): klient uwierzytelniony z auto-refresh i retry HTTP by @smekcio in https://github.com/smekcio/ksef-client-python/pull/101
+* feat(errors): taksonomia błędów z kodami KSeF i to_dict by @smekcio in https://github.com/smekcio/ksef-client-python/pull/103
+* feat(errors): taksonomia błędów dokumentów by @smekcio in https://github.com/smekcio/ksef-client-python/pull/104
+* feat: niezawodna paginacja z kursorami i obowiązkowa brama TEST przed publikacją by @smekcio in https://github.com/smekcio/ksef-client-python/pull/105
+* docs: pokaż w README paginację z kursorami i HWM by @smekcio in https://github.com/smekcio/ksef-client-python/pull/106
+* feat: multi-year invoice searches and shared API rate budgets by @smekcio in https://github.com/smekcio/ksef-client-python/pull/108
+* chore(packaging): enrich PyPI package metadata by @smekcio in https://github.com/smekcio/ksef-client-python/pull/111
+* feat(sdk): fasada sync/async, wznawianie operacji i eksport strumieniowy by @smekcio in https://github.com/smekcio/ksef-client-python/pull/110
+
+
+**Full Changelog**: https://github.com/smekcio/ksef-client-python/compare/v0.20.0...v0.21.0
+
 ## 0.20.0 (2026-10-21)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
