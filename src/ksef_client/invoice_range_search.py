@@ -18,16 +18,20 @@ from .exceptions import (
 )
 from .invoice_search import (
     MAX_CURSOR_BYTES,
+    InvoiceMetadataObservationPage,
     InvoiceMetadataPage,
+    InvoiceMetadataSearchIdentity,
     _date,
     _dump,
     _InvalidMetadataResponse,
     _json_object,
+    _metadata_query_fingerprint,
     _MetadataMachine,
     _reject_constant,
     _same_json,
 )
 from .models import InvoiceMetadata, InvoiceQueryFilters, QueryInvoicesMetadataResponse
+from .operations import environment_key
 from .pagination import validate_page_size
 
 _STATE_KEYS = {
@@ -264,13 +268,54 @@ class _RangeMachine:
         return InvoiceMetadataPage(page.items, next_cursor, new["hwm"])
 
 
+def _search_identity(machine: _RangeMachine) -> InvoiceMetadataSearchIdentity:
+    identity = machine.identity
+    return InvoiceMetadataSearchIdentity(
+        environment=environment_key(machine.environment),
+        context_key=identity["context_key"],
+        query_fingerprint=_metadata_query_fingerprint(identity["filters"]),
+        page_size=identity["page_size"],
+        window_days=identity["window_days"],
+        sort_order=identity["sort_order"],
+    )
+
+
 class InvoiceMetadataRangeSearch:
     """Lazy multi-window search; persist one next_cursor after committing each page."""
 
     def __init__(
-        self, machine: _RangeMachine, fetch: Callable[..., QueryInvoicesMetadataResponse]
+        self,
+        machine: _RangeMachine,
+        fetch: Callable[..., QueryInvoicesMetadataResponse],
+        observation_fetch: Callable[..., QueryInvoicesMetadataResponse] | None = None,
     ) -> None:
         self._machine, self._fetch = machine, fetch
+        self._observation_fetch = observation_fetch or fetch
+
+    @property
+    def identity(self) -> InvoiceMetadataSearchIdentity:
+        return _search_identity(self._machine)
+
+    def validate_cursor(self, cursor: str | None) -> None:
+        self._machine.load(cursor)
+
+    def observation_page(self, cursor: str | None = None) -> InvoiceMetadataObservationPage:
+        state = self._machine.load(cursor)
+        try:
+            response = self._observation_fetch(
+                InvoiceQueryFilters.from_dict(state["child"]["request"]),
+                page_offset=state["child"]["offset"],
+                page_size=state["page_size"],
+                sort_order=state["sort_order"],
+            )
+        except _InvalidMetadataResponse:
+            raise KsefIncompletePaginationError(
+                "invalid_response", last_cursor=_dump(state)
+            ) from None
+        page = self._machine.advance(state, response)
+        return InvoiceMetadataObservationPage(
+            tuple(response.invoices), page.next_cursor, page.permanent_storage_hwm_date
+        )
 
     def page(self, cursor: str | None = None) -> InvoiceMetadataPage:
         state = self._machine.load(cursor)
@@ -310,8 +355,35 @@ class AsyncInvoiceMetadataRangeSearch:
         self,
         machine: _RangeMachine,
         fetch: Callable[..., Awaitable[QueryInvoicesMetadataResponse]],
+        observation_fetch: Callable[..., Awaitable[QueryInvoicesMetadataResponse]] | None = None,
     ) -> None:
         self._machine, self._fetch = machine, fetch
+        self._observation_fetch = observation_fetch or fetch
+
+    @property
+    def identity(self) -> InvoiceMetadataSearchIdentity:
+        return _search_identity(self._machine)
+
+    def validate_cursor(self, cursor: str | None) -> None:
+        self._machine.load(cursor)
+
+    async def observation_page(self, cursor: str | None = None) -> InvoiceMetadataObservationPage:
+        state = self._machine.load(cursor)
+        try:
+            response = await self._observation_fetch(
+                InvoiceQueryFilters.from_dict(state["child"]["request"]),
+                page_offset=state["child"]["offset"],
+                page_size=state["page_size"],
+                sort_order=state["sort_order"],
+            )
+        except _InvalidMetadataResponse:
+            raise KsefIncompletePaginationError(
+                "invalid_response", last_cursor=_dump(state)
+            ) from None
+        page = self._machine.advance(state, response)
+        return InvoiceMetadataObservationPage(
+            tuple(response.invoices), page.next_cursor, page.permanent_storage_hwm_date
+        )
 
     async def page(self, cursor: str | None = None) -> InvoiceMetadataPage:
         state = self._machine.load(cursor)

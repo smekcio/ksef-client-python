@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
@@ -42,6 +42,7 @@ from .services.workflows import (
 from .token_manager import DEFAULT_REFRESH_MARGIN_SECONDS
 
 if TYPE_CHECKING:
+    from .invoice_sync import AsyncInvoiceSync
     from .streaming_export import AsyncExportOperation
 
 
@@ -205,6 +206,28 @@ class AsyncSession(AsyncOperation[m.SessionStatusResponse]):
 class AsyncInvoices:
     def __init__(self, owner: AsyncKsef) -> None:
         self.owner = owner
+
+    def sync(
+        self,
+        *,
+        namespace: str,
+        sync_key: str,
+        since: str | None = None,
+        subject_types: Sequence[m.InvoiceQuerySubjectType | str] | None = None,
+        queries: Sequence[m.InvoiceQueryFilters] | None = None,
+        page_size: int = 100,
+        window_days: int = 100,
+    ) -> AsyncInvoiceSync:
+        return self.owner.api.invoices.sync(
+            namespace=namespace,
+            sync_key=sync_key,
+            context_key=self.owner.context_key,
+            since=since,
+            subject_types=subject_types,
+            queries=queries,
+            page_size=page_size,
+            window_days=window_days,
+        )
 
     async def download(self, ksef_number: str) -> bytes:
         return (await self.owner.api.invoices.get_invoice_bytes(ksef_number)).content

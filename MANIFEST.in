@@ -22,7 +22,7 @@ include requirements.txt
 include requirements-dev.txt
 recursive-include specs *.json
 recursive-include tools *.py
-recursive-include docs *.md *.py
+recursive-include docs *.md *.py *.json
 # `*.py[cod]` obejmuje także zagnieżdżone `__pycache__` (wzorce z ukośnikiem są
 # zakotwiczone w katalogu głównym, więc sam `__pycache__/*` by ich nie złapał).
 global-exclude *.py[cod]

@@ -17,6 +17,15 @@ from urllib.parse import urlparse
 import httpx
 
 from . import openapi_models as _openapi_models
+from ._bounded_http import (
+    append_chunk,
+    check_control,
+    check_headers,
+    identity_headers,
+    limited_response_stream,
+    validate_max_bytes,
+)
+from ._json_bounds import check_json_structure
 from .config import KsefClientOptions
 from .exceptions import (
     KsefApiError,
@@ -66,6 +75,12 @@ def _budget_parameters(
         ),
         groups,
     )
+
+
+def _request_url(options: KsefClientOptions, path: str) -> str:
+    if _is_absolute_http_url(path):
+        return path
+    return options.normalized_base_url().rstrip("/") + "/" + path.lstrip("/")
 
 
 def _wire_timeout(options: KsefClientOptions) -> dict[str, Any]:
@@ -807,6 +822,52 @@ class BaseHttpClient:
     def close(self) -> None:
         self._client.close()
 
+    @property
+    def api_base_url(self) -> str:
+        """Read-only effective API target used by this transport."""
+        return self._options.normalized_base_url()
+
+    def request_json_limited(
+        self, method: str, path: str, *, max_bytes: int, **kwargs: Any
+    ) -> HttpResponse:
+        validate_max_bytes(max_bytes)
+        return self.request(method, path, max_bytes=max_bytes, **kwargs)
+
+    def _received_headers(
+        self,
+        response: httpx.Response,
+        budget_parameters: tuple[RateLimitScope, tuple[str, ...]] | None,
+    ) -> None:
+        if budget_parameters is not None and response.status_code == 429:
+            assert self._options.rate_limit_budget is not None
+            self._options.rate_limit_budget.defer(
+                *budget_parameters, _budget_retry_after(response.headers.get("Retry-After"))
+            )
+        _handle_system_warning(self._options, response)
+
+    def _receive_response(
+        self, *, budget_parameters: Any, max_bytes: int | None = None, **kwargs: Any
+    ) -> httpx.Response:
+        if max_bytes is None:
+            response = self._client.request(**kwargs)
+            self._received_headers(response, budget_parameters)
+            return response
+        kwargs["headers"] = identity_headers(kwargs["headers"])
+        kwargs["follow_redirects"] = False
+        check_control()
+        with self._client.stream(**kwargs) as response:
+            self._received_headers(response, budget_parameters)
+            check_headers(response, max_bytes)
+            check_control()
+            body = bytearray()
+            for chunk in response.iter_raw():
+                append_chunk(body, chunk, max_bytes)
+                check_control()
+            check_control()
+            return httpx.Response(
+                response.status_code, headers=response.headers, content=bytes(body)
+            )
+
     def request(
         self,
         method: str,
@@ -820,6 +881,7 @@ class BaseHttpClient:
         refresh_token: str | None = None,
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
+        max_bytes: int | None = None,
     ) -> HttpResponse:
         """Wykonuje żądanie HTTP, opcjonalnie ponawiając je według ``options.retry``.
 
@@ -827,7 +889,15 @@ class BaseHttpClient:
         jedno żądanie i wyjątek przy błędzie. Pętla ponawia wyłącznie odpowiedzi
         z ``RETRYABLE_STATUS_CODES`` dla metod z allowlisty (patrz
         :func:`ksef_client.retry.should_retry_request`).
+
+        ``max_bytes=None`` zachowuje zwykły odbiór. Dodatni limit obejmuje każdą
+        próbę, wymaga identity encoding i wyłącza przekierowania. Nie przechodzi
+        na zagnieżdżone wywołania bez jawnego przekazania argumentu.
         """
+        if max_bytes is not None:
+            validate_max_bytes(max_bytes)
+        # Freeze the limited target before auth, retry or rate-budget waits.
+        request_url = _request_url(self._options, path) if max_bytes is not None else None
         config = self._options.retry
         if config is None:
             return self._request_once(
@@ -841,6 +911,8 @@ class BaseHttpClient:
                 refresh_token=refresh_token,
                 skip_auth=skip_auth,
                 expected_status=expected_status,
+                max_bytes=max_bytes,
+                request_url=request_url,
             )
 
         attempts_limit = config.max_retries + 1
@@ -858,6 +930,8 @@ class BaseHttpClient:
                     refresh_token=refresh_token,
                     skip_auth=skip_auth,
                     expected_status=expected_status,
+                    max_bytes=max_bytes,
+                    request_url=request_url,
                 )
             except KsefHttpError as exc:
                 if attempt >= attempts_limit or not should_retry_request(
@@ -954,12 +1028,12 @@ class BaseHttpClient:
         refresh_token: str | None = None,
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
+        max_bytes: int | None = None,
+        request_url: str | None = None,
     ) -> HttpResponse:
         _reject_json_and_data_together(json, data)
-        url = path
-        if not _is_absolute_http_url(url):
-            url = self._options.normalized_base_url().rstrip("/") + "/" + path.lstrip("/")
-        elif skip_auth:
+        url = request_url if request_url is not None else _request_url(self._options, path)
+        if skip_auth and _is_absolute_http_url(path):
             _validate_presigned_url_security(self._options, url)
 
         token, budget_parameters, admission = self._admit_request(
@@ -996,7 +1070,9 @@ class BaseHttpClient:
         if admission is not None:
             admission.commit()
         try:
-            response = self._client.request(
+            response = self._receive_response(
+                budget_parameters=budget_parameters,
+                max_bytes=max_bytes,
                 method=method,
                 url=url,
                 params=params,
@@ -1017,12 +1093,6 @@ class BaseHttpClient:
             # wołający miał jeden kontrakt błędów (`KsefHttpError`).
             raise _wrap_transport_error(exc, method=method, url=url) from None
         logger.debug("HTTP %s %s -> %s", method, _loggable_url(url), response.status_code)
-        if budget_parameters is not None and response.status_code == 429:
-            assert self._options.rate_limit_budget is not None
-            self._options.rate_limit_budget.defer(
-                *budget_parameters, _budget_retry_after(response.headers.get("Retry-After"))
-            )
-        _handle_system_warning(self._options, response)
 
         if (
             expected_status
@@ -1036,16 +1106,20 @@ class BaseHttpClient:
             # odpowiedzi jest strona pośrednika albo puste ciało. Przyjmowanie
             # jej jako sukcesu zapisywało PUSTY plik UPO/faktury i raportowało
             # sukces (`upo download` tworzył plik o rozmiarze 0).
-            self._raise_for_status(response, path)
+            self._raise_for_status(response, path, max_bytes=max_bytes)
 
         return HttpResponse(response.status_code, response.headers, response.content)
 
-    def _raise_for_status(self, response: httpx.Response, path: str = "") -> None:
+    def _raise_for_status(
+        self, response: httpx.Response, path: str = "", *, max_bytes: int | None = None
+    ) -> None:
         retry_after_fields = _retry_after_fields(response)
         content_type = response.headers.get("Content-Type", "")
         body: Any = None
         if _is_json_content_type(content_type):
             try:
+                if max_bytes is not None:
+                    check_json_structure(response.content, max_nodes=500_000, max_depth=32)
                 body = response.json()
             except ValueError:
                 body = None
@@ -1079,6 +1153,52 @@ class AsyncBaseHttpClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    @property
+    def api_base_url(self) -> str:
+        """Read-only effective API target used by this transport."""
+        return self._options.normalized_base_url()
+
+    async def request_json_limited(
+        self, method: str, path: str, *, max_bytes: int, **kwargs: Any
+    ) -> HttpResponse:
+        validate_max_bytes(max_bytes)
+        return await self.request(method, path, max_bytes=max_bytes, **kwargs)
+
+    def _received_headers(
+        self,
+        response: httpx.Response,
+        budget_parameters: tuple[RateLimitScope, tuple[str, ...]] | None,
+    ) -> None:
+        if budget_parameters is not None and response.status_code == 429:
+            assert self._options.rate_limit_budget is not None
+            self._options.rate_limit_budget.defer(
+                *budget_parameters, _budget_retry_after(response.headers.get("Retry-After"))
+            )
+        _handle_system_warning(self._options, response)
+
+    async def _receive_response(
+        self, *, budget_parameters: Any, max_bytes: int | None = None, **kwargs: Any
+    ) -> httpx.Response:
+        if max_bytes is None:
+            response = await self._client.request(**kwargs)
+            self._received_headers(response, budget_parameters)
+            return response
+        kwargs["headers"] = identity_headers(kwargs["headers"])
+        kwargs["follow_redirects"] = False
+        check_control()
+        async with limited_response_stream(self._client, **kwargs) as response:
+            self._received_headers(response, budget_parameters)
+            check_headers(response, max_bytes)
+            check_control()
+            body = bytearray()
+            async for chunk in response.aiter_raw():
+                append_chunk(body, chunk, max_bytes)
+                check_control()
+            check_control()
+            return httpx.Response(
+                response.status_code, headers=response.headers, content=bytes(body)
+            )
+
     async def request(
         self,
         method: str,
@@ -1092,11 +1212,16 @@ class AsyncBaseHttpClient:
         refresh_token: str | None = None,
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
+        max_bytes: int | None = None,
     ) -> HttpResponse:
         """Asynchroniczny odpowiednik :meth:`BaseHttpClient.request`.
 
         Pętla retry ma identyczną semantykę; różni się wyłącznie ``asyncio.sleep``.
         """
+        if max_bytes is not None:
+            validate_max_bytes(max_bytes)
+        # Freeze the limited target before auth, retry or rate-budget waits.
+        request_url = _request_url(self._options, path) if max_bytes is not None else None
         config = self._options.retry
         if config is None:
             return await self._request_once(
@@ -1110,6 +1235,8 @@ class AsyncBaseHttpClient:
                 refresh_token=refresh_token,
                 skip_auth=skip_auth,
                 expected_status=expected_status,
+                max_bytes=max_bytes,
+                request_url=request_url,
             )
 
         attempts_limit = config.max_retries + 1
@@ -1127,6 +1254,8 @@ class AsyncBaseHttpClient:
                     refresh_token=refresh_token,
                     skip_auth=skip_auth,
                     expected_status=expected_status,
+                    max_bytes=max_bytes,
+                    request_url=request_url,
                 )
             except KsefHttpError as exc:
                 if attempt >= attempts_limit or not should_retry_request(
@@ -1225,12 +1354,12 @@ class AsyncBaseHttpClient:
         refresh_token: str | None = None,
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
+        max_bytes: int | None = None,
+        request_url: str | None = None,
     ) -> HttpResponse:
         _reject_json_and_data_together(json, data)
-        url = path
-        if not _is_absolute_http_url(url):
-            url = self._options.normalized_base_url().rstrip("/") + "/" + path.lstrip("/")
-        elif skip_auth:
+        url = request_url if request_url is not None else _request_url(self._options, path)
+        if skip_auth and _is_absolute_http_url(path):
             _validate_presigned_url_security(self._options, url)
 
         token, budget_parameters, admission = await self._admit_request(
@@ -1267,7 +1396,9 @@ class AsyncBaseHttpClient:
         if admission is not None:
             admission.commit()
         try:
-            response = await self._client.request(
+            response = await self._receive_response(
+                budget_parameters=budget_parameters,
+                max_bytes=max_bytes,
                 method=method,
                 url=url,
                 params=params,
@@ -1283,12 +1414,6 @@ class AsyncBaseHttpClient:
             # Patrz `BaseHttpClient.request`: jeden kontrakt błędów także dla sieci.
             raise _wrap_transport_error(exc, method=method, url=url) from None
         logger.debug("HTTP %s %s -> %s", method, _loggable_url(url), response.status_code)
-        if budget_parameters is not None and response.status_code == 429:
-            assert self._options.rate_limit_budget is not None
-            self._options.rate_limit_budget.defer(
-                *budget_parameters, _budget_retry_after(response.headers.get("Retry-After"))
-            )
-        _handle_system_warning(self._options, response)
 
         if (
             expected_status
@@ -1302,16 +1427,20 @@ class AsyncBaseHttpClient:
             # odpowiedzi jest strona pośrednika albo puste ciało. Przyjmowanie
             # jej jako sukcesu zapisywało PUSTY plik UPO/faktury i raportowało
             # sukces (`upo download` tworzył plik o rozmiarze 0).
-            self._raise_for_status(response, path)
+            self._raise_for_status(response, path, max_bytes=max_bytes)
 
         return HttpResponse(response.status_code, response.headers, response.content)
 
-    def _raise_for_status(self, response: httpx.Response, path: str = "") -> None:
+    def _raise_for_status(
+        self, response: httpx.Response, path: str = "", *, max_bytes: int | None = None
+    ) -> None:
         retry_after_fields = _retry_after_fields(response)
         content_type = response.headers.get("Content-Type", "")
         body: Any = None
         if _is_json_content_type(content_type):
             try:
+                if max_bytes is not None:
+                    check_json_structure(response.content, max_nodes=500_000, max_depth=32)
                 body = response.json()
             except ValueError:
                 body = None

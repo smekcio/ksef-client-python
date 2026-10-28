@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
 import re
 import warnings
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Sequence
 from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
+from .._json_bounds import check_json_structure
 from ..config import KsefClientOptions
 from ..invoice_range_search import (
     AsyncInvoiceMetadataRangeSearch,
@@ -17,8 +19,12 @@ from ..invoice_range_search import (
 from ..invoice_search import (
     AsyncInvoiceMetadataSearch,
     InvoiceMetadataSearch,
+    _check_retained_filter_fields,
+    _InvalidMetadataResponse,
+    _json_object,
     _MetadataMachine,
     _parse_metadata_response,
+    _reject_constant,
 )
 from ..models import (
     BinaryContent,
@@ -43,6 +49,10 @@ from ..pagination import (
 )
 from ..utils.datetime_parsing import normalize_api_timestamp, try_parse_api_datetime
 from .base import AsyncBaseApiClient, BaseApiClient, _serialize_json_payload
+
+if TYPE_CHECKING:
+    from ..invoice_sync import AsyncInvoiceSync, InvoiceSync
+
 
 _OFFSET_SUFFIX_RE = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
 INVOICE_QUERY_MAX_RANGE_DAYS = 100
@@ -231,21 +241,73 @@ def _serialize_search_filters(
     except (KeyError, TypeError, ValueError, AttributeError):
         raise ValueError("Invalid invoice search filters") from None
 
-    def check_retained(original: Any, parsed: Any) -> None:
-        if isinstance(original, dict):
-            if not isinstance(parsed, dict) or original.keys() - parsed.keys():
-                raise ValueError("Unknown invoice search filter")
-            for key, value in original.items():
-                check_retained(value, parsed[key])
-        elif isinstance(original, list) and isinstance(parsed, list):
-            for value, parsed_value in zip(original, parsed, strict=True):
-                check_retained(value, parsed_value)
-
-    check_retained(serialized, restored)
+    _check_retained_filter_fields(serialized, restored)
     return serialized
 
 
 class InvoicesClient(BaseApiClient):
+    def sync(
+        self,
+        *,
+        namespace: str,
+        sync_key: str,
+        context_key: str,
+        since: str | None = None,
+        subject_types: Sequence[InvoiceQuerySubjectType | str] | None = None,
+        queries: Sequence[InvoiceQueryFilters] | None = None,
+        page_size: int = 100,
+        window_days: int = 100,
+    ) -> InvoiceSync:
+        """Construct a metadata synchronizer without I/O; token is resolved per request."""
+        return _build_sync(
+            self,
+            namespace=namespace,
+            sync_key=sync_key,
+            context_key=context_key,
+            since=since,
+            subject_types=subject_types,
+            queries=queries,
+            page_size=page_size,
+            window_days=window_days,
+            asynchronous=False,
+        )
+
+    def _query_invoice_metadata_observation_page(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        page_offset: int,
+        page_size: int,
+        sort_order: str,
+        expected_environment: str,
+        access_token: str | None = None,
+    ) -> QueryInvoicesMetadataResponse:
+        http = cast(Any, self._http)
+        if http.api_base_url != expected_environment:
+            raise ValueError("Metadata source environment changed")
+        response = http.request_json_limited(
+            "POST",
+            "/invoices/query/metadata",
+            max_bytes=16 * 1024 * 1024,
+            params={"pageOffset": page_offset, "pageSize": page_size, "sortOrder": sort_order},
+            json=_serialize_invoice_payload(request_payload),
+            access_token=access_token,
+        )
+        try:
+            check_json_structure(response.content, max_nodes=500_000, max_depth=32)
+            raw = json.loads(
+                response.content, object_pairs_hook=_json_object, parse_constant=_reject_constant
+            )
+            if (
+                type(raw) is not dict
+                or type(raw.get("invoices")) is not list
+                or len(raw["invoices"]) > page_size
+            ):
+                raise ValueError("Invalid metadata page")
+            return _parse_metadata_response(raw)
+        except (ValueError, TypeError, RecursionError):
+            raise _InvalidMetadataResponse("Invalid metadata response") from None
+
     def search_invoice_metadata_range(
         self,
         request_payload: InvoiceQueryFilters,
@@ -275,6 +337,11 @@ class InvoicesClient(BaseApiClient):
         return InvoiceMetadataRangeSearch(
             machine,
             partial(self._query_invoice_metadata_search_page, access_token=access_token),
+            partial(
+                self._query_invoice_metadata_observation_page,
+                expected_environment=options.normalized_base_url(),
+                access_token=access_token,
+            ),
         )
 
     def search_invoice_metadata(
@@ -612,6 +679,68 @@ class InvoicesClient(BaseApiClient):
 
 
 class AsyncInvoicesClient(AsyncBaseApiClient):
+    def sync(
+        self,
+        *,
+        namespace: str,
+        sync_key: str,
+        context_key: str,
+        since: str | None = None,
+        subject_types: Sequence[InvoiceQuerySubjectType | str] | None = None,
+        queries: Sequence[InvoiceQueryFilters] | None = None,
+        page_size: int = 100,
+        window_days: int = 100,
+    ) -> AsyncInvoiceSync:
+        """Construct a metadata synchronizer without I/O; token is resolved per request."""
+        return _build_sync(
+            self,
+            namespace=namespace,
+            sync_key=sync_key,
+            context_key=context_key,
+            since=since,
+            subject_types=subject_types,
+            queries=queries,
+            page_size=page_size,
+            window_days=window_days,
+            asynchronous=True,
+        )
+
+    async def _query_invoice_metadata_observation_page(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        page_offset: int,
+        page_size: int,
+        sort_order: str,
+        expected_environment: str,
+        access_token: str | None = None,
+    ) -> QueryInvoicesMetadataResponse:
+        http = cast(Any, self._http)
+        if http.api_base_url != expected_environment:
+            raise ValueError("Metadata source environment changed")
+        response = await http.request_json_limited(
+            "POST",
+            "/invoices/query/metadata",
+            max_bytes=16 * 1024 * 1024,
+            params={"pageOffset": page_offset, "pageSize": page_size, "sortOrder": sort_order},
+            json=_serialize_invoice_payload(request_payload),
+            access_token=access_token,
+        )
+        try:
+            check_json_structure(response.content, max_nodes=500_000, max_depth=32)
+            raw = json.loads(
+                response.content, object_pairs_hook=_json_object, parse_constant=_reject_constant
+            )
+            if (
+                type(raw) is not dict
+                or type(raw.get("invoices")) is not list
+                or len(raw["invoices"]) > page_size
+            ):
+                raise ValueError("Invalid metadata page")
+            return _parse_metadata_response(raw)
+        except (ValueError, TypeError, RecursionError):
+            raise _InvalidMetadataResponse("Invalid metadata response") from None
+
     def search_invoice_metadata_range(
         self,
         request_payload: InvoiceQueryFilters,
@@ -637,6 +766,11 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         return AsyncInvoiceMetadataRangeSearch(
             machine,
             partial(self._query_invoice_metadata_search_page, access_token=access_token),
+            partial(
+                self._query_invoice_metadata_observation_page,
+                expected_environment=options.normalized_base_url(),
+                access_token=access_token,
+            ),
         )
 
     def search_invoice_metadata(
@@ -954,3 +1088,92 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             content=response.content,
             sha256_base64=response.headers.get("x-ms-meta-hash"),
         )
+
+
+def _build_sync(
+    client: Any,
+    *,
+    namespace: str,
+    sync_key: str,
+    context_key: str,
+    since: str | None,
+    subject_types: Sequence[InvoiceQuerySubjectType | str] | None,
+    queries: Sequence[InvoiceQueryFilters] | None,
+    page_size: int,
+    window_days: int,
+    asynchronous: bool,
+) -> Any:
+    from ..invoice_sync import (
+        AsyncInvoiceSync,
+        AsyncInvoiceSyncStream,
+        InvoiceSync,
+        InvoiceSyncStream,
+    )
+    from ..invoice_sync_state import (
+        InvoiceSyncScope,
+        _execution_parameters,
+        canonical_spec,
+        spec_fingerprint,
+        utc_timestamp,
+    )
+    from ..operations import environment_key
+
+    _execution_parameters(page_size, window_days)
+    if queries is not None:
+        if since is not None or subject_types is not None:
+            raise ValueError("Choose queries or since/subject_types")
+        selected = queries
+    else:
+        if since is None:
+            raise ValueError("since or queries is required")
+        since = utc_timestamp(since)
+        roles = (
+            subject_types
+            if subject_types is not None
+            else (InvoiceQuerySubjectType.SUBJECT1, InvoiceQuerySubjectType.SUBJECT2)
+        )
+        if not isinstance(roles, Sequence) or isinstance(roles, (str, bytes)):
+            raise TypeError("subject_types must be a sequence of roles")
+        selected = [
+            InvoiceQueryFilters(
+                subject_type=_normalize_invoice_query_subject_type(role),
+                date_range=InvoiceQueryDateRange(
+                    date_type=InvoiceQueryDateType.PERMANENTSTORAGE,
+                    from_=since,
+                    restrict_to_permanent_storage_hwm_date=True,
+                ),
+            )
+            for role in roles
+        ]
+    if not isinstance(selected, Sequence) or isinstance(selected, (str, bytes)):
+        raise TypeError("queries must be a sequence of typed queries")
+    if not 1 <= len(selected) <= 4:
+        raise ValueError("Sync requires one to four queries")
+    streams: list[Any] = []
+    for query in selected:
+        spec = canonical_spec(query)
+        # Reuse the existing strict typed-query normalization, retaining every filter.
+        normalized = InvoiceQueryFilters.from_dict(
+            _serialize_search_filters(
+                InvoiceQueryFilters.from_dict(spec["query"]), allow_long_range=True
+            )
+        )
+        spec = canonical_spec(normalized)
+        scope = InvoiceSyncScope(
+            namespace,
+            environment_key(client._http.api_base_url),
+            context_key,
+            sync_key,
+            spec_fingerprint(spec),
+        )
+        stream_type = AsyncInvoiceSyncStream if asynchronous else InvoiceSyncStream
+        streams.append(
+            stream_type(
+                scope,
+                InvoiceQueryFilters.from_dict(spec["query"]),
+                client.search_invoice_metadata_range,
+                page_size=page_size,
+                window_days=window_days,
+            )
+        )
+    return (AsyncInvoiceSync if asynchronous else InvoiceSync)(streams)

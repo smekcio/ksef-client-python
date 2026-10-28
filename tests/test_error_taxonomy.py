@@ -189,6 +189,16 @@ def test_error_codes_and_forbidden_reasons_are_stable() -> None:
         "pagination_error",
         "invalid_pagination_cursor",
         "incomplete_pagination",
+        "sync_error",
+        "invalid_sync_checkpoint",
+        "sync_state_error",
+        "sync_conflict",
+        "sync_data_conflict",
+        "sync_limit_exceeded",
+        "sync_store_error",
+        "sync_run_failed",
+        "response_limit_exceeded",
+
         "document_error",
         "document_validation_failed",
         "document_rendering_failed",
@@ -602,6 +612,16 @@ def test_exit_code_for_error_covers_every_error_code() -> None:
         ErrorCode.PAGINATION_ERROR: ExitCode.API_ERROR,
         ErrorCode.INVALID_PAGINATION_CURSOR: ExitCode.VALIDATION_ERROR,
         ErrorCode.INCOMPLETE_PAGINATION: ExitCode.API_ERROR,
+        ErrorCode.SYNC_ERROR: ExitCode.API_ERROR,
+        ErrorCode.INVALID_SYNC_CHECKPOINT: ExitCode.VALIDATION_ERROR,
+        ErrorCode.SYNC_STATE_ERROR: ExitCode.VALIDATION_ERROR,
+        ErrorCode.SYNC_CONFLICT: ExitCode.API_ERROR,
+        ErrorCode.SYNC_DATA_CONFLICT: ExitCode.API_ERROR,
+        ErrorCode.SYNC_LIMIT_EXCEEDED: ExitCode.API_ERROR,
+        ErrorCode.SYNC_STORE_ERROR: ExitCode.IO_ERROR,
+        ErrorCode.SYNC_RUN_FAILED: ExitCode.API_ERROR,
+        ErrorCode.RESPONSE_LIMIT_EXCEEDED: ExitCode.API_ERROR,
+
     }
 
     assert set(expected) == set(ErrorCode)

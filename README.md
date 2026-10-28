@@ -32,6 +32,9 @@ bez ładowania całej paczki do pamięci.
 
 Najważniejsze cechy:
 
+- **synchronizacja metadanych** — `client.invoices.sync(...).run_once(store)`, niezależne role,
+  trwałe checkpointy HWM i atomowy zapis z CAS; [przewodnik i SQLite](docs/invoice-sync.md),
+
 - **prosty klient `Ksef` / `AsyncKsef`** — logowanie, sesje i wynik faktury przez `.wait()`,
 - **eksport na dysk ze wznowieniem** — pobieranie, weryfikacja, odszyfrowanie i rozpakowanie,
 - **stan operacji do wznowienia** — kontynuacja oczekiwania lub transferu po przerwaniu,
@@ -487,7 +490,7 @@ Testy E2E wymagają osobnej konfiguracji środowiska KSeF i danych dostępowych.
 zmiennych środowiskowych są opisane w dokumentacji i testach.
 
 Publikację uruchamiaj z `main`, wskazując istniejący tag wersji. Brama wydawnicza wymaga
-sześciu rzeczywistych scenariuszy KSeF TEST na dokładnie tym pliku wheel, który trafi na PyPI.
+siedmiu rzeczywistych scenariuszy KSeF TEST na dokładnie tym pliku wheel, który trafi na PyPI.
 Konfiguracja środowisk GitHub, sekretów i Trusted Publishera:
 [publikacja potwierdzona TEST](docs/reliable-pagination.md#publikacja-potwierdzona-rzeczywistym-test).
 

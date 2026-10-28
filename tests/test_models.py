@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
@@ -85,17 +86,19 @@ class ModelsTests(unittest.TestCase):
             problem.raw
             """
         ).strip()
-        result = subprocess.run(
-            [sys.executable, "-m", "mypy", "-c", mypy_program],
-            capture_output=True,
-            text=True,
-            cwd=repo_root,
-            env={
-                **os.environ,
-                "MYPYPATH": str(repo_root / "src"),
-            },
-            check=False,
-        )
+        # Matrix workers and Windows/WSL must never share mypy's mutable cache.
+        with tempfile.TemporaryDirectory(prefix="ksef-model-types-") as cache_dir:
+            result = subprocess.run(
+                [sys.executable, "-m", "mypy", "--cache-dir", cache_dir, "-c", mypy_program],
+                capture_output=True,
+                text=True,
+                cwd=repo_root,
+                env={
+                    **os.environ,
+                    "MYPYPATH": str(repo_root / "src"),
+                },
+                check=False,
+            )
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
     def test_token_info_from_dict(self):
