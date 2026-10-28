@@ -216,6 +216,7 @@ def main() -> None:
 def _output(result: dict, path: Path | None) -> None:
     value = json.dumps(result, indent=2)
     if path:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(value + "\n", encoding="utf-8")
     print(value)
 

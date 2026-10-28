@@ -5,9 +5,11 @@ faktur. Każda rola ma osobny checkpoint. Aplikacja zapewnia uwierzytelnionego
 klienta, magazyn transakcyjny i harmonogram kolejnych uruchomień.
 
 To jedyny bieżący opis integracji, kontraktu i weryfikacji tej funkcji.
-Implementacja jest lokalnie gotowa; przed wydaniem minor po 0.21.0 wymagane
-jest zaliczenie live TEST w chronionej bramie CI. Aktualne wyniki związane z SHA
-zawiera [jeden plik dowodów](reports/invoice-sync-validation.json).
+Live TEST dla commita `2c8d113` zaliczył wszystkie siedem wymaganych scenariuszy
+w [chronionej bramie CI](https://github.com/smekcio/ksef-client-python/actions/runs/40757621518).
+Funkcja wymaga wydania minor po 0.21.0; brama nadal sprawdza dokładny artefakt
+przed publikacją. Wyniki związane z SHA zawiera
+[jeden plik dowodów](reports/invoice-sync-validation.json).
 
 ## Pierwsza integracja
 
@@ -214,7 +216,9 @@ odpowiedzi na każdej próbie. Bool, zero, wartości ujemne i float są odrzucan
 przed I/O. `request_json_limited(..., max_bytes=N)` jest skrótem tej samej ścieżki
 wymagającym limitu; nie uruchamia osobnej pętli HTTP.
 
-Metadane korzystają z limitu 16 MiB. Argument przechodzi jawnie przez retry,
+Ścieżka synchronizacji metadanych korzysta z limitu 16 MiB. Dotychczasowe metody
+`search_invoice_metadata(...).pages()` i `search_invoice_metadata_range(...).pages()`
+nie włączają tego limitu. Argument przechodzi jawnie przez retry,
 próbę HTTP, odświeżenie po 401 i odbiór odpowiedzi. Nie jest przechowywany
 w ContextVar i nie przechodzi na zagnieżdżone żądania auth ani inne taski/wątki.
 Każde z nich otrzymuje własny limit lub domyślne None.
@@ -318,6 +322,13 @@ oraz Python 3.12 na Windows. Bieżące liczby, wersje narzędzi, sumy artefaktó
 oraz surowe pary RSS są wyłącznie w [pliku dowodów](reports/invoice-sync-validation.json).
 Zmiany dokumentacji po zapisanym code_commit nie zmieniają badanego SDK.
 
+`requirements-dev.txt` określa dolne granice wersji, więc nowa instalacja nie
+odtwarza dokładnego środowiska zapisanej macierzy lokalnej. Przed porównaniem
+wyników zachowaj wersję Pythona i `python -m pip freeze`. Chronione runnery
+live/release na Linux/Python 3.12 instalują przypięte zależności z
+`requirements-ci.lock`. Subtests są częścią pytest od 9.0 i nie wymagają
+osobnego pakietu `pytest-subtests`.
+
 ```bash
 python tools/lint.py --strict
 python tools/generate_async_facade.py --check
@@ -344,6 +355,7 @@ Zbuduj artefakty ze wskazanego pełnego SHA (FULL_COMMIT_SHA poniżej jest miejs
 na rzeczywistą wartość z git rev-parse HEAD):
 
 ```bash
+python -m pip install build
 python -m build --outdir .tmp/invoice-sync-dist
 python tools/release_artifacts.py record .tmp/invoice-sync-dist --sha FULL_COMMIT_SHA
 python tools/release_artifacts.py verify .tmp/invoice-sync-dist --sha FULL_COMMIT_SHA
@@ -374,8 +386,9 @@ python tools/benchmark_invoice_sync.py --worker 250 --boundary 250 --dense-page 
 
 Próg dotyczy maksimum z trzech różnic max(0, peak_RSS_500k - peak_RSS_50k):
 32 MiB. Nie jest limitem całkowitego RSS gęstej strony. --output działa także
-z --worker. Osobne uruchomienia i różne SHA mogą dawać różne wyniki; aktualnym
-punktem odniesienia są pary w jedynym pliku dowodów, wraz z parametrami i SHA.
+z --worker i tworzy brakujące katalogi nadrzędne. Osobne uruchomienia i różne SHA
+mogą dawać różne wyniki; aktualnym punktem odniesienia są pary w jedynym pliku
+dowodów, wraz z parametrami i SHA.
 
 ### Obowiązkowa brama live
 
@@ -383,7 +396,12 @@ Scenariusz A/HWM/B/restart wykonuje workflow required-test-e2e.yml w środowisku
 ksef-test, na dokładnym wheelu. Jeden node nadzoruje dwa procesy fazowe na Linux,
 z łącznym watchdogiem 1800 s. Manifest i kontroler wymagają siedmiu scenariuszy,
 bez skip, rerun ani powtórnego wysłania faktury jako obejścia niepowodzenia.
-Zgodnie z decyzją użytkownika live pozostaje do CI; lokalny odbiór go nie zastępuje.
+Run [40757621518](https://github.com/smekcio/ksef-client-python/actions/runs/40757621518)
+dla commita `2c8d1138bf3bf52fbeef4457181ccd6123943175` zakończył się wynikiem
+**7 passed, 0 skipped, 0 failures, 0 errors**, w jednej próbie, na zweryfikowanym
+wheelu. Zestaw obejmował A/HWM/B/restart. Tymczasowy wyjątek środowiska `ksef-test`
+dla gałęzi PR został po runie usunięty; środowisko ponownie dopuszcza tylko `main`.
+Kolejne wydanie nadal przechodzi tę samą bramę na swoim dokładnym artefakcie.
 
 ## Historia
 

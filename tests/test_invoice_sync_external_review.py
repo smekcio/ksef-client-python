@@ -17,12 +17,65 @@ from ksef_client import (
     KsefSyncStateError,
     KsefSyncStoreError,
 )
+from ksef_client import models as m
 from ksef_client._json_bounds import check_json_structure
 from ksef_client.invoice_search import _InvalidMetadataResponse
 from ksef_client.invoice_sync_state import begin_cycle, make_batch
 from ksef_client.rate_limiting import RequestControl
 from tests.invoice_sync_store_harness import SQLiteHarness
 from tests.test_invoice_sync import H1, H2, Server, make_sync, row
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+def test_dense_metadata_page_fits_structural_budget_and_commits(tmp_path, asynchronous):
+    # Match the benchmark's dense page: 250 invoices with 100 named third subjects each.
+    thirds = [
+        m.InvoiceMetadataThirdSubject.from_dict(
+            {
+                "identifier": {"type": "Nip", "value": "1234567890"},
+                "role": 2,
+                "name": "x" * 512,
+            }
+        )
+        for _ in range(100)
+    ]
+    rows = [
+        replace(
+            row(f"invoice-{index:09}", "2025-01-01T00:00:00Z"),
+            invoice_number="benchmark",
+            third_subjects=thirds,
+        )
+        for index in range(250)
+    ]
+
+    async def run():
+        hwm = "2025-01-01T00:00:02Z"
+        sync, http = make_sync(
+            Server(rows, hwm=hwm),
+            asynchronous=asynchronous,
+            since="2025-01-01T00:00:00Z",
+            page_size=250,
+        )
+        try:
+            async with SQLiteHarness(tmp_path, asynchronous=asynchronous) as store:
+                report = await store.run_once(sync, max_pages_per_stream=1)
+                assert report.complete and report.streams[0].coverage.to == hwm
+                result = report.streams[0]
+                assert result.pages_committed == 1 and result.records_delivered == 250
+                count, metadata_bytes = (
+                    await store.sql(
+                        "SELECT count(*), sum(length(metadata_json)) FROM invoice_observations"
+                    )
+                )[0]
+                assert count == 250 and metadata_bytes > 14_000_000
+                stored = await store.sql("SELECT metadata_json FROM invoice_observations LIMIT 1")
+                sample = json.loads(stored[0][0])
+                assert len(sample["thirdSubjects"]) == 100
+                assert sample["thirdSubjects"][-1]["name"] == "x" * 512
+        finally:
+            await http.aclose() if asynchronous else http.close()
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
