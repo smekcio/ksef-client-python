@@ -65,3 +65,7 @@ A/HWM/B/restart pozostaje do wykonania w obowiązkowej, chronionej bramie CI,
 zgodnie z wcześniejszą decyzją użytkownika. Nie wykonywano push, PR, publikacji
 ani zmiany ochrony środowiska. Zaliczenie lokalnych regresji nie zastępuje
 faktycznego zaliczenia tej bramy przed wydaniem.
+
+Późniejsze domknięcie lokalnych kryteriów restartu, wspólnego kontraktu
+sync/async, budżetu i quickstartu opisuje
+[raport końcowego odbioru](invoice-sync-acceptance-closure.md).
