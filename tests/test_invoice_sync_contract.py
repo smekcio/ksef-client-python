@@ -233,6 +233,57 @@ def test_coordinators_reject_streams_from_the_other_execution_mode():
         asyncio.run(async_http.aclose())
 
 
+def test_live_poll_waits_for_hwm_and_preserves_other_failures():
+    from ksef_client import KsefIncompletePaginationError
+    from ksef_client.invoice_search import InvoiceMetadataObservationPage
+    from tests.invoice_sync_live_worker import find_at_hwm
+    from tests.test_invoice_sync import row
+
+    class Scan:
+        def __init__(self, reason=None):
+            self.reason = reason
+
+        def observation_page(self, cursor):
+            if self.reason:
+                raise KsefIncompletePaginationError(self.reason, last_cursor="private")
+            return InvoiceMetadataObservationPage(
+                (row(),) if cursor is None else (), "next" if cursor is None else None, H1
+            )
+
+    assert find_at_hwm(Scan("hwm_before_start"), "A") == (None, None)
+    invoice, hwm = find_at_hwm(Scan(), "A")
+    assert invoice.ksef_number == "A" and hwm == H1
+    with pytest.raises(KsefIncompletePaginationError):
+        find_at_hwm(Scan("repeated_page"), "A")
+
+
+def test_live_wire_bounds_validate_windows_and_hwm_clipping():
+    from ksef_client import models as m
+    from tests.invoice_sync_live_worker import check_wire_bounds
+    from tests.test_invoice_sync import row
+
+    scan = replace(query().date_range, to=H1)
+    wire = replace(
+        query(),
+        date_range=replace(
+            query().date_range, from_="2025-01-01T00:00:00Z", to="2025-01-02T00:00:00Z"
+        ),
+    )
+    response = m.QueryInvoicesMetadataResponse(
+        invoices=[row()],
+        has_more=False,
+        is_truncated=False,
+        permanent_storage_hwm_date="2025-01-01T12:00:00Z",
+    )
+    check_wire_bounds(scan, wire, response)
+    with pytest.raises(AssertionError):
+        check_wire_bounds(scan, replace(wire, date_range=replace(wire.date_range, to=H1)), response)
+    with pytest.raises(AssertionError):
+        check_wire_bounds(
+            scan, wire, replace(response, invoices=[row(date="2025-01-01T12:00:00.0000001Z")])
+        )
+
+
 def test_supervisor_success_failure_and_shared_timeout(tmp_path):
     run_phases([[sys.executable, "-c", "pass"]] * 2, cwd=tmp_path, env=dict(os.environ), timeout=10)
     with pytest.raises(RuntimeError, match="private output withheld"):

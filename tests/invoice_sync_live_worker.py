@@ -10,7 +10,7 @@ import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 # Only trusted tests/helpers are added. Never add the source SDK or an editable install.
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +19,13 @@ sys.path.insert(0, str(ROOT))
 from docs.examples.invoice_sync_sqlite import SQLiteInvoiceSyncStore  # noqa: E402
 from tools.release_artifacts import verify_installed_wheel  # noqa: E402
 
-from ksef_client import Ksef, KsefClientOptions, RetryConfig, TokenCredentials  # noqa: E402
+from ksef_client import (  # noqa: E402
+    Ksef,
+    KsefClientOptions,
+    KsefIncompletePaginationError,  # noqa: E402
+    RetryConfig,
+    TokenCredentials,
+)
 from ksef_client import models as m  # noqa: E402
 from ksef_client.invoice_search import _date  # noqa: E402
 from ksef_client.request_control import request_control, wait_seconds  # noqa: E402
@@ -35,6 +41,34 @@ def verify() -> None:
     assert os.environ.get("KSEF_TEST_INSTALLED") == "1"
     assert ROOT / "src" not in Path(ksef_client.__file__).resolve().parents
     verify_installed_wheel(Path(os.environ["KSEF_TEST_WHEEL"]))
+
+
+def find_at_hwm(scan, number):
+    cursor, found = None, None
+    try:
+        while True:
+            page = scan.observation_page(cursor)
+            found = next((r for r in page.observations if r.ksef_number == number), found)
+            cursor = page.next_cursor
+            if cursor is None:
+                return found, page.permanent_storage_hwm_date
+    except KsefIncompletePaginationError as error:
+        if error.reason_code != "hwm_before_start":
+            raise
+        return None, None
+
+
+def check_wire_bounds(scan, query, response) -> None:
+    wire = query.date_range
+    assert _date(scan.from_) <= _date(wire.from_) <= _date(wire.to) <= _date(scan.to)
+    assert (_date(wire.to)[0].date() - _date(wire.from_)[0].date()).days <= 100
+    assert wire.restrict_to_permanent_storage_hwm_date is True
+    assert response.permanent_storage_hwm_date is not None
+    upper = min((wire.to, response.permanent_storage_hwm_date), key=_date)
+    assert all(
+        _date(wire.from_) <= _date(row.permanent_storage_date) <= _date(upper)
+        for row in response.invoices
+    )
 
 
 def run(phase: str) -> None:
@@ -100,22 +134,9 @@ def run(phase: str) -> None:
                         ),
                         context_key=client.context_key,
                     )
-                    cursor, found = None, None
-                    while True:
-                        page = scan.observation_page(cursor)
-                        found = next(
-                            (
-                                r
-                                for r in page.observations
-                                if r.ksef_number == submitted.ksef_number
-                            ),
-                            found,
-                        )
-                        cursor = page.next_cursor
-                        if cursor is None:
-                            break
+                    found, observed_hwm = find_at_hwm(scan, submitted.ksef_number)
                     if found is not None:
-                        assert page.permanent_storage_hwm_date
+                        assert observed_hwm
                         if old is not None:
                             assert _date(cast(str, found.permanent_storage_date)) > _date(
                                 cast(str, old.committed_hwm)
@@ -123,7 +144,15 @@ def run(phase: str) -> None:
                         break
                     wait_seconds(60)
             original_factory = sync.streams[0]._search_factory
-            bounds = []
+            original_wire = client.api.invoices._query_invoice_metadata_observation_page
+            bounds: list[m.InvoiceQueryDateRange] = []
+
+            def checked_wire(filters, **kwargs):
+                response = original_wire(filters, **kwargs)
+                check_wire_bounds(bounds[-1], filters, response)
+                return response
+
+            cast(Any, client.api.invoices)._query_invoice_metadata_observation_page = checked_wire
 
             def checked_factory(filters, **kwargs):
                 bounds.append(filters.date_range)
