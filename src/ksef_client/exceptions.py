@@ -68,6 +68,15 @@ class ErrorCode(str, Enum):
     PAGINATION_ERROR = "pagination_error"
     INVALID_PAGINATION_CURSOR = "invalid_pagination_cursor"
     INCOMPLETE_PAGINATION = "incomplete_pagination"
+    SYNC_ERROR = "sync_error"
+    INVALID_SYNC_CHECKPOINT = "invalid_sync_checkpoint"
+    SYNC_STATE_ERROR = "sync_state_error"
+    SYNC_CONFLICT = "sync_conflict"
+    SYNC_DATA_CONFLICT = "sync_data_conflict"
+    SYNC_LIMIT_EXCEEDED = "sync_limit_exceeded"
+    SYNC_STORE_ERROR = "sync_store_error"
+    SYNC_RUN_FAILED = "sync_run_failed"
+    RESPONSE_LIMIT_EXCEEDED = "response_limit_exceeded"
 
     def __str__(self) -> str:
         return self.value
@@ -289,6 +298,96 @@ class KsefError(Exception):
         if omit_none:
             return {key: value for key, value in payload.items() if value is not None}
         return payload
+
+
+class KsefResponseLimitError(KsefError):
+    """A bounded response was rejected; deterministic and never retried."""
+
+    code = ErrorCode.RESPONSE_LIMIT_EXCEEDED
+
+    def __init__(
+        self,
+        *,
+        limit_bytes: int,
+        observed_bytes: int | None = None,
+        reason_code: str = "response_size_limit",
+    ) -> None:
+        super().__init__("Bounded HTTP response rejected")
+        self.limit_bytes = limit_bytes
+        self.observed_bytes = observed_bytes
+        self.reason_code = reason_code
+
+
+class KsefSyncError(KsefError):
+    code = ErrorCode.SYNC_ERROR
+
+    def __init__(self, reason_code: str = "sync_error") -> None:
+        super().__init__("Invoice metadata synchronization failed")
+        self.reason_code = reason_code
+
+
+class KsefInvalidSyncCheckpointError(KsefSyncError):
+    code = ErrorCode.INVALID_SYNC_CHECKPOINT
+
+
+class KsefSyncStateError(KsefSyncError):
+    code = ErrorCode.SYNC_STATE_ERROR
+
+
+class KsefSyncConflictError(KsefSyncError):
+    code = ErrorCode.SYNC_CONFLICT
+
+
+class KsefSyncDataConflictError(KsefSyncError):
+    code = ErrorCode.SYNC_DATA_CONFLICT
+
+
+class KsefSyncLimitError(KsefSyncError):
+    code = ErrorCode.SYNC_LIMIT_EXCEEDED
+
+    def __init__(
+        self, *, limit_stage: str, limit_bytes: int, observed_bytes: int | None = None
+    ) -> None:
+        if limit_stage not in {"response_body", "page_snapshot", "checkpoint"}:
+            raise ValueError("Invalid sync limit stage")
+        super().__init__("sync_limit_exceeded")
+        self.limit_stage = limit_stage
+        self.limit_bytes = limit_bytes
+        self.observed_bytes = observed_bytes
+
+
+class KsefSyncStoreError(KsefSyncError):
+    code = ErrorCode.SYNC_STORE_ERROR
+
+    def __init__(
+        self,
+        *,
+        operation: str,
+        commit_outcome: str = "not_started",
+        failure_scope: str = "stream",
+        original_error: BaseException | None = None,
+    ) -> None:
+        if (
+            operation not in {"load", "commit"}
+            or commit_outcome not in {"not_started", "rolled_back", "committed", "unknown"}
+            or failure_scope not in {"stream", "store"}
+            or operation == "load"
+            and commit_outcome != "not_started"
+        ):
+            raise ValueError("Invalid store error attributes")
+        super().__init__("store_failure")
+        self.operation = operation
+        self.commit_outcome = commit_outcome
+        self.failure_scope = failure_scope
+        self.original_error = original_error
+
+
+class KsefSyncRunError(KsefSyncError):
+    code = ErrorCode.SYNC_RUN_FAILED
+
+    def __init__(self, report: Any) -> None:
+        super().__init__("stream_failures")
+        self.report = report
 
 
 class KsefPaginationError(KsefError):

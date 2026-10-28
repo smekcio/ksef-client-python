@@ -17,6 +17,16 @@ from urllib.parse import urlparse
 import httpx
 
 from . import openapi_models as _openapi_models
+from ._bounded_http import (
+    PENDING,
+    append_chunk,
+    body_frame,
+    check_control,
+    check_headers,
+    identity_headers,
+    make_policy,
+    policy_for,
+)
 from .config import KsefClientOptions
 from .exceptions import (
     KsefApiError,
@@ -807,6 +817,50 @@ class BaseHttpClient:
     def close(self) -> None:
         self._client.close()
 
+    @property
+    def api_base_url(self) -> str:
+        """Read-only effective API target used by this transport."""
+        return self._options.normalized_base_url()
+
+    def request_json_limited(
+        self, method: str, path: str, *, max_bytes: int, **kwargs: Any
+    ) -> HttpResponse:
+        marker = PENDING.set(make_policy(self, path, max_bytes))
+        try:
+            return self.request(method, path, **kwargs)
+        finally:
+            PENDING.reset(marker)
+
+    def _received_headers(self, response: httpx.Response, budget_parameters: Any) -> None:
+        if budget_parameters is not None and response.status_code == 429:
+            assert self._options.rate_limit_budget is not None
+            self._options.rate_limit_budget.defer(
+                *budget_parameters, _budget_retry_after(response.headers.get("Retry-After"))
+            )
+        _handle_system_warning(self._options, response)
+
+    def _receive_response(self, *, budget_parameters: Any, **kwargs: Any) -> httpx.Response:
+        policy = policy_for(self)
+        if policy is None:
+            response = self._client.request(**kwargs)
+            self._received_headers(response, budget_parameters)
+            return response
+        kwargs["url"] = policy.url
+        kwargs["headers"] = identity_headers(kwargs["headers"])
+        kwargs["follow_redirects"] = False
+        check_control()
+        with self._client.stream(**kwargs) as response:
+            self._received_headers(response, budget_parameters)
+            check_headers(response, policy)
+            body = bytearray()
+            for chunk in response.iter_raw(chunk_size=65536):
+                append_chunk(body, chunk, policy)
+            check_control()
+            return httpx.Response(
+                response.status_code, headers=response.headers, content=bytes(body)
+            )
+
+    @body_frame
     def request(
         self,
         method: str,
@@ -996,7 +1050,8 @@ class BaseHttpClient:
         if admission is not None:
             admission.commit()
         try:
-            response = self._client.request(
+            response = self._receive_response(
+                budget_parameters=budget_parameters,
                 method=method,
                 url=url,
                 params=params,
@@ -1017,12 +1072,6 @@ class BaseHttpClient:
             # wołający miał jeden kontrakt błędów (`KsefHttpError`).
             raise _wrap_transport_error(exc, method=method, url=url) from None
         logger.debug("HTTP %s %s -> %s", method, _loggable_url(url), response.status_code)
-        if budget_parameters is not None and response.status_code == 429:
-            assert self._options.rate_limit_budget is not None
-            self._options.rate_limit_budget.defer(
-                *budget_parameters, _budget_retry_after(response.headers.get("Retry-After"))
-            )
-        _handle_system_warning(self._options, response)
 
         if (
             expected_status
@@ -1079,6 +1128,50 @@ class AsyncBaseHttpClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    @property
+    def api_base_url(self) -> str:
+        """Read-only effective API target used by this transport."""
+        return self._options.normalized_base_url()
+
+    async def request_json_limited(
+        self, method: str, path: str, *, max_bytes: int, **kwargs: Any
+    ) -> HttpResponse:
+        marker = PENDING.set(make_policy(self, path, max_bytes))
+        try:
+            return await self.request(method, path, **kwargs)
+        finally:
+            PENDING.reset(marker)
+
+    def _received_headers(self, response: httpx.Response, budget_parameters: Any) -> None:
+        if budget_parameters is not None and response.status_code == 429:
+            assert self._options.rate_limit_budget is not None
+            self._options.rate_limit_budget.defer(
+                *budget_parameters, _budget_retry_after(response.headers.get("Retry-After"))
+            )
+        _handle_system_warning(self._options, response)
+
+    async def _receive_response(self, *, budget_parameters: Any, **kwargs: Any) -> httpx.Response:
+        policy = policy_for(self)
+        if policy is None:
+            response = await self._client.request(**kwargs)
+            self._received_headers(response, budget_parameters)
+            return response
+        kwargs["url"] = policy.url
+        kwargs["headers"] = identity_headers(kwargs["headers"])
+        kwargs["follow_redirects"] = False
+        check_control()
+        async with self._client.stream(**kwargs) as response:
+            self._received_headers(response, budget_parameters)
+            check_headers(response, policy)
+            body = bytearray()
+            async for chunk in response.aiter_raw(chunk_size=65536):
+                append_chunk(body, chunk, policy)
+            check_control()
+            return httpx.Response(
+                response.status_code, headers=response.headers, content=bytes(body)
+            )
+
+    @body_frame
     async def request(
         self,
         method: str,
@@ -1267,7 +1360,8 @@ class AsyncBaseHttpClient:
         if admission is not None:
             admission.commit()
         try:
-            response = await self._client.request(
+            response = await self._receive_response(
+                budget_parameters=budget_parameters,
                 method=method,
                 url=url,
                 params=params,
@@ -1283,12 +1377,6 @@ class AsyncBaseHttpClient:
             # Patrz `BaseHttpClient.request`: jeden kontrakt błędów także dla sieci.
             raise _wrap_transport_error(exc, method=method, url=url) from None
         logger.debug("HTTP %s %s -> %s", method, _loggable_url(url), response.status_code)
-        if budget_parameters is not None and response.status_code == 429:
-            assert self._options.rate_limit_budget is not None
-            self._options.rate_limit_budget.defer(
-                *budget_parameters, _budget_retry_after(response.headers.get("Retry-After"))
-            )
-        _handle_system_warning(self._options, response)
 
         if (
             expected_status

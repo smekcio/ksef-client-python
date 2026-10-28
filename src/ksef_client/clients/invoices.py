@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import warnings
 from collections.abc import AsyncIterator, Iterator
@@ -17,8 +18,11 @@ from ..invoice_range_search import (
 from ..invoice_search import (
     AsyncInvoiceMetadataSearch,
     InvoiceMetadataSearch,
+    _InvalidMetadataResponse,
+    _json_object,
     _MetadataMachine,
     _parse_metadata_response,
+    _reject_constant,
 )
 from ..models import (
     BinaryContent,
@@ -246,6 +250,40 @@ def _serialize_search_filters(
 
 
 class InvoicesClient(BaseApiClient):
+    def _query_invoice_metadata_observation_page(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        page_offset: int,
+        page_size: int,
+        sort_order: str,
+        expected_environment: str,
+        access_token: str | None = None,
+    ) -> QueryInvoicesMetadataResponse:
+        if self._http.api_base_url != expected_environment:
+            raise ValueError("Metadata source environment changed")
+        response = self._http.request_json_limited(
+            "POST",
+            "/invoices/query/metadata",
+            max_bytes=16 * 1024 * 1024,
+            params={"pageOffset": page_offset, "pageSize": page_size, "sortOrder": sort_order},
+            json=_serialize_invoice_payload(request_payload),
+            access_token=access_token,
+        )
+        try:
+            raw = json.loads(
+                response.content, object_pairs_hook=_json_object, parse_constant=_reject_constant
+            )
+            if (
+                type(raw) is not dict
+                or type(raw.get("invoices")) is not list
+                or len(raw["invoices"]) > page_size
+            ):
+                raise ValueError("Invalid metadata page")
+            return _parse_metadata_response(raw)
+        except (ValueError, TypeError, RecursionError):
+            raise _InvalidMetadataResponse("Invalid metadata response") from None
+
     def search_invoice_metadata_range(
         self,
         request_payload: InvoiceQueryFilters,
@@ -275,6 +313,11 @@ class InvoicesClient(BaseApiClient):
         return InvoiceMetadataRangeSearch(
             machine,
             partial(self._query_invoice_metadata_search_page, access_token=access_token),
+            partial(
+                self._query_invoice_metadata_observation_page,
+                expected_environment=options.normalized_base_url(),
+                access_token=access_token,
+            ),
         )
 
     def search_invoice_metadata(
@@ -612,6 +655,40 @@ class InvoicesClient(BaseApiClient):
 
 
 class AsyncInvoicesClient(AsyncBaseApiClient):
+    async def _query_invoice_metadata_observation_page(
+        self,
+        request_payload: InvoiceQueryFilters,
+        *,
+        page_offset: int,
+        page_size: int,
+        sort_order: str,
+        expected_environment: str,
+        access_token: str | None = None,
+    ) -> QueryInvoicesMetadataResponse:
+        if self._http.api_base_url != expected_environment:
+            raise ValueError("Metadata source environment changed")
+        response = await self._http.request_json_limited(
+            "POST",
+            "/invoices/query/metadata",
+            max_bytes=16 * 1024 * 1024,
+            params={"pageOffset": page_offset, "pageSize": page_size, "sortOrder": sort_order},
+            json=_serialize_invoice_payload(request_payload),
+            access_token=access_token,
+        )
+        try:
+            raw = json.loads(
+                response.content, object_pairs_hook=_json_object, parse_constant=_reject_constant
+            )
+            if (
+                type(raw) is not dict
+                or type(raw.get("invoices")) is not list
+                or len(raw["invoices"]) > page_size
+            ):
+                raise ValueError("Invalid metadata page")
+            return _parse_metadata_response(raw)
+        except (ValueError, TypeError, RecursionError):
+            raise _InvalidMetadataResponse("Invalid metadata response") from None
+
     def search_invoice_metadata_range(
         self,
         request_payload: InvoiceQueryFilters,
@@ -637,6 +714,11 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
         return AsyncInvoiceMetadataRangeSearch(
             machine,
             partial(self._query_invoice_metadata_search_page, access_token=access_token),
+            partial(
+                self._query_invoice_metadata_observation_page,
+                expected_environment=options.normalized_base_url(),
+                access_token=access_token,
+            ),
         )
 
     def search_invoice_metadata(
