@@ -616,6 +616,8 @@ class TokenRefreshingHttpClient(BaseHttpClient):
         refresh_token: str | None = None,
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
+        max_bytes: int | None = None,
+        request_url: str | None = None,
     ) -> HttpResponse:
         if skip_auth or access_token is not None or refresh_token is not None:
             return super()._request_once(
@@ -629,6 +631,8 @@ class TokenRefreshingHttpClient(BaseHttpClient):
                 refresh_token=refresh_token,
                 skip_auth=skip_auth,
                 expected_status=expected_status,
+                max_bytes=max_bytes,
+                request_url=request_url,
             )
 
         marker = self._request_token.set(None)
@@ -643,6 +647,8 @@ class TokenRefreshingHttpClient(BaseHttpClient):
                     data=data,
                     skip_auth=skip_auth,
                     expected_status=expected_status,
+                    max_bytes=max_bytes,
+                    request_url=request_url,
                 )
             except KsefHttpError as exc:
                 if (
@@ -663,6 +669,8 @@ class TokenRefreshingHttpClient(BaseHttpClient):
                     data=data,
                     skip_auth=skip_auth,
                     expected_status=expected_status,
+                    max_bytes=max_bytes,
+                    request_url=request_url,
                 )
         finally:
             self._request_token.reset(marker)
@@ -724,6 +732,8 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
         refresh_token: str | None = None,
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
+        max_bytes: int | None = None,
+        request_url: str | None = None,
     ) -> HttpResponse:
         if skip_auth or access_token is not None or refresh_token is not None:
             return await super()._request_once(
@@ -737,6 +747,8 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
                 refresh_token=refresh_token,
                 skip_auth=skip_auth,
                 expected_status=expected_status,
+                max_bytes=max_bytes,
+                request_url=request_url,
             )
 
         marker = self._request_token.set(None)
@@ -751,6 +763,8 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
                     data=data,
                     skip_auth=skip_auth,
                     expected_status=expected_status,
+                    max_bytes=max_bytes,
+                    request_url=request_url,
                 )
             except KsefHttpError as exc:
                 if (
@@ -771,6 +785,8 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
                     data=data,
                     skip_auth=skip_auth,
                     expected_status=expected_status,
+                    max_bytes=max_bytes,
+                    request_url=request_url,
                 )
         finally:
             self._request_token.reset(marker)

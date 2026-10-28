@@ -4,6 +4,11 @@
 faktur. Każda rola ma osobny checkpoint. Aplikacja zapewnia uwierzytelnionego
 klienta, magazyn transakcyjny i harmonogram kolejnych uruchomień.
 
+To jedyny bieżący opis integracji, kontraktu i weryfikacji tej funkcji.
+Implementacja jest lokalnie gotowa; przed wydaniem minor po 0.21.0 wymagane
+jest zaliczenie live TEST w chronionej bramie CI. Aktualne wyniki związane z SHA
+zawiera [jeden plik dowodów](reports/invoice-sync-validation.json).
+
 ## Pierwsza integracja
 
 ```python
@@ -201,6 +206,27 @@ nie wykonuj sqlite3 na pętli zdarzeń.
 Pomylenie trybu magazynu daje `TypeError` z nazwą oczekiwanego trybu; nie jest
 błędem strumienia maskowanym przez `raise_on_error=False`.
 
+## Jawny limit transportu
+
+`BaseHttpClient.request(..., max_bytes=None)` i odpowiednik async pozostawiają
+zwykły odbiór bez zmian. Dodatnia liczba całkowita ogranicza rzeczywiste bajty
+odpowiedzi na każdej próbie. Bool, zero, wartości ujemne i float są odrzucane
+przed I/O. `request_json_limited(..., max_bytes=N)` jest skrótem tej samej ścieżki
+wymagającym limitu; nie uruchamia osobnej pętli HTTP.
+
+Metadane korzystają z limitu 16 MiB. Argument przechodzi jawnie przez retry,
+próbę HTTP, odświeżenie po 401 i odbiór odpowiedzi. Nie jest przechowywany
+w ContextVar i nie przechodzi na zagnieżdżone żądania auth ani inne taski/wątki.
+Każde z nich otrzymuje własny limit lub domyślne None.
+
+Adres limited request jest zamrożony przed auth/admission i pozostaje ten sam
+podczas retry oraz ponowienia po refreshu. Oryginalna ścieżka nadal decyduje
+o allowliście POST i walidacji presigned URL. Odbiór wymusza identity encoding,
+odrzuca 3xx, sprawdza Content-Length oraz faktyczne porcje, a następnie zamyka
+odpowiedź również przy wyjątku/anulowaniu. Nagłówki 429 aktualizują wspólny
+cooldown przed ewentualnym błędem body. Zabezpieczenia presigned URL i usuwanie
+Authorization przy skip_auth pozostają aktywne.
+
 ## Limity, błędy i odzyskanie
 
 Limity wynoszą: HTTP body i kanoniczna strona 16 MiB, checkpoint 4 MiB,
@@ -268,3 +294,101 @@ Synchronizacja metadanych nie pobiera XML i nie potwierdza zaksięgowania.
 Opcjonalny outbox przykładu SQLite ma stabilny klucz dokument/rodzaj/wariant,
 niezależny od generacji. Worker XML ma własne hashe i statusy.
 Automatyczny eksport, XML, harmonogram i rekonsyliacja są osobnymi etapami.
+
+## Decyzje implementacyjne
+
+- Jeden koordynator steruje przejściami, a osobne drivery wykonują sync/async I/O.
+  Pozwala to zachować identyczną kolejność load, odczytu strony i COMMIT.
+- Istniejący kursor wyszukiwania zachowuje semantykę i format v1. Kompaktowy
+  kursor oznaczałby odrębny kontrakt; nie usuwa też potrzeby limitowania metadanych.
+- Checkpoint ma niezmienny snapshot i mały cache pól skalarnych. Spec/active
+  zwracają niezależne kopie; observation_count nie parsuje strony dla licznika.
+- Generacja i rewizja służą CAS/fence. commit_id rozróżnia konkretne propozycje
+  partii: dwaj workerzy mogą przygotować różne partie z tą samą następną rewizją.
+- common_coverage realizuje wymagane przecięcie potwierdzonych zakresów ról.
+  Opóźniony, lecz zweryfikowany load zachowuje wcześniejsze pokrycie w partial.
+- Twardy deadline nagłówków wymaga nadzorcy procesu. Serwerowy cooldown wspólnego
+  limitera, proxy/CA i własność transportu pozostają częścią konfiguracji aplikacji.
+
+## Weryfikacja i odtwarzanie wyników
+
+Poniższe komendy wykonuj z katalogu repozytorium, w przygotowanym virtualenv
+zgodnym z requirements-dev.txt. Pełna macierz obejmuje Python 3.10–3.14 na Linux
+oraz Python 3.12 na Windows. Bieżące liczby, wersje narzędzi, sumy artefaktów
+oraz surowe pary RSS są wyłącznie w [pliku dowodów](reports/invoice-sync-validation.json).
+Zmiany dokumentacji po zapisanym code_commit nie zmieniają badanego SDK.
+
+```bash
+python tools/lint.py --strict
+python tools/generate_async_facade.py --check
+python -m pytest -q --cov=ksef_client --cov-fail-under=100 --cov-report=term-missing
+```
+
+To próg pokrycia instrukcji/linii, nie gałęzi. Lokalne pominięcia live lub
+przypadków platformowych nie zaliczają scenariuszy TEST. Regresje obejmują:
+
+| Granica | Dowód |
+| --- | --- |
+| Trwałość | Rzeczywista SQLite, sync/async, default/autocommit; awarie przed/po każdym SQL, w tym utrata receiptu po COMMIT; CAS, hash, fence i idempotentny outbox. |
+| Restart | Nowy interpreter z -I po każdej stronie; dokładne zbiory dokumentów i obserwacji, stały cycle_to oraz HWM tylko na końcu. |
+| Transport | Jawny limit na obu entry pointach, retry/401/refresh, nested auth, współbieżność, kompresja/3xx, 429 z błędem body, wolne porcje i cleanup async. |
+| Dane niezaufane | Limity body/snapshotu/kursora, preflight JSON przed dekoderem, mutacje checkpointu, niezgodna tożsamość źródła i poufne oryginalne wyjątki. |
+| Koordynacja | Zdrowa rola postępuje przy awarii innej; długi backfill korzysta z czasu po trzech pustych rolach; globalny i krokowy budżet mają odrębne przyczyny. |
+
+Testy mają krótkie jawne ID dla parametrów wielomegabajtowych, niezależnie od
+strategii automatycznych identyfikatorów pytest na Windows.
+
+### Dokładny wheel
+
+Zbuduj artefakty ze wskazanego pełnego SHA (FULL_COMMIT_SHA poniżej jest miejscem
+na rzeczywistą wartość z git rev-parse HEAD):
+
+```bash
+python -m build --outdir .tmp/invoice-sync-dist
+python tools/release_artifacts.py record .tmp/invoice-sync-dist --sha FULL_COMMIT_SHA
+python tools/release_artifacts.py verify .tmp/invoice-sync-dist --sha FULL_COMMIT_SHA
+```
+
+W osobnym virtualenv z zależnościami testowymi zainstaluj ten wheel przez pip
+z --force-reinstall --no-deps. Ustaw KSEF_TEST_INSTALLED=1 i KSEF_TEST_WHEEL na
+absolutną ścieżkę do pliku. Następnie wykonaj poniższy wybór testów (jawne ścieżki
+zamiast globu powłoki, aby ta sama komenda działała również w PowerShell):
+
+```bash
+python -m pytest -q tests/test_bounded_http.py tests/test_invoice_sync.py tests/test_invoice_sync_state.py tests/test_invoice_sync_failures.py tests/test_invoice_sync_contract.py tests/test_invoice_sync_processes.py tests/test_invoice_sync_review.py tests/test_invoice_sync_external_review.py tests/test_invoice_sync_store_contract.py tests/test_invoice_sync_transport.py tests/test_invoice_search.py tests/test_invoice_range_search.py tests/test_invoice_range_review.py tests/test_pagination.py
+python tools/release_artifacts.py verify-installed .tmp/invoice-sync-dist --sha FULL_COMMIT_SHA
+```
+
+Conftest i procesy restartu weryfikują import z zainstalowanego wheela oraz jego
+bajty, zamiast importu lokalnego src. Wymagana jest nieedytowalna instalacja.
+
+### Pamięć
+
+Referencyjny pomiar wymaga Linux/Python 3.12. Każdy worker jest nowym procesem:
+
+```bash
+python tools/benchmark_invoice_sync.py --pairs 3 --output .tmp/invoice-sync-rss.json
+python tools/benchmark_invoice_sync.py --worker 10000 --boundary 10000 --output .tmp/invoice-sync-boundary.json
+python tools/benchmark_invoice_sync.py --worker 250 --boundary 250 --dense-page --output .tmp/invoice-sync-dense.json
+```
+
+Próg dotyczy maksimum z trzech różnic max(0, peak_RSS_500k - peak_RSS_50k):
+32 MiB. Nie jest limitem całkowitego RSS gęstej strony. --output działa także
+z --worker. Osobne uruchomienia i różne SHA mogą dawać różne wyniki; aktualnym
+punktem odniesienia są pary w jedynym pliku dowodów, wraz z parametrami i SHA.
+
+### Obowiązkowa brama live
+
+Scenariusz A/HWM/B/restart wykonuje workflow required-test-e2e.yml w środowisku
+ksef-test, na dokładnym wheelu. Jeden node nadzoruje dwa procesy fazowe na Linux,
+z łącznym watchdogiem 1800 s. Manifest i kontroler wymagają siedmiu scenariuszy,
+bez skip, rerun ani powtórnego wysłania faktury jako obejścia niepowodzenia.
+Zgodnie z decyzją użytkownika live pozostaje do CI; lokalny odbiór go nie zastępuje.
+
+## Historia
+
+Dawny plan i kolejne raporty zostały skonsolidowane w ten dokument. Szczegółową
+historię wymagań, ustaleń i wcześniejszych prób zachowuje Git, np.
+`git show 379af4b:docs/plans/invoice-sync.md` oraz
+`git show 379af4b:docs/reports/invoice-sync-external-review-response.md`.
+Nie utrzymujemy ich jako równoległych aktualnych specyfikacji i raportów.

@@ -7,7 +7,6 @@ import httpx
 import pytest
 
 from ksef_client import KsefClientOptions
-from ksef_client._bounded_http import FRAME, PENDING
 from ksef_client.exceptions import KsefHttpError, KsefResponseLimitError
 from ksef_client.http import AsyncBaseHttpClient, BaseHttpClient
 
@@ -33,6 +32,7 @@ class Body(httpx.SyncByteStream, httpx.AsyncByteStream):
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("entry", ["request", "request_json_limited"])
 @pytest.mark.parametrize(
     "status,headers,chunks,limit,error",
     [
@@ -46,7 +46,7 @@ class Body(httpx.SyncByteStream, httpx.AsyncByteStream):
         (429, {}, [b"{}"], 20, KsefHttpError),
     ],
 )
-def test_bounded_receive(asynchronous, status, headers, chunks, limit, error):
+def test_bounded_receive(asynchronous, entry, status, headers, chunks, limit, error):
     body = Body(chunks)
     calls = []
 
@@ -66,7 +66,7 @@ def test_bounded_receive(asynchronous, status, headers, chunks, limit, error):
         await client._client.aclose()
         client._client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
         try:
-            result = await client.request_json_limited("GET", "/x", max_bytes=limit)
+            result = await getattr(client, entry)("GET", "/x", max_bytes=limit)
             assert result.content == b"{}"
         finally:
             await client.aclose()
@@ -76,7 +76,7 @@ def test_bounded_receive(asynchronous, status, headers, chunks, limit, error):
         client.close()
         client._client = httpx.Client(transport=httpx.MockTransport(handle))
         try:
-            result = client.request_json_limited("GET", "/x", max_bytes=limit)
+            result = getattr(client, entry)("GET", "/x", max_bytes=limit)
             assert result.content == b"{}"
         finally:
             client.close()
@@ -88,7 +88,6 @@ def test_bounded_receive(asynchronous, status, headers, chunks, limit, error):
         asyncio.run(run()) if asynchronous else sync()
     assert len(calls) == 1
     assert body.closed
-    assert FRAME.get() is None and PENDING.get() is None
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
@@ -147,6 +146,10 @@ def test_frozen_configuration_and_validation():
         for limit in (True, 0, -1, 1.0):
             with pytest.raises(ValueError):
                 client.request_json_limited("GET", "/x", max_bytes=limit)  # type: ignore[arg-type]
+            with pytest.raises(ValueError):
+                client.request("GET", "/x", max_bytes=limit)  # type: ignore[arg-type]
+        with pytest.raises(ValueError):
+            client.request_json_limited("GET", "/x", max_bytes=None)  # type: ignore[arg-type]
         with pytest.raises(AttributeError):
             client.api_base_url = "https://other.test"  # type: ignore[misc]
     finally:

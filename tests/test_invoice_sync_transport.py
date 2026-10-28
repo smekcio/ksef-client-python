@@ -4,6 +4,7 @@ import asyncio
 import json
 import threading
 import time
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from unittest.mock import Mock
@@ -18,9 +19,9 @@ from ksef_client import (
     RateLimitBudget,
     RateLimitPolicy,
     RateLimitValues,
+    RetryConfig,
     request_control,
 )
-from ksef_client._bounded_http import FRAME, PENDING, make_policy
 from ksef_client.clients.invoices import AsyncInvoicesClient, InvoicesClient
 from ksef_client.exceptions import KsefHttpError, KsefIncompletePaginationError
 from ksef_client.http import AsyncBaseHttpClient, BaseHttpClient
@@ -245,7 +246,7 @@ def test_real_slow_http_checks_deadline_without_filling_large_chunk():
         thread.join(timeout=2)
 
 
-def test_async_concurrent_nested_frames_and_no_marker_leak():
+def test_async_concurrent_explicit_limits_and_child_requests():
     async def run():
         client = AsyncBaseHttpClient(KsefClientOptions(base_url="https://example.test/v2"))
         await client.aclose()
@@ -270,15 +271,126 @@ def test_async_concurrent_nested_frames_and_no_marker_leak():
                 client.request("GET", "/large"),
             )
             assert small.content == b"{}" and len(large.content) > 2
-            # An inherited pending marker from another task is not consumed as its own policy.
-            marker = PENDING.set(make_policy(client, "/small", 2))
-            try:
-                result = await asyncio.create_task(client.request("GET", "/large"))
-                assert len(result.content) > 2
-            finally:
-                PENDING.reset(marker)
-            assert FRAME.get() is None and PENDING.get() is None
+            # A child task is ordinary unless its caller passes a limit explicitly.
+            result = await asyncio.create_task(client.request("GET", "/large"))
+            assert len(result.content) > 2
+            with pytest.raises(KsefResponseLimitError):
+                await asyncio.create_task(client.request("GET", "/large", max_bytes=2))
         finally:
             await client.aclose()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("overflow", [False, True])
+def test_explicit_limit_and_target_survive_retry_refresh_and_nested_auth(asynchronous, overflow):
+    from ksef_client.models import TokenInfo
+
+    async def run():
+        options = KsefClientOptions(
+            base_url="https://example.test/v2",
+            retry=RetryConfig(
+                max_retries=1,
+                base_delay_ms=1,
+                jitter_ratio=0,
+                retryable_post_paths=frozenset({"/invoices/query/metadata"}),
+            ),
+        )
+        calls = []
+
+        def handle(request):
+            calls.append(request)
+            if request.url.path.endswith("auth"):
+                return httpx.Response(
+                    200, stream=Body([b"ordinary refresh response exceeds limit"])
+                )
+            number = sum(r.url.path.endswith("metadata") for r in calls)
+            body = b"xxx" if number >= 3 and overflow else b"{}"
+            return httpx.Response({1: 503, 2: 401}.get(number, 200), stream=Body([body]))
+
+        client: Any
+
+        def refresh(token):
+            client.request("POST", "/auth", skip_auth=True)
+            client._options = replace(options, base_url="https://changed.test/v2")
+            return TokenInfo("new", "2099-01-01T00:00:00Z")
+
+        async def async_refresh(token):
+            await client.request("POST", "/auth", skip_auth=True)
+            client._options = replace(options, base_url="https://changed.test/v2")
+            return TokenInfo("new", "2099-01-01T00:00:00Z")
+
+        if asynchronous:
+            client = AsyncTokenRefreshingHttpClient(
+                options,
+                AsyncTokenManager("old", "refresh", refresh_handler=async_refresh),
+            )
+            await client.aclose()
+        else:
+            client = TokenRefreshingHttpClient(
+                options,
+                TokenManager("old", "refresh", refresh_handler=refresh),
+            )
+            client.close()
+        client._client = (httpx.AsyncClient if asynchronous else httpx.Client)(
+            transport=httpx.MockTransport(handle),
+        )
+        try:
+
+            async def invoke():
+                response = client.request("POST", "/invoices/query/metadata", max_bytes=2)
+                return await response if asynchronous else response
+
+            if overflow:
+                with pytest.raises(KsefResponseLimitError):
+                    await invoke()
+            else:
+                assert (await invoke()).content == b"{}"
+            assert len(calls) == 4
+            assert {request.url.host for request in calls} == {"example.test"}
+            business = [r for r in calls if r.url.path.endswith("metadata")]
+            assert [r.headers["Authorization"] for r in business] == [
+                "Bearer old",
+                "Bearer old",
+                "Bearer new",
+            ]
+        finally:
+            await client.aclose() if asynchronous else client.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_explicit_limit_preserves_relative_skip_auth_and_presigned_security(asynchronous):
+    async def run():
+        client: Any = (AsyncBaseHttpClient if asynchronous else BaseHttpClient)(
+            KsefClientOptions(base_url="http://127.0.0.1:12345/v2"),
+        )
+        await client.aclose() if asynchronous else client.close()
+        calls = []
+
+        def handle(request):
+            calls.append(request)
+            assert "Authorization" not in request.headers
+            return httpx.Response(200, stream=Body([b"{}"]))
+
+        client._client = (httpx.AsyncClient if asynchronous else httpx.Client)(
+            transport=httpx.MockTransport(handle),
+        )
+        try:
+            result = client.request("GET", "/x", skip_auth=True, max_bytes=2)
+            if asynchronous:
+                result = await result
+            assert result.content == b"{}"
+            with pytest.raises(ValueError, match="loopback"):
+                result = client.request(
+                    "GET", "https://127.0.0.1:12345/x", skip_auth=True, max_bytes=2
+                )
+                if asynchronous:
+                    await result
+            assert len(calls) == 1
+        finally:
+            await client.aclose() if asynchronous else client.close()
 
     asyncio.run(run())

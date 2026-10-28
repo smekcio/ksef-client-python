@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "status": "awaiting_validation",
+  "scope": "Explicit transport limit and consolidated invoice synchronization documentation",
+  "live_test": "deferred_to_protected_CI_by_user"
+}
