@@ -2,16 +2,87 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import multiprocessing
+import os
 import sqlite3
+import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from docs.examples.invoice_sync_sqlite import SQLiteInvoiceSyncStore
 
-from ksef_client import KsefSyncConflictError, KsefSyncDataConflictError
+from ksef_client import InvoiceSyncCheckpoint, KsefSyncConflictError, KsefSyncDataConflictError
+from ksef_client.invoice_search import _date
 from tests.test_invoice_sync import H1, H2, HASH, Server, database, make_sync, row
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize("autocommit", [False, True])
+def test_restart_after_every_page_no_early_hwm(tmp_path, mode, autocommit):
+    worker = Path(__file__).with_name("invoice_sync_page_worker.py")
+    environment = dict(os.environ)
+    environment.pop("PYTHONPATH", None)
+    checkpoints, calls, pids = [], [], []
+    cycle_to = None
+    for _ in range(30):  # A broken cursor must fail, rather than loop without a bound.
+        subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                str(worker),
+                str(tmp_path),
+                mode,
+                "autocommit" if autocommit else "default",
+            ],
+            cwd=tmp_path,
+            env=environment,
+            check=True,
+            timeout=30,
+        )
+        evidence = json.loads((tmp_path / "page.json").read_text(encoding="utf-8"))
+        checkpoint = InvoiceSyncCheckpoint.from_json(evidence["checkpoint"])
+        checkpoints.append(checkpoint)
+        calls.append(evidence["wire"])
+        pids.append(evidence["pid"])
+        assert checkpoint.committed_hwm == (H1 if evidence["complete"] else None)
+        if checkpoint.active is not None:
+            if cycle_to is None:
+                cycle_to = checkpoint.active["cycle_to"]
+            assert checkpoint.active["cycle_to"] == cycle_to
+        if len(checkpoints) > 1:
+            previous = checkpoints[-2]
+            assert checkpoint.generation_id == previous.generation_id
+            assert checkpoint.revision == previous.revision + 1
+        if environment.get("KSEF_TEST_INSTALLED") == "1":
+            assert (
+                Path(__file__).resolve().parents[1] / "src"
+                not in Path(evidence["sdk_path"]).resolve().parents
+            )
+        if evidence["complete"]:
+            break
+    else:
+        pytest.fail("Fresh-process pagination did not terminate")
+    assert len(checkpoints) > 8
+    assert cycle_to is not None
+    assert os.getpid() not in pids  # OS may recycle a PID after an earlier child has exited.
+    assert {call[1] for call in calls} >= {0, 1, 2}
+    assert len({call[0]["dateRange"]["from"] for call in calls}) > 6
+    assert checkpoints[-1].phase == "idle"
+    assert all(_date(call[0]["dateRange"]["to"]) <= _date(cycle_to) for call in calls)
+    connection = sqlite3.connect(tmp_path / "sync.db", timeout=2)
+    try:
+        expected = {str(i) for i in range(50)}
+        assert {r[0] for r in connection.execute("SELECT ksef_number FROM invoices")} == expected
+        assert {
+            r[0] for r in connection.execute("SELECT ksef_number FROM invoice_observations")
+        } == expected
+        assert {r[0] for r in connection.execute("SELECT ksef_number FROM outbox")} == expected
+    finally:
+        connection.close()
 
 
 def _race_worker(path, barrier, queue, mode, index):

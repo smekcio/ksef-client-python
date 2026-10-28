@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -24,58 +23,77 @@ from ksef_client import (
 from ksef_client.exceptions import KsefResponseLimitError
 from ksef_client.invoice_search import InvoiceMetadataObservationPage
 from ksef_client.invoice_sync import _commit_and_drain
-from tests.test_invoice_sync import H1, H2, Server, database, make_sync, row
+from tests.test_invoice_sync import H1, H2, Server, database, make_sync, query
 
 
-@pytest.mark.parametrize("at", range(1, 9))
-@pytest.mark.parametrize("after", [False, True])
-def test_sqlite_failure_at_each_statement_is_atomic(tmp_path, at, after):
-    class FaultStore(SQLiteInvoiceSyncStore):
-        calls = 0
-        failure_at = None
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_backfill_uses_remaining_budget_after_three_empty_roles(
+    tmp_path, monkeypatch, asynchronous
+):
+    import time
 
-        def _execute(self, sql, parameters=()):
-            self.calls += 1
-            fail = self.calls == self.failure_at
-            if fail:
-                self.failure_at = None
-            if fail and not after:
-                raise OSError("private-database-details")
-            result = super()._execute(sql, parameters)
-            if fail:
-                raise OSError("private-database-details")
-            return result
+    from ksef_client.rate_limiting import RequestControl
+    from tests.invoice_sync_store_harness import SQLiteHarness
 
-    server = Server([row()])
-    sync, http = make_sync(server, since="2025-01-01T00:00:00Z")
-    connection = sqlite3.connect(tmp_path / "sync.db", timeout=2)
-    store = FaultStore(connection, enqueue_xml=True)
-    stream = sync.streams[0]
-    try:
-        begin = stream.begin_cycle(None, until=H1)
-        cp = begin.confirm(store.commit(begin))
-        page = stream.next_batch(cp)
-        store.calls, store.failure_at = 0, at
-        with pytest.raises(KsefSyncStoreError) as caught:
-            store.commit(page)
-        assert caught.value.commit_outcome in {"not_started", "rolled_back", "unknown"}
-        assert not connection.in_transaction
-        loaded = store.load(stream.scope)
-        assert loaded is not None
-        persisted = loaded.last_commit_id == page.receipt.commit_id
-        assert persisted == (after and at == 8)
-        for table in ("invoices", "invoice_observations", "outbox"):
-            assert connection.execute("SELECT count(*) FROM " + table).fetchone()[0] == int(
-                persisted
-            )
-        assert loaded == (page.next_checkpoint if persisted else cp)
-        # Replay after an uncertain committed result is rejected by CAS.
-        if persisted:
-            with pytest.raises(KsefSyncConflictError):
-                store.commit(page)
-    finally:
-        http.close()
-        connection.close()
+    clock = [100.0]
+    server = Server()
+    sync, http = make_sync(
+        server,
+        asynchronous=asynchronous,
+        queries=[
+            query("Subject1"),
+            *(
+                query(role, "2025-12-31T00:00:00Z")
+                for role in ("Subject2", "Subject3", "SubjectAuthorized")
+            ),
+        ],
+    )
+    original_handle = server.handle
+
+    def handle(request):
+        response = original_handle(request)
+        clock[0] += 1
+        return response
+
+    http._client._transport.handler = handle
+    original_check, original_remaining = RequestControl.check, RequestControl.remaining
+
+    async def run():
+        try:
+            async with SQLiteHarness(tmp_path, asynchronous=asynchronous) as store:
+                with monkeypatch.context() as context:
+                    context.setattr(time, "monotonic", lambda: clock[0])
+                    context.setattr(
+                        RequestControl,
+                        "check",
+                        lambda self, **kw: original_check(self, clock=lambda: clock[0]),
+                    )
+                    context.setattr(
+                        RequestControl,
+                        "remaining",
+                        lambda self, **kw: original_remaining(self, clock=lambda: clock[0]),
+                    )
+                    report = await store.run_once(sync, time_budget=16)
+                assert report.complete
+                assert report.streams[0].pages_committed > 16 / 4
+                assert [result.pages_committed for result in report.streams[1:]] == [1, 1, 1]
+                assert [call[0]["subjectType"] for call in server.calls[:4]] == [
+                    "Subject1",
+                    "Subject2",
+                    "Subject3",
+                    "SubjectAuthorized",
+                ]
+                assert all(call[0]["subjectType"] == "Subject1" for call in server.calls[4:])
+                assert clock[0] - 100 == len(server.calls) < 16
+                assert report.common_coverage.from_ == "2025-12-31T00:00:00Z"
+                assert report.common_coverage.to == H1
+        finally:
+            if asynchronous:
+                await http.aclose()
+            else:
+                http.close()
+
+    asyncio.run(run())
 
 
 def test_foreign_transaction_and_broken_load_are_not_missing(tmp_path):

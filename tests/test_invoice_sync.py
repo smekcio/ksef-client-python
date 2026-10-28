@@ -6,7 +6,6 @@ import json
 import sqlite3
 import traceback
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import Mock
 
@@ -159,42 +158,6 @@ def test_a_hwm_b_restart_real_sqlite(tmp_path, autocommit):
             "B",
         }
         assert store.connection.execute("SELECT count(*) FROM outbox").fetchone()[0] == 2
-    finally:
-        http.close()
-        store.connection.close()
-
-
-def test_restart_after_every_page_no_early_hwm(tmp_path):
-    server = Server(
-        [
-            row(
-                str(i),
-                (datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(days=13 * i)).isoformat(),
-            )
-            for i in range(50)
-        ]
-    )
-    store = database(tmp_path)
-    sync, http = make_sync(server)
-    calls = 0
-    try:
-        while True:
-            report = sync.run_once(store, max_pages_per_stream=1)
-            checkpoint = store.load(sync.streams[0].scope)
-            checkpoint = InvoiceSyncCheckpoint.from_json(checkpoint.to_json())
-            calls += 1
-            if report.complete:
-                assert checkpoint.committed_hwm == H1
-                break
-            assert checkpoint.committed_hwm is None
-            assert report.streams[0].stop_reason == "work_limit"
-            assert report.common_coverage is None
-            store.connection.close()
-            store = database(tmp_path)
-        assert calls > 6
-        assert {r[0] for r in store.connection.execute("SELECT ksef_number FROM invoices")} == {
-            str(i) for i in range(50)
-        }
     finally:
         http.close()
         store.connection.close()

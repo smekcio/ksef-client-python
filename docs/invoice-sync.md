@@ -26,11 +26,16 @@ with Ksef.connect(
         namespace="tenant-42", sync_key="erp-invoices",
         since="2024-01-01T00:00:00Z",
     )
-    report = sync.run_once(application_store, time_budget=600)
-    if report.complete:
+    report = sync.run_once(
+        application_store, time_budget=600, raise_on_error=False,
+    )
+    failed = [stream for stream in report.streams if stream.status == "failed"]
+    if failed:
+        handle_failed_streams(failed)  # alert / naprawa według stop_reason
+    elif report.complete:
         handle_completed_metadata_cycle(report)
     else:
-        schedule_next_run(report)
+        schedule_next_run(report)  # partial: wznowienie zapisanego postępu
 ```
 
 `application_store` implementuje opisany poniżej protokół. Kompletny adapter
@@ -38,6 +43,15 @@ SQLite znajduje się w [invoice_sync_sqlite.py](examples/invoice_sync_sqlite.py)
 Przykład należy skopiować do aplikacji; nie jest częścią publicznego pakietu.
 Połączenie SQLite musi mieć skończony timeout, np.
 `sqlite3.connect(private_database_path, timeout=5)`.
+
+Funkcje `handle_failed_streams`, `handle_completed_metadata_cycle` i
+`schedule_next_run` należą do aplikacji. Scheduler powinien uruchamiać kolejne
+cykle także po sukcesie; po `failed` decyzja o ponowieniu zależy od przyczyny
+(np. 403 wymaga poprawy uprawnień). `raise_on_error=False` pozwala obsłużyć
+oczekiwane awarie poszczególnych strumieni w raporcie. Błąd jednej roli nie powinien
+wyłączać harmonogramu pozostałych ról. Awaria całego magazynu,
+błąd programistyczny, nadrzędny deadline i anulowanie nadal przerywają wywołanie;
+powinien je obsłużyć nadrzędny worker aplikacji.
 
 Fabryka nie wykonuje I/O. Domyślnie wybiera Subject1 i Subject2. Pozostałe role
 włącza się przez `subject_types=("Subject1", "Subject2", "Subject3", "SubjectAuthorized")`.
