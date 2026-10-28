@@ -96,6 +96,9 @@ deadline i anulowanie zawsze przerywają wywołanie.
 `pages_committed` liczy zatwierdzone strony. `new_streams` wskazuje nowe scope.
 `to_dict()` raportu jest bezpiecznym opisem diagnostycznym; oryginalne błędy
 pozostają poufnym atrybutem `original_error` wyników.
+Pełny raport może przez traceback oryginalnego błędu utrzymywać ramki i dane
+strony w pamięci. Do długiego przechowywania diagnostyki używaj `to_dict()`
+i zwalniaj pełne obiekty raportów.
 Każdy wynik JSON zawiera także własne `coverage`, nawet gdy nie ma wspólnego
 pokrycia wszystkich ról. `stop_reason` błędu używa wyłącznie znanych kodów SDK;
 nie kopiuje dowolnego tekstu `reasonCode` serwera ani adaptera.

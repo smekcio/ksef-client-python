@@ -63,3 +63,7 @@ Nie zmieniano ochrony środowiska ani sposobu udostępniania sekretów.
 Wymagany przed wydaniem pozostaje zielony wynik tej bramy. Plan wymaga też
 wydania minor po 0.21.0; lokalnie zbudowane artefakty 0.21.0 służą weryfikacji,
 nie są nowym wydaniem. Nie wykonywano push, tworzenia PR ani publikacji.
+
+Późniejszą weryfikację i poprawki po zewnętrznym bug/security review opisuje
+[odpowiedź na review](invoice-sync-external-review-response.md). Wyniki powyżej
+są historycznym odbiorem commita `872e523`; aktualne dowody wskazuje nowy raport.
