@@ -28,17 +28,45 @@ from .exceptions import (
     KsefHttpError,
     KsefIncompletePaginationError,
     KsefInvalidPaginationCursorError,
+    KsefInvalidSyncCheckpointError,
     KsefPaginationError,
     KsefRateLimitError,
     KsefRenderingError,
+    KsefResponseLimitError,
+    KsefSyncConflictError,
+    KsefSyncDataConflictError,
+    KsefSyncError,
+    KsefSyncLimitError,
+    KsefSyncRunError,
+    KsefSyncStateError,
+    KsefSyncStoreError,
     KsefVerificationError,
 )
 from .facade import Ksef, TokenCredentials, XadesCredentials
 from .invoice_range_search import AsyncInvoiceMetadataRangeSearch, InvoiceMetadataRangeSearch
 from .invoice_search import (
     AsyncInvoiceMetadataSearch,
+    InvoiceMetadataObservationPage,
     InvoiceMetadataPage,
     InvoiceMetadataSearch,
+    InvoiceMetadataSearchIdentity,
+)
+from .invoice_sync import (
+    AsyncInvoiceSync,
+    AsyncInvoiceSyncStore,
+    AsyncInvoiceSyncStream,
+    InvoiceSync,
+    InvoiceSyncCoverage,
+    InvoiceSyncReport,
+    InvoiceSyncStore,
+    InvoiceSyncStream,
+    InvoiceSyncStreamResult,
+)
+from .invoice_sync_state import (
+    InvoiceSyncBatch,
+    InvoiceSyncCheckpoint,
+    InvoiceSyncCommitReceipt,
+    InvoiceSyncScope,
 )
 from .models import (
     AuthenticationChallengeResponse,
@@ -88,6 +116,31 @@ from .streaming_export import (
 from .token_manager import AsyncTokenManager, TokenManager, TokenManagerError
 
 __all__ = [
+    "KsefSyncError",
+    "KsefInvalidSyncCheckpointError",
+    "KsefSyncStateError",
+    "KsefSyncConflictError",
+    "KsefSyncDataConflictError",
+    "KsefSyncLimitError",
+    "KsefSyncStoreError",
+    "KsefSyncRunError",
+    "KsefResponseLimitError",
+    "InvoiceSync",
+    "AsyncInvoiceSync",
+    "InvoiceSyncStream",
+    "AsyncInvoiceSyncStream",
+    "InvoiceSyncCoverage",
+    "InvoiceSyncReport",
+    "InvoiceSyncStreamResult",
+    "InvoiceSyncStore",
+    "AsyncInvoiceSyncStore",
+    "InvoiceSyncScope",
+    "InvoiceSyncCheckpoint",
+    "InvoiceSyncBatch",
+    "InvoiceSyncCommitReceipt",
+    "InvoiceMetadataObservationPage",
+    "InvoiceMetadataSearchIdentity",
+
     "ExportLimits",
     "Ksef", "AsyncKsef", "TokenCredentials", "XadesCredentials",
     "Operation", "AsyncOperation", "OperationState", "KsefOperationError", "KsefOperationTimeout",
