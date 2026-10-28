@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
+from ._async_cleanup import shield_and_drain
 from .exceptions import KsefResponseLimitError
 from .request_control import current_request_control
 
@@ -33,6 +37,35 @@ class BodyPolicy:
 
 PENDING: ContextVar[BodyPolicy | None] = ContextVar("ksef_pending_body", default=None)
 FRAME: ContextVar[BodyPolicy | None] = ContextVar("ksef_body_frame", default=None)
+
+
+class _ClosingAsyncStream(httpx.AsyncByteStream):
+    """Protect HTTPX's implicit EOF close as well as context-manager cleanup."""
+
+    def __init__(self, source: httpx.AsyncByteStream) -> None:
+        self._source = source
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        async for chunk in self._source:
+            yield chunk
+
+    async def aclose(self) -> None:
+        await shield_and_drain(self._source.aclose())
+
+
+@asynccontextmanager
+async def limited_response_stream(
+    client: httpx.AsyncClient, **kwargs: Any
+) -> AsyncIterator[httpx.Response]:
+    manager = client.stream(**kwargs)
+    response = await manager.__aenter__()
+    try:
+        response.stream = _ClosingAsyncStream(cast(httpx.AsyncByteStream, response.stream))
+        yield response
+    finally:
+        exception = sys.exc_info()
+        cancellation = exception[1] if isinstance(exception[1], asyncio.CancelledError) else None
+        await shield_and_drain(manager.__aexit__(*exception), cancellation=cancellation)
 
 
 def policy_for(owner: object) -> BodyPolicy | None:

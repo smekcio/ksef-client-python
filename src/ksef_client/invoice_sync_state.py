@@ -24,14 +24,24 @@ from .exceptions import (
     KsefSyncStateError,
     KsefSyncStoreError,
 )
-from .invoice_search import MAX_CURSOR_BYTES, _date, _json_object, _reject_constant, _same_json
+from .invoice_search import (
+    MAX_CURSOR_BYTES,
+    _check_retained_filter_fields,
+    _date,
+    _json_object,
+    _reject_constant,
+    _same_json,
+)
 from .pagination import validate_page_size
 
 MAX_CHECKPOINT_BYTES = 4 * 1024 * 1024
 MAX_QUERY_BYTES = 128 * 1024
 MAX_PAGE_BYTES = 16 * 1024 * 1024
 MAX_REVISION = 2**63 - 1
-_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(\d+))?(?:Z|[+-]\d{2}:\d{2})")
+_STAMP = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.([0-9]+))?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])"
+)
 _HEX = re.compile(r"[0-9a-f]{64}")
 
 
@@ -160,9 +170,10 @@ def canonical_spec(query: m.InvoiceQueryFilters) -> dict[str, Any]:
     ):
         raise ValueError("Sync requires an open, HWM-restricted PermanentStorage query")
     dr["from"] = utc_timestamp(dr["from"])
-    value = m.InvoiceQueryFilters.from_dict(value).to_dict()
-    canonical_json(value, MAX_QUERY_BYTES)
-    return {"semantics_version": 1, "query": value}
+    restored = m.InvoiceQueryFilters.from_dict(value).to_dict()
+    _check_retained_filter_fields(value, restored)
+    canonical_json(restored, MAX_QUERY_BYTES)
+    return {"semantics_version": 1, "query": restored}
 
 
 def spec_fingerprint(spec: dict[str, Any]) -> str:
@@ -200,6 +211,7 @@ def _validate_checkpoint(data: Any) -> None:
         or spec["semantics_version"] != 1
     ):
         raise ValueError("Invalid stream specification")
+    canonical_json(spec["query"], MAX_QUERY_BYTES)
     normalized = canonical_spec(m.InvoiceQueryFilters.from_dict(spec["query"]))
     if not _same_json(normalized, spec) or spec_fingerprint(spec) != scope.stream_id:
         raise ValueError("Incompatible stream specification")
@@ -248,6 +260,7 @@ class InvoiceSyncCheckpoint:
             if type(self._snapshot) is not bytes or len(self._snapshot) > MAX_CHECKPOINT_BYTES:
                 raise KsefInvalidSyncCheckpointError("checkpoint_size_limit")
             data = _loads(self._snapshot)
+            _walk(data, max_chars=MAX_CHECKPOINT_BYTES)
             _validate_checkpoint(data)
             raw = canonical_json(data, MAX_CHECKPOINT_BYTES)
             object.__setattr__(self, "_snapshot", raw)

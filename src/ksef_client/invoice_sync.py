@@ -7,12 +7,12 @@ import math
 import time
 from collections import deque
 from collections.abc import Callable, Generator, Mapping, Sequence
-from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Generic, Protocol, TypeVar
 
 from . import models as m
+from ._async_cleanup import shield_and_drain
 from .exceptions import (
     ErrorCode,
     KsefError,
@@ -25,9 +25,16 @@ from .exceptions import (
     KsefSyncError,
     KsefSyncLimitError,
     KsefSyncRunError,
+    KsefSyncStateError,
     KsefSyncStoreError,
 )
-from .invoice_search import InvoiceMetadataObservationPage, _date, _same_json
+from .invoice_search import (
+    InvoiceMetadataObservationPage,
+    InvoiceMetadataSearchIdentity,
+    _date,
+    _metadata_query_fingerprint,
+    _same_json,
+)
 from .invoice_sync_state import (
     InvoiceSyncBatch,
     InvoiceSyncCheckpoint,
@@ -64,6 +71,9 @@ class InvoiceSyncCoverage:
     to: str
     stream_ids: tuple[str, ...]
 
+    def to_dict(self) -> dict[str, Any]:
+        return {"from": self.from_, "to": self.to, "stream_ids": list(self.stream_ids)}
+
 
 @dataclass(frozen=True)
 class InvoiceSyncStreamResult:
@@ -84,6 +94,7 @@ class InvoiceSyncStreamResult:
         return {
             "stream_id": self.scope.stream_id,
             "status": self.status,
+            "coverage": self.coverage.to_dict() if self.coverage else None,
             "stop_reason": self.stop_reason,
             "pages_committed": self.pages_committed,
             "records_delivered": self.records_delivered,
@@ -114,11 +125,7 @@ class InvoiceSyncReport:
             "streams": [item.to_dict() for item in self.streams],
             "common_coverage": None
             if self.common_coverage is None
-            else {
-                "from": self.common_coverage.from_,
-                "to": self.common_coverage.to,
-                "stream_ids": list(self.common_coverage.stream_ids),
-            },
+            else self.common_coverage.to_dict(),
         }
 
 
@@ -185,11 +192,15 @@ class _InvoiceSyncStreamBase:
             sort_order="Asc",
             access_token=None,
         )
-        identity = search.identity
-        if (
-            identity.environment != self.scope.environment
-            or identity.context_key != self.scope.context_key
-        ):
+        expected = InvoiceMetadataSearchIdentity(
+            environment=self.scope.environment,
+            context_key=self.scope.context_key,
+            query_fingerprint=_metadata_query_fingerprint(query),
+            page_size=active["page_size"],
+            window_days=active["window_days"],
+            sort_order="Asc",
+        )
+        if search.identity != expected:
             raise KsefInvalidSyncCheckpointError("source_identity_mismatch")
         return search
 
@@ -273,11 +284,7 @@ class InvoiceSyncStream(_InvoiceSyncStreamBase):
         try:
             page = self._search(checkpoint).observation_page(checkpoint.active["cursor"])
         except KsefResponseLimitError as error:
-            raise KsefSyncLimitError(
-                limit_stage="response_body",
-                limit_bytes=error.limit_bytes,
-                observed_bytes=error.observed_bytes,
-            ) from None
+            raise _bounded_source_error(error) from None
         return self._advance(checkpoint, page)
 
 
@@ -289,12 +296,23 @@ class AsyncInvoiceSyncStream(_InvoiceSyncStreamBase):
         try:
             page = await self._search(checkpoint).observation_page(checkpoint.active["cursor"])
         except KsefResponseLimitError as error:
-            raise KsefSyncLimitError(
-                limit_stage="response_body",
-                limit_bytes=error.limit_bytes,
-                observed_bytes=error.observed_bytes,
-            ) from None
+            raise _bounded_source_error(error) from None
         return self._advance(checkpoint, page)
+
+
+def _bounded_source_error(error: KsefResponseLimitError) -> KsefSyncError:
+    if error.reason_code == "response_size_limit":
+        return KsefSyncLimitError(
+            limit_stage="response_body",
+            limit_bytes=error.limit_bytes,
+            observed_bytes=error.observed_bytes,
+        )
+    reason = (
+        error.reason_code
+        if error.reason_code in {"response_redirect", "response_encoding"}
+        else "response_rejected"
+    )
+    return KsefSyncError(reason)
 
 
 def _positive(value: Any, name: str) -> float:
@@ -345,6 +363,44 @@ def _now() -> str:
 
 
 _EXPECTED = (KsefSyncError, KsefHttpError, KsefPaginationError)
+_SAFE_FAILURE_REASONS = frozenset(
+    {
+        "sync_error",
+        "invalid_metadata",
+        "invalid_hwm",
+        "checkpoint_required",
+        "checkpoint_identity_mismatch",
+        "source_identity_mismatch",
+        "invalid_store_checkpoint",
+        "checkpoint_size_limit",
+        "invalid_checkpoint",
+        "cycle_already_active",
+        "cycle_not_active",
+        "cycle_end_before_start",
+        "revision_exhausted",
+        "invoice_hash_conflict",
+        "checkpoint_conflict",
+        "sync_limit_exceeded",
+        "store_failure",
+        "hwm_regressed",
+        "hwm_before_start",
+        "missing_ksef_number",
+        "invalid_invoice_date",
+        "invoice_outside_range",
+        "inconsistent_sort_order",
+        "boundary_limit_exceeded",
+        "empty_pages",
+        "repeated_page",
+        "empty_truncated_page",
+        "truncation_did_not_advance",
+        "result_limit_without_truncation",
+        "cursor_size_limit",
+        "invalid_response",
+        "response_redirect",
+        "response_encoding",
+        "response_rejected",
+    }
+)
 _STORE_ERRORS = (
     KsefSyncStoreError,
     KsefSyncConflictError,
@@ -442,7 +498,14 @@ class _InvoiceSyncBase(Generic[_StreamT]):
             if isinstance(error, KsefSyncStoreError) and error.failure_scope == "store":
                 raise error from None
             progress.status, progress.error = "failed", error
-            progress.reason = getattr(error, "reason_code", None) or error.code.value
+            reason = getattr(error, "reason_code", None)
+            progress.reason = (
+                reason
+                if not isinstance(error, KsefHttpError)
+                and type(reason) is str
+                and reason in _SAFE_FAILURE_REASONS
+                else error.code.value
+            )
             if isinstance(error, (KsefSyncConflictError, KsefSyncStoreError)):
                 progress.trustworthy = False
 
@@ -462,6 +525,7 @@ class _InvoiceSyncBase(Generic[_StreamT]):
                             raise KsefSyncStoreError(operation="load", failure_scope="store")
                         progress.checkpoint = cp
                         progress.stream._validate(cp)
+                    control.check()
                     progress.new = cp is None
                     progress.observed_at = _now()
             except KsefRateLimitWaitTimeout as error:
@@ -478,6 +542,11 @@ class _InvoiceSyncBase(Generic[_StreamT]):
                 ) as control:
                     cp = progress.checkpoint
                     if cp is None or cp.phase == "idle":
+                        start = (cp.committed_hwm if cp else None) or (
+                            progress.stream._spec["query"]["dateRange"]["from"]
+                        )
+                        if _date(cycle_to) < _date(start):
+                            raise KsefSyncStateError("cycle_end_before_start")
                         batch = progress.stream.begin_cycle(cp, until=cycle_to)
                     else:
                         batch = yield ("next", (progress.stream, cp))
@@ -581,21 +650,12 @@ def _drive(
 async def _commit_and_drain(
     store: AsyncInvoiceSyncStore, batch: InvoiceSyncBatch
 ) -> InvoiceSyncCommitReceipt:
-    task = asyncio.ensure_future(store.commit(batch))
-    cancelled = None
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError as error:
-            cancelled = error
-        except Exception:
-            break
-    if cancelled is not None:
-        # Retrieve the result/exception even after repeated outer cancellation.
-        with suppress(BaseException):
-            task.result()
-        raise cancelled
-    return task.result()
+    # Deliver cancellation already queued before crossing the commit boundary.
+    await asyncio.sleep(0)
+    control = current_request_control()
+    if control is not None:
+        control.check()
+    return await shield_and_drain(store.commit(batch))
 
 
 class AsyncInvoiceSync(_InvoiceSyncBase[AsyncInvoiceSyncStream]):

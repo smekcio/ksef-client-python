@@ -25,6 +25,7 @@ from .invoice_search import (
     _dump,
     _InvalidMetadataResponse,
     _json_object,
+    _metadata_query_fingerprint,
     _MetadataMachine,
     _reject_constant,
     _same_json,
@@ -272,15 +273,7 @@ def _search_identity(machine: _RangeMachine) -> InvoiceMetadataSearchIdentity:
     return InvoiceMetadataSearchIdentity(
         environment=environment_key(machine.environment),
         context_key=identity["context_key"],
-        query_fingerprint=hashlib.sha256(
-            json.dumps(
-                identity["filters"],
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=True,
-                allow_nan=False,
-            ).encode()
-        ).hexdigest(),
+        query_fingerprint=_metadata_query_fingerprint(identity["filters"]),
         page_size=identity["page_size"],
         window_days=identity["window_days"],
         sort_order=identity["sort_order"],

@@ -292,10 +292,10 @@ def test_pull_idle_hwm_validation_and_response_limits(tmp_path):
             with pytest.raises(KsefSyncError):
                 stream._advance(active, InvoiceMetadataObservationPage((), None, hwm))
 
+        expected_identity = stream._search(active).identity
+
         class TooBig:
-            identity = SimpleNamespace(
-                environment=stream.scope.environment, context_key=stream.scope.context_key
-            )
+            identity = expected_identity
 
             def validate_cursor(self, cursor):
                 return None

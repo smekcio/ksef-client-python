@@ -18,6 +18,7 @@ from ..invoice_range_search import (
 from ..invoice_search import (
     AsyncInvoiceMetadataSearch,
     InvoiceMetadataSearch,
+    _check_retained_filter_fields,
     _InvalidMetadataResponse,
     _json_object,
     _MetadataMachine,
@@ -239,17 +240,7 @@ def _serialize_search_filters(
     except (KeyError, TypeError, ValueError, AttributeError):
         raise ValueError("Invalid invoice search filters") from None
 
-    def check_retained(original: Any, parsed: Any) -> None:
-        if isinstance(original, dict):
-            if not isinstance(parsed, dict) or original.keys() - parsed.keys():
-                raise ValueError("Unknown invoice search filter")
-            for key, value in original.items():
-                check_retained(value, parsed[key])
-        elif isinstance(original, list) and isinstance(parsed, list):
-            for value, parsed_value in zip(original, parsed, strict=True):
-                check_retained(value, parsed_value)
-
-    check_retained(serialized, restored)
+    _check_retained_filter_fields(serialized, restored)
     return serialized
 
 

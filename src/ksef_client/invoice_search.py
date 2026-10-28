@@ -28,6 +28,32 @@ from .pagination import validate_page_size
 from .utils.datetime_parsing import parse_api_datetime
 
 MAX_CURSOR_BYTES = 2 * 1024 * 1024
+
+
+def _metadata_query_fingerprint(filters: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            filters,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode()
+    ).hexdigest()
+
+
+def _check_retained_filter_fields(original: Any, parsed: Any) -> None:
+    """Reject fields discarded by a model roundtrip before accepting its identity."""
+    if isinstance(original, dict):
+        if not isinstance(parsed, dict) or original.keys() - parsed.keys():
+            raise ValueError("Unknown invoice search filter")
+        for key, value in original.items():
+            _check_retained_filter_fields(value, parsed[key])
+    elif isinstance(original, list) and isinstance(parsed, list):
+        for value, parsed_value in zip(original, parsed, strict=True):
+            _check_retained_filter_fields(value, parsed_value)
+
+
 _FIELDS = {
     "Issue": "issue_date",
     "Invoicing": "invoicing_date",

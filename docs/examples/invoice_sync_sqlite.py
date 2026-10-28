@@ -69,7 +69,23 @@ class SQLiteInvoiceSyncStore:
     def _execute(self, sql: str, parameters: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         return self.connection.execute(sql, parameters)
 
+    def _require_idle(self, operation: str) -> None:
+        try:
+            active = self.connection.in_transaction
+        except Exception as error:
+            raise KsefSyncStoreError(
+                operation=operation,
+                failure_scope="store",
+                original_error=error,
+            ) from None
+        if active:
+            raise KsefSyncStoreError(operation=operation, failure_scope="store")
+
     def load(self, scope: InvoiceSyncScope) -> InvoiceSyncCheckpoint | None:
+        self._require_idle("load")
+        return self._read_checkpoint(scope)
+
+    def _read_checkpoint(self, scope: InvoiceSyncScope) -> InvoiceSyncCheckpoint | None:
         try:
             row = self._execute(
                 "SELECT checkpoint_json, generation, revision, spec_hash, last_commit_id "
@@ -96,14 +112,13 @@ class SQLiteInvoiceSyncStore:
     def commit(self, batch: InvoiceSyncBatch) -> InvoiceSyncCommitReceipt:
         from ksef_client.invoice_sync_state import MAX_PAGE_BYTES, canonical_json
 
-        if self.connection.in_transaction:
-            raise KsefSyncStoreError(operation="commit", failure_scope="store")
+        self._require_idle("commit")
         checkpoint, scope = batch.next_checkpoint, batch.scope
         started, committing = False, False
         try:
             self._execute("BEGIN IMMEDIATE")
             started = True
-            previous = self.load(scope)
+            previous = self._read_checkpoint(scope)
             if previous is None:
                 if batch.expected_generation is not None or batch.expected_revision is not None:
                     raise KsefSyncConflictError("checkpoint_conflict")
@@ -167,35 +182,27 @@ class SQLiteInvoiceSyncStore:
             committing = True
             # Explicit SQL also works with sqlite3 autocommit=True (Python >=3.12).
             self._execute("COMMIT")
-        except (KsefSyncConflictError, KsefSyncDataConflictError) as known:
-            try:
-                if self.connection.in_transaction:
-                    self._execute("ROLLBACK")
-            except Exception as error:
-                with suppress(Exception):
-                    self.connection.close()
-                raise KsefSyncStoreError(
-                    operation="commit",
-                    commit_outcome="unknown",
-                    failure_scope="store",
-                    original_error=error,
-                ) from None
-            raise known from None
-        except Exception as error:
+        except BaseException as error:
             outcome = "unknown" if committing else "rolled_back" if started else "not_started"
             try:
                 if self.connection.in_transaction:
                     self._execute("ROLLBACK")
                     outcome = "rolled_back"
-            except Exception:
-                with suppress(Exception):
+            except BaseException:
+                with suppress(BaseException):
                     self.connection.close()
+                if not isinstance(error, Exception):
+                    raise error from None
                 raise KsefSyncStoreError(
                     operation="commit",
                     commit_outcome="unknown",
                     failure_scope="store",
                     original_error=error,
                 ) from None
+            if isinstance(error, (KsefSyncConflictError, KsefSyncDataConflictError)):
+                raise error from None
+            if not isinstance(error, Exception):
+                raise error from None
             raise KsefSyncStoreError(
                 operation="commit",
                 commit_outcome=outcome,

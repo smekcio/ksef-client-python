@@ -24,6 +24,7 @@ from ._bounded_http import (
     check_control,
     check_headers,
     identity_headers,
+    limited_response_stream,
     make_policy,
     policy_for,
 )
@@ -1170,7 +1171,7 @@ class AsyncBaseHttpClient:
         kwargs["headers"] = identity_headers(kwargs["headers"])
         kwargs["follow_redirects"] = False
         check_control()
-        async with self._client.stream(**kwargs) as response:
+        async with limited_response_stream(self._client, **kwargs) as response:
             self._received_headers(response, budget_parameters)
             check_headers(response, policy)
             check_control()
