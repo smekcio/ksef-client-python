@@ -129,6 +129,23 @@ def _dump(state: dict[str, Any]) -> str:
 
 
 @dataclass(frozen=True)
+class InvoiceMetadataSearchIdentity:
+    environment: str = field(repr=False)
+    context_key: str = field(repr=False)
+    query_fingerprint: str = field(repr=False)
+    page_size: int
+    window_days: int
+    sort_order: str
+
+
+@dataclass(frozen=True)
+class InvoiceMetadataObservationPage:
+    observations: tuple[InvoiceMetadata, ...] = field(repr=False)
+    next_cursor: str | None = field(repr=False)
+    permanent_storage_hwm_date: str | None = None
+
+
+@dataclass(frozen=True)
 class InvoiceMetadataPage:
     """Processed metadata and the next request; None means confirmed end."""
 
