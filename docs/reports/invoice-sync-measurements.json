@@ -1,0 +1,135 @@
+{
+  "code_commit": "0c5e125281d1a23a90b64bf09ce18ddb29d640dd",
+  "sdk_tree": "5569613d29398932bbc926111ef8c6dc476e496a",
+  "rss_comparison": {
+    "environment": {
+      "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.36",
+      "python": "3.12.13",
+      "pid": 42
+    },
+    "pairs": [
+      {
+        "small": {
+          "records": 50000,
+          "peak_rss_bytes": 59441152,
+          "steps": 202,
+          "checkpoint_max_bytes": 5111,
+          "page_snapshot_max_bytes": 43751,
+          "checkpoint_serialize_p50_seconds": 6.401699999969424e-05,
+          "commit_p50_seconds": 0.019985143999974753,
+          "commit_p95_seconds": 0.027754121999976178,
+          "step_p50_seconds": 0.027882225500036384,
+          "step_p95_seconds": 0.03792236300000695,
+          "boundary_size": 100
+        },
+        "large": {
+          "records": 500000,
+          "peak_rss_bytes": 60198912,
+          "steps": 2020,
+          "checkpoint_max_bytes": 5112,
+          "page_snapshot_max_bytes": 43751,
+          "checkpoint_serialize_p50_seconds": 5.8991999992485944e-05,
+          "commit_p50_seconds": 0.02305873799997471,
+          "commit_p95_seconds": 0.04111994800001639,
+          "step_p50_seconds": 0.030026926999966008,
+          "step_p95_seconds": 0.04980256900000768,
+          "boundary_size": 100
+        },
+        "rss_delta_bytes": 757760
+      },
+      {
+        "small": {
+          "records": 50000,
+          "peak_rss_bytes": 59944960,
+          "steps": 202,
+          "checkpoint_max_bytes": 5111,
+          "page_snapshot_max_bytes": 43751,
+          "checkpoint_serialize_p50_seconds": 5.667399994990774e-05,
+          "commit_p50_seconds": 0.019787443000041094,
+          "commit_p95_seconds": 0.03725617800000691,
+          "step_p50_seconds": 0.0261965145000147,
+          "step_p95_seconds": 0.04376618399999188,
+          "boundary_size": 100
+        },
+        "large": {
+          "records": 500000,
+          "peak_rss_bytes": 60186624,
+          "steps": 2020,
+          "checkpoint_max_bytes": 5112,
+          "page_snapshot_max_bytes": 43751,
+          "checkpoint_serialize_p50_seconds": 5.47540000184199e-05,
+          "commit_p50_seconds": 0.018205932000000757,
+          "commit_p95_seconds": 0.030169879999959903,
+          "step_p50_seconds": 0.02403337450002141,
+          "step_p95_seconds": 0.035968208999975104,
+          "boundary_size": 100
+        },
+        "rss_delta_bytes": 241664
+      },
+      {
+        "small": {
+          "records": 50000,
+          "peak_rss_bytes": 59863040,
+          "steps": 202,
+          "checkpoint_max_bytes": 5111,
+          "page_snapshot_max_bytes": 43751,
+          "checkpoint_serialize_p50_seconds": 5.4305999981352215e-05,
+          "commit_p50_seconds": 0.017284550999988824,
+          "commit_p95_seconds": 0.02625908099997787,
+          "step_p50_seconds": 0.02372616200003108,
+          "step_p95_seconds": 0.03215259299997797,
+          "boundary_size": 100
+        },
+        "large": {
+          "records": 500000,
+          "peak_rss_bytes": 60080128,
+          "steps": 2020,
+          "checkpoint_max_bytes": 5112,
+          "page_snapshot_max_bytes": 43751,
+          "checkpoint_serialize_p50_seconds": 5.622399999083427e-05,
+          "commit_p50_seconds": 0.018938623000053667,
+          "commit_p95_seconds": 0.030383199000027616,
+          "step_p50_seconds": 0.025860658999988573,
+          "step_p95_seconds": 0.03787546199998815,
+          "boundary_size": 100
+        },
+        "rss_delta_bytes": 217088
+      }
+    ],
+    "passed": true
+  },
+  "maximum_boundary": {
+    "records": 10000,
+    "peak_rss_bytes": 63692800,
+    "steps": 40,
+    "checkpoint_max_bytes": 262406,
+    "page_snapshot_max_bytes": 43751,
+    "checkpoint_serialize_p50_seconds": 0.0002727159999835749,
+    "commit_p50_seconds": 0.019943527999998878,
+    "commit_p95_seconds": 0.024300608000032753,
+    "step_p50_seconds": 0.035365759499995875,
+    "step_p95_seconds": 0.04670643800000107,
+    "boundary_size": 10000
+  },
+  "dense_page": {
+    "records": 250,
+    "peak_rss_bytes": 121536512,
+    "steps": 1,
+    "checkpoint_max_bytes": 795,
+    "page_snapshot_max_bytes": 14598251,
+    "checkpoint_serialize_p50_seconds": 6.71729999908166e-05,
+    "commit_p50_seconds": 0.12246043050001276,
+    "commit_p95_seconds": 0.23327751500005434,
+    "step_p50_seconds": 0.7280311899999674,
+    "step_p95_seconds": 0.7280311899999674,
+    "boundary_size": 250
+  },
+  "distribution": {
+    "version": "0.21.0",
+    "commit": "0c5e125281d1a23a90b64bf09ce18ddb29d640dd",
+    "sha256": {
+      "ksef_client-0.21.0-py3-none-any.whl": "26b53d785464278904cc7bd0d54abfc86012073ec20a560bc6775679916e937a",
+      "ksef_client-0.21.0.tar.gz": "88173d098a6cf468f81f85d9e9e8a4545906ca5b983f7414474e0e06e6c5b3f1"
+    }
+  }
+}
