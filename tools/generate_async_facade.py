@@ -23,6 +23,7 @@ NAMES = {
         "OnlineSessionWorkflow",
         "BatchSessionWorkflow",
         "ExportOperation",
+        "InvoiceSync",
     )
 }
 ASYNC = {
@@ -127,6 +128,8 @@ class Convert(ast.NodeTransformer):
             )
         if path == "cls.from_auth_result":
             return node
+        if path == "self.owner.api.invoices.sync":
+            return node
         requires_await = (
             path.startswith(
                 (
@@ -199,7 +202,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
@@ -237,6 +240,7 @@ from .services.workflows import (
 from .token_manager import DEFAULT_REFRESH_MARGIN_SECONDS
 
 if TYPE_CHECKING:
+    from .invoice_sync import AsyncInvoiceSync
     from .streaming_export import AsyncExportOperation
 
 
