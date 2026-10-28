@@ -10,7 +10,7 @@ from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Protocol, cast
+from typing import Any, Generic, Protocol, TypeVar
 
 from . import models as m
 from .exceptions import (
@@ -355,8 +355,11 @@ _STORE_ERRORS = (
 )
 
 
-class _InvoiceSyncBase:
-    def __init__(self, streams: Sequence[_InvoiceSyncStreamBase]) -> None:
+_StreamT = TypeVar("_StreamT", bound=_InvoiceSyncStreamBase)
+
+
+class _InvoiceSyncBase(Generic[_StreamT]):
+    def __init__(self, streams: Sequence[_StreamT]) -> None:
         if not 1 <= len(streams) <= 4 or any(
             not isinstance(s, _InvoiceSyncStreamBase) for s in streams
         ):
@@ -367,7 +370,7 @@ class _InvoiceSyncBase:
         self._streams = tuple(streams)
 
     @property
-    def streams(self) -> tuple[_InvoiceSyncStreamBase, ...]:
+    def streams(self) -> tuple[_StreamT, ...]:
         return self._streams
 
     def describe(
@@ -510,15 +513,11 @@ class _InvoiceSyncBase:
         return report
 
 
-class InvoiceSync(_InvoiceSyncBase):
+class InvoiceSync(_InvoiceSyncBase[InvoiceSyncStream]):
     def __init__(self, streams: Sequence[InvoiceSyncStream]) -> None:
         if any(not isinstance(stream, InvoiceSyncStream) for stream in streams):
             raise TypeError("Use streams matching the coordinator's sync/async mode")
         super().__init__(streams)
-
-    @property
-    def streams(self) -> tuple[InvoiceSyncStream, ...]:
-        return cast(tuple[InvoiceSyncStream, ...], self._streams)
 
     def run_once(
         self,
@@ -599,15 +598,11 @@ async def _commit_and_drain(
     return task.result()
 
 
-class AsyncInvoiceSync(_InvoiceSyncBase):
+class AsyncInvoiceSync(_InvoiceSyncBase[AsyncInvoiceSyncStream]):
     def __init__(self, streams: Sequence[AsyncInvoiceSyncStream]) -> None:
         if any(not isinstance(stream, AsyncInvoiceSyncStream) for stream in streams):
             raise TypeError("Use streams matching the coordinator's sync/async mode")
         super().__init__(streams)
-
-    @property
-    def streams(self) -> tuple[AsyncInvoiceSyncStream, ...]:
-        return cast(tuple[AsyncInvoiceSyncStream, ...], self._streams)
 
     async def run_once(
         self,

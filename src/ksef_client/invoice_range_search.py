@@ -30,6 +30,7 @@ from .invoice_search import (
     _same_json,
 )
 from .models import InvoiceMetadata, InvoiceQueryFilters, QueryInvoicesMetadataResponse
+from .operations import environment_key
 from .pagination import validate_page_size
 
 _STATE_KEYS = {
@@ -269,7 +270,7 @@ class _RangeMachine:
 def _search_identity(machine: _RangeMachine) -> InvoiceMetadataSearchIdentity:
     identity = machine.identity
     return InvoiceMetadataSearchIdentity(
-        environment=hashlib.sha256(machine.environment.rstrip("/").encode()).hexdigest(),
+        environment=environment_key(machine.environment),
         context_key=identity["context_key"],
         query_fingerprint=hashlib.sha256(
             json.dumps(
