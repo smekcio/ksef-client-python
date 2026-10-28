@@ -114,8 +114,9 @@ Workflow publikacji przyjmuje wyłącznie istniejący tag wersji zgodny z
 PyPI otrzymuje te same pliki po ponownej kontroli sum; manifest nie jest wysyłany
 jako dystrybucja. Ręczne uruchomienie wymaga podania taga i przechodzi te same kontrole.
 
-Publikację uruchamia się przez `workflow_dispatch` z gałęzi `main`; samo utworzenie
-release nie publikuje pakietu. Tag musi wskazywać commit należący do historii `main`.
+Po utworzeniu wydania Release Please automatycznie uruchamia publikację przez
+`workflow_dispatch` z gałęzi `main`, przekazując tag nowego wydania. Publikację można
+też uruchomić ręcznie z tym samym tagiem. Tag musi wskazywać commit należący do historii `main`.
 Narzędzia weryfikujące, manifest i testy pochodzą z commita zaufanego workflow,
 a nie z wydawanego taga. Kod budowania działa w osobnym jobie bez sekretów TEST.
 Job posiadający OIDC pobiera tylko zweryfikowane artefakty i uruchamia przypiętą
