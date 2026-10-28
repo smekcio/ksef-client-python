@@ -1155,7 +1155,7 @@ def _build_sync(
         raise TypeError("queries must be a sequence of typed queries")
     if not 1 <= len(selected) <= 4:
         raise ValueError("Sync requires one to four queries")
-    streams = []
+    streams: list[Any] = []
     for query in selected:
         spec = canonical_spec(query)
         # Reuse the existing strict typed-query normalization, retaining every filter.

@@ -10,7 +10,7 @@ from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from . import models as m
 from .exceptions import (
@@ -143,7 +143,7 @@ def _report(results: Sequence[InvoiceSyncStreamResult]) -> InvoiceSyncReport:
     return InvoiceSyncReport(tuple(results), common)
 
 
-class InvoiceSyncStream:
+class _InvoiceSyncStreamBase:
     def __init__(
         self,
         scope: InvoiceSyncScope,
@@ -228,20 +228,6 @@ class InvoiceSyncStream:
         self._validate(batch.next_checkpoint)
         return batch
 
-    def next_batch(self, checkpoint: InvoiceSyncCheckpoint) -> InvoiceSyncBatch | None:
-        self._validate(checkpoint)
-        if checkpoint.active is None:
-            return None
-        try:
-            page = self._search(checkpoint).observation_page(checkpoint.active["cursor"])
-        except KsefResponseLimitError as error:
-            raise KsefSyncLimitError(
-                limit_stage="response_body",
-                limit_bytes=error.limit_bytes,
-                observed_bytes=error.observed_bytes,
-            ) from None
-        return self._advance(checkpoint, page)
-
     def restart_active(
         self,
         checkpoint: InvoiceSyncCheckpoint,
@@ -279,8 +265,24 @@ class InvoiceSyncStream:
         return administrative_batch(checkpoint, "fence_after_restore", reason=reason)
 
 
-class AsyncInvoiceSyncStream(InvoiceSyncStream):
-    async def next_batch(self, checkpoint: InvoiceSyncCheckpoint) -> InvoiceSyncBatch | None:  # type: ignore[override]
+class InvoiceSyncStream(_InvoiceSyncStreamBase):
+    def next_batch(self, checkpoint: InvoiceSyncCheckpoint) -> InvoiceSyncBatch | None:
+        self._validate(checkpoint)
+        if checkpoint.active is None:
+            return None
+        try:
+            page = self._search(checkpoint).observation_page(checkpoint.active["cursor"])
+        except KsefResponseLimitError as error:
+            raise KsefSyncLimitError(
+                limit_stage="response_body",
+                limit_bytes=error.limit_bytes,
+                observed_bytes=error.observed_bytes,
+            ) from None
+        return self._advance(checkpoint, page)
+
+
+class AsyncInvoiceSyncStream(_InvoiceSyncStreamBase):
+    async def next_batch(self, checkpoint: InvoiceSyncCheckpoint) -> InvoiceSyncBatch | None:
         self._validate(checkpoint)
         if checkpoint.active is None:
             return None
@@ -309,7 +311,7 @@ def _positive(value: Any, name: str) -> float:
 
 @dataclass
 class _Progress:
-    stream: InvoiceSyncStream
+    stream: _InvoiceSyncStreamBase
     checkpoint: InvoiceSyncCheckpoint | None = None
     pages: int = 0
     records: int = 0
@@ -354,8 +356,10 @@ _STORE_ERRORS = (
 
 
 class _InvoiceSyncBase:
-    def __init__(self, streams: Sequence[InvoiceSyncStream]) -> None:
-        if not 1 <= len(streams) <= 4 or any(not isinstance(s, InvoiceSyncStream) for s in streams):
+    def __init__(self, streams: Sequence[_InvoiceSyncStreamBase]) -> None:
+        if not 1 <= len(streams) <= 4 or any(
+            not isinstance(s, _InvoiceSyncStreamBase) for s in streams
+        ):
             raise ValueError("Sync requires one to four streams")
         roles = [stream._spec["query"]["subjectType"] for stream in streams]
         if len(set(roles)) != len(roles):
@@ -363,7 +367,7 @@ class _InvoiceSyncBase:
         self._streams = tuple(streams)
 
     @property
-    def streams(self) -> tuple[InvoiceSyncStream, ...]:
+    def streams(self) -> tuple[_InvoiceSyncStreamBase, ...]:
         return self._streams
 
     def describe(
@@ -507,6 +511,15 @@ class _InvoiceSyncBase:
 
 
 class InvoiceSync(_InvoiceSyncBase):
+    def __init__(self, streams: Sequence[InvoiceSyncStream]) -> None:
+        if any(not isinstance(stream, InvoiceSyncStream) for stream in streams):
+            raise TypeError("Use streams matching the coordinator's sync/async mode")
+        super().__init__(streams)
+
+    @property
+    def streams(self) -> tuple[InvoiceSyncStream, ...]:
+        return cast(tuple[InvoiceSyncStream, ...], self._streams)
+
     def run_once(
         self,
         store: InvoiceSyncStore,
@@ -587,6 +600,15 @@ async def _commit_and_drain(
 
 
 class AsyncInvoiceSync(_InvoiceSyncBase):
+    def __init__(self, streams: Sequence[AsyncInvoiceSyncStream]) -> None:
+        if any(not isinstance(stream, AsyncInvoiceSyncStream) for stream in streams):
+            raise TypeError("Use streams matching the coordinator's sync/async mode")
+        super().__init__(streams)
+
+    @property
+    def streams(self) -> tuple[AsyncInvoiceSyncStream, ...]:
+        return cast(tuple[AsyncInvoiceSyncStream, ...], self._streams)
+
     async def run_once(
         self,
         store: AsyncInvoiceSyncStore,

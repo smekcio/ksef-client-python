@@ -218,6 +218,21 @@ def test_async_expected_store_error_remains_per_stream():
     asyncio.run(run())
 
 
+def test_coordinators_reject_streams_from_the_other_execution_mode():
+    from ksef_client import AsyncInvoiceSync
+
+    sync, http = make_sync(Server())
+    asynchronous, async_http = make_sync(Server(), asynchronous=True)
+    try:
+        with pytest.raises(TypeError):
+            InvoiceSync(cast(Any, asynchronous.streams))
+        with pytest.raises(TypeError):
+            AsyncInvoiceSync(cast(Any, sync.streams))
+    finally:
+        http.close()
+        asyncio.run(async_http.aclose())
+
+
 def test_supervisor_success_failure_and_shared_timeout(tmp_path):
     run_phases([[sys.executable, "-c", "pass"]] * 2, cwd=tmp_path, env=dict(os.environ), timeout=10)
     with pytest.raises(RuntimeError, match="private output withheld"):
