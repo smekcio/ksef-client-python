@@ -584,6 +584,18 @@
   enforces per pre-encryption part; `build_zip` sanitises entry names like `build_tar_gz`, and both
   readers reject duplicate entry names instead of silently dropping content
 
+## 0.22.0 (2026-10-28)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* fix(ci): publish new releases to PyPI automatically by @smekcio in https://github.com/smekcio/ksef-client-python/pull/112
+* feat: add resumable invoice metadata synchronization by @smekcio in https://github.com/smekcio/ksef-client-python/pull/114
+
+
+**Full Changelog**: https://github.com/smekcio/ksef-client-python/compare/v0.21.0...v0.22.0
+
 ## 0.21.0 (2026-10-27)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
