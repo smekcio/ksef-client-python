@@ -1,6 +1,311 @@
 {
   "schema_version": 1,
-  "status": "awaiting_validation",
-  "scope": "Explicit transport limit and consolidated invoice synchronization documentation",
-  "live_test": "deferred_to_protected_CI_by_user"
+  "status": "passed",
+  "date": "2026-10-28",
+  "code_commit": "3888e971a8db586d543e77f514e1a6394da95841",
+  "sdk_tree": "ea6f4da3462682b525ffda81ac01db2171f955e4",
+  "scope": "Explicit per-request response bounds and consolidated InvoiceSync documentation",
+  "documentation": {
+    "canonical": "docs/invoice-sync.md",
+    "historical_snapshot": "379af4b",
+    "plan_path_is_redirect": true,
+    "evidence": "docs/reports/invoice-sync-validation.json"
+  },
+  "new_test_cases": 22,
+  "verified_transport_contract": [
+    "request(max_bytes=N) and request_json_limited share the same bounded receive path",
+    "Retry and reactive 401 refresh preserve both the limit and frozen target",
+    "Nested auth and concurrent/child requests receive only explicitly supplied limits",
+    "POST retry allowlist and presigned URL validation use the original route",
+    "Body limits, identity encoding, redirect rejection, 429 cooldown and async cleanup retained"
+  ],
+  "matrix": [
+    {
+      "platform": "Linux",
+      "python": "3.10.20",
+      "pytest": "9.2.0",
+      "passed": 3520,
+      "skipped": 13,
+      "warnings": 1,
+      "subtests_passed": 61,
+      "elapsed": "184.58s (0:03:04)",
+      "log": ".tmp/explicit-matrix-3.10.txt"
+    },
+    {
+      "platform": "Linux",
+      "python": "3.11.2",
+      "pytest": "9.2.0",
+      "passed": 3520,
+      "skipped": 13,
+      "warnings": 1,
+      "subtests_passed": 61,
+      "elapsed": "173.35s (0:02:53)",
+      "log": ".tmp/explicit-matrix-3.11.txt"
+    },
+    {
+      "platform": "Linux",
+      "python": "3.12.13",
+      "pytest": "9.2.0",
+      "passed": 3520,
+      "skipped": 13,
+      "warnings": 1,
+      "subtests_passed": 61,
+      "elapsed": "225.37s (0:03:45)",
+      "log": ".tmp/explicit-matrix-3.12.txt"
+    },
+    {
+      "platform": "Linux",
+      "python": "3.13.13",
+      "pytest": "9.2.0",
+      "passed": 3520,
+      "skipped": 13,
+      "warnings": 1,
+      "subtests_passed": 61,
+      "elapsed": "178.22s (0:02:58)",
+      "log": ".tmp/explicit-matrix-3.13.txt"
+    },
+    {
+      "platform": "Linux",
+      "python": "3.14.4",
+      "pytest": "9.2.0",
+      "passed": 3520,
+      "skipped": 13,
+      "warnings": 1,
+      "subtests_passed": 61,
+      "elapsed": "178.85s (0:02:58)",
+      "log": ".tmp/explicit-matrix-3.14.txt"
+    },
+    {
+      "platform": "Windows",
+      "python": "3.12.9",
+      "pytest": "9.2.0",
+      "passed": 3511,
+      "skipped": 22,
+      "warnings": 1,
+      "subtests_passed": 61,
+      "elapsed": "327.04s (0:05:27)",
+      "log": ".tmp/explicit-matrix-windows.txt"
+    }
+  ],
+  "coverage": {
+    "linux": {
+      "kind": "statement/line; not branch coverage",
+      "covered_lines": 18822,
+      "num_statements": 18822,
+      "percent_covered": 100.0,
+      "percent_covered_display": "100",
+      "missing_lines": 0,
+      "excluded_lines": 389,
+      "percent_statements_covered": 100.0,
+      "percent_statements_covered_display": "100"
+    },
+    "windows": {
+      "kind": "statement/line; not branch coverage",
+      "covered_lines": 18822,
+      "num_statements": 18822,
+      "percent_covered": 100.0,
+      "percent_covered_display": "100",
+      "missing_lines": 0,
+      "excluded_lines": 389,
+      "percent_statements_covered": 100.0,
+      "percent_statements_covered_display": "100"
+    }
+  },
+  "installed_wheel": {
+    "passed": 547,
+    "skipped": 0,
+    "local_src_imported": false,
+    "verifies_each_child_before_and_after": true,
+    "verified_installed_bytes_after_tests": true,
+    "selection": [
+      "tests/test_invoice_sync*.py",
+      "tests/test_bounded_http.py",
+      "tests/test_invoice_search.py",
+      "tests/test_invoice_range_search.py",
+      "tests/test_invoice_range_review.py",
+      "tests/test_pagination.py"
+    ],
+    "log": ".tmp/explicit-wheel.txt"
+  },
+  "checks": {
+    "strict_lint": true,
+    "ruff": true,
+    "mypy_files": 280,
+    "generators": true,
+    "pip_check": true,
+    "wheel_and_sdist": true,
+    "sdist_consolidated_documentation_paths": true,
+    "documentation_links": true,
+    "git_diff_check": true
+  },
+  "distribution": {
+    "version": "0.21.0",
+    "commit": "3888e971a8db586d543e77f514e1a6394da95841",
+    "sha256": {
+      "ksef_client-0.21.0-py3-none-any.whl": "b6d71c2bdd73ce36724316d87fa977d9afafa09c5200cfd67c8e37cd02b93301",
+      "ksef_client-0.21.0.tar.gz": "1902be87de46cf5ac998085f794345a78b0054ccef1d3efc388b823be98993ac"
+    }
+  },
+  "memory": {
+    "rss_comparison": {
+      "schema_version": 1,
+      "parameters": {
+        "pairs": 3,
+        "boundary": 100,
+        "dense_page": false
+      },
+      "environment": {
+        "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.36",
+        "python": "3.12.13",
+        "pid": 26
+      },
+      "pairs": [
+        {
+          "small": {
+            "records": 50000,
+            "peak_rss_bytes": 60129280,
+            "steps": 202,
+            "checkpoint_max_bytes": 5111,
+            "page_snapshot_max_bytes": 43751,
+            "checkpoint_serialize_p50_seconds": 5.9367000000420944e-05,
+            "commit_p50_seconds": 0.016500062000000426,
+            "commit_p95_seconds": 0.023697722000000088,
+            "step_p50_seconds": 0.023959583999999978,
+            "step_p95_seconds": 0.031907946000000464,
+            "boundary_size": 100,
+            "environment": {
+              "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.36",
+              "python": "3.12.13"
+            }
+          },
+          "large": {
+            "records": 500000,
+            "peak_rss_bytes": 59596800,
+            "steps": 2020,
+            "checkpoint_max_bytes": 5112,
+            "page_snapshot_max_bytes": 43751,
+            "checkpoint_serialize_p50_seconds": 5.695899999835774e-05,
+            "commit_p50_seconds": 0.017304401000000524,
+            "commit_p95_seconds": 0.031547625000001744,
+            "step_p50_seconds": 0.024011792000001364,
+            "step_p95_seconds": 0.039908394000001124,
+            "boundary_size": 100,
+            "environment": {
+              "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.36",
+              "python": "3.12.13"
+            }
+          },
+          "rss_delta_bytes": 0
+        },
+        {
+          "small": {
+            "records": 50000,
+            "peak_rss_bytes": 60321792,
+            "steps": 202,
+            "checkpoint_max_bytes": 5111,
+            "page_snapshot_max_bytes": 43751,
+            "checkpoint_serialize_p50_seconds": 5.638400000407273e-05,
+            "commit_p50_seconds": 0.0252202369999992,
+            "commit_p95_seconds": 0.03492471599999192,
+            "step_p50_seconds": 0.03197336450000421,
+            "step_p95_seconds": 0.041986824999995065,
+            "boundary_size": 100,
+            "environment": {
+              "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.36",
+              "python": "3.12.13"
+            }
+          },
+          "large": {
+            "records": 500000,
+            "peak_rss_bytes": 60252160,
+            "steps": 2020,
+            "checkpoint_max_bytes": 5112,
+            "page_snapshot_max_bytes": 43751,
+            "checkpoint_serialize_p50_seconds": 5.771600000059607e-05,
+            "commit_p50_seconds": 0.020887688000001958,
+            "commit_p95_seconds": 0.03773226200002,
+            "step_p50_seconds": 0.028001027000001955,
+            "step_p95_seconds": 0.04601938400000449,
+            "boundary_size": 100,
+            "environment": {
+              "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.36",
+              "python": "3.12.13"
+            }
+          },
+          "rss_delta_bytes": 0
+        },
+        {
+          "small": {
+            "records": 50000,
+            "peak_rss_bytes": 60047360,
+            "steps": 202,
+            "checkpoint_max_bytes": 5111,
+            "page_snapshot_max_bytes": 43751,
+            "checkpoint_serialize_p50_seconds": 5.810599998312682e-05,
+            "commit_p50_seconds": 0.03736701599999037,
+            "commit_p95_seconds": 0.05155855000000997,
+            "step_p50_seconds": 0.04407696050000709,
+            "step_p95_seconds": 0.058001405999988265,
+            "boundary_size": 100,
+            "environment": {
+              "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.36",
+              "python": "3.12.13"
+            }
+          },
+          "large": {
+            "records": 500000,
+            "peak_rss_bytes": 59428864,
+            "steps": 2020,
+            "checkpoint_max_bytes": 5112,
+            "page_snapshot_max_bytes": 43751,
+            "checkpoint_serialize_p50_seconds": 5.674799999155766e-05,
+            "commit_p50_seconds": 0.027386181999986547,
+            "commit_p95_seconds": 0.03741215799999509,
+            "step_p50_seconds": 0.03399560350000286,
+            "step_p95_seconds": 0.044117069000009224,
+            "boundary_size": 100,
+            "environment": {
+              "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.36",
+              "python": "3.12.13"
+            }
+          },
+          "rss_delta_bytes": 0
+        }
+      ],
+      "passed": true
+    },
+    "maximum_delta_bytes": 0,
+    "limit_delta_bytes": 33554432,
+    "dense_page": {
+      "records": 250,
+      "peak_rss_bytes": 121798656,
+      "steps": 1,
+      "checkpoint_max_bytes": 795,
+      "page_snapshot_max_bytes": 14598251,
+      "checkpoint_serialize_p50_seconds": 0.00010698699999522887,
+      "commit_p50_seconds": 0.06281064350000065,
+      "commit_p95_seconds": 0.11401964899999939,
+      "step_p50_seconds": 0.7658745520000139,
+      "step_p95_seconds": 0.7658745520000139,
+      "boundary_size": 250,
+      "environment": {
+        "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.36",
+        "python": "3.12.13"
+      }
+    },
+    "interpretation": "Deltas are clamped at zero; zero is not total process memory usage"
+  },
+  "known_warning": "Existing QR test uses Pillow Image.getdata scheduled for future removal",
+  "live_test": {
+    "status": "deferred_to_protected_CI_by_user",
+    "executed_locally": false,
+    "required_before_release": true,
+    "manifest_nodes": 7,
+    "workflow": ".github/workflows/required-test-e2e.yml"
+  },
+  "remote_actions": {
+    "push": false,
+    "pull_request_created": false,
+    "published": false
+  }
 }
