@@ -32,6 +32,9 @@ bez ładowania całej paczki do pamięci.
 
 Najważniejsze cechy:
 
+- **synchronizacja metadanych** — `client.invoices.sync(...).run_once(store)`, niezależne role,
+  trwałe checkpointy HWM i atomowy zapis z CAS; [przewodnik i SQLite](docs/invoice-sync.md),
+
 - **prosty klient `Ksef` / `AsyncKsef`** — logowanie, sesje i wynik faktury przez `.wait()`,
 - **eksport na dysk ze wznowieniem** — pobieranie, weryfikacja, odszyfrowanie i rozpakowanie,
 - **stan operacji do wznowienia** — kontynuacja oczekiwania lub transferu po przerwaniu,

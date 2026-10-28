@@ -15,6 +15,9 @@ Publiczny kontrakt SDK używa typowanych modeli `ksef_client.models`. Payloady r
 `typed-only`, a wiele metod klientów zwraca modele odpowiedzi zamiast surowych `dict`. Jeśli
 migrujesz starszą integrację, zobacz [`migration-typed-model-api.md`](migration-typed-model-api.md).
 
+Nowe API synchronizacji **metadanych**: [InvoiceSync / AsyncInvoiceSync](invoice-sync.md),
+z niezależnym postępem ról i transakcyjnym przykładem SQLite.
+
 ## Wymagania
 
 - Python `>= 3.10`
