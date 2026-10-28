@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import sqlite3
 import traceback
@@ -19,6 +20,7 @@ from ksef_client import (
     InvoiceSyncCheckpoint,
     InvoiceSyncCommitReceipt,
     KsefClientOptions,
+    KsefInvalidPaginationCursorError,
     KsefInvalidSyncCheckpointError,
     KsefSyncConflictError,
     KsefSyncDataConflictError,
@@ -30,7 +32,6 @@ from ksef_client import models as m
 from ksef_client.clients.invoices import AsyncInvoicesClient, InvoicesClient
 from ksef_client.http import AsyncBaseHttpClient, BaseHttpClient
 from ksef_client.invoice_search import _date
-from ksef_client.operations import environment_key
 
 START = "2024-01-01T00:00:00Z"
 H1 = "2026-01-01T00:00:00.1234567Z"
@@ -204,7 +205,9 @@ def test_round_robin_and_configuration_identity(tmp_path):
             "Subject2",
         ]
         assert [r.pages_committed for r in report.streams] == [2, 2]
-        assert sync.streams[0].scope.environment == environment_key(http.api_base_url)
+        assert sync.streams[0].scope.environment == hashlib.sha256(
+            b"https://example.test/v2"
+        ).hexdigest()
     finally:
         for h in (http, http2, http3):
             h.close()
@@ -254,7 +257,7 @@ def test_pull_receipt_cas_recovery_and_fence(tmp_path):
         bad = checkpoint.to_dict()
         bad["active"]["cursor"] = "broken"
         broken = InvoiceSyncCheckpoint.from_dict(bad)
-        with pytest.raises(Exception, match="cursor"):
+        with pytest.raises(KsefInvalidPaginationCursorError):
             stream.next_batch(broken)
         repaired = stream.restart_active(broken, reason="cursor_invalid", page_size=20)
         checkpoint = repaired.confirm(store.commit(repaired))
@@ -320,6 +323,9 @@ def test_store_exception_redaction_and_isolation(tmp_path):
         class Failing:
             def load(self, scope):
                 raise RuntimeError("secret-DSN-token")
+
+            def commit(self, batch):
+                raise AssertionError("Load must fail before commit")
 
         with pytest.raises(KsefSyncStoreError) as caught:
             sync.run_once(Failing(), raise_on_error=False)

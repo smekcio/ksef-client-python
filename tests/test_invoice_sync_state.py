@@ -73,7 +73,7 @@ def active():
         (("active", "window_days"), 0),
         (("active", "cursor"), 3),
         (("active", "cursor"), "\u0105"),
-        (("active", "cursor"), "x" * (2 * 1024 * 1024 + 1)),
+        pytest.param(("active", "cursor"), "x" * (2 * 1024 * 1024 + 1), id="oversized-cursor"),
         (("unexpected",), "payload"),
     ],
 )
@@ -98,7 +98,7 @@ def test_untrusted_envelopes_rejected(active, path, value):
         '{"a":1,"a":2}',
         '{"a":NaN}',
         '{"a":Infinity}',
-        '"' + "x" * MAX_CHECKPOINT_BYTES,
+        pytest.param('"' + "x" * MAX_CHECKPOINT_BYTES, id="oversized-json"),
     ],
 )
 def test_checkpoint_json_is_bounded_and_strict(value):

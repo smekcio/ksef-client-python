@@ -28,6 +28,7 @@ from ._bounded_http import (
     make_policy,
     policy_for,
 )
+from ._json_bounds import check_json_structure
 from .config import KsefClientOptions
 from .exceptions import (
     KsefApiError,
@@ -1102,6 +1103,8 @@ class BaseHttpClient:
         body: Any = None
         if _is_json_content_type(content_type):
             try:
+                if policy_for(self) is not None:
+                    check_json_structure(response.content, max_nodes=500_000, max_depth=32)
                 body = response.json()
             except ValueError:
                 body = None
@@ -1413,6 +1416,8 @@ class AsyncBaseHttpClient:
         body: Any = None
         if _is_json_content_type(content_type):
             try:
+                if policy_for(self) is not None:
+                    check_json_structure(response.content, max_nodes=500_000, max_depth=32)
                 body = response.json()
             except ValueError:
                 body = None

@@ -10,12 +10,14 @@ import base64
 import binascii
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
 
 from . import models as m
+from ._json_bounds import check_json_structure
 from .exceptions import (
     KsefInvalidSyncCheckpointError,
     KsefSyncDataConflictError,
@@ -87,6 +89,8 @@ def _walk(
             raise ValueError("Unsupported JSON value")
         elif type(item) is str:
             characters += len(item)
+        elif type(item) is float and not math.isfinite(item):
+            raise ValueError("Non-finite JSON number")
         if max_chars is not None and characters > max_chars:
             raise _JsonSizeLimit("JSON size exceeds bounds")
 
@@ -251,19 +255,45 @@ def _validate_checkpoint(data: Any) -> None:
         raise ValueError("Invalid checkpoint phase")
 
 
+@dataclass(frozen=True)
+class _CheckpointSummary:
+    scope: InvoiceSyncScope
+    generation_id: str
+    revision: int
+    committed_hwm: str | None
+    phase: str
+    last_commit_id: str
+
+
 @dataclass(frozen=True, repr=False)
 class InvoiceSyncCheckpoint:
     _snapshot: bytes
+    _summary: _CheckpointSummary = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         try:
-            if type(self._snapshot) is not bytes or len(self._snapshot) > MAX_CHECKPOINT_BYTES:
+            if type(self._snapshot) is not bytes:
+                raise KsefInvalidSyncCheckpointError("invalid_checkpoint")
+            if len(self._snapshot) > MAX_CHECKPOINT_BYTES:
                 raise KsefInvalidSyncCheckpointError("checkpoint_size_limit")
+            check_json_structure(self._snapshot, max_nodes=100_000, max_depth=18)
             data = _loads(self._snapshot)
             _walk(data, max_chars=MAX_CHECKPOINT_BYTES)
             _validate_checkpoint(data)
             raw = canonical_json(data, MAX_CHECKPOINT_BYTES)
             object.__setattr__(self, "_snapshot", raw)
+            object.__setattr__(
+                self,
+                "_summary",
+                _CheckpointSummary(
+                    InvoiceSyncScope(**data["scope"]),
+                    data["generation_id"],
+                    data["revision"],
+                    data["committed_hwm"],
+                    data["phase"],
+                    data["last_commit_id"],
+                ),
+            )
         except _JsonSizeLimit:
             raise KsefInvalidSyncCheckpointError("checkpoint_size_limit") from None
         except (ValueError, TypeError, KeyError, AttributeError, RecursionError, OverflowError):
@@ -274,7 +304,9 @@ class InvoiceSyncCheckpoint:
 
     @classmethod
     def from_json(cls, value: str | bytes) -> InvoiceSyncCheckpoint:
-        if type(value) not in (str, bytes) or len(value) > MAX_CHECKPOINT_BYTES:
+        if type(value) not in (str, bytes):
+            raise KsefInvalidSyncCheckpointError("invalid_checkpoint")
+        if len(value) > MAX_CHECKPOINT_BYTES:
             raise KsefInvalidSyncCheckpointError("checkpoint_size_limit")
         try:
             return cls(value.encode("utf-8") if isinstance(value, str) else value)
@@ -299,7 +331,7 @@ class InvoiceSyncCheckpoint:
 
     @property
     def scope(self) -> InvoiceSyncScope:
-        return InvoiceSyncScope(**self.to_dict()["scope"])
+        return self._summary.scope
 
     @property
     def spec(self) -> dict[str, Any]:
@@ -307,19 +339,19 @@ class InvoiceSyncCheckpoint:
 
     @property
     def generation_id(self) -> str:
-        return self.to_dict()["generation_id"]
+        return self._summary.generation_id
 
     @property
     def revision(self) -> int:
-        return self.to_dict()["revision"]
+        return self._summary.revision
 
     @property
     def committed_hwm(self) -> str | None:
-        return self.to_dict()["committed_hwm"]
+        return self._summary.committed_hwm
 
     @property
     def phase(self) -> str:
-        return self.to_dict()["phase"]
+        return self._summary.phase
 
     @property
     def active(self) -> dict[str, Any] | None:
@@ -327,7 +359,7 @@ class InvoiceSyncCheckpoint:
 
     @property
     def last_commit_id(self) -> str:
-        return self.to_dict()["last_commit_id"]
+        return self._summary.last_commit_id
 
 
 @dataclass(frozen=True)
@@ -353,6 +385,7 @@ class InvoiceSyncBatch:
     expected_generation: str | None
     expected_revision: int | None
     is_page: bool
+    _record_count: int | None = field(default=None, repr=False)
 
     def __repr__(self) -> str:
         return f"InvoiceSyncBatch(revision={self.next_checkpoint.revision}, is_page={self.is_page})"
@@ -374,6 +407,10 @@ class InvoiceSyncBatch:
         return _loads(self._observations)
 
     @property
+    def observation_count(self) -> int:
+        return self._record_count if self._record_count is not None else len(self.observation_dicts)
+
+    @property
     def receipt(self) -> InvoiceSyncCommitReceipt:
         checkpoint = self._checkpoint
         return InvoiceSyncCommitReceipt(
@@ -385,7 +422,7 @@ class InvoiceSyncBatch:
 
     def confirm(self, receipt: InvoiceSyncCommitReceipt) -> InvoiceSyncCheckpoint:
         if not isinstance(receipt, InvoiceSyncCommitReceipt) or receipt != self.receipt:
-            raise KsefSyncStoreError(operation="commit", commit_outcome="committed")
+            raise KsefSyncStoreError(operation="commit", commit_outcome="unknown")
         return self._checkpoint
 
 
@@ -397,6 +434,11 @@ def make_batch(
     is_page: bool = False,
     new_generation: bool = False,
 ) -> InvoiceSyncBatch:
+    if previous is not None and (
+        data.get("scope") != previous.scope.to_dict()
+        or not _same_json(data.get("spec"), previous.spec)
+    ):
+        raise KsefSyncStateError("checkpoint_identity_mismatch")
     if previous is not None and previous.revision == MAX_REVISION:
         raise KsefSyncStateError("revision_exhausted")
     data["revision"] = previous.revision + 1 if previous else 1
@@ -436,14 +478,17 @@ def make_batch(
             raise KsefSyncError("invalid_metadata") from None
     try:
         snapshot = canonical_json(values, MAX_PAGE_BYTES, page=True)
-    except (ValueError, TypeError, OverflowError):
+    except _JsonSizeLimit:
         raise KsefSyncLimitError(limit_stage="page_snapshot", limit_bytes=MAX_PAGE_BYTES) from None
+    except (ValueError, TypeError, OverflowError, RecursionError):
+        raise KsefSyncError("invalid_metadata") from None
     return InvoiceSyncBatch(
         checkpoint,
         snapshot,
         previous.generation_id if previous else None,
         previous.revision if previous else None,
         is_page,
+        len(values),
     )
 
 
@@ -472,6 +517,8 @@ def begin_cycle(
     window_days: int,
 ) -> InvoiceSyncBatch:
     if checkpoint is not None:
+        if checkpoint.scope != scope or not _same_json(checkpoint.spec, spec):
+            raise KsefSyncStateError("checkpoint_identity_mismatch")
         if checkpoint.phase != "idle":
             raise KsefSyncStateError("cycle_already_active")
         data = checkpoint.to_dict()

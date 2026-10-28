@@ -153,11 +153,18 @@ def main() -> None:
     parser.add_argument("--pairs", type=int, default=3)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    if args.worker:
-        print(json.dumps(worker(args.worker, boundary=args.boundary, dense_page=args.dense_page)))
-        return
+    if args.pairs <= 0 or args.boundary <= 0 or (args.worker is not None and args.worker <= 0):
+        parser.error("pairs, boundary and worker must be positive")
     if sys.platform != "linux" or sys.version_info[:2] != (3, 12):
         raise SystemExit("Reference measurements require Linux/Python 3.12")
+    if args.worker:
+        result = worker(args.worker, boundary=args.boundary, dense_page=args.dense_page)
+        result["environment"] = {
+            "platform": platform.platform(),
+            "python": platform.python_version(),
+        }
+        _output(result, args.output)
+        return
     pairs = []
     for _ in range(args.pairs):
         pair = []
@@ -170,6 +177,7 @@ def main() -> None:
                     str(count),
                     "--boundary",
                     str(args.boundary),
+                    *(["--dense-page"] if args.dense_page else []),
                 ],
                 check=True,
                 stdout=subprocess.PIPE,
@@ -186,6 +194,12 @@ def main() -> None:
             }
         )
     result = {
+        "schema_version": 1,
+        "parameters": {
+            "pairs": args.pairs,
+            "boundary": args.boundary,
+            "dense_page": args.dense_page,
+        },
         "environment": {
             "platform": platform.platform(),
             "python": platform.python_version(),
@@ -194,12 +208,16 @@ def main() -> None:
         "pairs": pairs,
         "passed": max(p["rss_delta_bytes"] for p in pairs) <= 32 * 1024 * 1024,
     }
-    value = json.dumps(result, indent=2)
-    if args.output:
-        args.output.write_text(value + "\n", encoding="utf-8")
-    print(value)
+    _output(result, args.output)
     if not result["passed"]:
         raise SystemExit(1)
+
+
+def _output(result: dict, path: Path | None) -> None:
+    value = json.dumps(result, indent=2)
+    if path:
+        path.write_text(value + "\n", encoding="utf-8")
+    print(value)
 
 
 if __name__ == "__main__":

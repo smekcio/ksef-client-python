@@ -22,13 +22,16 @@ def linux_process_running(pid: int) -> bool:
 def _stop(process: subprocess.Popen, grace: float) -> None:
     if os.name != "posix":
         # A manual Windows runner must provide equivalent process-tree cleanup.
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=grace,
-        )
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=grace,
+            )
+        if process.poll() is None:
+            process.kill()
         process.wait(timeout=grace)
         return
     with contextlib.suppress(ProcessLookupError):
@@ -66,9 +69,11 @@ def run_phases(
         )
         try:
             process.wait(timeout=max(0, deadline - time.monotonic()))
-        except BaseException:
+        except BaseException as error:
             _stop(process, grace)
-            raise TimeoutError("Invoice sync process watchdog interrupted a phase") from None
+            if isinstance(error, subprocess.TimeoutExpired):
+                raise TimeoutError("Invoice sync process watchdog interrupted a phase") from None
+            raise
         # Reap descendants also when their leader exited successfully.
         _stop(process, grace)
         if process.returncode:

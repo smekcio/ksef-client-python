@@ -28,18 +28,34 @@ async def close_http(http, asynchronous):
 
 
 @pytest.mark.parametrize("autocommit", [False, True])
-@pytest.mark.parametrize("at", range(1, 9))
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "BEGIN IMMEDIATE",
+        "SELECT checkpoint_json",
+        "INSERT INTO invoices",
+        "SELECT invoice_hash",
+        "INSERT INTO invoice_observations",
+        "INSERT INTO outbox",
+        "UPDATE sync_checkpoints",
+        "COMMIT",
+    ],
+)
 @pytest.mark.parametrize("after", [False, True])
-def test_sqlite_failure_at_each_statement_is_atomic(tmp_path, asynchronous, autocommit, at, after):
+def test_sqlite_failure_at_each_statement_is_atomic(
+    tmp_path,
+    asynchronous,
+    autocommit,
+    statement,
+    after,
+):
     class FaultStore(SQLiteInvoiceSyncStore):
-        calls = 0
-        failure_at = None
+        armed = False
 
         def _execute(self, sql, parameters=()):
-            self.calls += 1
-            fail = self.calls == self.failure_at
+            fail = self.armed and sql.startswith(statement)
             if fail:
-                self.failure_at = None
+                self.armed = False
             if fail and not after:
                 raise OSError("private-database-details")
             result = super()._execute(sql, parameters)
@@ -61,16 +77,20 @@ def test_sqlite_failure_at_each_statement_is_atomic(tmp_path, asynchronous, auto
                 page = await store.next_batch(stream, checkpoint)
 
                 def arm():
-                    store.store.calls, store.store.failure_at = 0, at
+                    store.store.armed = True
 
                 await store.call(arm)
                 with pytest.raises(KsefSyncStoreError) as caught:
                     await store.commit(page)
-                persisted = after and at == 8
+                persisted = after and statement == "COMMIT"
                 expected_outcome = (
                     "unknown"
                     if persisted
-                    else ("not_started" if at == 1 and not after else "rolled_back")
+                    else (
+                        "not_started"
+                        if statement == "BEGIN IMMEDIATE" and not after
+                        else "rolled_back"
+                    )
                 )
                 assert caught.value.commit_outcome == expected_outcome
                 assert caught.value.failure_scope == "store"

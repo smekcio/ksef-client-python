@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import math
 import time
 from collections import deque
@@ -46,6 +47,7 @@ from .invoice_sync_state import (
     canonical_spec,
     make_batch,
     spec_fingerprint,
+    utc_timestamp,
 )
 from .rate_limiting import (
     CancellationSignal,
@@ -226,9 +228,8 @@ class _InvoiceSyncStreamBase:
         if page.next_cursor is None:
             hwm = page.permanent_storage_hwm_date
             try:
-                if hwm is None or not _date(active["from"]) <= _date(hwm) <= _date(
-                    active["cycle_to"]
-                ):
+                hwm = utc_timestamp(hwm)  # type: ignore[arg-type]
+                if not _date(active["from"]) <= _date(hwm) <= _date(active["cycle_to"]):
                     raise ValueError("Invalid completed HWM")
             except (ValueError, TypeError):
                 raise KsefSyncError("invalid_hwm") from None
@@ -448,6 +449,7 @@ class _InvoiceSyncBase(Generic[_StreamT]):
             progress = _Progress(
                 stream,
                 checkpoint,
+                new=checkpoint is None,
                 observed_at=_now(),
                 status="completed" if checkpoint and checkpoint.phase == "idle" else "partial",
             )
@@ -517,17 +519,16 @@ class _InvoiceSyncBase(Generic[_StreamT]):
                     deadline=min(global_end, end), cancellation=cancellation
                 ) as control:
                     cp = yield ("load", progress.stream.scope)
-                    control.check()
                     if cp is not None:
                         if not isinstance(cp, InvoiceSyncCheckpoint):
                             raise KsefInvalidSyncCheckpointError("invalid_store_checkpoint")
                         if cp.scope != progress.stream.scope:
                             raise KsefSyncStoreError(operation="load", failure_scope="store")
-                        progress.checkpoint = cp
                         progress.stream._validate(cp)
-                    control.check()
+                        progress.checkpoint = cp
                     progress.new = cp is None
                     progress.observed_at = _now()
+                    control.check()
             except KsefRateLimitWaitTimeout as error:
                 progress.reason = classify(error, end)
             except _EXPECTED as error:
@@ -557,7 +558,7 @@ class _InvoiceSyncBase(Generic[_StreamT]):
                     progress.observed_at = _now()
                     if batch.is_page:
                         progress.pages += 1
-                        progress.records += len(batch.observation_dicts)
+                        progress.records += batch.observation_count
                     if progress.checkpoint.phase == "idle":
                         progress.status = "completed"
                     elif (
@@ -598,6 +599,7 @@ class InvoiceSync(_InvoiceSyncBase[InvoiceSyncStream]):
         cancellation: CancellationSignal | None = None,
         raise_on_error: bool = True,
     ) -> InvoiceSyncReport:
+        _validate_store(store, asynchronous=False)
         runner = self._run(
             time_budget=time_budget,
             max_pages_per_stream=max_pages_per_stream,
@@ -615,6 +617,25 @@ def _store_failure(error: Exception, operation: str) -> KsefSyncStoreError:
         failure_scope="store",
         original_error=error,
     )
+
+
+class _StoreModeError(TypeError):
+    pass
+
+
+def _validate_store(store: Any, *, asynchronous: bool) -> None:
+    for operation in ("load", "commit"):
+        method = getattr(store, operation, None)
+        if not callable(method):
+            raise _StoreModeError(f"Store must provide callable {operation}")
+        if not asynchronous and inspect.iscoroutinefunction(method):
+            raise _StoreModeError("InvoiceSync requires a synchronous store; use AsyncInvoiceSync")
+
+
+def _require_awaitable(value: Any) -> Any:
+    if not inspect.isawaitable(value):
+        raise _StoreModeError("AsyncInvoiceSync requires awaitable store.load/commit results")
+    return value
 
 
 def _drive(
@@ -635,6 +656,12 @@ def _drive(
                 else:
                     try:
                         value = getattr(store, operation)(argument)
+                        if inspect.isawaitable(value):
+                            if inspect.iscoroutine(value):
+                                value.close()
+                            raise _StoreModeError("InvoiceSync requires synchronous store results")
+                    except _StoreModeError:
+                        raise
                     except _STORE_ERRORS as known:
                         raise known from None
                     except asyncio.CancelledError:
@@ -655,7 +682,7 @@ async def _commit_and_drain(
     control = current_request_control()
     if control is not None:
         control.check()
-    return await shield_and_drain(store.commit(batch))
+    return await shield_and_drain(_require_awaitable(store.commit(batch)))
 
 
 class AsyncInvoiceSync(_InvoiceSyncBase[AsyncInvoiceSyncStream]):
@@ -674,6 +701,7 @@ class AsyncInvoiceSync(_InvoiceSyncBase[AsyncInvoiceSyncStream]):
         cancellation: CancellationSignal | None = None,
         raise_on_error: bool = True,
     ) -> InvoiceSyncReport:
+        _validate_store(store, asynchronous=True)
         runner = self._run(
             time_budget=time_budget,
             max_pages_per_stream=max_pages_per_stream,
@@ -698,8 +726,10 @@ class AsyncInvoiceSync(_InvoiceSyncBase[AsyncInvoiceSyncStream]):
                             value = (
                                 await _commit_and_drain(store, argument)
                                 if operation == "commit"
-                                else await store.load(argument)
+                                else await _require_awaitable(store.load(argument))
                             )
+                        except _StoreModeError:
+                            raise
                         except _STORE_ERRORS as known:
                             raise known from None
                         except asyncio.CancelledError:

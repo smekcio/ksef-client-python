@@ -101,7 +101,11 @@ pokrycia wszystkich ról. `stop_reason` błędu używa wyłącznie znanych kodó
 nie kopiuje dowolnego tekstu `reasonCode` serwera ani adaptera.
 
 Budżety są kooperatywne. Timeout HTTP ogranicza również pojedynczy odczyt
-sieciowy. Rozpoczęty COMMIT jest odbierany do końca zgodnie z timeoutem adaptera;
+sieciowy i jest zmniejszany do pozostałego deadline'u. Nie jest to łączny timeout
+fazy nagłówków: HTTPX może odebrać je w wielu odczytach. Serwer wysyłający
+nagłówki małymi porcjami może więc przekroczyć budżet przed kolejnym checkiem SDK.
+Anulowanie kooperatywne również czeka na powrót z takiego odczytu.
+Rozpoczęty COMMIT jest odbierany do końca zgodnie z timeoutem adaptera;
 async chroni go przed anulowaniem i odbiera wynik także po wielokrotnym cancel.
 Twardy limit czasu wymaga nadzorcy procesu. Wymuszone zakończenie nie dowodzi rollbacku.
 
@@ -191,17 +195,26 @@ Fabryka, begin_cycle, confirm i operacje administracyjne pozostają zwykłymi
 metodami. `next_batch`, load i commit są awaitowalne. Adapter aplikacji musi
 korzystać z async DB lub jawnie zarządzać własnym workerem z timeoutem;
 nie wykonuj sqlite3 na pętli zdarzeń.
+Pomylenie trybu magazynu daje `TypeError` z nazwą oczekiwanego trybu; nie jest
+błędem strumienia maskowanym przez `raise_on_error=False`.
 
 ## Limity, błędy i odzyskanie
 
 Limity wynoszą: HTTP body i kanoniczna strona 16 MiB, checkpoint 4 MiB,
 kursor 2 MiB, query 128 KiB, głębokość checkpointu 16 i 50 000 węzłów.
+Przed dekodowaniem odpowiedzi metadanych kontrolowane są także głębokość
+32 kontenerów i budżet 500 000 tokenów struktury (klucze, wartości i kontenery).
+Kontrola pomija zawartość stringów bez tworzenia ich kopii. Przekroczenie
+oznacza niepoprawną odpowiedź, bez zatwierdzenia strony. Nie jest to limit RSS
+całego procesu; tekst, modele i snapshot mogą współistnieć w pamięci.
 Przekroczenie body/snapshotu/nowego checkpointu daje `KsefSyncLimitError`
-z `limit_stage`, `limit_bytes` i znanym `observed_bytes`. Nie jest ponawiane.
+z `limit_stage`, `limit_bytes` i `observed_bytes`, jeżeli rozmiar został ustalony
+(pole może być None). Nie jest ponawiane. Niefinitywne kwoty, także wynik
+przepełnienia `1e999`, dają `invalid_metadata`; zmniejszenie strony ich nie naprawi.
 Runtime limit kursora zachowuje `KsefIncompletePaginationError` z przyczyną
 `cursor_size_limit`. Strona nie zostaje zatwierdzona.
 
-Odrzucone przekierowanie lub kompresja odpowiedzi daje `KsefSyncError` z kodem
+Odrzucone przekierowanie lub kompresja odpowiedzi daje `KsefSyncError` z `reason_code`
 `response_redirect` albo `response_encoding`, a nie błąd rozmiaru. Popraw adres
 lub konfigurację pośrednika; zmniejszenie strony nie naprawia tej sytuacji.
 Początek historii późniejszy od bieżącej granicy cyklu daje błąd tylko danego
@@ -210,6 +223,11 @@ strumienia (`cycle_end_before_start`), bez zmiany jego HWM.
 `KsefSyncStoreError` opisuje `operation=load/commit`,
 `commit_outcome=not_started/rolled_back/committed/unknown` i
 `failure_scope=stream/store`. `store` zawsze przerywa koordynator.
+Niezgodny receipt daje `commit_outcome="unknown"`: dopiero ponowny load/CAS
+rozstrzyga, czy partia została utrwalona.
+`KsefRateLimitCapacityError` również przerywa całe wywołanie, niezależnie od
+`raise_on_error`: oznacza wyczerpanie pamięci rozliczeniowej wspólnego limitera,
+nie błąd pojedynczej roli. Należy poprawić konfigurację/obciążenie budżetu.
 Obcy wyjątek adaptera jest poufnym `original_error`, bez ujawniania jego łańcucha.
 Przykład SQLite odrzuca obcą transakcję również przy `load`. Po przerwaniu
 rozpoczętej transakcji przez `KeyboardInterrupt` lub `SystemExit` sprząta ją

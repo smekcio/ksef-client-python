@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import sys
 import threading
 from collections.abc import AsyncIterator
@@ -93,7 +94,7 @@ def _enter(owner: object) -> tuple[Any, Any]:
 
 
 def body_frame(function: Any) -> Any:
-    if asyncio.iscoroutinefunction(function):
+    if inspect.iscoroutinefunction(function):
 
         @wraps(function)
         async def async_call(self: object, *args: Any, **kwargs: Any) -> Any:

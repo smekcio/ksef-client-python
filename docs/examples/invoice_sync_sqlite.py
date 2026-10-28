@@ -7,6 +7,7 @@ does not own this connection. Set a finite sqlite busy timeout.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import suppress
 from typing import Any
@@ -110,8 +111,6 @@ class SQLiteInvoiceSyncStore:
         return checkpoint
 
     def commit(self, batch: InvoiceSyncBatch) -> InvoiceSyncCommitReceipt:
-        from ksef_client.invoice_sync_state import MAX_PAGE_BYTES, canonical_json
-
         self._require_idle("commit")
         checkpoint, scope = batch.next_checkpoint, batch.scope
         started, committing = False, False
@@ -143,7 +142,10 @@ class SQLiteInvoiceSyncStore:
                 ).fetchone()
                 if existing is None or existing[0] != value["invoiceHash"]:
                     raise KsefSyncDataConflictError("invoice_hash_conflict")
-                metadata = canonical_json(value, MAX_PAGE_BYTES, page=True).decode("ascii")
+                # Batch snapshots are already validated and bounded by the SDK.
+                metadata = json.dumps(
+                    value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+                )
                 self._execute(
                     "INSERT INTO invoice_observations VALUES (?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(namespace, environment, context_key, sync_key, stream_id, "

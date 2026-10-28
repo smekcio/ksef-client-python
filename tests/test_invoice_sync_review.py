@@ -224,6 +224,9 @@ def test_safe_report_never_copies_untrusted_exception_reason(tmp_path, origin):
         def load(self, scope):
             raise KsefSyncConflictError(secret)
 
+        def commit(self, batch):
+            raise AssertionError("Load must fail before commit")
+
     def handler(request):
         value = {"status": 403, "title": "Forbidden", "detail": "private", "reasonCode": secret}
         return httpx.Response(

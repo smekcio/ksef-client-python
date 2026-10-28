@@ -129,12 +129,18 @@ def test_validation_extremes_and_unexpected_deadline(tmp_path):
             def load(self, scope):
                 raise KsefRateLimitWaitTimeout("not an expired SDK deadline")
 
+            def commit(self, batch):
+                raise AssertionError("Load must fail before commit")
+
         with pytest.raises(KsefRateLimitWaitTimeout):
             sync.run_once(EarlyTimeout(), raise_on_error=False)
 
         class CancelledStore:
             def load(self, scope):
                 raise asyncio.CancelledError()
+
+            def commit(self, batch):
+                raise AssertionError("Load must fail before commit")
 
         with pytest.raises(asyncio.CancelledError):
             sync.run_once(CancelledStore())
@@ -206,6 +212,9 @@ def test_async_expected_store_error_remains_per_stream():
         class Store:
             async def load(self, scope):
                 raise KsefSyncStoreError(operation="load", failure_scope="stream")
+
+            async def commit(self, batch):
+                raise AssertionError("Load must fail before commit")
 
         try:
             report = await sync.run_once(Store(), raise_on_error=False)

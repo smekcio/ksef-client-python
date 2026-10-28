@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
+from .._json_bounds import check_json_structure
 from ..config import KsefClientOptions
 from ..invoice_range_search import (
     AsyncInvoiceMetadataRangeSearch,
@@ -293,6 +294,7 @@ class InvoicesClient(BaseApiClient):
             access_token=access_token,
         )
         try:
+            check_json_structure(response.content, max_nodes=500_000, max_depth=32)
             raw = json.loads(
                 response.content, object_pairs_hook=_json_object, parse_constant=_reject_constant
             )
@@ -725,6 +727,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             access_token=access_token,
         )
         try:
+            check_json_structure(response.content, max_nodes=500_000, max_depth=32)
             raw = json.loads(
                 response.content, object_pairs_hook=_json_object, parse_constant=_reject_constant
             )

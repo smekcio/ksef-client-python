@@ -1,6 +1,7 @@
 # Plan implementacji InvoiceSync
 
-Status: projekt do implementacji; opisane API nie jest jeszcze dostępne.
+Status: zaimplementowane lokalnie na `feat/invoice-metadata-sync`; odbiór lokalny
+opisują raporty w `docs/reports/`. Live TEST pozostaje bramą CI przed wydaniem.
 
 Data: 27 października 2026. Baza: **0.21.0**, commit
 `1db4dbe486bcd7ab75973dc6c321e50785a1ed18`. Gałąź: `feat/invoice-sync-plan`.
@@ -277,7 +278,8 @@ macierz transportu. Nowa metoda i własne adaptery mają identyczny kontrakt.
 
 ## 6. API użytkowe i jawny tryb pull
 
-Wszystkie poniższe przykłady opisują przyszłe API.
+Poniższe przykłady opisują zaimplementowane API; bieżący przewodnik integracji
+znajduje się w [invoice-sync.md](../invoice-sync.md).
 
 ```python
 from ksef_client import (
