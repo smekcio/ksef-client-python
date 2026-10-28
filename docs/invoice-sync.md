@@ -82,6 +82,9 @@ deadline i anulowanie zawsze przerywają wywołanie.
 `pages_committed` liczy zatwierdzone strony. `new_streams` wskazuje nowe scope.
 `to_dict()` raportu jest bezpiecznym opisem diagnostycznym; oryginalne błędy
 pozostają poufnym atrybutem `original_error` wyników.
+Każdy wynik JSON zawiera także własne `coverage`, nawet gdy nie ma wspólnego
+pokrycia wszystkich ról. `stop_reason` błędu używa wyłącznie znanych kodów SDK;
+nie kopiuje dowolnego tekstu `reasonCode` serwera ani adaptera.
 
 Budżety są kooperatywne. Timeout HTTP ogranicza również pojedynczy odczyt
 sieciowy. Rozpoczęty COMMIT jest odbierany do końca zgodnie z timeoutem adaptera;
@@ -184,10 +187,19 @@ z `limit_stage`, `limit_bytes` i znanym `observed_bytes`. Nie jest ponawiane.
 Runtime limit kursora zachowuje `KsefIncompletePaginationError` z przyczyną
 `cursor_size_limit`. Strona nie zostaje zatwierdzona.
 
+Odrzucone przekierowanie lub kompresja odpowiedzi daje `KsefSyncError` z kodem
+`response_redirect` albo `response_encoding`, a nie błąd rozmiaru. Popraw adres
+lub konfigurację pośrednika; zmniejszenie strony nie naprawia tej sytuacji.
+Początek historii późniejszy od bieżącej granicy cyklu daje błąd tylko danego
+strumienia (`cycle_end_before_start`), bez zmiany jego HWM.
+
 `KsefSyncStoreError` opisuje `operation=load/commit`,
 `commit_outcome=not_started/rolled_back/committed/unknown` i
 `failure_scope=stream/store`. `store` zawsze przerywa koordynator.
 Obcy wyjątek adaptera jest poufnym `original_error`, bez ujawniania jego łańcucha.
+Przykład SQLite odrzuca obcą transakcję również przy `load`. Po przerwaniu
+rozpoczętej transakcji przez `KeyboardInterrupt` lub `SystemExit` sprząta ją
+przed propagacją przerwania; po błędzie sprzątania zamyka połączenie.
 
 Operacje administracyjne tworzą puste partie do zatwierdzenia przez ten sam CAS:
 

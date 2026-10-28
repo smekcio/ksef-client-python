@@ -628,9 +628,12 @@ Nowe ErrorCode dopisujemy na końcu enuma.
 | KsefSyncRunError | Agregat oczekiwanych błędów strumieni po obsłużeniu pozostałych; zawiera report. | SYNC_RUN_FAILED / API_ERROR |
 | KsefResponseLimitError | Błąd nowego limited HTTP przed wejściem do modelu sync; bez retry i bez dziedziczenia po KsefHttpError. | RESPONSE_LIMIT_EXCEEDED / API_ERROR |
 
-KsefResponseLimitError dziedziczy bezpośrednio po KsefError. Bounded source
-mapuje go na KsefSyncLimitError(limit_stage="response_body") przy wejściu
-synchronizacji. Parser źródła nie musi rozumieć store ani checkpointu.
+KsefResponseLimitError dziedziczy bezpośrednio po KsefError. Po review implementacji
+bounded source mapuje wyłącznie przekroczenie rozmiaru na
+KsefSyncLimitError(limit_stage="response_body"). Odrzucenie przekierowania lub
+kompresji daje KsefSyncError(reason_code="response_redirect"/"response_encoding"),
+aby nie sugerować nieskutecznej naprawy przez zmniejszenie strony.
+Parser źródła nie musi rozumieć store ani checkpointu.
 Dotychczasowe błędy HTTP/paginacji w pull pozostają rozpoznawalne. Nieznany
 status, nie-JSON lub brak wymaganego hasha nie są konfliktem DB ani pustą stroną.
 Błędne argumenty fabryki/parametry to ValueError/TypeError przed I/O.
