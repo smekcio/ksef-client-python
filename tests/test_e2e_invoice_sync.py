@@ -19,6 +19,7 @@ pytestmark = pytest.mark.e2e
 
 def test_e2e_test_environment_invoice_sync_restart(tmp_path):
     _ensure_e2e_enabled()
+    assert sys.platform == "linux", "Live watchdog requires Linux CI process-group supervision"
     assert os.environ.get("KSEF_TEST_INSTALLED") == "1", "Exact installed wheel required"
     assert os.environ.get("KSEF_TEST_WHEEL"), "Exact wheel path required"
     tmp_path.chmod(0o700)

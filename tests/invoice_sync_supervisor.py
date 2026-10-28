@@ -11,6 +11,14 @@ from pathlib import Path
 from typing import Any, cast
 
 
+def linux_process_running(pid: int) -> bool:
+    try:
+        state = Path("/proc", str(pid), "stat").read_text().rsplit(") ", 1)[1].split()[0]
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    return state not in {"Z", "X"}
+
+
 def _stop(process: subprocess.Popen, grace: float) -> None:
     if os.name != "posix":
         # A manual Windows runner must provide equivalent process-tree cleanup.
@@ -19,6 +27,7 @@ def _stop(process: subprocess.Popen, grace: float) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=grace,
         )
         process.wait(timeout=grace)
         return
@@ -56,10 +65,11 @@ def run_phases(
             **options,
         )
         try:
-            process.wait(timeout=remaining)
+            process.wait(timeout=max(0, deadline - time.monotonic()))
         except BaseException:
             _stop(process, grace)
             raise TimeoutError("Invoice sync process watchdog interrupted a phase") from None
+        # Reap descendants also when their leader exited successfully.
+        _stop(process, grace)
         if process.returncode:
-            _stop(process, grace)
             raise RuntimeError("Invoice sync phase failed (private output withheld)")

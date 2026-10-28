@@ -5,7 +5,6 @@ import asyncio
 import os
 import sys
 from dataclasses import replace
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -24,7 +23,7 @@ from ksef_client.clients.invoices import InvoicesClient
 from ksef_client.facade import Invoices
 from ksef_client.invoice_sync import InvoiceSyncStream
 from ksef_client.invoice_sync_state import _walk, utc_timestamp
-from tests.invoice_sync_supervisor import run_phases
+from tests.invoice_sync_supervisor import linux_process_running, run_phases
 from tests.test_invoice_sync import H1, Server, database, make_sync, query
 
 
@@ -305,7 +304,7 @@ def test_supervisor_success_failure_and_shared_timeout(tmp_path):
         run_phases([[sys.executable, "-c", "pass"]], cwd=tmp_path, env=dict(os.environ), timeout=0)
 
 
-@pytest.mark.skipif(os.name != "posix", reason="CI process-group watchdog runs on Linux")
+@pytest.mark.skipif(sys.platform != "linux", reason="CI process-group watchdog runs on Linux")
 def test_supervisor_kills_descendants_which_ignore_sigterm(tmp_path):
     import time
 
@@ -322,12 +321,7 @@ def test_supervisor_kills_descendants_which_ignore_sigterm(tmp_path):
         )
     pids = (tmp_path / "pids").read_text().split()
     for _ in range(50):
-        alive = [
-            pid
-            for pid in pids
-            if Path("/proc", pid, "stat").exists()
-            and Path("/proc", pid, "stat").read_text().split()[2] not in {"Z", "X"}
-        ]
+        alive = [pid for pid in pids if linux_process_running(int(pid))]
         if not alive:
             break
         time.sleep(0.01)
