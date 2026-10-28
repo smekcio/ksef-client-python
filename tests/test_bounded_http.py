@@ -146,7 +146,7 @@ def test_frozen_configuration_and_validation():
             client._options.base_url = "https://other.test"  # type: ignore[misc]
         for limit in (True, 0, -1, 1.0):
             with pytest.raises(ValueError):
-                client.request_json_limited("GET", "/x", max_bytes=limit)
+                client.request_json_limited("GET", "/x", max_bytes=limit)  # type: ignore[arg-type]
         with pytest.raises(AttributeError):
             client.api_base_url = "https://other.test"  # type: ignore[misc]
     finally:

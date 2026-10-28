@@ -831,7 +831,11 @@ class BaseHttpClient:
         finally:
             PENDING.reset(marker)
 
-    def _received_headers(self, response: httpx.Response, budget_parameters: Any) -> None:
+    def _received_headers(
+        self,
+        response: httpx.Response,
+        budget_parameters: tuple[RateLimitScope, tuple[str, ...]] | None,
+    ) -> None:
         if budget_parameters is not None and response.status_code == 429:
             assert self._options.rate_limit_budget is not None
             self._options.rate_limit_budget.defer(
@@ -852,9 +856,11 @@ class BaseHttpClient:
         with self._client.stream(**kwargs) as response:
             self._received_headers(response, budget_parameters)
             check_headers(response, policy)
+            check_control()
             body = bytearray()
-            for chunk in response.iter_raw(chunk_size=65536):
+            for chunk in response.iter_raw():
                 append_chunk(body, chunk, policy)
+                check_control()
             check_control()
             return httpx.Response(
                 response.status_code, headers=response.headers, content=bytes(body)
@@ -1142,7 +1148,11 @@ class AsyncBaseHttpClient:
         finally:
             PENDING.reset(marker)
 
-    def _received_headers(self, response: httpx.Response, budget_parameters: Any) -> None:
+    def _received_headers(
+        self,
+        response: httpx.Response,
+        budget_parameters: tuple[RateLimitScope, tuple[str, ...]] | None,
+    ) -> None:
         if budget_parameters is not None and response.status_code == 429:
             assert self._options.rate_limit_budget is not None
             self._options.rate_limit_budget.defer(
@@ -1163,9 +1173,11 @@ class AsyncBaseHttpClient:
         async with self._client.stream(**kwargs) as response:
             self._received_headers(response, budget_parameters)
             check_headers(response, policy)
+            check_control()
             body = bytearray()
-            async for chunk in response.aiter_raw(chunk_size=65536):
+            async for chunk in response.aiter_raw():
                 append_chunk(body, chunk, policy)
+                check_control()
             check_control()
             return httpx.Response(
                 response.status_code, headers=response.headers, content=bytes(body)
