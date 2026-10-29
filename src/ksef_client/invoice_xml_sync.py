@@ -58,7 +58,10 @@ def _failure(error: Exception, claim: InvoiceXmlClaim, max_failures: int) -> dic
             # Unlike in-request retry, durable scheduling must not clip long cooldowns.
             from .http import _budget_retry_after
 
-            minimum = _budget_retry_after(getattr(error, "retry_after_raw", None))
+            try:
+                minimum = _budget_retry_after(getattr(error, "retry_after_raw", None))
+            except KsefRateLimitWaitTimeout:
+                reason, blocked = "invalid_retry_after", True
     if failure and claim.failures + 1 >= max_failures:
         reason, blocked = "retry_exhausted", True
     exponent = min(max(0, claim.attempts - 1), 10)
@@ -352,6 +355,18 @@ def _changed(metadata: Any, report: Any, xml: InvoiceXmlReport) -> bool:
     )
 
 
+def _unstarted_cycle(metadata: Any, xml: InvoiceXmlReport) -> InvoiceDocumentReport:
+    observed = metadata.describe(xml.checkpoints)
+    partial = replace(
+        observed,
+        streams=tuple(
+            replace(stream, status="partial", stop_reason="time_budget")
+            for stream in observed.streams
+        ),
+    )
+    return InvoiceDocumentReport(partial, replace(xml, stop_reason="time_budget"))
+
+
 class InvoiceDocumentSync:
     def __init__(self, metadata: InvoiceSync, client: Any, **xml_options: Any) -> None:
         self.metadata = metadata
@@ -377,11 +392,19 @@ class InvoiceDocumentSync:
         positive_int(max_documents, "max_documents")
         if type(raise_on_error) is not bool:
             raise TypeError("raise_on_error must be bool")
-        store.validate_xml(self.xml.scopes, storage.storage_id)
         end = time.monotonic() + budget
         with request_control(cancellation=cancellation):
+            check_control()
+            store.validate_xml(self.xml.scopes, storage.storage_id)
+            check_control()
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                return _unstarted_cycle(self.metadata, store.describe_xml(self.xml.scopes))
             report = self.metadata.run_once(
-                store, time_budget=metadata_budget, cancellation=cancellation, raise_on_error=False
+                store,
+                time_budget=min(metadata_budget, remaining),
+                cancellation=cancellation,
+                raise_on_error=False,
             )
             remaining = end - time.monotonic()
             if remaining > 0:
@@ -430,11 +453,19 @@ class AsyncInvoiceDocumentSync:
         positive_int(max_documents, "max_documents")
         if type(raise_on_error) is not bool:
             raise TypeError("raise_on_error must be bool")
-        await store.validate_xml(self.xml.scopes, storage.storage_id)
         end = time.monotonic() + budget
         with request_control(cancellation=cancellation):
+            check_control()
+            await store.validate_xml(self.xml.scopes, storage.storage_id)
+            check_control()
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                return _unstarted_cycle(self.metadata, await store.describe_xml(self.xml.scopes))
             report = await self.metadata.run_once(
-                store, time_budget=metadata_budget, cancellation=cancellation, raise_on_error=False
+                store,
+                time_budget=min(metadata_budget, remaining),
+                cancellation=cancellation,
+                raise_on_error=False,
             )
             remaining = end - time.monotonic()
             if remaining > 0:

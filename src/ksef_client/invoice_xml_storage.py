@@ -7,11 +7,14 @@ import hashlib
 import os
 import re
 import stat
+import threading
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import suppress
+from functools import wraps
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Concatenate, ParamSpec, TypeVar, cast
 
 from ._async_cleanup import shield_and_drain
 from ._bounded_http import check_control
@@ -24,6 +27,20 @@ from .invoice_xml_types import (
     positive_int,
     verify_hash,
 )
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+def _locked(
+    method: Callable[Concatenate[FileInvoiceXmlStore, P], T],
+) -> Callable[Concatenate[FileInvoiceXmlStore, P], T]:
+    @wraps(method)
+    def guarded(self: FileInvoiceXmlStore, *args: P.args, **kwargs: P.kwargs) -> T:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return guarded
 
 
 def _safe_directory(path: Path, *, allow_missing: bool = False) -> None:
@@ -90,6 +107,7 @@ class FileInvoiceXmlStore:
     """An application-owned private directory. Do not share it with untrusted writers."""
 
     def __init__(self, path: str | Path) -> None:
+        self._lock = threading.RLock()
         self.root = Path(os.path.abspath(path))
         self._handles: list[int] = []
         self._dir_fd: int | None = None
@@ -133,6 +151,11 @@ class FileInvoiceXmlStore:
             self.close()
             raise
 
+    def _require_open(self) -> None:
+        if self._closed or (os.name != "nt" and self._dir_fd is None):
+            raise KsefXmlStorageError("storage_closed")
+
+    @_locked
     def _open(self, name: str, *, create: bool = False) -> Any:
         if self._closed or "/" in name or "\\" in name or name in {".", ".."}:
             raise KsefXmlStorageError("unsafe_storage_path")
@@ -154,14 +177,18 @@ class FileInvoiceXmlStore:
             raise KsefXmlStorageError("unsafe_storage_file")
         return os.fdopen(descriptor, "wb" if create else "rb")
 
+    @_locked
     def _unlink(self, name: str) -> None:
+        self._require_open()
         with suppress(FileNotFoundError):
             if os.name == "nt":
                 os.unlink(self.root / name)
             else:
                 os.unlink(name, dir_fd=self._dir_fd)
 
+    @_locked
     def _publish(self, source: str, target: str) -> None:
+        self._require_open()
         try:
             if os.name == "nt":
                 os.rename(self.root / source, self.root / target)
@@ -178,6 +205,7 @@ class FileInvoiceXmlStore:
         except FileExistsError:
             pass  # The caller must verify the winner before returning a receipt.
 
+    @_locked
     def inspect(self, key: InvoiceXmlKey, expected_hash: str) -> InvoiceXmlReceipt | None:
         name = key.object_key(expected_hash)
         try:
@@ -195,6 +223,7 @@ class FileInvoiceXmlStore:
         except OSError:
             raise KsefXmlStorageError("storage_read_failed") from None
 
+    @_locked
     def put_verified(
         self, key: InvoiceXmlKey, content: bytes, expected_hash: str
     ) -> InvoiceXmlReceipt:
@@ -218,6 +247,7 @@ class FileInvoiceXmlStore:
             raise KsefXmlStorageError("storage_publish_failed")
         return result
 
+    @_locked
     def read(
         self, key: InvoiceXmlKey, expected_hash: str, *, max_bytes: int = 16 * 1024 * 1024
     ) -> bytes:
@@ -232,12 +262,15 @@ class FileInvoiceXmlStore:
         except OSError:
             raise KsefXmlStorageError("storage_read_failed") from None
 
+    @_locked
     def cleanup_staging(self, *, max_entries: int = 1000, older_than: float = 86400) -> int:
+        self._require_open()
         positive_int(max_entries, "max_entries")
         if older_than < 120:
             raise ValueError("Staging retention must be at least 120 seconds")
         removed = 0
-        with os.scandir(self.root) as entries:
+        directory = self.root if os.name == "nt" else cast(int, self._dir_fd)
+        with os.scandir(directory) as entries:
             for index, entry in enumerate(entries):
                 if index >= max_entries:
                     break
@@ -250,6 +283,7 @@ class FileInvoiceXmlStore:
                     removed += 1
         return removed
 
+    @_locked
     def close(self) -> None:
         if self._dir_fd is not None:
             os.close(self._dir_fd)
@@ -307,8 +341,12 @@ class AsyncFileInvoiceXmlStore:
             asyncio.to_thread(self._store.put_verified, key, content, expected_hash)
         )
 
-    async def read(self, key: InvoiceXmlKey, expected_hash: str) -> bytes:
-        return await shield_and_drain(asyncio.to_thread(self._store.read, key, expected_hash))
+    async def read(
+        self, key: InvoiceXmlKey, expected_hash: str, *, max_bytes: int = 16 * 1024 * 1024
+    ) -> bytes:
+        return await shield_and_drain(
+            asyncio.to_thread(self._store.read, key, expected_hash, max_bytes=max_bytes)
+        )
 
     async def close(self) -> None:
         await shield_and_drain(asyncio.to_thread(self._store.close))

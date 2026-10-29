@@ -279,3 +279,9 @@ python docs/examples/error_handling.py
 
 
 Zalecane API kompletnego pobierania: [paginacja z kursorami i checkpoint SQLite](../reliable-pagination.md).
+
+## Przyrostowe archiwum XML
+
+`python docs/examples/invoice_sync_documents.py` uruchamia pojedynczy, wznawialny cykl
+metadanych i XML w TEST. Ustaw `KSEF_NIP` i `KSEF_TOKEN`. Szczegóły i konfigurację
+opisuje [przewodnik](../invoice-xml-sync.md).

@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-29",
+  "status": "review_fixes_verified_live_pending",
+  "reviewed_commit": "04f83ec",
+  "branch": "feat/invoice-xml-sync",
+  "sdk_tree": "9f5cac7d502193282a8cc7392737039abb086b75",
+  "scope": "Invoice XML synchronization, public stores, recovery, security boundaries and onboarding documentation",
+  "findings": {
+    "fixed": 6,
+    "security_findings_fixed": 1,
+    "baseline_failing_regression_cases": 7,
+    "details": "invoice-xml-sync-critical-review.md"
+  },
+  "matrix": [
+    {
+      "platform": "Linux",
+      "python": "3.10",
+      "suite": {
+        "passed": 3675,
+        "skipped": 14,
+        "subtests_passed": 61
+      }
+    },
+    {
+      "platform": "Linux",
+      "python": "3.11",
+      "suite": {
+        "passed": 3675,
+        "skipped": 14,
+        "subtests_passed": 61
+      }
+    },
+    {
+      "platform": "Linux",
+      "python": "3.12",
+      "suite": {
+        "passed": 3675,
+        "skipped": 14,
+        "subtests_passed": 61
+      }
+    },
+    {
+      "platform": "Linux",
+      "python": "3.13",
+      "suite": {
+        "passed": 3675,
+        "skipped": 14,
+        "subtests_passed": 61
+      }
+    },
+    {
+      "platform": "Linux",
+      "python": "3.14",
+      "suite": {
+        "passed": 3675,
+        "skipped": 14,
+        "subtests_passed": 61
+      }
+    },
+    {
+      "platform": "Windows",
+      "python": "3.12.9",
+      "suite": {
+        "passed": 3661,
+        "skipped": 28,
+        "subtests_passed": 61
+      }
+    }
+  ],
+  "line_coverage": {
+    "linux_python312": {
+      "covered_lines": 19991,
+      "num_statements": 19991,
+      "percent_covered": 100.0,
+      "percent_covered_display": "100",
+      "missing_lines": 0,
+      "excluded_lines": 485,
+      "percent_statements_covered": 100.0,
+      "percent_statements_covered_display": "100"
+    },
+    "windows_python312": {
+      "covered_lines": 19978,
+      "num_statements": 19991,
+      "percent_covered": 99.93497073683157,
+      "percent_covered_display": "99",
+      "missing_lines": 13,
+      "excluded_lines": 485,
+      "percent_statements_covered": 99.93497073683157,
+      "percent_statements_covered_display": "99"
+    },
+    "note": "100% SDK line coverage gate passed on Linux; 13 unexecuted Windows lines in invoice_xml_storage.py are covered by Linux. This is not branch coverage."
+  },
+  "installed_wheel": {
+    "passed": 148,
+    "skipped": 5,
+    "suite": "tests/test_invoice_xml*.py",
+    "sdk_files_compared_byte_for_byte": 141,
+    "distribution_version": "0.22.0 (local verification artifact; next release is minor)"
+  },
+  "artifacts_sha256": {
+    "ksef_client-0.22.0-py3-none-any.whl": "45447d7a99e9f07f02e2f23f1ba9713397691395ad44cd21fbf806590ff08795",
+    "ksef_client-0.22.0.tar.gz": "71280e53d9ffd2806379fbc0f122a929d9755446311ce4a7f5919c9ac6e96694"
+  },
+  "queue_rss": {
+    "results": [
+      {
+        "records": 50000,
+        "peak_rss_bytes": 57933824
+      },
+      {
+        "records": 500000,
+        "peak_rss_bytes": 57749504
+      }
+    ],
+    "growth_bytes": -184320,
+    "limit_bytes": 33554432
+  },
+  "checks": {
+    "strict_lint_windows": "passed",
+    "strict_lint_linux": "passed",
+    "mypy": "passed (295 source files)",
+    "async_facade_generation": "passed",
+    "openapi_models_and_stubs_from_snapshot": "passed",
+    "base_cli_fa3_packaging": "passed",
+    "documentation_examples": "executed with real SDK adapters and mock HTTP; restart reuses XML without another GET",
+    "git_diff_check": "passed"
+  },
+  "live_test": {
+    "status": "not_run",
+    "reason": "No local TEST credentials; required protected CI remains pending",
+    "scenario": "tests/test_e2e_invoice_xml_sync.py::test_e2e_test_environment_invoice_xml_restart",
+    "required_manifest": "tests/required_test_e2e.json"
+  },
+  "publication": {
+    "status": "not_published",
+    "target": "Next minor release after 0.22.0 via Release Please"
+  },
+  "previous_validation": "invoice-xml-sync-validation.json describes the earlier SDK tree and remains historical evidence"
+}

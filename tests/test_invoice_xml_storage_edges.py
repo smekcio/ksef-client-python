@@ -80,6 +80,7 @@ def test_windows_descriptor_adaptation_on_posix(monkeypatch, tmp_path):
 
     monkeypatch.setattr(files, "_windows_handle", handle)
     storage = object.__new__(FileInvoiceXmlStore)
+    storage._lock = threading.RLock()
     storage.root, storage._closed, storage._dir_fd, storage._handles = tmp_path, False, None, []
     proxy.O_BINARY = 0
     with storage._open("temporary", create=True) as stream:

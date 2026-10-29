@@ -74,6 +74,7 @@ SAFE_REASONS = frozenset(
     {
         "not_available",
         "rate_limited",
+        "invalid_retry_after",
         "transient_http",
         "network_error",
         "retry_exhausted",
@@ -204,7 +205,8 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                     raise KsefXmlStorageError("storage_id_mismatch")
                 connection.execute("COMMIT")
             except BaseException:
-                connection.execute("ROLLBACK")
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
                 raise
         super().__init__(connection, enqueue_xml=enqueue_xml)
         self.xml_storage_id = connection.execute(
@@ -271,7 +273,8 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             )
             connection.execute("COMMIT")
         except BaseException:
-            connection.execute("ROLLBACK")
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
             raise
         # Import is bounded and restartable through backfill_xml. All old outbox rows
         # remain durable and are included in per-scope backfill through observations.
@@ -295,7 +298,14 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             except BaseException:
                 with suppress(BaseException):
                     self.connection.close()
-                outcome = "unknown"
+                if not isinstance(error, Exception):
+                    raise error from None
+                raise KsefSyncStoreError(
+                    operation="commit" if write else "load",
+                    commit_outcome="unknown" if write else "not_started",
+                    failure_scope="store",
+                    original_error=error,
+                ) from None
             if isinstance(error, sqlite3.Error):
                 raise KsefSyncStoreError(
                     operation="commit" if write else "load",

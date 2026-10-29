@@ -222,7 +222,9 @@ class InvoiceXmlStorage(Protocol):
     def put_verified(
         self, key: InvoiceXmlKey, content: bytes, expected_hash: str
     ) -> InvoiceXmlReceipt: ...
-    def read(self, key: InvoiceXmlKey, expected_hash: str) -> bytes: ...
+    def read(
+        self, key: InvoiceXmlKey, expected_hash: str, *, max_bytes: int = 16 * 1024 * 1024
+    ) -> bytes: ...
 
 
 class AsyncInvoiceXmlStorage(Protocol):
@@ -232,7 +234,9 @@ class AsyncInvoiceXmlStorage(Protocol):
     async def put_verified(
         self, key: InvoiceXmlKey, content: bytes, expected_hash: str
     ) -> InvoiceXmlReceipt: ...
-    async def read(self, key: InvoiceXmlKey, expected_hash: str) -> bytes: ...
+    async def read(
+        self, key: InvoiceXmlKey, expected_hash: str, *, max_bytes: int = 16 * 1024 * 1024
+    ) -> bytes: ...
 
 
 class InvoiceDocumentStore(InvoiceSyncStore, Protocol):
