@@ -133,7 +133,8 @@ class MetadataSQLiteStore:
             self._prepare_xml_scope(scope, previous is None)
             document_scope = (scope.namespace, scope.environment, scope.context_key)
             for value in batch.observation_dicts:
-                document = (*document_scope, value["ksefNumber"])
+                number = self._document_number(value["ksefNumber"])
+                document = (*document_scope, number)
                 self._execute(
                     "INSERT INTO invoices VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
                     (*document, value["invoiceHash"]),
@@ -153,7 +154,7 @@ class MetadataSQLiteStore:
                     "INSERT INTO invoice_observations VALUES (?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(namespace, environment, context_key, sync_key, stream_id, "
                     "ksef_number) DO UPDATE SET metadata_json=excluded.metadata_json",
-                    (*_key(scope), value["ksefNumber"], metadata),
+                    (*_key(scope), number, metadata),
                 )
                 if self.enqueue_xml:
                     self._execute(
@@ -216,6 +217,9 @@ class MetadataSQLiteStore:
                 original_error=error,
             ) from None
         return batch.receipt
+
+    def _document_number(self, number: str) -> str:
+        return number
 
     def _enqueue_xml(self, document: tuple[str, ...], expected_hash: str) -> None:
         pass

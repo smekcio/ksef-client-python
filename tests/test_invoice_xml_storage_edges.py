@@ -21,7 +21,7 @@ from ksef_client import invoice_xml_storage as files
 from tests.test_invoice_xml_sync import HASH, NUMBER, XML, environment
 
 
-@pytest.mark.parametrize("error", [2, 3, 80, 183, 5])
+@pytest.mark.parametrize("error", [2, 3, 80, 183, 5, 32, 123])
 def test_windows_handle_error_translation(monkeypatch, tmp_path, error):
     from ctypes import wintypes
 

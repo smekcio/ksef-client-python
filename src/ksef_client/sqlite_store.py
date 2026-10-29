@@ -20,7 +20,7 @@ from typing import Any
 from ._async_cleanup import shield_and_drain
 from ._sqlite_metadata import SCHEMA as METADATA_SCHEMA
 from ._sqlite_metadata import MetadataSQLiteStore
-from .exceptions import KsefSyncStoreError
+from .exceptions import KsefSyncDataConflictError, KsefSyncStoreError
 from .invoice_sync_state import (
     InvoiceSyncBatch,
     InvoiceSyncCheckpoint,
@@ -60,6 +60,10 @@ CREATE TABLE invoice_xml_documents (
       REFERENCES invoices(namespace,environment,context_key,ksef_number)
 );
 CREATE INDEX xml_due ON invoice_xml_documents(status,next_attempt_at,lease_until,created_at);
+CREATE INDEX xml_claim_due ON invoice_xml_documents(
+    namespace,environment,context_key,status,next_attempt_at,created_at,ksef_number);
+CREATE INDEX xml_claim_expired ON invoice_xml_documents(
+    namespace,environment,context_key,status,lease_until,created_at,ksef_number);
 CREATE INDEX xml_observations_document ON invoice_observations(
     namespace,environment,context_key,ksef_number,sync_key,stream_id);
 CREATE TABLE xml_backfill (
@@ -93,8 +97,17 @@ SAFE_REASONS = frozenset(
         "cancelled",
         "verified_missing",
         "verified_corrupt",
+        "invalid_ksef_number",
+        "unsafe_storage_file",
+        "stored_object_unreadable",
     }
 )
+
+
+def _valid_number(number: str) -> bool:
+    from .utils.ksef_number import is_valid_ksef_number
+
+    return isinstance(number, str) and is_valid_ksef_number(number)
 
 
 def _scope_values(scope: InvoiceSyncScope) -> tuple[str, ...]:
@@ -119,7 +132,9 @@ def _legacy_shape(connection: sqlite3.Connection) -> bool:
         reference.executescript(METADATA_SCHEMA)
         expected = dict(reference.execute("SELECT name,sql FROM sqlite_master WHERE type='table'"))
         actual = dict(connection.execute("SELECT name,sql FROM sqlite_master WHERE type='table'"))
-        if actual.keys() != expected.keys():
+        if not expected.keys() <= actual.keys() or any(
+            name.startswith("xml_") or name == "invoice_xml_documents" for name in actual
+        ):
             return False
 
         def normalize(value: str) -> str:
@@ -128,6 +143,70 @@ def _legacy_shape(connection: sqlite3.Connection) -> bool:
         return all(normalize(actual[k]) == normalize(v) for k, v in expected.items())
     finally:
         reference.close()
+
+
+def _canonicalize_legacy_numbers(connection: sqlite3.Connection) -> None:
+    """Offline canonicalization, preserving observations and download obligations."""
+    from .utils.ksef_number import canonical_ksef_number
+
+    last = ""
+    while True:
+        rows = connection.execute(
+            "SELECT namespace,environment,context_key,ksef_number,invoice_hash FROM invoices "
+            "WHERE ksef_number IN (SELECT DISTINCT ksef_number FROM invoices WHERE "
+            "length(ksef_number)=36 AND ksef_number>? ORDER BY ksef_number LIMIT "
+            "500) ORDER BY ksef_number",
+            (last,),
+        ).fetchall()
+        if not rows:
+            break
+        for namespace, environment, context, old, expected in rows:
+            last = old
+            if not _valid_number(old):
+                continue
+            new = canonical_ksef_number(old)
+            prefix = (namespace, environment, context)
+            old_key, new_key = (*prefix, old), (*prefix, new)
+            where = "namespace=? AND environment=? AND context_key=? AND ksef_number=?"
+            connection.execute(
+                "INSERT INTO invoices VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING",
+                (*new_key, expected),
+            )
+            if (
+                connection.execute(
+                    "SELECT invoice_hash FROM invoices WHERE " + where, new_key
+                ).fetchone()[0]
+                != expected
+            ):
+                raise KsefSyncDataConflictError("invoice_hash_conflict")
+            connection.execute(
+                "INSERT INTO invoice_observations SELECT "
+                "namespace,environment,context_key,sync_key,stream_id,?,metadata_json "
+                "FROM invoice_observations WHERE " + where + " ON CONFLICT DO NOTHING",
+                (new, *old_key),
+            )
+            connection.execute(
+                "INSERT INTO outbox SELECT "
+                "namespace,environment,context_key,?,kind,variant,status FROM outbox "
+                "WHERE " + where + " ON CONFLICT DO NOTHING",
+                (new, *old_key),
+            )
+            # Published names include the old identity. Revalidate via a fresh task;
+            # do not falsely mark a newly named object ready or delete old files.
+            connection.execute(
+                "INSERT INTO "
+                "invoice_xml_documents(namespace,environment,context_key,ksef_number,va"
+                "riant,expected_hash,status,created_at,next_attempt_at,attempts,failure"
+                "s,last_reason) SELECT "
+                "namespace,environment,context_key,?,variant,expected_hash,CASE WHEN "
+                "status IN ('leased','ready') THEN 'pending' ELSE status "
+                "END,created_at,next_attempt_at,attempts,failures,last_reason FROM "
+                "invoice_xml_documents WHERE " + where + " ON CONFLICT DO NOTHING",
+                (new, *old_key),
+            )
+            for table in ("invoice_xml_documents", "invoice_observations", "outbox", "invoices"):
+                connection.execute("DELETE FROM " + table + " WHERE " + where, old_key)
+    connection.execute("UPDATE xml_backfill SET complete=0,last_number='' WHERE complete=0")
 
 
 class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
@@ -142,6 +221,8 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
     ) -> None:
         if connection.in_transaction:
             raise ValueError("The adapter requires an idle connection")
+        if connection.row_factory not in (None, sqlite3.Row):
+            raise ValueError("Use tuple rows or sqlite3.Row for the SDK connection")
         if enqueue_xml and (
             not isinstance(xml_storage_id, str) or not xml_storage_id or len(xml_storage_id) > 256
         ):
@@ -156,8 +237,12 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             row = connection.execute(
                 "SELECT version,storage_id FROM xml_store_meta WHERE id=1"
             ).fetchone()
-            if row is None or row[0] != 1:
-                raise KsefXmlStorageError("unsupported_schema")
+            if row is None or row[0] != 2:
+                raise KsefXmlStorageError(
+                    "schema_migration_required"
+                    if row is not None and row[0] == 1
+                    else "unsupported_schema"
+                )
             if xml_storage_id is not None and row[1] is not None and row[1] != xml_storage_id:
                 raise KsefXmlStorageError("storage_id_mismatch")
         if fresh:
@@ -173,7 +258,7 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                         if statement.strip():
                             connection.execute(statement)
                     connection.execute(
-                        "INSERT INTO xml_store_meta VALUES (1,1,?,?)",
+                        "INSERT INTO xml_store_meta VALUES (1,2,?,?)",
                         (uuid.uuid4().hex, xml_storage_id),
                     )
                 else:
@@ -182,7 +267,7 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                     existing = connection.execute(
                         "SELECT version,storage_id FROM xml_store_meta WHERE id=1"
                     ).fetchone()
-                    if existing is None or existing[0] != 1:
+                    if existing is None or existing[0] != 2:
                         raise KsefXmlStorageError("unsupported_schema")
                     if existing[1] != xml_storage_id:
                         raise KsefXmlStorageError("storage_id_mismatch")
@@ -254,23 +339,33 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             raise
 
     @classmethod
-    def migrate_legacy_example(cls, connection: sqlite3.Connection, *, xml_storage_id: str) -> None:
+    def migrate_legacy_example(
+        cls, connection: sqlite3.Connection, *, xml_storage_id: str | None = None
+    ) -> None:
         """Explicit offline adoption; existing outbox entries remain untouched."""
-        if connection.in_transaction or not xml_storage_id or len(xml_storage_id) > 256:
+        if connection.in_transaction or (
+            xml_storage_id is not None
+            and (
+                not isinstance(xml_storage_id, str)
+                or not xml_storage_id
+                or len(xml_storage_id) > 256
+            )
+        ):
             raise ValueError("Migration requires an idle connection and a storage identity")
         tables = {
             r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
         if "xml_store_meta" in tables:
-            cls(connection, enqueue_xml=True, xml_storage_id=xml_storage_id)
+            cls(connection, enqueue_xml=xml_storage_id is not None, xml_storage_id=xml_storage_id)
             return
         if not _legacy_shape(connection):
             raise KsefXmlStorageError("unrecognized_legacy_schema")
         try:
             connection.executescript("BEGIN IMMEDIATE;" + XML_SCHEMA)
             connection.execute(
-                "INSERT INTO xml_store_meta VALUES (1,1,?,?)", (uuid.uuid4().hex, xml_storage_id)
+                "INSERT INTO xml_store_meta VALUES (1,2,?,?)", (uuid.uuid4().hex, xml_storage_id)
             )
+            _canonicalize_legacy_numbers(connection)
             connection.execute("COMMIT")
         except BaseException:
             if connection.in_transaction:
@@ -278,6 +373,37 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             raise
         # Import is bounded and restartable through backfill_xml. All old outbox rows
         # remain durable and are included in per-scope backfill through observations.
+
+    @classmethod
+    def migrate_schema(cls, connection: sqlite3.Connection) -> None:
+        """Offline v1 -> v2 index upgrade. Stop every writer and back up first."""
+        if connection.in_transaction:
+            raise ValueError("Migration requires an idle connection")
+        version = connection.execute("SELECT version FROM xml_store_meta WHERE id=1").fetchone()
+        if version is None or version[0] not in (1, 2):
+            raise KsefXmlStorageError("unsupported_schema")
+        if version[0] == 2:
+            return
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            for name, clock in (
+                ("xml_claim_due", "next_attempt_at"),
+                ("xml_claim_expired", "lease_until"),
+            ):
+                connection.execute(
+                    "CREATE INDEX "
+                    + name
+                    + " ON invoice_xml_documents(namespace,environment,context_key,status,"
+                    + clock
+                    + ",created_at,ksef_number)"
+                )
+            _canonicalize_legacy_numbers(connection)
+            connection.execute("UPDATE xml_store_meta SET version=2 WHERE id=1")
+            connection.execute("COMMIT")
+        except BaseException:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
 
     @contextmanager
     def _transaction(self, *, write: bool = True) -> Iterator[None]:
@@ -328,13 +454,25 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                 _scope_values(scope),
             )
 
+    def _document_number(self, number: str) -> str:
+        from .utils.ksef_number import canonical_ksef_number
+
+        return canonical_ksef_number(number) if _valid_number(number) else number
+
     def _enqueue_xml(self, document: tuple[str, ...], expected_hash: str) -> None:
         hash_bytes(expected_hash)
         self._execute(
             "INSERT INTO invoice_xml_documents "
-            "(namespace,environment,context_key,ksef_number,expected_hash,created_at) "
-            "VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-            (*document, expected_hash, time.time()),
+            "(namespace,environment,context_key,ksef_number,expected_hash,created_a"
+            "t,status,last_reason) "
+            "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+            (
+                *document,
+                expected_hash,
+                time.time(),
+                "pending" if _valid_number(document[3]) else "blocked",
+                None if _valid_number(document[3]) else "invalid_ksef_number",
+            ),
         )
 
     def validate_xml(self, scopes: Sequence[InvoiceSyncScope], storage_id: str) -> None:
@@ -355,49 +493,93 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             values,
         )
 
+    def _claim_query(
+        self, scopes: Sequence[InvoiceSyncScope], now: float
+    ) -> tuple[str, tuple[Any, ...]]:
+        condition, scope_values = _selection(scopes)
+        identity = _scope_values(scopes[0])[:3]
+        # Three index-ordered, single-row probes. Only their winners are sorted.
+        # EXISTS uses the observation PK; no history-wide DISTINCT under the writer lock.
+        probes: list[str] = []
+        parameters: list[Any] = []
+        for status, clock, index in (
+            ("pending", "next_attempt_at", "xml_claim_due"),
+            ("retry_wait", "next_attempt_at", "xml_claim_due"),
+            ("leased", "lease_until", "xml_claim_expired"),
+        ):
+            probes.append(
+                "SELECT * FROM (SELECT d.namespace,d.environment,d.context_key,d.ksef_number,"
+                "d.variant,d.expected_hash,d.fencing,d.failures,d.attempts,d."
+                + clock
+                + " AS available,d.created_at FROM invoice_xml_documents d INDEXED BY "
+                + index
+                + " WHERE d.namespace=? AND d.environment=? AND d.context_key=? "
+                "AND d.status=? AND d."
+                + clock
+                + "<=? AND EXISTS(SELECT 1 FROM invoice_observations o WHERE ("
+                + condition
+                + ") AND o.ksef_number=d.ksef_number) ORDER BY d."
+                + clock
+                + ",d.created_at,d.ksef_number LIMIT 1)"
+            )
+            parameters.extend((*identity, status, now, *scope_values))
+        return "SELECT * FROM (" + " UNION ALL ".join(
+            probes
+        ) + ") ORDER BY available,created_at,ksef_number LIMIT 1", tuple(parameters)
+
     def claim_xml(
         self, scopes: Sequence[InvoiceSyncScope], *, lease_seconds: float = 120
     ) -> InvoiceXmlClaim | None:
         positive(lease_seconds, "lease_seconds")
-        cte, values = self._selected(scopes)
         with self._transaction():
             now = time.time()
-            row = self._execute(
-                cte + "SELECT d.namespace,d.environment,d.context_key,d.ksef_number,"
-                "d.variant,d.expected_hash,d.fencing,d.failures,d.attempts "
-                "FROM invoice_xml_documents d "
-                "JOIN selected s USING(namespace,environment,context_key,ksef_number) "
-                "WHERE (d.status IN ('pending','retry_wait') AND d.next_attempt_at<=?) "
-                "OR (d.status='leased' AND d.lease_until<=?) "
-                "ORDER BY d.next_attempt_at,d.created_at,d.ksef_number LIMIT 1",
-                (*values, now, now),
-            ).fetchone()
-            if row is None:
-                return None
-            epoch, storage_id = self._execute(
-                "SELECT epoch,storage_id FROM xml_store_meta WHERE id=1"
-            ).fetchone()
-            if storage_id is None:
-                raise KsefXmlStorageError("storage_id_mismatch")
-            key = InvoiceXmlKey(*row[:5])
-            token = uuid.uuid4().hex
-            claim = InvoiceXmlClaim(
-                key,
-                row[5],
-                storage_id,
-                token,
-                row[6] + 1,
-                epoch,
-                now + lease_seconds,
-                row[7],
-                row[8] + 1,
-            )
-            self._execute(
-                "UPDATE invoice_xml_documents SET status='leased',attempts=attempts+1,"
-                "lease_token=?,fencing=?,lease_epoch=?,lease_until=? WHERE " + DOC_KEY,
-                (token, claim.fencing, epoch, claim.expires_at, *key.values),
-            )
-        return claim
+            query, parameters = self._claim_query(scopes, now)
+            # Bound corruption recovery per call; the next invocation resumes scanning.
+            for _ in range(100):
+                row = self._execute(query, parameters).fetchone()
+                if row is None:
+                    return None
+                try:
+                    key = InvoiceXmlKey(*row[:5])
+                    if key.ksef_number != row[3]:
+                        raise ValueError("Noncanonical queued identity requires migration")
+                    hash_bytes(row[5])
+                except (ValueError, KsefXmlIntegrityError) as error:
+                    self._execute(
+                        "UPDATE invoice_xml_documents SET status='blocked',last_reason=? WHERE "
+                        + DOC_KEY,
+                        (
+                            "invalid_hash"
+                            if isinstance(error, KsefXmlIntegrityError)
+                            else "invalid_ksef_number",
+                            *row[:5],
+                        ),
+                    )
+                    continue
+                epoch, storage_id = self._execute(
+                    "SELECT epoch,storage_id FROM xml_store_meta WHERE id=1"
+                ).fetchone()
+                if storage_id is None:
+                    raise KsefXmlStorageError("storage_id_mismatch")
+                token = uuid.uuid4().hex
+                claim = InvoiceXmlClaim(
+                    key,
+                    row[5],
+                    storage_id,
+                    token,
+                    row[6] + 1,
+                    epoch,
+                    now + lease_seconds,
+                    row[7],
+                    row[8] + 1,
+                )
+                self._execute(
+                    "UPDATE invoice_xml_documents SET status='leased',attempts=attempts+1,"
+                    "lease_token=?,fencing=?,lease_epoch=?,lease_until=? WHERE " + DOC_KEY,
+                    (token, claim.fencing, epoch, claim.expires_at, *key.values),
+                )
+                return claim
+            return None
 
     def _claim_update(
         self, claim: InvoiceXmlClaim, assignment: str, parameters: tuple[Any, ...]
@@ -469,6 +651,7 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                 self._execute(
                     cte + "SELECT COALESCE(d.status,'not_enqueued'),COUNT(*) "
                     "FROM selected s LEFT JOIN invoice_xml_documents d "
+                    "INDEXED BY sqlite_autoindex_invoice_xml_documents_1 "
                     "USING(namespace,environment,context_key,ksef_number) "
                     "GROUP BY COALESCE(d.status,'not_enqueued')",
                     values,
@@ -477,20 +660,34 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             next_time = self._execute(
                 cte + "SELECT MIN(CASE WHEN d.status='leased' THEN d.lease_until "
                 "ELSE d.next_attempt_at END) FROM selected s JOIN invoice_xml_documents d "
+                "INDEXED BY sqlite_autoindex_invoice_xml_documents_1 "
                 "USING(namespace,environment,context_key,ksef_number) WHERE "
                 "d.status IN ('retry_wait','leased')",
                 values,
             ).fetchone()[0]
             complete = all(
-                self._execute(
-                    "SELECT complete FROM xml_backfill WHERE namespace=? AND environment=? "
-                    "AND context_key=? AND sync_key=? AND stream_id=?",
-                    _scope_values(scope),
-                ).fetchone()
-                == (1,)
+                (
+                    row := self._execute(
+                        "SELECT complete FROM xml_backfill WHERE namespace=? AND environment=? "
+                        "AND context_key=? AND sync_key=? AND stream_id=?",
+                        _scope_values(scope),
+                    ).fetchone()
+                )
+                is not None
+                and row[0] == 1
                 for scope in scopes
             )
+            reasons = self._execute(
+                cte + "SELECT d.last_reason,COUNT(*) FROM selected s JOIN invoice_xml_documents d "
+                "INDEXED BY sqlite_autoindex_invoice_xml_documents_1 "
+                "USING(namespace,environment,context_key,ksef_number) WHERE "
+                "d.last_reason IS NOT NULL GROUP BY d.last_reason",
+                values,
+            ).fetchall()
             return InvoiceXmlReport(
+                reason_counts=tuple(
+                    (reason, count) for reason, count in reasons if reason in SAFE_REASONS
+                ),
                 observed=sum(counts.values()),
                 not_enqueued=counts.get("not_enqueued", 0),
                 pending=counts.get("pending", 0),
@@ -531,6 +728,7 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                         "SELECT o.ksef_number,i.invoice_hash FROM invoice_observations o "
                         "JOIN invoices i USING(namespace,environment,context_key,ksef_number) "
                         "LEFT JOIN invoice_xml_documents d "
+                        "INDEXED BY sqlite_autoindex_invoice_xml_documents_1 "
                         "USING(namespace,environment,context_key,ksef_number) "
                         "WHERE o.namespace=? AND o.environment=? AND o.context_key=? "
                         "AND o.sync_key=? AND o.stream_id=? "
@@ -563,6 +761,7 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                 cte + "SELECT s.ksef_number,d.status,d.expected_hash,d.attempts,d.failures,"
                 "d.last_reason,d.next_attempt_at,d.verified_at,d.fencing "
                 "FROM selected s LEFT JOIN invoice_xml_documents d "
+                "INDEXED BY sqlite_autoindex_invoice_xml_documents_1 "
                 "USING(namespace,environment,context_key,ksef_number) WHERE "
                 "s.ksef_number>? ORDER BY s.ksef_number LIMIT ?",
                 (*values, after, limit),
@@ -612,6 +811,7 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
         with self._transaction(write=False):
             rows = self._execute(
                 cte + "SELECT d.ksef_number,d.expected_hash,d.fencing FROM invoice_xml_documents d "
+                "INDEXED BY sqlite_autoindex_invoice_xml_documents_1 "
                 "JOIN selected s USING(namespace,environment,context_key,ksef_number) "
                 "WHERE d.status='ready' AND d.ksef_number>? ORDER BY d.ksef_number LIMIT ?",
                 (*values, after, limit),
@@ -773,10 +973,12 @@ class AsyncSQLiteInvoiceSyncStore:
     async def close(self) -> None:
         try:
             if self._store is not None:
-                await self._call("close")
-                self._store = None
+                try:
+                    await self._call("close")
+                finally:
+                    self._store = None
         finally:
-            await asyncio.to_thread(self._executor.shutdown, wait=True)
+            await shield_and_drain(asyncio.to_thread(self._executor.shutdown, wait=True))
 
     async def __aenter__(self) -> AsyncSQLiteInvoiceSyncStore:
         return self

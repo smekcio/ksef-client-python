@@ -20,6 +20,7 @@ REQUIRED = [
     "tests/test_e2e_pagination.py::test_e2e_test_environment_cursor_restart",
     "tests/test_e2e_facade.py::test_e2e_test_environment_facade_streaming_export",
     "tests/test_e2e_invoice_sync.py::test_e2e_test_environment_invoice_sync_restart",
+    "tests/test_e2e_invoice_xml_sync.py::test_e2e_test_environment_invoice_xml_restart",
 ]
 
 

@@ -46,7 +46,7 @@ def _failure(error: Exception, claim: InvoiceXmlClaim, max_failures: int) -> dic
             reason, blocked = "not_available", False
         elif error.status_code == 429:
             reason, blocked = "rate_limited", False
-        elif error.status_code in {500, 502, 503, 504}:
+        elif error.status_code in {408, 409, 425, 500, 502, 503, 504, 507, 520, 522, 524}:
             reason, blocked, failure = "transient_http", False, True
         elif error.status_code == 401:
             reason, blocked = "authentication", False
@@ -54,7 +54,7 @@ def _failure(error: Exception, claim: InvoiceXmlClaim, max_failures: int) -> dic
             reason = "not_found"
         elif error.status_code == 403:
             reason = "forbidden"
-        if error.status_code == 429:
+        if not blocked:
             # Unlike in-request retry, durable scheduling must not clip long cooldowns.
             from .http import _budget_retry_after
 
@@ -129,6 +129,8 @@ class _InvoiceXmlBase:
         counts = {"claims": 0, "downloaded": 0, "recovered": 0, "downloaded_bytes": 0, "errors": 0}
         stop_reason = None
         yield ("store", "validate_xml", (self.scopes, storage_id), {})
+        initial = yield ("store", "describe_xml", (self.scopes,), {})
+        _validate_snapshot(initial, self.scopes)
         for _ in range(max_documents):
             claim = None
             try:
@@ -183,6 +185,21 @@ class _InvoiceXmlBase:
                         counts["recovered" if recovered else "downloaded"] += 1
             except KsefXmlLeaseLostError:
                 stop_reason = "lease_lost"
+                break
+            except KsefXmlStorageError as error:
+                if claim is None or error.reason_code not in {
+                    "unsafe_storage_file",
+                    "stored_object_unreadable",
+                }:
+                    raise
+                counts["errors"] += 1
+                with contextlib.suppress(KsefXmlLeaseLostError):
+                    yield (
+                        "store",
+                        "defer_xml",
+                        (claim,),
+                        {"reason": error.reason_code, "delay": 5, "blocked": True},
+                    )
             except (
                 KsefHttpError,
                 KsefTransportError,
@@ -236,6 +253,7 @@ class _InvoiceXmlBase:
         else:
             stop_reason = "work_limit"
         report = yield ("store", "describe_xml", (self.scopes,), {})
+        _validate_snapshot(report, self.scopes)
         report = replace(report, **counts, stop_reason=stop_reason)
         if raise_on_error and (report.blocked or report.stop_reason == "authentication"):
             raise KsefXmlRunError(report)
@@ -347,7 +365,28 @@ class AsyncInvoiceXmlSync(_InvoiceXmlBase):
             runner.close()
 
 
+def _validate_snapshot(xml: InvoiceXmlReport, scopes: Any) -> None:
+    if not isinstance(xml, InvoiceXmlReport) or len(xml.checkpoints) != len(scopes):
+        raise KsefXmlStorageError("invalid_report_checkpoints")
+    if any(
+        cp is not None and cp.scope != scope
+        for cp, scope in zip(xml.checkpoints, scopes, strict=True)
+    ):
+        raise KsefXmlStorageError("invalid_report_checkpoints")
+
+
+def _raise_document_errors(result: InvoiceDocumentReport, enabled: bool) -> InvoiceDocumentReport:
+    if enabled and (
+        any(s.status == "failed" for s in result.metadata.streams)
+        or result.xml.blocked
+        or result.xml.stop_reason == "authentication"
+    ):
+        raise KsefXmlRunError(result)
+    return result
+
+
 def _changed(metadata: Any, report: Any, xml: InvoiceXmlReport) -> bool:
+    _validate_snapshot(xml, tuple(s.scope for s in metadata.streams))
     return any(
         (result.observed_generation, result.observed_revision)
         != ((cp.generation_id, cp.revision) if cp is not None else (None, None))
@@ -356,6 +395,7 @@ def _changed(metadata: Any, report: Any, xml: InvoiceXmlReport) -> bool:
 
 
 def _unstarted_cycle(metadata: Any, xml: InvoiceXmlReport) -> InvoiceDocumentReport:
+    _validate_snapshot(xml, tuple(s.scope for s in metadata.streams))
     observed = metadata.describe(xml.checkpoints)
     partial = replace(
         observed,
@@ -374,6 +414,7 @@ class InvoiceDocumentSync:
 
     def describe(self, store: Any) -> InvoiceDocumentReport:
         xml = store.describe_xml(self.xml.scopes)
+        _validate_snapshot(xml, self.xml.scopes)
         return InvoiceDocumentReport(self.metadata.describe(xml.checkpoints), xml)
 
     def run_once(
@@ -399,7 +440,10 @@ class InvoiceDocumentSync:
             check_control()
             remaining = end - time.monotonic()
             if remaining <= 0:
-                return _unstarted_cycle(self.metadata, store.describe_xml(self.xml.scopes))
+                return _raise_document_errors(
+                    _unstarted_cycle(self.metadata, store.describe_xml(self.xml.scopes)),
+                    raise_on_error,
+                )
             report = self.metadata.run_once(
                 store,
                 time_budget=min(metadata_budget, remaining),
@@ -435,6 +479,7 @@ class AsyncInvoiceDocumentSync:
 
     async def describe(self, store: Any) -> InvoiceDocumentReport:
         xml = await store.describe_xml(self.xml.scopes)
+        _validate_snapshot(xml, self.xml.scopes)
         return InvoiceDocumentReport(self.metadata.describe(xml.checkpoints), xml)
 
     async def run_once(
@@ -460,7 +505,10 @@ class AsyncInvoiceDocumentSync:
             check_control()
             remaining = end - time.monotonic()
             if remaining <= 0:
-                return _unstarted_cycle(self.metadata, await store.describe_xml(self.xml.scopes))
+                return _raise_document_errors(
+                    _unstarted_cycle(self.metadata, await store.describe_xml(self.xml.scopes)),
+                    raise_on_error,
+                )
             report = await self.metadata.run_once(
                 store,
                 time_budget=min(metadata_budget, remaining),

@@ -48,7 +48,11 @@ with Ksef.connect(
 `application_store` implementuje opisany poniżej protokół. Publiczny adapter
 `SQLiteInvoiceSyncStore.open(path, timeout=5)` oraz wariant
 `await AsyncSQLiteInvoiceSyncStore.open(path)` są dostępne w `ksef_client`.
-Domyślnie synchronizują tylko metadane (`enqueue_xml=False`).
+Domyślnie synchronizują tylko metadane (`enqueue_xml=False`). Istniejąca baza
+z dawnego przykładu wymaga jawnej migracji również w tym trybie — adapter nie
+zmienia schematu przy otwarciu. Zatrzymaj zapisujących workerów i wykonaj backup;
+[procedura aktualizacji](invoice-xml-sync.md#aktualizacja-istniejącej-bazy)
+nie wymaga włączania XML ani podawania zastępczego identyfikatora storage.
 [Trwała kolejka i synchronizacja XML](invoice-xml-sync.md) opisuje włączenie pobrań.
 Własne połączenie SQLite musi mieć skończony timeout, np.
 `sqlite3.connect(private_database_path, timeout=5)`.

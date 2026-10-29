@@ -235,7 +235,7 @@ def test_first_open_rechecks_schema_under_lock(other):
                         super().execute(
                             "INSERT INTO xml_store_meta VALUES (1,?,?,?)",
                             (
-                                99 if other == "version" else 1,
+                                99 if other == "version" else 2,
                                 "epoch",
                                 "bad" if other == "binding" else "files",
                             ),

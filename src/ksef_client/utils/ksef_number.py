@@ -67,3 +67,14 @@ def require_ksef_number(ksef_number: str) -> str:
 
 def is_valid_ksef_number(ksef_number: str) -> bool:
     return validate_ksef_number(ksef_number).is_valid
+
+
+def canonical_ksef_number(ksef_number: str) -> str:
+    """Validate and return the canonical 35-character document identity."""
+    require_ksef_number(ksef_number)
+    parts = ksef_number.split("-")
+    return (
+        "-".join((parts[0], parts[1], parts[2] + parts[3], parts[4]))
+        if len(parts) == 5
+        else ksef_number
+    )

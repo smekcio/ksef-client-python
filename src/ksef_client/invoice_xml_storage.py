@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import os
 import re
@@ -27,6 +28,7 @@ from .invoice_xml_types import (
     positive_int,
     verify_hash,
 )
+from .rate_limiting import KsefRateLimitWaitTimeout, KsefRequestCancelledError
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -79,7 +81,7 @@ def _windows_handle(path: Path, *, directory: bool = False, create: bool = False
     ]
     handle = kernel.CreateFileW(
         str(path),
-        0 if directory else (0x40000000 if create else 0x80000000),
+        1 if directory else (0x40000000 if create else 0x80000000),
         3 if directory else 1,
         None,
         1 if create else 3,
@@ -92,6 +94,8 @@ def _windows_handle(path: Path, *, directory: bool = False, create: bool = False
             raise FileNotFoundError
         if error in (80, 183):
             raise FileExistsError
+        if error in (5, 32):
+            raise PermissionError(errno.EACCES, "Storage object unavailable")
         raise OSError(error, "Storage handle unavailable")
     attributes = (wintypes.DWORD * 2)()
     if not kernel.GetFileInformationByHandleEx(handle, 9, ctypes.byref(attributes), 8):
@@ -99,7 +103,7 @@ def _windows_handle(path: Path, *, directory: bool = False, create: bool = False
         raise KsefXmlStorageError("storage_stat_failed")
     if attributes[0] & 0x400 or (not directory and attributes[0] & 0x10):
         kernel.CloseHandle(handle)
-        raise KsefXmlStorageError("unsafe_storage_path")
+        raise KsefXmlStorageError("unsafe_storage_path" if directory else "unsafe_storage_file")
     return int(handle)
 
 
@@ -108,6 +112,8 @@ class FileInvoiceXmlStore:
 
     def __init__(self, path: str | Path) -> None:
         self._lock = threading.RLock()
+        if str(path) == "":
+            raise ValueError("Storage path must not be empty")
         self.root = Path(os.path.abspath(path))
         self._handles: list[int] = []
         self._dir_fd: int | None = None
@@ -181,10 +187,15 @@ class FileInvoiceXmlStore:
     def _unlink(self, name: str) -> None:
         self._require_open()
         with suppress(FileNotFoundError):
-            if os.name == "nt":
-                os.unlink(self.root / name)
-            else:
-                os.unlink(name, dir_fd=self._dir_fd)
+            try:
+                if os.name == "nt":
+                    os.unlink(self.root / name)
+                else:
+                    os.unlink(name, dir_fd=self._dir_fd)
+            except FileNotFoundError:
+                raise
+            except OSError:
+                raise KsefXmlStorageError("storage_cleanup_failed") from None
 
     @_locked
     def _publish(self, source: str, target: str) -> None:
@@ -220,7 +231,13 @@ class FileInvoiceXmlStore:
             return InvoiceXmlReceipt(self.storage_id, name, expected_hash, size)
         except FileNotFoundError:
             return None
-        except OSError:
+        except (KsefRateLimitWaitTimeout, KsefRequestCancelledError):
+            raise
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                raise KsefXmlStorageError("unsafe_storage_file") from None
+            if isinstance(error, PermissionError):
+                raise KsefXmlStorageError("stored_object_unreadable") from None
             raise KsefXmlStorageError("storage_read_failed") from None
 
     @_locked
@@ -259,7 +276,13 @@ class FileInvoiceXmlStore:
                 raise KsefXmlStorageError("stored_size_limit")
             verify_hash(content, expected_hash)
             return content
-        except OSError:
+        except (KsefRateLimitWaitTimeout, KsefRequestCancelledError):
+            raise
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                raise KsefXmlStorageError("unsafe_storage_file") from None
+            if isinstance(error, PermissionError):
+                raise KsefXmlStorageError("stored_object_unreadable") from None
             raise KsefXmlStorageError("storage_read_failed") from None
 
     @_locked
@@ -269,18 +292,22 @@ class FileInvoiceXmlStore:
         if older_than < 120:
             raise ValueError("Staging retention must be at least 120 seconds")
         removed = 0
+        candidates = 0
         directory = self.root if os.name == "nt" else cast(int, self._dir_fd)
         with os.scandir(directory) as entries:
-            for index, entry in enumerate(entries):
-                if index >= max_entries:
-                    break
+            for entry in entries:
+                check_control()
+                if re.fullmatch(r"\.tmp-[a-f0-9]{32}", entry.name) is None:
+                    continue
+                candidates += 1
                 if (
-                    re.fullmatch(r"\.tmp-[a-f0-9]{32}", entry.name)
-                    and entry.is_file(follow_symlinks=False)
+                    entry.is_file(follow_symlinks=False)
                     and entry.stat(follow_symlinks=False).st_mtime < time.time() - older_than
                 ):
                     self._unlink(entry.name)
                     removed += 1
+                if candidates >= max_entries:
+                    break
         return removed
 
     @_locked
@@ -298,6 +325,11 @@ class FileInvoiceXmlStore:
                 kernel.CloseHandle(handle)
             self._handles.clear()
         self._closed = True
+
+    def __del__(self) -> None:
+        # Raw OS handles/descriptors are integers, not GC-owned file objects.
+        with suppress(BaseException):
+            self.close()
 
     def __enter__(self) -> FileInvoiceXmlStore:
         return self

@@ -1,5 +1,10 @@
 """KSeF Python SDK."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .sqlite_store import AsyncSQLiteInvoiceSyncStore, SQLiteInvoiceSyncStore
+
 from .async_facade import AsyncKsef
 from .certificates import (
     CertificateRecord,
@@ -245,7 +250,17 @@ from .invoice_xml_types import (
     KsefXmlStorageError,
     KsefXmlSyncError,
 )
-from .sqlite_store import AsyncSQLiteInvoiceSyncStore, SQLiteInvoiceSyncStore
+
+
+def __getattr__(name: str):
+    if name in {"AsyncSQLiteInvoiceSyncStore", "SQLiteInvoiceSyncStore"}:
+        from . import sqlite_store
+
+        value = getattr(sqlite_store, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(name)
+
 
 __all__ += [
     "InvoiceDocumentSync",

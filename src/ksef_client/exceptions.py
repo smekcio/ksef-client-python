@@ -77,6 +77,8 @@ class ErrorCode(str, Enum):
     SYNC_STORE_ERROR = "sync_store_error"
     SYNC_RUN_FAILED = "sync_run_failed"
     RESPONSE_LIMIT_EXCEEDED = "response_limit_exceeded"
+    XML_INTEGRITY_ERROR = "xml_integrity_error"
+    XML_STORAGE_ERROR = "xml_storage_error"
 
     def __str__(self) -> str:
         return self.value

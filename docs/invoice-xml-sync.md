@@ -88,7 +88,10 @@ czas całego przebiegu. Domyślnie worker przejmuje najwyżej 100 dokumentów,
 pojedynczo. Harmonogram kolejnych uruchomień zapewnia aplikacja, także po sukcesie.
 `raise_on_error=False` zwraca oczekiwane błędy dokumentów w raporcie; awarie
 magazynu, błędy programistyczne, nadrzędny deadline i anulowanie nadal przerywają
-wywołanie. `KsefXmlRunError.report` zawiera raport przy domyślnym trybie wyjątków.
+wywołanie. `KsefXmlRunError.report` zawiera wynik danego przebiegu: `InvoiceDocumentReport`
+przy wspólnym cyklu albo `InvoiceXmlReport` przy osobnym workerze. W obu przypadkach
+`exc.xml_report` (także `exc.report.xml`) udostępnia raport XML. Wyjątek dziedziczy
+po `KsefSyncRunError`.
 
 Osobne wywołania to `sync.metadata.run_once(store)` i
 `sync.xml.run_once(store, storage)`. Dla istniejącego `InvoiceSync`:
@@ -217,7 +220,7 @@ własny adapter ma egzekwować te same gwarancje transakcyjne i fencing.
 Dla metadanych zapisanych przed włączeniem kolejki wywołać:
 
 ```python
-progress = store.backfill_xml(worker.scopes, batch_size=500, time_budget=60)
+progress = store.backfill_xml(sync.xml.scopes, batch_size=500, time_budget=60)
 ```
 
 Checkpoint backfillu jest trwały. Powtarzać do `progress.complete`.
@@ -267,3 +270,106 @@ inny koordynator zmieni checkpoint, `metadata_changed=True` uniemożliwia
 przedstawienie nieaktualnego wyniku jako kompletnego.
 Gotowość oznacza ostatnią potwierdzoną publikację: zewnętrzne usunięcie pliku
 wykrywa odczyt z weryfikacją lub `verify_ready`, nie sam licznik bazy.
+
+
+## Diagnostyka i kontrakty adapterów
+
+`report.xml.reason_counts` to ograniczona liczba par `(kod, liczba dokumentów)`
+z ostatnimi znanymi przyczynami, np. `(("forbidden", 2),)`. Raport nie kopiuje
+odpowiedzi serwera. Przyczyny konkretnych dokumentów znajdziesz w paginowanym
+`store.list_xml(sync.xml.scopes, limit=100)`: pola `ksef_number`, `status`,
+`last_reason`, `attempts`, `failures`, `next_attempt_at`. Następną stronę pobierz
+przez `after=ostatni_ksef_number`. `last_reason` jest ostatnim stanem diagnostyki,
+nie historią zdarzeń. `retry_blocked(..., reason="permissions_fixed")` wymaga
+najpierw usunięcia przyczyny błędu. Nie resetuj blokad w pętli.
+
+Wadliwy numer KSeF ma kod `invalid_ksef_number`. Nieczytelny pojedynczy obiekt
+ma `stored_object_unreadable`, a plik specjalny/dowiązanie `unsafe_storage_file`.
+Te dokumenty przechodzą do `blocked`; worker obsługuje pozostałe zadania.
+Błędy I/O całego dysku, brak miejsca i awarie SQLite nadal przerywają wywołanie,
+także przy `raise_on_error=False`. Ten parametr kontroluje błędy dokumentów,
+a nie dostępność infrastruktury.
+
+HTTP 408/409/425 i 500/502/503/504/507/520/522/524 są ponawiane z limitem
+`max_failures`. 403, 21164 i pozostałe trwałe błędy żądania blokują dokument.
+`Retry-After` jest zachowywany także dla 21165 i przejściowych błędów HTTP,
+a nie tylko 429. Kod `invalid_retry_after` dotyczy terminu przekraczającego
+zakres reprezentacji czasu; zwykły niepoprawny tekst nagłówka podlega parserowi
+transportu i nie oznacza automatycznie tej blokady.
+
+`stop_reason` przyjmuje `time_budget`, `work_limit`, `lease_lost`,
+`authentication` albo `None`. Utrata dzierżawy kończy bieżący worker. `None`
+może oznaczać brak zadań gotowych teraz: sprawdź `pending`, `leased`,
+`retry_wait` i `next_attempt_at`, zanim zaplanujesz kolejny cykl.
+Czasy diagnostyczne `observed_at` są ISO-8601 UTC; `next_attempt_at` to sekundy
+Unix (float), nadające się do porównania z `time.time()`.
+
+Własny `describe_xml` musi zwrócić w jednej migawce również wymagane pole
+`checkpoints`: po jednej pozycji na scope, w kolejności argumentu `scopes`.
+`None` oznacza brak checkpointu tego strumienia. Worker sprawdza kontrakt przed
+pierwszym claimem. Nie wolno zastąpić migawki niezależnymi odczytami checkpointów.
+`InvoiceXmlKey.environment` jest fingerprintem środowiska z
+`sync.xml.scopes[0].environment`, nie napisem `"TEST"`. Klucze normalizują poprawne
+numery KSeF z dodatkowym myślnikiem do postaci 35-znakowej; publiczny adapter
+robi to także przy zapisie obserwacji.
+
+## Aktualizacja istniejącej bazy
+
+Nowy publiczny adapter **nie aktualizuje istniejącego schematu przy otwieraniu**.
+Zatrzymaj wszystkie procesy zapisujące, wykonaj backup i otwórz osobne bezczynne
+połączenie. Dla schematu dawnego przykładu metadanych:
+
+```python
+import sqlite3
+from contextlib import closing
+from ksef_client import SQLiteInvoiceSyncStore
+
+with closing(sqlite3.connect("private/invoices.db", timeout=5)) as connection:
+    SQLiteInvoiceSyncStore.migrate_legacy_example(connection)
+```
+
+Ta migracja nie wymaga katalogu XML. Późniejsze otwarcie z `enqueue_xml=True`
+i `xml_storage_id=storage.storage_id` wiąże bazę z archiwum; wykonaj potem
+backfill. Możesz też podać właściwy identyfikator od razu podczas migracji.
+Dodatkowe tabele aplikacji są zachowywane (poza zastrzeżonymi nazwami XML),
+ale tabele adaptera muszą mieć pełny
+rozpoznany schemat. Połączenie obsługuje domyślne wiersze tuple lub `sqlite3.Row`;
+własne fabryki słownikowe wymagają osobnego połączenia dla aplikacji.
+
+Bazy XML utworzone wcześniejszym kodem tej gałęzi mają wersję 1. Przed otwarciem
+aktualnym adapterem wykonaj offline `SQLiteInvoiceSyncStore.migrate_schema(connection)`.
+Wersja 2 dodaje indeksowane sondy wyboru zadań zamiast materializowania całej
+historii obserwacji przy każdym claimie. Obie migracje scalają poprawne alternatywne postacie numeru KSeF;
+konflikt hashy wycofuje transakcję. Obiekt opublikowany pod dawną tożsamością
+nie jest usuwany ani automatycznie uznawany za nowy plik gotowy — pozostaje
+obowiązek pobrania i weryfikacji. Nie stosuj zastępczego `storage_id`.
+Zmiana powiązania na dowolny inny katalog nie jest wspierana: przeniesienie
+archiwum wymaga zachowania jego `.storage-id` i sprawdzenia plików po restore.
+
+## Warunki operacyjne
+
+`max_xml_bytes` ogranicza także dokument odzyskiwany z istniejącego obiektu.
+Obniżenie limitu może dać `response_size_limit` i `blocked`, choć bajty mają
+poprawny hash. Po zwiększeniu limitu ponowienie jest jawne. `inspect` haszuje
+strumieniowo, w stałej pamięci, sprawdzając deadline między fragmentami;
+nie przerywa już rozpoczętego wywołania systemowego odczytu.
+
+`cleanup_staging(max_entries=...)` ogranicza liczbę kandydatów `.tmp-*`, nie
+liczbę opublikowanych XML pominiętych podczas skanu. Katalog może wymagać pełnego
+przejścia; sprzątanie wykonuj w oknie serwisowym z zatrzymanymi publikującymi
+workerami. Gotowe dokumenty nie są automatycznie usuwane ani szyfrowane.
+Polityka retencji danych, backupów i ewentualne VACUUM należą do aplikacji.
+
+Zegar systemowy hosta musi być poprawnie synchronizowany. Trwałe terminy
+kolejki używają czasu Unix, budżety czasu — zegara monotonicznego. Ręczna zmiana
+czasu/restore VM może opóźnić przejęcie wygasłych zadań; po zatrzymaniu starych
+workerów i korekcie czasu użyj kontrolowanego odzyskiwania. Sam report nie
+wykonuje audytu wszystkich plików, zgodnie z opisem `verify_ready`.
+
+Magazyn wymaga lokalnego systemu plików obsługującego bezpieczną publikację
+(hardlinki i fsync na POSIX, uchwyty i rename bez nadpisywania na Windows).
+FAT, udział sieciowy, OneDrive i katalogi z junction/reparse points nie są
+obsługiwanym sposobem współdzielenia archiwum. `.storage-id` jest plikiem
+wewnętrznym: nie edytuj go ani nie zmieniaj zakończeń linii. Na Windows uchwyty
+obejmują także przodków katalogu, aby uniemożliwić podmianę ścieżki. Zamykaj
+storage blokiem `with`; finalizer zwalnia porzucone uchwyty tylko pomocniczo.

@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
-from .exceptions import KsefSyncError
+from .exceptions import ErrorCode, KsefSyncError, KsefSyncRunError
 from .invoice_sync import AsyncInvoiceSyncStore, InvoiceSyncReport, InvoiceSyncStore
 from .invoice_sync_state import (
     InvoiceSyncBatch,
@@ -26,16 +26,26 @@ class KsefXmlSyncError(KsefSyncError):
 
     def __init__(self, reason_code: str) -> None:
         super().__init__(reason_code)
-        self.message = "Invoice XML synchronization failed"
+        # Only bounded SDK reason identifiers are included in the human message.
+        safe = (
+            reason_code
+            if reason_code.isascii()
+            and reason_code.replace("_", "").isalnum()
+            and len(reason_code) <= 64
+            else "xml_error"
+        )
+        self.message = "Invoice XML synchronization failed: " + safe
+        if safe == "schema_migration_required":
+            self.message += "; stop writers and explicitly migrate the SQLite schema"
         self.args = (self.message,)
 
 
 class KsefXmlIntegrityError(KsefXmlSyncError):
-    pass
+    code = ErrorCode.XML_INTEGRITY_ERROR
 
 
 class KsefXmlStorageError(KsefXmlSyncError):
-    pass
+    code = ErrorCode.XML_STORAGE_ERROR
 
 
 class KsefXmlLeaseLostError(KsefXmlSyncError):
@@ -43,10 +53,16 @@ class KsefXmlLeaseLostError(KsefXmlSyncError):
         super().__init__("lease_lost")
 
 
-class KsefXmlRunError(KsefXmlSyncError):
-    def __init__(self, report: Any) -> None:
-        super().__init__("document_failures")
+class KsefXmlRunError(KsefSyncRunError, KsefXmlSyncError):
+    def __init__(self, report: InvoiceXmlReport | InvoiceDocumentReport) -> None:
+        KsefSyncError.__init__(self, "document_failures")
+        self.message = "Invoice XML synchronization failed: document_failures"
+        self.args = (self.message,)
         self.report = report
+
+    @property
+    def xml_report(self) -> InvoiceXmlReport:
+        return self.report.xml
 
 
 def positive(value: float, name: str) -> float:
@@ -97,9 +113,9 @@ class InvoiceXmlKey:
             raise ValueError("Unsupported XML variant")
         # Reuse the bounded application scope validation without parsing invoice bytes.
         InvoiceSyncScope(self.namespace, self.environment, self.context_key, "xml", "0" * 64)
-        from .utils.ksef_number import require_ksef_number
+        from .utils.ksef_number import canonical_ksef_number
 
-        require_ksef_number(self.ksef_number)
+        object.__setattr__(self, "ksef_number", canonical_ksef_number(self.ksef_number))
 
     @property
     def values(self) -> tuple[str, ...]:
@@ -152,6 +168,7 @@ class InvoiceXmlReport:
     ready: int
     backfill_complete: bool
     observed_at: str
+    checkpoints: tuple[InvoiceSyncCheckpoint | None, ...] = field(repr=False, kw_only=True)
     next_attempt_at: float | None = None
     downloaded: int = 0
     recovered: int = 0
@@ -159,7 +176,12 @@ class InvoiceXmlReport:
     claims: int = 0
     errors: int = 0
     stop_reason: str | None = None
-    checkpoints: tuple[InvoiceSyncCheckpoint | None, ...] = field(default=(), repr=False)
+    reason_counts: tuple[tuple[str, int], ...] = ()
+
+    @property
+    def xml(self) -> InvoiceXmlReport:
+        """Uniform XML report access for standalone and combined run errors."""
+        return self
 
     @property
     def xml_ready_for_observed(self) -> bool:

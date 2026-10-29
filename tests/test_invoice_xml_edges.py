@@ -157,7 +157,7 @@ def test_lease_lost_while_publishing_cannot_ack(tmp_path):
 
             storage.put_verified = fence
             report = sync.run_once(store, storage, max_documents=1)
-            assert report.xml.stop_reason == "work_limit" and report.xml.pending == 1
+            assert report.xml.stop_reason == "lease_lost" and report.xml.pending == 1
 
     asyncio.run(run())
 

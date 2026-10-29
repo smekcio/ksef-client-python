@@ -89,11 +89,13 @@
   },
   "installed_wheel": {
     "suite": {
-      "passed": 350
+      "passed": 350,
+      "skipped": 4
     },
     "additional_final_cases": 6,
     "sdk_files_compared_to_current_worktree": 140,
-    "distribution_version": "0.22.0 (local verification artifact; next release is minor)"
+    "distribution_version": "0.22.0 (local verification artifact; next release is minor)",
+    "selection": "Historical focused installed-wheel run; exact selection was not recorded. The 350 count is retained as log evidence, not claimed as a reproducible full suite."
   },
   "artifacts_sha256": {
     "ksef_client-0.22.0-py3-none-any.whl": "6e606a2f9e92f6cc8566781135a19f3891aab0910f0e12adc850a1cad715d60a",
@@ -130,5 +132,6 @@
   "publication": {
     "status": "not_published",
     "target": "Next minor release after 0.22.0 via Release Please"
-  }
+  },
+  "evidence_note": "Historical phased runs: final_supplemental cases were run after the initial full suites; Python 3.12 full_suite already includes these six cases. Do not compare initial full_suite counts as a single simultaneous collection. New validation reports supersede this evidence."
 }
