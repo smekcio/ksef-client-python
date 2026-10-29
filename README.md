@@ -32,6 +32,9 @@ bez ładowania całej paczki do pamięci.
 
 Najważniejsze cechy:
 
+- **trwała synchronizacja XML** — SQLite sync/async, kolejka z dzierżawami, magazyn plikowy,
+  kontrola hashy i gotowości dokumentów; [przewodnik](docs/invoice-xml-sync.md),
+
 - **synchronizacja metadanych** — `client.invoices.sync(...).run_once(store)`, niezależne role,
   trwałe checkpointy HWM i atomowy zapis z CAS; [przewodnik i SQLite](docs/invoice-sync.md),
 

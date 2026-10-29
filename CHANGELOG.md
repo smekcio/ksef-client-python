@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Durable XML synchronization
+
+* Added sync/async document synchronization, a public transactional SQLite adapter,
+  fenced download leases, verified immutable file storage, historical queue backfill,
+  explicit migration and document readiness reports. Existing metadata APIs are unchanged.
+
 ### Range searches and proactive rate budgets
 
 * Added sync/async `search_invoice_metadata_range()` with inclusive UTC windows,

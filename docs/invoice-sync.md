@@ -7,7 +7,7 @@ klienta, magazyn transakcyjny i harmonogram kolejnych uruchomień.
 To jedyny bieżący opis integracji, kontraktu i weryfikacji tej funkcji.
 Live TEST dla commita `2c8d113` zaliczył wszystkie siedem wymaganych scenariuszy
 w [chronionej bramie CI](https://github.com/smekcio/ksef-client-python/actions/runs/40757621518).
-Funkcja wymaga wydania minor po 0.21.0; brama nadal sprawdza dokładny artefakt
+Synchronizacja metadanych jest dostępna od 0.22.0; brama sprawdza dokładny artefakt
 przed publikacją. Wyniki związane z SHA zawiera
 [jeden plik dowodów](reports/invoice-sync-validation.json).
 
@@ -45,10 +45,12 @@ with Ksef.connect(
         schedule_next_run(report)  # partial: wznowienie zapisanego postępu
 ```
 
-`application_store` implementuje opisany poniżej protokół. Kompletny adapter
-SQLite znajduje się w [invoice_sync_sqlite.py](examples/invoice_sync_sqlite.py).
-Przykład należy skopiować do aplikacji; nie jest częścią publicznego pakietu.
-Połączenie SQLite musi mieć skończony timeout, np.
+`application_store` implementuje opisany poniżej protokół. Publiczny adapter
+`SQLiteInvoiceSyncStore.open(path, timeout=5)` oraz wariant
+`await AsyncSQLiteInvoiceSyncStore.open(path)` są dostępne w `ksef_client`.
+Domyślnie synchronizują tylko metadane (`enqueue_xml=False`).
+[Trwała kolejka i synchronizacja XML](invoice-xml-sync.md) opisuje włączenie pobrań.
+Własne połączenie SQLite musi mieć skończony timeout, np.
 `sqlite3.connect(private_database_path, timeout=5)`.
 
 Funkcje `handle_failed_streams`, `handle_completed_metadata_cycle` i
