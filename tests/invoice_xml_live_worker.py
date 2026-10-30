@@ -28,6 +28,7 @@ from ksef_client.exceptions import KsefHttpError, KsefSyncRunError  # noqa: E402
 from ksef_client.rate_limiting import KsefRateLimitWaitTimeout  # noqa: E402
 from ksef_client.request_control import request_control, wait_seconds  # noqa: E402
 from ksef_client.sqlite_store import SAFE_REASONS  # noqa: E402
+from ksef_client.utils.ksef_number import canonical_ksef_number  # noqa: E402
 from tests.invoice_sync_live_worker import verify  # noqa: E402
 from tests.test_e2e_token_flows import (  # noqa: E402
     _build_invoice_xml,
@@ -144,7 +145,7 @@ def run(phase: str) -> None:
                     )
                 ).wait(timeout=120)
             assert isinstance(result.ksef_number, str) and result.ksef_number
-            state["number"] = result.ksef_number
+            state["number"] = canonical_ksef_number(result.ksef_number)
             state_path.write_text(json.dumps(state), encoding="utf-8")
         query = m.InvoiceQueryFilters(
             subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
@@ -153,7 +154,6 @@ def run(phase: str) -> None:
                 from_=state["since"],
                 restrict_to_permanent_storage_hwm_date=True,
             ),
-            ksef_number=state["number"],
         )
         sync = client.invoices.sync_documents(
             namespace="wheel-xml-test", sync_key="xml", queries=[query]
@@ -166,6 +166,14 @@ def run(phase: str) -> None:
                 xml_storage_id=storage.storage_id,
             ) as store,
         ):
+
+            def target_status() -> str | None:
+                row = store.connection.execute(
+                    "SELECT status FROM invoice_xml_documents WHERE ksef_number=?",
+                    (state["number"],),
+                ).fetchone()
+                return row[0] if row is not None else None
+
             if phase == "metadata":
                 # Wait for the new invoice to enter the metadata repository, then commit
                 # its real page/checkpoint/job without making any XML request.
@@ -181,7 +189,11 @@ def run(phase: str) -> None:
                         context_key=client.context_key,
                     )
                     try:
-                        found = any(item.ksef_number == state["number"] for item in scan)
+                        found = any(
+                            item.ksef_number is not None
+                            and canonical_ksef_number(item.ksef_number) == state["number"]
+                            for item in scan
+                        )
                     except KsefIncompletePaginationError as error:
                         if error.reason_code != "hwm_before_start":
                             raise
@@ -191,22 +203,23 @@ def run(phase: str) -> None:
                         sync.metadata.run_once(store, time_budget=120)
                         report = sync.describe(store)
                         diagnostic(stage="metadata", report=report)
-                        if report.xml.pending == 1 and report.metadata_complete:
+                        if target_status() == "pending" and report.metadata_complete:
                             break
                     wait_seconds(30)
-                assert report.xml.ready == 0 and not report.complete
+                assert report.xml.pending >= 1 and report.xml.ready == 0 and not report.complete
                 diagnostic(stage="queued", report=report)
             else:
-                assert sync.describe(store).xml.pending == 1
+                assert target_status() == "pending" and sync.describe(store).xml.pending >= 1
                 while True:
                     diagnostic(stage="xml")
                     report_xml = sync.xml.run_once(store, storage, time_budget=120)
                     diagnostic(stage="xml", report=report_xml)
-                    if report_xml.ready == 1:
+                    if report_xml.xml_ready_for_observed and target_status() == "ready":
                         break
                     wait_seconds(30)
                 again = sync.xml.run_once(store, storage)
-                assert again.ready == 1 and again.downloaded == 0 and again.claims == 0
+                assert again.ready >= 1 and again.xml_ready_for_observed
+                assert again.downloaded == 0 and again.claims == 0
                 report = sync.describe(store)
                 assert report.complete
                 diagnostic(stage="ready", report=report)

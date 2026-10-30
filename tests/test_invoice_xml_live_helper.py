@@ -6,15 +6,23 @@ import time
 from contextlib import nullcontext
 from types import SimpleNamespace
 
+import pytest
+
 from ksef_client.rate_limiting import KsefRateLimitWaitTimeout
 from tests import invoice_xml_live_worker as worker
-from tests.test_invoice_sync import START
-from tests.test_invoice_xml_sync import NUMBER, XML, environment
+from tests.test_invoice_sync import START, row
+from tests.test_invoice_xml_sync import HASH, NUMBER, NUMBER2, XML, environment
 
 
-def test_live_helper_completes_both_phases_with_real_sdk_adapters(tmp_path, monkeypatch):
+@pytest.mark.parametrize("submitted_number", [NUMBER, NUMBER[:26] + "-" + NUMBER[26:]])
+@pytest.mark.parametrize("other_invoice", [False, True])
+def test_live_helper_completes_both_phases_with_real_sdk_adapters(
+    tmp_path, monkeypatch, submitted_number, other_invoice
+):
     async def run():
         async with environment(tmp_path, False) as (initial, _, __, server):
+            if other_invoice:
+                server.rows.append(row(NUMBER2, hash_=HASH))
             api = initial.xml.client
             client = SimpleNamespace(
                 context_key="Nip:test",
@@ -27,7 +35,7 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(tmp_path, monk
                 online_session=lambda: nullcontext(
                     SimpleNamespace(
                         send_invoice=lambda content: SimpleNamespace(
-                            wait=lambda **kwargs: SimpleNamespace(ksef_number=NUMBER)
+                            wait=lambda **kwargs: SimpleNamespace(ksef_number=submitted_number)
                         )
                     )
                 ),
@@ -62,7 +70,8 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(tmp_path, monk
             worker.run("metadata")
             assert server.downloads == 0
             worker.run("xml")
-            assert server.downloads == 1
+            assert server.downloads == (2 if other_invoice else 1)
+            assert all(payload.get("ksefNumber") is None for payload, _, __ in server.calls)
             assert json.loads((tmp_path / "state.json").read_text())["complete"]
 
     asyncio.run(run())
