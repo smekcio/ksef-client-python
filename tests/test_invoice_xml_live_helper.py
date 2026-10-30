@@ -169,3 +169,33 @@ def test_live_diagnostic_preserves_only_bounded_codes_and_counts(tmp_path):
     assert "private" not in json.dumps(value)
     path.write_text("not-json")
     assert worker.diagnostic(path=path)["stage"] == "unknown"
+
+
+def test_live_metadata_diagnostic_keeps_partial_reason_and_http_context_only(tmp_path):
+    path = tmp_path / "safe.json"
+    try:
+        try:
+            raise worker.KsefHttpError(429, "private-token", {"secret": "private-response"})
+        except worker.KsefHttpError:
+            raise KsefRateLimitWaitTimeout("private-deadline") from None
+    except KsefRateLimitWaitTimeout as error:
+        worker.diagnostic(stage="metadata", transport_error=error, path=path)
+    report = SimpleNamespace(
+        streams=(
+            SimpleNamespace(
+                status="partial", stop_reason="time_budget", pages_committed=0, records_delivered=0
+            ),
+        )
+    )
+    worker.diagnostic(metadata_report=report, path=path)
+    value = worker.diagnostic(path=path)
+    assert value["metadata_http_status"] == 429
+    assert value["metadata_streams"] == [
+        {"status": "partial", "reason": "time_budget", "pages": 0, "records": 0}
+    ]
+    assert "private" not in json.dumps(value)
+    report.streams[0].status = "private-token"
+    report.streams[0].stop_reason = "private-response"
+    value = worker.diagnostic(metadata_report=report, path=path)
+    assert value["metadata_streams"][0]["status"] == "unknown"
+    assert value["metadata_streams"][0]["reason"] is None

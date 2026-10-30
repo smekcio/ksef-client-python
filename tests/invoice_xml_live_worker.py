@@ -7,7 +7,7 @@ import sys
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -26,6 +26,7 @@ from ksef_client import (  # noqa: E402
 )
 from ksef_client.exceptions import KsefHttpError, KsefSyncRunError  # noqa: E402
 from ksef_client.invoice_search import _date  # noqa: E402
+from ksef_client.invoice_sync import _SAFE_FAILURE_REASONS  # noqa: E402
 from ksef_client.invoice_xml_types import KsefXmlRunError  # noqa: E402
 from ksef_client.rate_limiting import KsefRateLimitWaitTimeout  # noqa: E402
 from ksef_client.request_control import request_control, wait_seconds  # noqa: E402
@@ -63,6 +64,8 @@ def diagnostic(
     report: Any = None,
     error: BaseException | None = None,
     visibility: tuple[int, bool] | None = None,
+    metadata_report: Any = None,
+    transport_error: BaseException | None = None,
     path: Path = Path("xml-live-diagnostic.json"),
 ) -> dict[str, Any]:
     """Persist only fixed stages, counts and SDK codes; never child output or queries."""
@@ -119,6 +122,45 @@ def diagnostic(
         value["reasons"] = [
             reason for reason in previous.get("reasons", []) if reason in SAFE_REASONS
         ]
+    if metadata_report is not None:
+        allowed = _SAFE_FAILURE_REASONS | {"time_budget", "step_time_budget", "work_limit"}
+        value["metadata_streams"] = [
+            {
+                "status": stream.status
+                if stream.status in {"completed", "partial", "failed"}
+                else "unknown",
+                "reason": stream.stop_reason if stream.stop_reason in allowed else None,
+                "pages": stream.pages_committed,
+                "records": stream.records_delivered,
+            }
+            for stream in metadata_report.streams[:4]
+        ]
+    elif isinstance(previous.get("metadata_streams"), list):
+        # Re-sanitize persisted diagnostics instead of copying arbitrary file content.
+        allowed = _SAFE_FAILURE_REASONS | {"time_budget", "step_time_budget", "work_limit"}
+        value["metadata_streams"] = [
+            {
+                "status": row.get("status")
+                if row.get("status") in {"completed", "partial", "failed"}
+                else "unknown",
+                "reason": row.get("reason") if row.get("reason") in allowed else None,
+                "pages": row.get("pages") if type(row.get("pages")) is int else 0,
+                "records": row.get("records") if type(row.get("records")) is int else 0,
+            }
+            for row in previous["metadata_streams"][:4]
+            if isinstance(row, dict)
+        ]
+    previous_http = previous.get("metadata_http_status")
+    if type(previous_http) is int and 100 <= previous_http <= 599:
+        value["metadata_http_status"] = previous_http
+    current = transport_error
+    for _ in range(8):
+        if current is None:
+            break
+        if isinstance(current, KsefHttpError) and 100 <= current.status_code <= 599:
+            value["metadata_http_status"] = current.status_code
+            break
+        current = current.__cause__ or current.__context__
     if previous.get("failure") in {"deadline", "http", "sync", "assertion", "unexpected"}:
         value["failure"] = previous["failure"]
     if type(previous.get("http_status")) is int and 100 <= previous["http_status"] <= 599:
@@ -176,6 +218,16 @@ def run(phase: str) -> None:
                 restrict_to_permanent_storage_hwm_date=True,
             ),
         )
+        original_wire = client.api.invoices._query_invoice_metadata_observation_page
+
+        def checked_wire(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return original_wire(*args, **kwargs)
+            except BaseException as error:
+                diagnostic(transport_error=error)
+                raise
+
+        cast(Any, client.api.invoices)._query_invoice_metadata_observation_page = checked_wire
         if phase == "metadata":
             # Use real, already indexed metadata. Fresh submission/HWM propagation is
             # exercised separately by the metadata restart gate; this gate verifies
@@ -244,7 +296,8 @@ def run(phase: str) -> None:
             if phase == "metadata":
                 while True:
                     diagnostic(stage="metadata")
-                    sync.metadata.run_once(store, time_budget=120)
+                    metadata_report = sync.metadata.run_once(store, time_budget=120)
+                    diagnostic(stage="metadata", metadata_report=metadata_report)
                     report = sync.describe(store)
                     diagnostic(stage="metadata", report=report)
                     if report.xml.blocked:

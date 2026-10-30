@@ -81,3 +81,23 @@ HWM sprawdzono następnie osobnym przebiegiem helperów; konfiguracji pokrycia
 nie zmieniano. Wynik nowego live E2E należy sprawdzić dla
 commita zawierającego tę poprawkę; poprzednich siedmiu sukcesów nie zaliczamy
 jako walidacji nowego scenariusza XML.
+
+## Kolejne ustalenie: faza metadanych
+
+[41094644469](https://github.com/smekcio/ksef-client-python/actions/runs/41094644469),
+SHA `fa07cb8`: 7 zaliczonych scenariuszy. Discovery widział 131 obserwacji i
+wybrał cel, lecz po 600 s stan pozostawał `metadata`, `observed=0`,
+`metadata_complete=false`. Problem dotyczy teraz wykonania synchronizacji,
+a nie odnalezienia faktury. Przyczyna oczekiwania nie jest jeszcze potwierdzona.
+
+Helper zachowuje teraz bezpieczny wynik `metadata.run_once`: status, dozwolony
+powód zatrzymania oraz liczbę stron i rekordów. Z ograniczonego łańcucha wyjątków
+transportu odczytuje wyłącznie numeryczny status HTTP. Nie zapisuje body, URL,
+identyfikatorów faktur, nagłówków ani tekstu wyjątków. Regresja sprawdza deadline
+podczas obsługi 429 i redakcję prywatnej zawartości.
+
+Gate wykonuje scenariusz XML jako pierwszy i przerywa po pierwszym błędzie, aby
+oddzielić jego zachowanie od obciążenia poprzednimi przepływami. Nadal wymagane
+jest osiem zatwierdzonych scenariuszy, każdy dokładnie raz i bez pominięć;
+niepełny JUnit nie może zostać uznany za sukces. Zmiana kolejności nie jest
+potwierdzeniem hipotezy o limicie API.

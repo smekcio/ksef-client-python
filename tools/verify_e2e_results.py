@@ -106,10 +106,14 @@ def main(argv: list[str] | None = None) -> int:
                     "--tb=short",
                     "--show-capture=no",
                     "--durations=0",
+                    "--maxfail=1",
                     "-o",
                     "xfail_strict=true",
                     f"--junitxml={args.report}",
-                    *required,
+                    # Exercise durable XML before the other metadata-heavy flows.
+                    # Verification still requires every approved scenario exactly once.
+                    required[-1],
+                    *required[:-1],
                 ],
                 check=False,
             )
