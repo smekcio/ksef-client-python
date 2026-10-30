@@ -12,8 +12,8 @@
   jeszcze zapis metadanych ani pobieranie XML. W tym samym jobie przeszedł
   wcześniejszy scenariusz synchronizacji korzystający z szerszego zakresu dat.
 
-Drugi wynik lokalizuje problem w oczekiwaniu na metadane przy dodatkowym filtrze
-dokładnego numeru KSeF. Nie dowodzi ogólnej awarii SDK ani konkretnej usterki
+Drugi wynik lokalizuje problem w oczekiwaniu na metadane. Sam wynik nie
+rozstrzyga, czy przyczyną jest dodatkowy filtr dokładnego numeru KSeF. Nie dowodzi ogólnej awarii SDK ani konkretnej usterki
 wewnętrznego indeksu MF. Test restartu XML nie powinien dodatkowo zależeć od czasu
 udostępnienia dokumentu przez osobne wyszukiwanie dokładnego numeru.
 
@@ -25,10 +25,20 @@ force push. Zachowano te zmiany i ich przypadki testowe; poniższe uzupełnienia
 dodają m.in. publiczne, stronicowane sprawdzanie celu, obsługę trwałych blokad,
 diagnostykę HWM oraz testy nadzoru procesów.
 
-Helper obserwuje zakres dat `PermanentStorage` z zachowaniem HWM, jak działający
-scenariusz metadanych. Wybiera docelową fakturę po numerze, a następnie uruchamia
-rzeczywistą synchronizację metadanych. Przed zakończeniem pierwszego procesu
-sprawdza w trwałej kolejce, że dokładnie ta faktura ma zadanie `pending`.
+Przebieg [41091179363](https://github.com/smekcio/ksef-client-python/actions/runs/41091179363)
+na `b74ffc5` ponownie zaliczył siedem testów. Bounded observation widział dwie
+faktury, ale nie nowo wysłany cel: `visible_count=2, target_visible=false`,
+`stage=observe, failure=deadline`. Przejście na zakres dat i bounded HTTP nie
+rozwiązało tego problemu; nie traktujemy wcześniejszych hipotez jako diagnozy MF.
+
+Helper wybiera teraz najnowszą rzeczywistą fakturę już widoczną w zakresie
+`PermanentStorage` z ostatniej doby, z zachowaniem HWM i stronicowania. Przechowuje
+wyłącznie jednego kandydata. Zapisuje jego numer i datę permanent storage w
+prywatnym pliku stanu, a synchronizację ogranicza od tej daty. Oba procesy używają
+identycznego zapisanego zakresu. Test XML nie wysyła nowej faktury; wysyłkę i
+propagację nowej faktury do HWM nadal sprawdza osobny wymagany test metadanych.
+Przed zakończeniem pierwszego procesu helper sprawdza w trwałej kolejce, że
+wybrana faktura ma zadanie `pending`.
 
 Zakres może zawierać inne faktury. Drugi proces musi doprowadzić wszystkie
 zaobserwowane XML do gotowości, potwierdzić `ready` docelowego zadania i kompletność
@@ -57,7 +67,7 @@ obowiązkowe przed i po E2E.
 ## Regresje i walidacja
 
 Testy z prawdziwymi adapterami SQLite/plików oraz transportem HTTP odtwarzają
-pusty wynik przy filtrze dokładnego numeru, opóźniony HWM, dodatkowe dokumenty
+wybór już widocznych metadanych bez wysyłki nowej faktury, opóźniony HWM, dodatkowe dokumenty
 w zakresie, trwałą blokadę oraz restart i odczyt gotowych XML. Osobny test sprawdza
 stronicowane odnalezienie celu poza pierwszymi 100 zadaniami i alias numeru.
 Test rzeczywistego procesu potomnego sprawdza numer nieudanej fazy i brak wycieku

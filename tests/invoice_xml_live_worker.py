@@ -25,6 +25,7 @@ from ksef_client import (  # noqa: E402
     models as m,
 )
 from ksef_client.exceptions import KsefHttpError, KsefSyncRunError  # noqa: E402
+from ksef_client.invoice_search import _date  # noqa: E402
 from ksef_client.invoice_xml_types import KsefXmlRunError  # noqa: E402
 from ksef_client.rate_limiting import KsefRateLimitWaitTimeout  # noqa: E402
 from ksef_client.request_control import request_control, wait_seconds  # noqa: E402
@@ -32,7 +33,6 @@ from ksef_client.sqlite_store import SAFE_REASONS  # noqa: E402
 from ksef_client.utils.ksef_number import canonical_ksef_number  # noqa: E402
 from tests.invoice_sync_live_worker import verify  # noqa: E402
 from tests.test_e2e_token_flows import (  # noqa: E402
-    _build_invoice_xml,
     _load_test_token_config,
 )
 
@@ -168,19 +168,6 @@ def run(phase: str) -> None:
             context_value=config.context_value,
         ) as client,
     ):
-        if phase == "metadata":
-            diagnostic(stage="submit")
-            with client.online_session() as session:
-                result = session.send_invoice(
-                    _build_invoice_xml(
-                        seller_nip=config.context_value,
-                        environment_name="xml-durable",
-                    )
-                ).wait(timeout=120)
-            assert isinstance(result.ksef_number, str) and result.ksef_number
-            state["number"] = canonical_ksef_number(result.ksef_number)
-            state_path.write_text(json.dumps(state), encoding="utf-8")
-        expected_number = document_number(state["number"])
         query = m.InvoiceQueryFilters(
             subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
             date_range=m.InvoiceQueryDateRange(
@@ -189,6 +176,60 @@ def run(phase: str) -> None:
                 restrict_to_permanent_storage_hwm_date=True,
             ),
         )
+        if phase == "metadata":
+            # Use real, already indexed metadata. Fresh submission/HWM propagation is
+            # exercised separately by the metadata restart gate; this gate verifies
+            # the durable XML obligation across a process restart.
+            while True:
+                diagnostic(stage="observe")
+                scan = client.api.invoices.search_invoice_metadata_range(
+                    replace(
+                        query,
+                        date_range=replace(
+                            query.date_range, to=datetime.now(timezone.utc).isoformat()
+                        ),
+                    ),
+                    context_key=client.context_key,
+                )
+                selected: tuple[str, str] | None = None
+                cursor, visible = None, 0
+                try:
+                    while True:
+                        page = scan.observation_page(cursor)
+                        visible += len(page.observations)
+                        for item in page.observations:
+                            if not item.ksef_number or not item.permanent_storage_date:
+                                continue
+                            try:
+                                canonical_ksef_number(item.ksef_number)
+                            except ValueError:
+                                continue
+                            if selected is None or _date(item.permanent_storage_date) >= _date(
+                                selected[1]
+                            ):
+                                selected = (item.ksef_number, item.permanent_storage_date)
+                        cursor = page.next_cursor
+                        if cursor is None:
+                            break
+                    diagnostic(
+                        stage="observe",
+                        observation="visible" if selected else "not_visible",
+                        visibility=(visible, selected is not None),
+                    )
+                except KsefIncompletePaginationError as error:
+                    if error.reason_code != "hwm_before_start":
+                        raise
+                    selected = None
+                    diagnostic(
+                        stage="observe", observation="hwm_before_start", visibility=(0, False)
+                    )
+                if selected is not None:
+                    state["number"] = canonical_ksef_number(selected[0])
+                    state["metadata_from"] = selected[1]
+                    state_path.write_text(json.dumps(state), encoding="utf-8")
+                    break
+                wait_seconds(30)
+        query = replace(query, date_range=replace(query.date_range, from_=state["metadata_from"]))
         sync = client.invoices.sync_documents(
             namespace="wheel-xml-test", sync_key="xml", queries=[query]
         )
@@ -201,54 +242,16 @@ def run(phase: str) -> None:
             ) as store,
         ):
             if phase == "metadata":
-                # Wait for the new invoice to enter the metadata repository, then commit
-                # its real page/checkpoint/job without making any XML request.
                 while True:
-                    diagnostic(stage="observe")
-                    scan = client.api.invoices.search_invoice_metadata_range(
-                        replace(
-                            query,
-                            date_range=replace(
-                                query.date_range, to=datetime.now(timezone.utc).isoformat()
-                            ),
-                        ),
-                        context_key=client.context_key,
-                    )
-                    try:
-                        cursor, visible, found = None, 0, False
-                        while True:
-                            page = scan.observation_page(cursor)
-                            visible += len(page.observations)
-                            found = found or any(
-                                item.ksef_number is not None
-                                and document_number(item.ksef_number) == expected_number
-                                for item in page.observations
-                            )
-                            cursor = page.next_cursor
-                            if cursor is None:
-                                break
-                        diagnostic(
-                            stage="observe",
-                            observation="visible" if found else "not_visible",
-                            visibility=(visible, found),
-                        )
-                    except KsefIncompletePaginationError as error:
-                        if error.reason_code != "hwm_before_start":
-                            raise
-                        found = False
-                        diagnostic(
-                            stage="observe", observation="hwm_before_start", visibility=(0, False)
-                        )
-                    if found:
-                        diagnostic(stage="metadata")
-                        sync.metadata.run_once(store, time_budget=120)
-                        report = sync.describe(store)
-                        diagnostic(stage="metadata", report=report)
-                        if report.xml.blocked:
-                            raise KsefXmlRunError(report)
-                        target = target_job(store, sync.xml.scopes, state["number"])
-                        if target and target["status"] == "pending" and report.metadata_complete:
-                            break
+                    diagnostic(stage="metadata")
+                    sync.metadata.run_once(store, time_budget=120)
+                    report = sync.describe(store)
+                    diagnostic(stage="metadata", report=report)
+                    if report.xml.blocked:
+                        raise KsefXmlRunError(report)
+                    target = target_job(store, sync.xml.scopes, state["number"])
+                    if target and target["status"] == "pending" and report.metadata_complete:
+                        break
                     wait_seconds(30)
                 assert report.xml.pending >= 1 and report.xml.ready == 0 and not report.complete
                 diagnostic(stage="queued", report=report)

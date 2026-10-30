@@ -12,25 +12,24 @@ import pytest
 from ksef_client.rate_limiting import KsefRateLimitWaitTimeout
 from tests import invoice_xml_live_worker as worker
 from tests.test_invoice_sync import H1, START, row
-from tests.test_invoice_xml_sync import HASH, NUMBER, NUMBER2, XML, XmlServer, environment
+from tests.test_invoice_xml_sync import HASH, NUMBER, NUMBER2, XmlServer, environment
 
 
 @pytest.mark.parametrize("blocked", [False, True])
 @pytest.mark.parametrize("extra", [False, True])
 @pytest.mark.parametrize("delayed", [False, True])
-@pytest.mark.parametrize("submitted_number", [NUMBER, NUMBER[:26] + "-" + NUMBER[26:]])
+@pytest.mark.parametrize("observed_number", [NUMBER, NUMBER[:26] + "-" + NUMBER[26:]])
 def test_live_helper_completes_both_phases_with_real_sdk_adapters(
-    tmp_path, monkeypatch, blocked, extra, delayed, submitted_number
+    tmp_path, monkeypatch, blocked, extra, delayed, observed_number
 ):
     async def run():
-        server = XmlServer()
+        server = XmlServer([row(observed_number, hash_=HASH)])
         original = server.handle
         visible = not delayed
         waits = 0
 
         def handle(request):
-            # Reproduce the live failure: exact-number metadata search stays empty
-            # even when the date-range scan can already observe the invoice.
+            # Discovery uses bounded role/date observations without an exact-number filter.
             if request.method == "POST" and (
                 not visible or "ksefNumber" in json.loads(request.content)
             ):
@@ -72,13 +71,6 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(
                         context_key="Nip:test", **kwargs
                     )
                 ),
-                online_session=lambda: nullcontext(
-                    SimpleNamespace(
-                        send_invoice=lambda content: SimpleNamespace(
-                            wait=lambda **kwargs: SimpleNamespace(ksef_number=submitted_number)
-                        )
-                    )
-                ),
             )
             monkeypatch.chdir(tmp_path)
             (tmp_path / "state.json").write_text(
@@ -101,7 +93,6 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(
                 ),
             )
             monkeypatch.setattr(worker.Ksef, "connect", lambda **kwargs: nullcontext(client))
-            monkeypatch.setattr(worker, "_build_invoice_xml", lambda **kwargs: XML)
 
             def unexpected_wait(*args):
                 nonlocal visible, waits
@@ -131,7 +122,9 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(
             assert all(payload.get("ksefNumber") is None for payload, _, __ in server.calls)
             assert json.loads((tmp_path / "state.json").read_text())["complete"]
             assert json.loads((tmp_path / "xml-live-diagnostic.json").read_text())["target_visible"]
-            assert json.loads((tmp_path / "state.json").read_text())["number"] == NUMBER
+            saved = json.loads((tmp_path / "state.json").read_text())
+            assert saved["number"] == NUMBER
+            assert saved["metadata_from"] == "2025-01-01T00:00:00Z"
             assert waits == int(delayed)
 
     asyncio.run(run())
