@@ -15,9 +15,7 @@ sys.path.insert(0, str(ROOT))
 from ksef_client import (  # noqa: E402
     FileInvoiceXmlStore,
     Ksef,
-    KsefClientOptions,
     KsefIncompletePaginationError,
-    RetryConfig,
     SQLiteInvoiceSyncStore,
     TokenCredentials,
 )
@@ -29,6 +27,7 @@ from ksef_client.invoice_xml_types import KsefXmlRunError  # noqa: E402
 from ksef_client.request_control import request_control, wait_seconds  # noqa: E402
 from ksef_client.utils.ksef_number import canonical_ksef_number  # noqa: E402
 from tests.invoice_live_diagnostics import diagnostic  # noqa: E402
+from tests.invoice_live_options import live_options  # noqa: E402
 from tests.invoice_sync_live_worker import verify  # noqa: E402
 from tests.test_e2e_token_flows import (  # noqa: E402
     _load_test_token_config,
@@ -61,13 +60,7 @@ def run(phase: str) -> None:
     state = json.loads(state_path.read_text(encoding="utf-8"))
     config = _load_test_token_config()
     assert config.token
-    options = KsefClientOptions(
-        base_url=config.base_url,
-        retry=RetryConfig(
-            max_retries=5,
-            retryable_post_paths=frozenset({"/invoices/query/metadata"}),
-        ),
-    )
+    options = live_options(config.base_url, config.context_type, config.context_value)
     with (
         request_control(deadline=state["soft_deadline"]),
         Ksef.connect(

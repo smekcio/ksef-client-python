@@ -203,3 +203,70 @@ def test_live_metadata_diagnostic_keeps_partial_reason_and_http_context_only(tmp
     value = worker.diagnostic(metadata_report=report, path=path)
     assert value["metadata_streams"][0]["status"] == "unknown"
     assert value["metadata_streams"][0]["reason"] is None
+
+
+def test_xml_live_helper_obeys_hourly_retry_after_before_queue_and_download(tmp_path, monkeypatch):
+    from tests.invoice_live_clock import virtual_time
+    from tests.invoice_sync_supervisor import LIVE_SCENARIO_SOFT_TIMEOUT
+
+    async def run():
+        server = XmlServer()
+        async with environment(tmp_path, False, server) as (initial, _, __, ___):
+            api = initial.xml.client
+            client = SimpleNamespace(
+                context_key="Nip:test",
+                api=SimpleNamespace(invoices=api),
+                invoices=SimpleNamespace(
+                    sync_documents=lambda **kwargs: api.sync_documents(
+                        context_key="Nip:test", **kwargs
+                    )
+                ),
+            )
+            monkeypatch.chdir(tmp_path)
+            monkeypatch.setattr(worker, "verify", lambda: None)
+            monkeypatch.setattr(
+                worker,
+                "_load_test_token_config",
+                lambda: SimpleNamespace(
+                    token="test",
+                    base_url="https://example.test/v2",
+                    context_type="Nip",
+                    context_value="test",
+                ),
+            )
+
+            def connect(**kwargs):
+                api._http._options = kwargs["options"]
+                return nullcontext(client)
+
+            monkeypatch.setattr(worker.Ksef, "connect", connect)
+            with virtual_time(monkeypatch) as clock:
+                (tmp_path / "state.json").write_text(
+                    json.dumps(
+                        {"since": START, "soft_deadline": clock() + LIVE_SCENARIO_SOFT_TIMEOUT}
+                    )
+                )
+                original = api._http._client._transport.handler
+                available = clock() + 3600
+                attempts = []
+
+                def handle(request):
+                    if request.method == "POST":
+                        attempts.append(clock())
+                        if clock() < available:
+                            return httpx.Response(
+                                429,
+                                stream=httpx.ByteStream(b'{"title":"limited"}'),
+                                headers={"Content-Type": "application/json", "Retry-After": "3600"},
+                            )
+                    return original(request)
+
+                api._http._client._transport.handler = handle
+                worker.run("metadata")
+                assert server.downloads == 0
+                assert attempts[1] >= available
+                worker.run("xml")
+                assert server.downloads == 1
+                assert json.loads((tmp_path / "state.json").read_text())["complete"]
+
+    asyncio.run(run())

@@ -2,20 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
+import math
+import sqlite3
 from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
+from ksef_client.rate_limiting import KsefRateLimitWaitTimeout
 from tests import invoice_sync_live_worker as worker
+from tests.invoice_live_clock import virtual_time
+from tests.invoice_sync_supervisor import LIVE_SCENARIO_SOFT_TIMEOUT
 from tests.test_invoice_sync import H1, H2, START, row
 from tests.test_invoice_xml_sync import HASH, NUMBER, NUMBER2, XML, XmlServer, environment
 
 
 @pytest.mark.parametrize("legacy_alias", [False, True])
+@pytest.mark.parametrize("cooldown_budget", [None, 1740, LIVE_SCENARIO_SOFT_TIMEOUT])
 def test_metadata_live_helper_finalizes_session_before_discovery_and_resumes(
-    tmp_path, monkeypatch, legacy_alias
+    tmp_path, monkeypatch, legacy_alias, cooldown_budget
 ):
     async def run():
         server = XmlServer([])
@@ -61,9 +67,6 @@ def test_metadata_live_helper_finalizes_session_before_discovery_and_resumes(
                 online_session=online_session,
             )
             monkeypatch.chdir(tmp_path)
-            (tmp_path / "state.json").write_text(
-                json.dumps({"since": START, "soft_deadline": time.monotonic() + 60})
-            )
             monkeypatch.setattr(worker, "verify", lambda: None)
             monkeypatch.setattr(
                 worker,
@@ -75,7 +78,13 @@ def test_metadata_live_helper_finalizes_session_before_discovery_and_resumes(
                     context_value="test",
                 ),
             )
-            monkeypatch.setattr(worker.Ksef, "connect", lambda **kwargs: nullcontext(client))
+
+            def connect(**kwargs):
+                # Apply the actual helper options, including real HTTP retry.
+                api._http._options = kwargs["options"]
+                return nullcontext(client)
+
+            monkeypatch.setattr(worker.Ksef, "connect", connect)
             monkeypatch.setattr(worker, "_build_invoice_xml", lambda **kwargs: XML)
             monkeypatch.setattr(
                 worker,
@@ -84,9 +93,72 @@ def test_metadata_live_helper_finalizes_session_before_discovery_and_resumes(
                     "Discovery must observe metadata after session finalization"
                 ),
             )
-            worker.run("bootstrap")
-            current = "incremental"
-            worker.run("incremental")
+            with virtual_time(monkeypatch) as clock:
+                state_path = tmp_path / "state.json"
+                state_path.write_text(
+                    json.dumps({"since": START, "soft_deadline": clock() + (cooldown_budget or 60)})
+                )
+                original = api._http._client._transport.handler
+                cooldown_until = None
+                limited = []
+                requests = []
+
+                def handle(request):
+                    nonlocal cooldown_until
+                    if request.method == "POST":
+                        lower = json.loads(request.content)["dateRange"]["from"]
+                        if (
+                            cooldown_budget
+                            and current == "incremental"
+                            and worker._date(lower) == worker._date(H1)
+                        ):
+                            if cooldown_until is None:
+                                cooldown_until = clock() + 3600
+                            requests.append(clock())
+                            if clock() < cooldown_until:
+                                limited.append(clock())
+                                return httpx.Response(
+                                    429,
+                                    stream=httpx.ByteStream(b'{"title":"limited"}'),
+                                    headers={
+                                        "Content-Type": "application/json",
+                                        "Retry-After": str(math.ceil(cooldown_until - clock())),
+                                    },
+                                )
+                    return original(request)
+
+                api._http._client._transport.handler = handle
+                worker.run("bootstrap")
+                current = "incremental"
+                if cooldown_budget == 1740:
+                    with pytest.raises(KsefRateLimitWaitTimeout) as caught:
+                        worker.run("incremental")
+                    worker.diagnostic(
+                        error=caught.value, path=tmp_path / "metadata-live-diagnostic.json"
+                    )
+                    safe = json.loads((tmp_path / "metadata-live-diagnostic.json").read_text())
+                    assert safe["metadata_http_status"] == 429
+                    assert safe["metadata_streams"] == [
+                        {"status": "partial", "reason": "time_budget", "pages": 0, "records": 0}
+                    ]
+                    with sqlite3.connect(tmp_path / "sync.db") as connection:
+                        assert (
+                            connection.execute("SELECT count(*) FROM invoices").fetchone()[0] == 1
+                        )
+                        checkpoint = json.loads(
+                            connection.execute(
+                                "SELECT checkpoint_json FROM sync_checkpoints"
+                            ).fetchone()[0]
+                        )
+                        assert checkpoint["phase"] == "active"
+                    assert clock() < cooldown_until
+                    assert len(limited) == 1
+                    return
+                worker.run("incremental")
+                if cooldown_budget:
+                    assert cooldown_until is not None and clock() >= cooldown_until
+                    assert len(limited) == 1
+                    assert all(attempt >= cooldown_until for attempt in requests[1:])
             assert events == ["close", "session_wait", "upo_wait"] * 2
             assert server.downloads == 0
             for phase in ("bootstrap", "incremental"):
