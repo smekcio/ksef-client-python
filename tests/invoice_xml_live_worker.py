@@ -7,6 +7,7 @@ import sys
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -23,7 +24,10 @@ from ksef_client import (  # noqa: E402
 from ksef_client import (  # noqa: E402
     models as m,
 )
+from ksef_client.exceptions import KsefHttpError, KsefSyncRunError  # noqa: E402
+from ksef_client.rate_limiting import KsefRateLimitWaitTimeout  # noqa: E402
 from ksef_client.request_control import request_control, wait_seconds  # noqa: E402
+from ksef_client.sqlite_store import SAFE_REASONS  # noqa: E402
 from tests.invoice_sync_live_worker import verify  # noqa: E402
 from tests.test_e2e_token_flows import (  # noqa: E402
     _build_invoice_xml,
@@ -31,7 +35,84 @@ from tests.test_e2e_token_flows import (  # noqa: E402
 )
 
 
+def diagnostic(
+    *,
+    stage: str | None = None,
+    report: Any = None,
+    error: BaseException | None = None,
+    path: Path = Path("xml-live-diagnostic.json"),
+) -> dict[str, Any]:
+    """Persist only fixed stages, counts and SDK codes; never child output or queries."""
+    stages = {"connect", "submit", "observe", "metadata", "queued", "xml", "ready"}
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, ValueError):
+        previous = {}
+    value: dict[str, Any] = {
+        "stage": stage if stage in stages else previous.get("stage", "unknown")
+    }
+    if value["stage"] not in stages:
+        value["stage"] = "unknown"
+    if report is not None:
+        xml = report.xml
+        for name in (
+            "observed",
+            "not_enqueued",
+            "pending",
+            "leased",
+            "retry_wait",
+            "blocked",
+            "ready",
+        ):
+            value[name] = getattr(xml, name)
+        value["reasons"] = [reason for reason, _ in xml.reason_counts if reason in SAFE_REASONS]
+        if hasattr(report, "metadata_complete"):
+            value["metadata_complete"] = report.metadata_complete
+    else:
+        for name in (
+            "observed",
+            "not_enqueued",
+            "pending",
+            "leased",
+            "retry_wait",
+            "blocked",
+            "ready",
+        ):
+            if type(previous.get(name)) is int:
+                value[name] = previous[name]
+        if type(previous.get("metadata_complete")) is bool:
+            value["metadata_complete"] = previous["metadata_complete"]
+        value["reasons"] = [
+            reason for reason in previous.get("reasons", []) if reason in SAFE_REASONS
+        ]
+    if previous.get("failure") in {"deadline", "http", "sync", "assertion", "unexpected"}:
+        value["failure"] = previous["failure"]
+    if type(previous.get("http_status")) is int and 100 <= previous["http_status"] <= 599:
+        value["http_status"] = previous["http_status"]
+    if error is not None:
+        value["failure"] = (
+            "deadline"
+            if isinstance(error, KsefRateLimitWaitTimeout)
+            else "http"
+            if isinstance(error, KsefHttpError)
+            else "sync"
+            if isinstance(error, KsefSyncRunError)
+            else "assertion"
+            if isinstance(error, AssertionError)
+            else "unexpected"
+        )
+        if isinstance(error, KsefHttpError):
+            value["http_status"] = error.status_code
+        if hasattr(error, "xml_report"):
+            value["reasons"] = [
+                reason for reason, _ in error.xml_report.reason_counts if reason in SAFE_REASONS
+            ]
+    path.write_text(json.dumps(value), encoding="utf-8")
+    return value
+
+
 def run(phase: str) -> None:
+    diagnostic(stage="connect")
     verify()
     state_path = Path("state.json")
     state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -45,7 +126,7 @@ def run(phase: str) -> None:
         ),
     )
     with (
-        request_control(deadline=state["soft_deadline"]),
+        request_control(deadline=state["soft_deadline"], timeout_seconds=600),
         Ksef.connect(
             options=options,
             credentials=TokenCredentials(config.token),
@@ -54,6 +135,7 @@ def run(phase: str) -> None:
         ) as client,
     ):
         if phase == "metadata":
+            diagnostic(stage="submit")
             with client.online_session() as session:
                 result = session.send_invoice(
                     _build_invoice_xml(
@@ -61,6 +143,7 @@ def run(phase: str) -> None:
                         environment_name="xml-durable",
                     )
                 ).wait(timeout=120)
+            assert isinstance(result.ksef_number, str) and result.ksef_number
             state["number"] = result.ksef_number
             state_path.write_text(json.dumps(state), encoding="utf-8")
         query = m.InvoiceQueryFilters(
@@ -87,6 +170,7 @@ def run(phase: str) -> None:
                 # Wait for the new invoice to enter the metadata repository, then commit
                 # its real page/checkpoint/job without making any XML request.
                 while True:
+                    diagnostic(stage="observe")
                     scan = client.api.invoices.search_invoice_metadata_range(
                         replace(
                             query,
@@ -103,16 +187,21 @@ def run(phase: str) -> None:
                             raise
                         found = False
                     if found:
+                        diagnostic(stage="metadata")
                         sync.metadata.run_once(store, time_budget=120)
                         report = sync.describe(store)
+                        diagnostic(stage="metadata", report=report)
                         if report.xml.pending == 1 and report.metadata_complete:
                             break
                     wait_seconds(30)
                 assert report.xml.ready == 0 and not report.complete
+                diagnostic(stage="queued", report=report)
             else:
                 assert sync.describe(store).xml.pending == 1
                 while True:
+                    diagnostic(stage="xml")
                     report_xml = sync.xml.run_once(store, storage, time_budget=120)
+                    diagnostic(stage="xml", report=report_xml)
                     if report_xml.ready == 1:
                         break
                     wait_seconds(30)
@@ -120,10 +209,15 @@ def run(phase: str) -> None:
                 assert again.ready == 1 and again.downloaded == 0 and again.claims == 0
                 report = sync.describe(store)
                 assert report.complete
+                diagnostic(stage="ready", report=report)
                 state["complete"] = True
                 state_path.write_text(json.dumps(state), encoding="utf-8")
     verify()
 
 
 if __name__ == "__main__":
-    run(sys.argv[1])
+    try:
+        run(sys.argv[1])
+    except BaseException as error:
+        diagnostic(error=error)
+        raise

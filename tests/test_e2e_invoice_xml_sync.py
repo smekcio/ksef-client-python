@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tests.invoice_sync_supervisor import run_phases
+from tests.invoice_xml_live_worker import diagnostic
 from tests.test_e2e_token_flows import _ensure_e2e_enabled
 
 pytestmark = pytest.mark.e2e
@@ -29,9 +30,14 @@ def test_e2e_test_environment_invoice_xml_restart(tmp_path):
     worker = str(Path(__file__).with_name("invoice_xml_live_worker.py"))
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
-    run_phases(
-        [[sys.executable, "-I", worker, phase] for phase in ("metadata", "xml")],
-        cwd=tmp_path,
-        env=env,
-    )
+    try:
+        run_phases(
+            [[sys.executable, "-I", worker, phase] for phase in ("metadata", "xml")],
+            cwd=tmp_path,
+            env=env,
+        )
+    except Exception:
+        # The parent never exposes stderr, tokens, XML or invoice identifiers.
+        safe = diagnostic(path=tmp_path / "xml-live-diagnostic.json")
+        pytest.fail("XML restart diagnostic: " + json.dumps(safe), pytrace=False)
     assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["complete"]
