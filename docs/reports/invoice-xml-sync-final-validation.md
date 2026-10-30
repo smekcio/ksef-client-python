@@ -117,3 +117,44 @@ Bez zmian pozostają wszystkie wymagane scenariusze, asercje i produktowe
 budżety SDK. Diagnostyka może dodatkowo zachować wyłącznie ograniczoną liczbową
 wartość Retry-After; dowolny tekst nagłówka nadal nie trafia do raportu.
 Nowy wynik pełnego live wymaga oddzielnego potwierdzenia.
+
+## Potwierdzony pełny live i lokalna regresja przed kolejnym pushem
+
+[41123576461](https://github.com/smekcio/ksef-client-python/actions/runs/41123576461)
+na `4dc49b9268867df3636b28ab6377e591dcc48127`: **8 passed, 0 failed,
+0 skipped**, 3614,48 s. Artefakt JUnit zawiera wszystkie osiem wymaganych
+scenariuszy dokładnie raz. Test XML przeszedł o 20:30:22 UTC, a inkrementalny
+restart metadanych o 21:30:19 UTC. To potwierdza przejście przez długie oczekiwanie
+na quota. SHA-256 rzeczywiście testowanego wheela:
+`35726d3dca7bfcbb81d4f1963df77d7d6f241348cf1d6a70f707874f55a4f7d4`.
+
+Po uwadze użytkownika wykonano dodatkową weryfikację **lokalnie przed pushem**.
+Ujawniono lukę poprzednich testów helpera: podstawiony klient nie otrzymywał
+konfiguracji retry z helpera live. Nowa regresja używa rzeczywistego transportu
+HTTP SDK, SQLite i magazynu plikowego oraz zegara wirtualnego, który odtwarza
+3600 sekund bez rzeczywistego usypiania procesu.
+
+Przed poprawką test zimnego startu XML kończył się lokalnie HTTP 429 po
+wyczerpaniu prób: samo wydłużenie deadline nie wystarczało. Helpery używają teraz
+wspólnej konfiguracji `RateLimitBudget`, zapamiętującej pełny cooldown podany
+przez serwer. Puste okna limitów nie zakładają żadnych wartości quota TEST ani
+nie zmieniają ich na serwerze. Regresje potwierdzają jedno żądanie zakończone 429,
+brak następnego żądania przed Retry-After, zachowanie checkpointu po krótszym
+deadline oraz ukończenie metadanych i XML z wystarczającym budżetem.
+
+Dla lokalnego commita `ef1aacb` przed wysłaniem na GitHub wykonano:
+
+- pełny Windows/Python 3.12: **3765 passed, 28 skipped, 61 subtests passed**,
+  334,88 s;
+- pełny Linux/WSL/Python 3.12, dokładne źródła z `git archive ef1aacb`:
+  **3779 passed, 14 skipped, 61 subtests passed**, 172,18 s,
+  **20144/20144 linii SDK, 100%, zero brakujących linii**;
+- testy na lokalnie zbudowanym i zainstalowanym wheelu: **142 passed**;
+- strict lint/mypy, generatory, `pip check`, budowa wheela i sdist: zaliczone.
+
+Porównano bajty wszystkich **141 plików `ksef_client/`** lokalnego wheela
+z artefaktem live `4dc49b9`: zawartość SDK jest identyczna. Późniejsze zmiany
+dotyczą helperów testowych i dokumentacji. Lokalne archiwum ma SHA-256
+`222ce0956358c71ae0c799dbccbd9b0337aa1d21da2f85da3a22c5b1f36f98ae`;
+różny hash całego ZIP nie oznacza różnego kodu SDK. Raport rozróżnia zatem
+rzeczywisty live na `4dc49b9` od późniejszej lokalnej regresji helperów na `ef1aacb`.

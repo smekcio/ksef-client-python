@@ -138,10 +138,20 @@ Kontrola wheela przed instalacją odrzuca pliki `.pth`, nieoczekiwane pliki poza
 symlinki i rozbieżności nazw dystrybucji z METADATA. Nie jest to skaner złośliwego kodu.
 
 Manifest obowiązkowych scenariuszy znajduje się w `tests/required_test_e2e.json`.
-TEST wymaga pełnego przepływu token/XAdES, wznowienia online/batch i kontynuacji
-paginacji w nowym procesie. Każdy scenariusz jest wykonywany raz. Brak raportu,
+TEST wymaga ośmiu scenariuszy: pełnego przepływu token/XAdES, wznowienia
+online/batch, kontynuacji paginacji w nowym procesie, fasady z eksportem,
+synchronizacji metadanych po restarcie oraz trwałej kolejki XML z weryfikacją
+hasha po restarcie. Każdy scenariusz jest wykonywany raz. Brak raportu,
 brak testu, pominięcie, xfail lub błąd blokują publikację. Awaria TEST lub brak
 sekretów także blokują publikację; DEMO nie zastępuje tej kontroli.
+
+KSeF ma także godzinne limity API. Odpowiedź 429 może więc wydłużyć pełny
+przebieg; nie oznacza sama w sobie zawieszenia procesu. Scenariusze restartu metadanych i XML
+mają po 74 minuty na pracę i 75 minut twardego nadzoru procesów, a job —
+160 minut na całą bramę. Budżety pozwalają poczekać na odnowienie limitu bez zmiany konfiguracji
+kontekstu TEST. Wynik jest zaliczany dopiero po ośmiu sukcesach w jednym raporcie
+JUnit. Zielone testy jednostkowe i pojedynczy zaliczony scenariusz nie zastępują
+pełnej bramy live.
 
 Wymagane sekrety GitHub: `KSEF_TEST_TOKEN`, `KSEF_TEST_CONTEXT_TYPE`,
 `KSEF_TEST_CONTEXT_VALUE`, certyfikat i klucz XAdES jako
