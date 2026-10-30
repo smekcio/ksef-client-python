@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.invoice_live_diagnostics import diagnostic
 from tests.invoice_sync_supervisor import run_phases
 from tests.test_e2e_token_flows import _ensure_e2e_enabled
 
@@ -31,10 +32,14 @@ def test_e2e_test_environment_invoice_sync_restart(tmp_path):
     worker = str(Path(__file__).with_name("invoice_sync_live_worker.py"))
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
-    run_phases(
-        [[sys.executable, "-I", worker, phase] for phase in ("bootstrap", "incremental")],
-        cwd=tmp_path,
-        env=env,
-    )
+    try:
+        run_phases(
+            [[sys.executable, "-I", worker, phase] for phase in ("bootstrap", "incremental")],
+            cwd=tmp_path,
+            env=env,
+        )
+    except Exception:
+        safe = diagnostic(path=tmp_path / "metadata-live-diagnostic.json")
+        pytest.fail("Metadata restart diagnostic: " + json.dumps(safe), pytrace=False)
     for phase in ("bootstrap", "incremental"):
         assert json.loads((tmp_path / (phase + "-evidence.json")).read_text())["complete"]

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from ksef_client.exceptions import KsefHttpError
 from ksef_client.rate_limiting import KsefRateLimitWaitTimeout
 from tests import invoice_xml_live_worker as worker
 from tests.test_invoice_sync import H1, START, row
@@ -175,8 +176,8 @@ def test_live_metadata_diagnostic_keeps_partial_reason_and_http_context_only(tmp
     path = tmp_path / "safe.json"
     try:
         try:
-            raise worker.KsefHttpError(429, "private-token", {"secret": "private-response"})
-        except worker.KsefHttpError:
+            raise KsefHttpError(429, "private-token", {"secret": "private-response"})
+        except KsefHttpError:
             raise KsefRateLimitWaitTimeout("private-deadline") from None
     except KsefRateLimitWaitTimeout as error:
         worker.diagnostic(stage="metadata", transport_error=error, path=path)
