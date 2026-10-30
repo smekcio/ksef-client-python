@@ -67,7 +67,8 @@ jobs:
     if: ${{ always() && !cancelled() && (inputs.artifact-name != '' || needs.build-development.result == 'success') }}
     runs-on: ubuntu-latest
     environment: ksef-test
-    timeout-minutes: 60
+    # Both restart scenarios may encounter a full hourly TEST API cooldown.
+    timeout-minutes: 160
     concurrency:
       group: ksef-test-live
       cancel-in-progress: false

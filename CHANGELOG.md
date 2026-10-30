@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Durable XML synchronization
+
+* Added sync/async document synchronization, a public transactional SQLite adapter,
+  fenced download leases, verified immutable file storage, historical queue backfill,
+  explicit migration and document readiness reports. Metadata synchronization method
+  contracts are unchanged. Adopting the public SQLite adapter for a database from
+  the previous example requires an explicit offline migration, including metadata-only use.
+* Fixed the required live TEST manifest gate, indexed queue claims, document-local
+  corruption isolation, Retry-After scheduling and snapshot/report contracts.
+  SQLite XML schema v1 requires the explicit v2 migration before opening.
+
 ### Range searches and proactive rate budgets
 
 * Added sync/async `search_invoice_metadata_range()` with inclusive UTC windows,

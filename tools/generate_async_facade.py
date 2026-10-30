@@ -24,6 +24,8 @@ NAMES = {
         "BatchSessionWorkflow",
         "ExportOperation",
         "InvoiceSync",
+        "InvoiceDocumentSync",
+        "InvoiceXmlSync",
     )
 }
 ASYNC = {
@@ -128,7 +130,11 @@ class Convert(ast.NodeTransformer):
             )
         if path == "cls.from_auth_result":
             return node
-        if path == "self.owner.api.invoices.sync":
+        if path in {
+            "self.owner.api.invoices.sync",
+            "self.owner.api.invoices.sync_documents",
+            "self.owner.api.invoices.xml_sync",
+        }:
             return node
         requires_await = (
             path.startswith(
@@ -241,6 +247,7 @@ from .token_manager import DEFAULT_REFRESH_MARGIN_SECONDS
 
 if TYPE_CHECKING:
     from .invoice_sync import AsyncInvoiceSync
+    from .invoice_xml_sync import AsyncInvoiceDocumentSync, AsyncInvoiceXmlSync
     from .streaming_export import AsyncExportOperation
 
 

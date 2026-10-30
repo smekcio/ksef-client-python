@@ -69,6 +69,12 @@ def test_gate_cli_and_runner_fail_closed(tmp_path, monkeypatch):
 
     def run(command, **kwargs):
         calls.append(command)
+        assert "-u" in command and "-v" in command
+        assert "--show-capture=no" in command
+        assert "--durations=0" in command
+        assert "--maxfail=1" in command
+        selected = [arg for arg in command if arg.startswith("tests/")]
+        assert selected == [gate.REQUIRED[-1], *gate.REQUIRED[:-1]]
         assert not report.exists(), "a stale success must be removed before pytest"
         write_report(report, [(name, None) for name in gate.required_tests()])
         return SimpleNamespace(returncode=0)

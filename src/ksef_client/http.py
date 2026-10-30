@@ -302,13 +302,18 @@ def _retry_after_fields(response: httpx.Response) -> dict[str, Any]:
     KSeF wysyła ``Retry-After`` nie tylko przy 429, ale i przy 502/503/504 (przerwa
     serwisowa, przeciążenie), a CLI ponawia wszystkie te kody. Wcześniej nagłówek był
     czytany wyłącznie dla 429, więc ponowienie po 503 czekało 0,25 s zamiast żądanych
-    przez serwer 30 s. Dla pozostałych statusów nie czytamy nagłówka, żeby nie
-    sugerować ponowienia tam, gdzie go nie ma.
+    przez serwer 30 s. Dla pozostałych statusów zachowujemy surowy nagłówek na
+    potrzeby trwałego harmonogramu; samo to nie włącza ponowień transportu.
     """
-    if response.status_code not in RETRYABLE_STATUS_CODES:
-        return {}
     raw_value = response.headers.get("Retry-After")
-    return {"retry_after": _parse_retry_after(raw_value), "retry_after_raw": raw_value}
+    # Preserve the server floor for durable consumers even when transport retry
+    # does not include this status (e.g. 21165 carried by HTTP 400).
+    return {
+        "retry_after": _parse_retry_after(raw_value)
+        if response.status_code in RETRYABLE_STATUS_CODES
+        else None,
+        "retry_after_raw": raw_value,
+    }
 
 
 def _wrap_transport_error(

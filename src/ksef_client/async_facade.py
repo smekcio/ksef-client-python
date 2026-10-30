@@ -43,6 +43,7 @@ from .token_manager import DEFAULT_REFRESH_MARGIN_SECONDS
 
 if TYPE_CHECKING:
     from .invoice_sync import AsyncInvoiceSync
+    from .invoice_xml_sync import AsyncInvoiceDocumentSync, AsyncInvoiceXmlSync
     from .streaming_export import AsyncExportOperation
 
 
@@ -228,6 +229,35 @@ class AsyncInvoices:
             page_size=page_size,
             window_days=window_days,
         )
+
+    def sync_documents(
+        self,
+        *,
+        namespace: str,
+        sync_key: str,
+        since: str | None = None,
+        subject_types: Sequence[m.InvoiceQuerySubjectType | str] | None = None,
+        queries: Sequence[m.InvoiceQueryFilters] | None = None,
+        page_size: int = 100,
+        window_days: int = 100,
+        xml_options: dict[str, Any] | None = None,
+    ) -> AsyncInvoiceDocumentSync:
+        return self.owner.api.invoices.sync_documents(
+            namespace=namespace,
+            sync_key=sync_key,
+            context_key=self.owner.context_key,
+            since=since,
+            subject_types=subject_types,
+            queries=queries,
+            page_size=page_size,
+            window_days=window_days,
+            xml_options=xml_options,
+        )
+
+    def xml_sync(self, metadata_sync: AsyncInvoiceSync, **options: Any) -> AsyncInvoiceXmlSync:
+        if any(s.scope.context_key != self.owner.context_key for s in metadata_sync.streams):
+            raise ValueError("XML worker context differs from connection")
+        return self.owner.api.invoices.xml_sync(metadata_sync, **options)
 
     async def download(self, ksef_number: str) -> bytes:
         return (await self.owner.api.invoices.get_invoice_bytes(ksef_number)).content

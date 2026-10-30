@@ -1,5 +1,10 @@
 """KSeF Python SDK."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .sqlite_store import AsyncSQLiteInvoiceSyncStore, SQLiteInvoiceSyncStore
+
 from .async_facade import AsyncKsef
 from .certificates import (
     CertificateRecord,
@@ -140,11 +145,20 @@ __all__ = [
     "InvoiceSyncCommitReceipt",
     "InvoiceMetadataObservationPage",
     "InvoiceMetadataSearchIdentity",
-
     "ExportLimits",
-    "Ksef", "AsyncKsef", "TokenCredentials", "XadesCredentials",
-    "Operation", "AsyncOperation", "OperationState", "KsefOperationError", "KsefOperationTimeout",
-    "ExportFiles", "ExportOperation", "AsyncExportOperation", "KsefExportTransferError",
+    "Ksef",
+    "AsyncKsef",
+    "TokenCredentials",
+    "XadesCredentials",
+    "Operation",
+    "AsyncOperation",
+    "OperationState",
+    "KsefOperationError",
+    "KsefOperationTimeout",
+    "ExportFiles",
+    "ExportOperation",
+    "AsyncExportOperation",
+    "KsefExportTransferError",
     "InvoiceMetadataRangeSearch",
     "AsyncInvoiceMetadataRangeSearch",
     "RateLimitBudget",
@@ -210,4 +224,66 @@ __all__ = [
     "InvoicePackage",
     "InvoicePackagePart",
     "InvoiceExportStatusResponse",
+]
+
+from .invoice_xml_storage import AsyncFileInvoiceXmlStore, FileInvoiceXmlStore
+from .invoice_xml_sync import (
+    AsyncInvoiceDocumentSync,
+    AsyncInvoiceXmlSync,
+    InvoiceDocumentSync,
+    InvoiceXmlSync,
+)
+from .invoice_xml_types import (
+    AsyncInvoiceDocumentStore,
+    AsyncInvoiceXmlStorage,
+    InvoiceDocumentReport,
+    InvoiceDocumentStore,
+    InvoiceXmlBackfillReport,
+    InvoiceXmlClaim,
+    InvoiceXmlKey,
+    InvoiceXmlReceipt,
+    InvoiceXmlReport,
+    InvoiceXmlStorage,
+    KsefXmlIntegrityError,
+    KsefXmlLeaseLostError,
+    KsefXmlRunError,
+    KsefXmlStorageError,
+    KsefXmlSyncError,
+)
+
+
+def __getattr__(name: str):
+    if name in {"AsyncSQLiteInvoiceSyncStore", "SQLiteInvoiceSyncStore"}:
+        from . import sqlite_store
+
+        value = getattr(sqlite_store, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(name)
+
+
+__all__ += [
+    "InvoiceDocumentSync",
+    "AsyncInvoiceDocumentSync",
+    "InvoiceXmlSync",
+    "AsyncInvoiceXmlSync",
+    "FileInvoiceXmlStore",
+    "AsyncFileInvoiceXmlStore",
+    "SQLiteInvoiceSyncStore",
+    "AsyncSQLiteInvoiceSyncStore",
+    "InvoiceXmlKey",
+    "InvoiceXmlReceipt",
+    "InvoiceXmlClaim",
+    "InvoiceXmlReport",
+    "InvoiceDocumentReport",
+    "InvoiceXmlBackfillReport",
+    "InvoiceXmlStorage",
+    "AsyncInvoiceXmlStorage",
+    "InvoiceDocumentStore",
+    "AsyncInvoiceDocumentStore",
+    "KsefXmlSyncError",
+    "KsefXmlIntegrityError",
+    "KsefXmlStorageError",
+    "KsefXmlLeaseLostError",
+    "KsefXmlRunError",
 ]

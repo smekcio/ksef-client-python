@@ -52,6 +52,12 @@ from .base import AsyncBaseApiClient, BaseApiClient, _serialize_json_payload
 
 if TYPE_CHECKING:
     from ..invoice_sync import AsyncInvoiceSync, InvoiceSync
+    from ..invoice_xml_sync import (
+        AsyncInvoiceDocumentSync,
+        AsyncInvoiceXmlSync,
+        InvoiceDocumentSync,
+        InvoiceXmlSync,
+    )
 
 
 _OFFSET_SUFFIX_RE = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
@@ -270,6 +276,62 @@ class InvoicesClient(BaseApiClient):
             page_size=page_size,
             window_days=window_days,
             asynchronous=False,
+        )
+
+    def sync_documents(
+        self,
+        *,
+        namespace: str,
+        sync_key: str,
+        context_key: str,
+        since: str | None = None,
+        subject_types: Sequence[InvoiceQuerySubjectType | str] | None = None,
+        queries: Sequence[InvoiceQueryFilters] | None = None,
+        page_size: int = 100,
+        window_days: int = 100,
+        xml_options: dict[str, Any] | None = None,
+    ) -> InvoiceDocumentSync:
+        from ..invoice_xml_sync import InvoiceDocumentSync
+
+        metadata = self.sync(
+            namespace=namespace,
+            sync_key=sync_key,
+            context_key=context_key,
+            since=since,
+            subject_types=subject_types,
+            queries=queries,
+            page_size=page_size,
+            window_days=window_days,
+        )
+        return InvoiceDocumentSync(metadata, self, **(xml_options or {}))
+
+    def xml_sync(self, metadata_sync: InvoiceSync, **options: Any) -> InvoiceXmlSync:
+        from ..invoice_xml_sync import InvoiceXmlSync
+
+        return InvoiceXmlSync(metadata_sync, self, **options)
+
+    def get_invoice_bytes_limited(
+        self,
+        ksef_number: str,
+        *,
+        max_bytes: int,
+        access_token: str | None = None,
+    ) -> BinaryContent:
+        from .._bounded_http import validate_max_bytes
+        from ..utils.ksef_number import require_ksef_number
+
+        validate_max_bytes(max_bytes)
+        require_ksef_number(ksef_number)
+        response = self._http.request(
+            "GET",
+            f"/invoices/ksef/{ksef_number}",
+            headers={"Accept": "application/xml"},
+            access_token=access_token,
+            expected_status={200},
+            max_bytes=max_bytes,
+        )
+        return BinaryContent(
+            content=response.content, sha256_base64=response.headers.get("x-ms-meta-hash")
         )
 
     def _query_invoice_metadata_observation_page(
@@ -703,6 +765,62 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
             page_size=page_size,
             window_days=window_days,
             asynchronous=True,
+        )
+
+    def sync_documents(
+        self,
+        *,
+        namespace: str,
+        sync_key: str,
+        context_key: str,
+        since: str | None = None,
+        subject_types: Sequence[InvoiceQuerySubjectType | str] | None = None,
+        queries: Sequence[InvoiceQueryFilters] | None = None,
+        page_size: int = 100,
+        window_days: int = 100,
+        xml_options: dict[str, Any] | None = None,
+    ) -> AsyncInvoiceDocumentSync:
+        from ..invoice_xml_sync import AsyncInvoiceDocumentSync
+
+        metadata = self.sync(
+            namespace=namespace,
+            sync_key=sync_key,
+            context_key=context_key,
+            since=since,
+            subject_types=subject_types,
+            queries=queries,
+            page_size=page_size,
+            window_days=window_days,
+        )
+        return AsyncInvoiceDocumentSync(metadata, self, **(xml_options or {}))
+
+    def xml_sync(self, metadata_sync: AsyncInvoiceSync, **options: Any) -> AsyncInvoiceXmlSync:
+        from ..invoice_xml_sync import AsyncInvoiceXmlSync
+
+        return AsyncInvoiceXmlSync(metadata_sync, self, **options)
+
+    async def get_invoice_bytes_limited(
+        self,
+        ksef_number: str,
+        *,
+        max_bytes: int,
+        access_token: str | None = None,
+    ) -> BinaryContent:
+        from .._bounded_http import validate_max_bytes
+        from ..utils.ksef_number import require_ksef_number
+
+        validate_max_bytes(max_bytes)
+        require_ksef_number(ksef_number)
+        response = await self._http.request(
+            "GET",
+            f"/invoices/ksef/{ksef_number}",
+            headers={"Accept": "application/xml"},
+            access_token=access_token,
+            expected_status={200},
+            max_bytes=max_bytes,
+        )
+        return BinaryContent(
+            content=response.content, sha256_base64=response.headers.get("x-ms-meta-hash")
         )
 
     async def _query_invoice_metadata_observation_page(

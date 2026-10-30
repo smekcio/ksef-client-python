@@ -313,6 +313,28 @@ def test_supervisor_success_failure_and_shared_timeout(tmp_path):
         run_phases([[sys.executable, "-c", "pass"]], cwd=tmp_path, env=dict(os.environ), timeout=0)
 
 
+def test_supervisor_identifies_failed_phase_without_exposing_child_output(tmp_path, capfd):
+    with pytest.raises(RuntimeError, match=r"phase 2 failed \(exit 7;") as caught:
+        run_phases(
+            [
+                [sys.executable, "-c", "pass"],
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; print('private-token'); "
+                    "print('private-xml', file=sys.stderr); sys.exit(7)",
+                ],
+            ],
+            cwd=tmp_path,
+            env=dict(os.environ),
+            timeout=10,
+        )
+    captured = capfd.readouterr()
+    assert captured.out == captured.err == ""
+    assert "private-token" not in str(caught.value)
+    assert "private-xml" not in str(caught.value)
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="CI process-group watchdog runs on Linux")
 def test_supervisor_kills_descendants_which_ignore_sigterm(tmp_path):
     import time

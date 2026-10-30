@@ -32,6 +32,9 @@ bez ładowania całej paczki do pamięci.
 
 Najważniejsze cechy:
 
+- **lokalne archiwum faktur i XML** — przyrostowe pobieranie, wznowienie po restarcie,
+  kontrola SHA-256 i raport gotowości; gotowe SQLite i magazyn plikowy sync/async;
+  [przykład synchronizacji](#synchronizacja-metadanych-i-xml),
 - **synchronizacja metadanych** — `client.invoices.sync(...).run_once(store)`, niezależne role,
   trwałe checkpointy HWM i atomowy zapis z CAS; [przewodnik i SQLite](docs/invoice-sync.md),
 
@@ -64,6 +67,7 @@ Najważniejsze cechy:
 - [Instalacja](#instalacja)
 - [Szybki start: CLI](#szybki-start-cli)
 - [Szybki start: SDK](#szybki-start-sdk)
+- [Synchronizacja metadanych i XML](#synchronizacja-metadanych-i-xml)
 - [FA(3) SDK](#fa3-sdk)
 - [Najważniejsze możliwości](#najważniejsze-możliwości)
 - [Dokumentacja](#dokumentacja)
@@ -209,6 +213,8 @@ Masz już profil? Zastąp `options`, `context_type` i `context_value` przez
 | Chcesz… | Użyj |
 | --- | --- |
 | Wysłać paczkę faktur | `client.batch_session(archive_bytes)` i `session.upload_parts()` |
+| Synchronizować metadane i pliki XML | `client.invoices.sync_documents(...)` i `.run_once(store, storage)` |
+| Synchronizować tylko metadane | `client.invoices.sync(...)` i `.run_once(store)` |
 | Pobrać XML faktury | `client.invoices.download(ksef_number)` |
 | Pobrać eksport na dysk | `client.exports.start(filters).download_to(destination, work_dir=work)` |
 | Kontynuować po przerwaniu | `operation.resume_state()` i `client.resume_operation(state)` |
@@ -217,6 +223,54 @@ Masz już profil? Zastąp `options`, `context_type` i `context_value` przez
 
 [Pełny przewodnik: XAdES, batch, eksport, timeout i wznowienie](docs/facade.md).
 Przy wznowieniu stan przechowuje aplikacja; może on zawierać klucze i tokeny.
+
+### Synchronizacja metadanych i XML
+
+Do lokalnego archiwum użyj `sync_documents()`. SDK pobierze metadane oraz XML,
+a SQLite zapamięta postęp i zadania pobrania. **Po przerwaniu uruchom ten sam kod
+z tą samą bazą i katalogiem XML** — gotowe dokumenty nie będą pobierane ponownie.
+Domyślnie synchronizowane są role sprzedawcy i nabywcy.
+
+Przykład jest samodzielny: wymaga zmiennych `KSEF_NIP` i `KSEF_TOKEN` dla TEST.
+Dla bieżącego checkoutu zainstaluj SDK przez `pip install -e .`.
+
+```python
+import os
+from ksef_client import (
+    Ksef, KsefClientOptions, KsefEnvironment, TokenCredentials, RetryConfig,
+    FileInvoiceXmlStore, SQLiteInvoiceSyncStore,
+)
+
+options = KsefClientOptions(
+    base_url=KsefEnvironment.TEST.value,
+    retry=RetryConfig(retryable_post_paths=frozenset({"/invoices/query/metadata"})),
+)
+with Ksef.connect(
+    options=options, context_type="Nip", context_value=os.environ["KSEF_NIP"],
+    credentials=TokenCredentials(os.environ["KSEF_TOKEN"]),
+) as client:
+    with FileInvoiceXmlStore("private/xml") as storage, SQLiteInvoiceSyncStore.open(
+        "private/invoices.db", enqueue_xml=True, xml_storage_id=storage.storage_id,
+    ) as store:
+        sync = client.invoices.sync_documents(
+            namespace="firma", sync_key="erp", since="2024-01-01T00:00:00Z",
+        )
+        report = sync.run_once(store, storage, time_budget=600, raise_on_error=False)
+        print(report.xml.ready, report.xml.observed, report.complete)
+```
+
+`private/invoices.db` zawiera metadane i kolejkę, a `private/xml` oryginalne pliki.
+`report.complete` potwierdza gotowość wszystkich odkrytych XML do granicy trwałego
+zapisu na serwerze (HWM).
+Przy częściowym wyniku ponów uruchomienie; przy `blocked` lub błędzie strumienia
+sprawdź przyczynę w `report.to_dict()`. Harmonogram należy do aplikacji — kolejne
+cykle są potrzebne również po sukcesie.
+
+Potrzebujesz wyłącznie metadanych? Wybierz `client.invoices.sync(...)` i
+`SQLiteInvoiceSyncStore.open(path)` bez włączania kolejki XML.
+
+[Przewodnik: wyniki, async, historia i odzyskiwanie](docs/invoice-xml-sync.md) ·
+[Gotowy skrypt z obsługą wyniku](docs/examples/invoice_sync_documents.py).
 
 ### Bezpośredni dostęp do API
 

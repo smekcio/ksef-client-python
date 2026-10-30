@@ -61,6 +61,8 @@ _ERROR_EXIT_CODES: dict[ErrorCode, ExitCode] = {
     ErrorCode.SYNC_STORE_ERROR: ExitCode.IO_ERROR,
     ErrorCode.SYNC_RUN_FAILED: ExitCode.API_ERROR,
     ErrorCode.RESPONSE_LIMIT_EXCEEDED: ExitCode.API_ERROR,
+    ErrorCode.XML_INTEGRITY_ERROR: ExitCode.VALIDATION_ERROR,
+    ErrorCode.XML_STORAGE_ERROR: ExitCode.IO_ERROR,
 }
 
 
