@@ -112,12 +112,20 @@ def diagnostic(
     previous_http = previous.get("metadata_http_status")
     if type(previous_http) is int and 100 <= previous_http <= 599:
         value["metadata_http_status"] = previous_http
+    previous_delay = previous.get("metadata_retry_after_seconds")
+    if type(previous_delay) is int and 0 <= previous_delay <= 86400:
+        value["metadata_retry_after_seconds"] = previous_delay
     current = transport_error
     for _ in range(8):
         if current is None:
             break
         if isinstance(current, KsefHttpError) and 100 <= current.status_code <= 599:
             value["metadata_http_status"] = current.status_code
+            raw = current.retry_after_raw
+            if isinstance(raw, str) and raw.isascii() and raw.isdigit() and len(raw) <= 5:
+                delay = int(raw)
+                if delay <= 86400:
+                    value["metadata_retry_after_seconds"] = delay
             break
         current = current.__cause__ or current.__context__
     if previous.get("failure") in {"deadline", "http", "sync", "assertion", "unexpected"}:

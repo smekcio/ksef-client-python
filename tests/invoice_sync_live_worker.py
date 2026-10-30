@@ -6,7 +6,6 @@ import json
 import os
 import sqlite3
 import sys
-import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -147,7 +146,7 @@ def run(phase: str) -> None:
             assert session.upo().wait(timeout=360).pages
             assert submitted.ksef_number
             submitted_number = canonical_ksef_number(submitted.ksef_number)
-            poll_end = min(time.monotonic() + 600, state["soft_deadline"])
+            poll_end = state["soft_deadline"]
             query = m.InvoiceQueryFilters(
                 subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
                 date_range=m.InvoiceQueryDateRange(

@@ -10,6 +10,11 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+# A TEST endpoint may require waiting for its hourly quota window. Each live
+# restart scenario has a hard watchdog and a soft deadline leaving cleanup time.
+LIVE_SCENARIO_TIMEOUT = 4500
+LIVE_SCENARIO_SOFT_TIMEOUT = LIVE_SCENARIO_TIMEOUT - 60
+
 
 def linux_process_running(pid: int) -> bool:
     try:

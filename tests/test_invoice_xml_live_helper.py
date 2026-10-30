@@ -176,7 +176,9 @@ def test_live_metadata_diagnostic_keeps_partial_reason_and_http_context_only(tmp
     path = tmp_path / "safe.json"
     try:
         try:
-            raise KsefHttpError(429, "private-token", {"secret": "private-response"})
+            raise KsefHttpError(
+                429, "private-token", {"secret": "private-response"}, retry_after_raw="3600"
+            )
         except KsefHttpError:
             raise KsefRateLimitWaitTimeout("private-deadline") from None
     except KsefRateLimitWaitTimeout as error:
@@ -191,6 +193,7 @@ def test_live_metadata_diagnostic_keeps_partial_reason_and_http_context_only(tmp
     worker.diagnostic(metadata_report=report, path=path)
     value = worker.diagnostic(path=path)
     assert value["metadata_http_status"] == 429
+    assert value["metadata_retry_after_seconds"] == 3600
     assert value["metadata_streams"] == [
         {"status": "partial", "reason": "time_budget", "pages": 0, "records": 0}
     ]

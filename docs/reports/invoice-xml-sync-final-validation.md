@@ -98,3 +98,22 @@ sprawdza kolejność close → session.wait → UPO → discovery, oba zapisy nu
 oraz bootstrap i inkrementalną kontynuację na tej samej bazie. Wynik nowego
 live wymaga ponownego sprawdzenia; przyczyna poprzedniego deadline nie jest
 jeszcze potwierdzona przez dozwolone kody transportu.
+
+## Potwierdzony powód oczekiwania: HTTP 429
+
+[41118426563](https://github.com/smekcio/ksef-client-python/actions/runs/41118426563)
+na `8a2b9c4`: ponownie **7 passed, 1 failed**. XML przeszedł; helper metadanych
+zakończył fazę inkrementalną z `metadata_http_status=429`,
+`metadata_streams=[partial/time_budget, pages=0, records=0]` i `failure=deadline`.
+Finalizacja sesji/UPO nie usunęła tego oczekiwania. To potwierdza limit API,
+a nie niezgodność hasha lub utratę zadania XML.
+
+KSeF przewiduje również limity godzinne; budżet 29 minut nie zapewniał
+obsługi pełnego takiego cooldownu po 429. Oba scenariusze
+restartu mają teraz 74-minutowy deadline i 75-minutowy nadzór procesów; cały job
+ma limit 160 minut, obejmujący oba możliwe cooldowny i pozostałe scenariusze.
+Pozwala to honorować pełne Retry-After bez zmiany limitów kontekstu TEST.
+Bez zmian pozostają wszystkie wymagane scenariusze, asercje i produktowe
+budżety SDK. Diagnostyka może dodatkowo zachować wyłącznie ograniczoną liczbową
+wartość Retry-After; dowolny tekst nagłówka nadal nie trafia do raportu.
+Nowy wynik pełnego live wymaga oddzielnego potwierdzenia.

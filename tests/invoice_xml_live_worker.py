@@ -69,7 +69,7 @@ def run(phase: str) -> None:
         ),
     )
     with (
-        request_control(deadline=state["soft_deadline"], timeout_seconds=600),
+        request_control(deadline=state["soft_deadline"]),
         Ksef.connect(
             options=options,
             credentials=TokenCredentials(config.token),
