@@ -41,10 +41,11 @@ def diagnostic(
     stage: str | None = None,
     report: Any = None,
     error: BaseException | None = None,
+    visibility: tuple[int, bool] | None = None,
     path: Path = Path("xml-live-diagnostic.json"),
 ) -> dict[str, Any]:
     """Persist only fixed stages, counts and SDK codes; never child output or queries."""
-    stages = {"connect", "submit", "observe", "metadata", "queued", "xml", "ready"}
+    stages = {"connect", "submit", "observe", "hwm_wait", "metadata", "queued", "xml", "ready"}
     try:
         previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     except (OSError, ValueError):
@@ -54,6 +55,13 @@ def diagnostic(
     }
     if value["stage"] not in stages:
         value["stage"] = "unknown"
+    if visibility is not None:
+        value["visible_count"], value["target_visible"] = visibility
+    else:
+        if type(previous.get("visible_count")) is int:
+            value["visible_count"] = previous["visible_count"]
+        if type(previous.get("target_visible")) is bool:
+            value["target_visible"] = previous["target_visible"]
     if report is not None:
         xml = report.xml
         for name in (
@@ -189,15 +197,24 @@ def run(phase: str) -> None:
                         context_key=client.context_key,
                     )
                     try:
-                        found = any(
-                            item.ksef_number is not None
-                            and canonical_ksef_number(item.ksef_number) == state["number"]
-                            for item in scan
-                        )
+                        cursor, visible, found = None, 0, False
+                        while True:
+                            page = scan.observation_page(cursor)
+                            visible += len(page.observations)
+                            found = found or any(
+                                item.ksef_number is not None
+                                and canonical_ksef_number(item.ksef_number) == state["number"]
+                                for item in page.observations
+                            )
+                            cursor = page.next_cursor
+                            if cursor is None:
+                                break
+                        diagnostic(stage="observe", visibility=(visible, found))
                     except KsefIncompletePaginationError as error:
                         if error.reason_code != "hwm_before_start":
                             raise
                         found = False
+                        diagnostic(stage="hwm_wait", visibility=(0, False))
                     if found:
                         diagnostic(stage="metadata")
                         sync.metadata.run_once(store, time_budget=120)

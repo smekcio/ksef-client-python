@@ -24,6 +24,11 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(
             if other_invoice:
                 server.rows.append(row(NUMBER2, hash_=HASH))
             api = initial.xml.client
+
+            def unbounded_poll(*args, **kwargs):
+                raise AssertionError("Live visibility must use the bounded observation path")
+
+            monkeypatch.setattr(api, "_query_invoice_metadata_search_page", unbounded_poll)
             client = SimpleNamespace(
                 context_key="Nip:test",
                 api=SimpleNamespace(invoices=api),
@@ -73,6 +78,7 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(
             assert server.downloads == (2 if other_invoice else 1)
             assert all(payload.get("ksefNumber") is None for payload, _, __ in server.calls)
             assert json.loads((tmp_path / "state.json").read_text())["complete"]
+            assert json.loads((tmp_path / "xml-live-diagnostic.json").read_text())["target_visible"]
 
     asyncio.run(run())
 
