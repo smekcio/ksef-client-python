@@ -6,29 +6,64 @@ import time
 from contextlib import nullcontext
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from ksef_client.rate_limiting import KsefRateLimitWaitTimeout
 from tests import invoice_xml_live_worker as worker
-from tests.test_invoice_sync import START, row
-from tests.test_invoice_xml_sync import HASH, NUMBER, NUMBER2, XML, environment
+from tests.test_invoice_sync import H1, START, row
+from tests.test_invoice_xml_sync import HASH, NUMBER, NUMBER2, XML, XmlServer, environment
 
 
+@pytest.mark.parametrize("blocked", [False, True])
+@pytest.mark.parametrize("extra", [False, True])
+@pytest.mark.parametrize("delayed", [False, True])
 @pytest.mark.parametrize("submitted_number", [NUMBER, NUMBER[:26] + "-" + NUMBER[26:]])
-@pytest.mark.parametrize("other_invoice", [False, True])
 def test_live_helper_completes_both_phases_with_real_sdk_adapters(
-    tmp_path, monkeypatch, submitted_number, other_invoice
+    tmp_path, monkeypatch, blocked, extra, delayed, submitted_number
 ):
     async def run():
-        async with environment(tmp_path, False) as (initial, _, __, server):
-            if other_invoice:
-                server.rows.append(row(NUMBER2, hash_=HASH))
+        server = XmlServer()
+        original = server.handle
+        visible = not delayed
+        waits = 0
+
+        def handle(request):
+            # Reproduce the live failure: exact-number metadata search stays empty
+            # even when the date-range scan can already observe the invoice.
+            if request.method == "POST" and (
+                not visible or "ksefNumber" in json.loads(request.content)
+            ):
+                return httpx.Response(
+                    200,
+                    stream=httpx.ByteStream(
+                        json.dumps(
+                            {
+                                "invoices": [],
+                                "hasMore": False,
+                                "isTruncated": False,
+                                "permanentStorageHwmDate": H1
+                                if visible
+                                else "2000-01-01T00:00:00Z",
+                            }
+                        ).encode()
+                    ),
+                    headers={"Content-Type": "application/json"},
+                )
+            return original(request)
+
+        monkeypatch.setattr(server, "handle", handle)
+        async with environment(tmp_path, False, server) as (initial, _, __, server):
             api = initial.xml.client
 
             def unbounded_poll(*args, **kwargs):
                 raise AssertionError("Live visibility must use the bounded observation path")
 
             monkeypatch.setattr(api, "_query_invoice_metadata_search_page", unbounded_poll)
+            if blocked:
+                server.rows.append(row("invalid-ksef-number", hash_=HASH))
+            if extra:
+                server.rows.insert(0, row(NUMBER2, hash_=HASH))
             client = SimpleNamespace(
                 context_key="Nip:test",
                 api=SimpleNamespace(invoices=api),
@@ -69,16 +104,52 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(
             monkeypatch.setattr(worker, "_build_invoice_xml", lambda **kwargs: XML)
 
             def unexpected_wait(*args):
-                raise AssertionError("Helper waited despite an observable invoice")
+                nonlocal visible, waits
+                if visible:
+                    raise AssertionError("Helper waited despite an observable invoice")
+                safe = json.loads((tmp_path / "xml-live-diagnostic.json").read_text())
+                assert safe["stage"] == "observe"
+                assert safe["observation"] == "hwm_before_start"
+                waits += 1
+                visible = True
 
             monkeypatch.setattr(worker, "wait_seconds", unexpected_wait)
+            if blocked:
+                with pytest.raises(worker.KsefXmlRunError) as caught:
+                    worker.run("metadata")
+                assert caught.value.xml_report.blocked == 1
+                safe = worker.diagnostic(error=caught.value)
+                assert safe["stage"] == "metadata"
+                assert safe["reasons"] == ["invalid_ksef_number"]
+                assert server.downloads == 0
+                assert waits == int(delayed)
+                return
             worker.run("metadata")
             assert server.downloads == 0
             worker.run("xml")
-            assert server.downloads == (2 if other_invoice else 1)
+            assert server.downloads == 1 + int(extra)
             assert all(payload.get("ksefNumber") is None for payload, _, __ in server.calls)
             assert json.loads((tmp_path / "state.json").read_text())["complete"]
             assert json.loads((tmp_path / "xml-live-diagnostic.json").read_text())["target_visible"]
+            assert json.loads((tmp_path / "state.json").read_text())["number"] == NUMBER
+            assert waits == int(delayed)
+
+    asyncio.run(run())
+
+
+def test_live_target_lookup_is_paginated_and_normalizes_legacy_alias(tmp_path):
+    async def run():
+        server = XmlServer(
+            [row(f"000-invalid-{index:03}", hash_=HASH) for index in range(100)]
+            + [row(NUMBER, hash_=HASH)]
+        )
+        async with environment(tmp_path, False, server) as (sync, store, _, __):
+            sync.metadata.run_once(store)
+            alias = NUMBER[:26] + "-" + NUMBER[26:]
+            target = worker.target_job(store, sync.xml.scopes, alias)
+            assert target is not None and target["ksef_number"] == NUMBER
+            assert target["status"] == "pending"
+            assert worker.target_job(store, sync.xml.scopes, NUMBER2) is None
 
     asyncio.run(run())
 

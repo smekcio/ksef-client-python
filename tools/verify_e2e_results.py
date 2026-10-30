@@ -99,11 +99,13 @@ def main(argv: list[str] | None = None) -> int:
             result = subprocess.run(
                 [
                     sys.executable,
+                    "-u",
                     "-m",
                     "pytest",
-                    "-q",
+                    "-v",
                     "--tb=short",
                     "--show-capture=no",
+                    "--durations=0",
                     "-o",
                     "xfail_strict=true",
                     f"--junitxml={args.report}",

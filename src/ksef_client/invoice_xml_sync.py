@@ -226,7 +226,7 @@ class _InvoiceXmlBase:
                         # response. Cancellation/deadline must not discard its full
                         # server cooldown when handing control back to the queue.
                         previous = error.__context__
-                        if isinstance(previous, KsefHttpError) and previous.status_code == 429:
+                        if isinstance(previous, KsefHttpError):
                             retry = _failure(previous, claim, self.max_failures)
                             counts["errors"] += 1
                         else:
