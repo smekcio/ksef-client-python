@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-29",
+  "base_commit": "bcbd0525ce06fa2d06fe2372519aae72182ff110",
+  "branch": "fix/invoice-xml-final-review",
+  "platform": "Linux x86_64, Debian through WSL",
+  "python": "3.12.13",
+  "dependencies": "requirements-ci.lock",
+  "command": ".venv/bin/python -m pytest -q --cov=ksef_client --cov-fail-under=100 --cov-report=term-missing --cov-report=json:.coverage-review.json --cov-report=xml:coverage.xml",
+  "exit_code": 0,
+  "passed": 3752,
+  "skipped": 14,
+  "subtests_passed": 61,
+  "warnings": 1,
+  "duration_seconds": 165.97,
+  "coverage": {
+    "type": "line",
+    "covered_lines": 20144,
+    "num_statements": 20144,
+    "missing_lines": 0,
+    "percent_covered": 100.0,
+    "all_modules_have_zero_missing_lines": true,
+    "single_full_run": true,
+    "coverage_configuration_changed": false
+  },
+  "source_sha256": {
+    "src/ksef_client/invoice_xml_sync.py": "05695345b158e33580079bd47f1114025aa38817f82efe3b10be99497491ba1c",
+    "src/ksef_client/utils/ksef_number.py": "bced91beb1ce9a07e6cf29439738f4a26fcc9a72349713163bb793dd967df2f0",
+    "tests/test_invoice_xml_final_review.py": "985037b44eab0b0668a9e7f990d1078ce52f69b43d2fc563b01bd1ca9e674875"
+  },
+  "strict_lint": "passed",
+  "live_ksef_run": false
+}
