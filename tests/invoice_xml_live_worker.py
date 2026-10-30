@@ -25,6 +25,7 @@ from ksef_client import (  # noqa: E402
     models as m,
 )
 from ksef_client.exceptions import KsefHttpError, KsefSyncRunError  # noqa: E402
+from ksef_client.invoice_xml_types import KsefXmlRunError  # noqa: E402
 from ksef_client.rate_limiting import KsefRateLimitWaitTimeout  # noqa: E402
 from ksef_client.request_control import request_control, wait_seconds  # noqa: E402
 from ksef_client.sqlite_store import SAFE_REASONS  # noqa: E402
@@ -36,9 +37,29 @@ from tests.test_e2e_token_flows import (  # noqa: E402
 )
 
 
+def document_number(number: str) -> str:
+    try:
+        return canonical_ksef_number(number)
+    except ValueError:
+        # Let the real queue quarantine malformed server metadata and report its code.
+        return number
+
+
+def target_job(store: Any, scopes: Any, number: str) -> dict[str, Any] | None:
+    number = document_number(number)
+    after = ""
+    while rows := store.list_xml(scopes, after=after, limit=100):
+        for row in rows:
+            if row["ksef_number"] == number:
+                return row
+        after = rows[-1]["ksef_number"]
+    return None
+
+
 def diagnostic(
     *,
     stage: str | None = None,
+    observation: str | None = None,
     report: Any = None,
     error: BaseException | None = None,
     path: Path = Path("xml-live-diagnostic.json"),
@@ -54,6 +75,10 @@ def diagnostic(
     }
     if value["stage"] not in stages:
         value["stage"] = "unknown"
+    if value["stage"] == "observe":
+        observed = observation if observation is not None else previous.get("observation")
+        if isinstance(observed, str) and observed in {"hwm_before_start", "not_visible", "visible"}:
+            value["observation"] = observed
     if report is not None:
         xml = report.xml
         for name in (
@@ -147,6 +172,7 @@ def run(phase: str) -> None:
             assert isinstance(result.ksef_number, str) and result.ksef_number
             state["number"] = canonical_ksef_number(result.ksef_number)
             state_path.write_text(json.dumps(state), encoding="utf-8")
+        expected_number = document_number(state["number"])
         query = m.InvoiceQueryFilters(
             subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
             date_range=m.InvoiceQueryDateRange(
@@ -166,14 +192,6 @@ def run(phase: str) -> None:
                 xml_storage_id=storage.storage_id,
             ) as store,
         ):
-
-            def target_status() -> str | None:
-                row = store.connection.execute(
-                    "SELECT status FROM invoice_xml_documents WHERE ksef_number=?",
-                    (state["number"],),
-                ).fetchone()
-                return row[0] if row is not None else None
-
             if phase == "metadata":
                 # Wait for the new invoice to enter the metadata repository, then commit
                 # its real page/checkpoint/job without making any XML request.
@@ -191,35 +209,44 @@ def run(phase: str) -> None:
                     try:
                         found = any(
                             item.ksef_number is not None
-                            and canonical_ksef_number(item.ksef_number) == state["number"]
+                            and document_number(item.ksef_number) == expected_number
                             for item in scan
                         )
+                        observation = "visible" if found else "not_visible"
                     except KsefIncompletePaginationError as error:
                         if error.reason_code != "hwm_before_start":
                             raise
                         found = False
+                        observation = "hwm_before_start"
+                    diagnostic(stage="observe", observation=observation)
                     if found:
                         diagnostic(stage="metadata")
                         sync.metadata.run_once(store, time_budget=120)
                         report = sync.describe(store)
                         diagnostic(stage="metadata", report=report)
-                        if target_status() == "pending" and report.metadata_complete:
+                        if report.xml.blocked:
+                            raise KsefXmlRunError(report)
+                        target = target_job(store, sync.xml.scopes, state["number"])
+                        if target and target["status"] == "pending" and report.metadata_complete:
                             break
                     wait_seconds(30)
                 assert report.xml.pending >= 1 and report.xml.ready == 0 and not report.complete
                 diagnostic(stage="queued", report=report)
             else:
-                assert target_status() == "pending" and sync.describe(store).xml.pending >= 1
+                target = target_job(store, sync.xml.scopes, state["number"])
+                assert target is not None and target["status"] == "pending"
                 while True:
                     diagnostic(stage="xml")
                     report_xml = sync.xml.run_once(store, storage, time_budget=120)
                     diagnostic(stage="xml", report=report_xml)
-                    if report_xml.xml_ready_for_observed and target_status() == "ready":
+                    if report_xml.observed and report_xml.xml_ready_for_observed:
                         break
                     wait_seconds(30)
                 again = sync.xml.run_once(store, storage)
-                assert again.ready >= 1 and again.xml_ready_for_observed
+                assert again.ready == report_xml.observed
                 assert again.downloaded == 0 and again.claims == 0
+                target = target_job(store, sync.xml.scopes, state["number"])
+                assert target is not None and target["status"] == "ready"
                 report = sync.describe(store)
                 assert report.complete
                 diagnostic(stage="ready", report=report)

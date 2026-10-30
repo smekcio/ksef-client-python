@@ -53,10 +53,10 @@ def run_phases(
     grace: float = 10,
 ) -> None:
     deadline = time.monotonic() + timeout
-    for command in commands:
+    for phase, command in enumerate(commands, 1):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise TimeoutError("Invoice sync process watchdog expired")
+            raise TimeoutError(f"Invoice sync process watchdog expired before phase {phase}")
         options = {"start_new_session": True} if os.name == "posix" else {"creationflags": 0x200}
         process = subprocess.Popen(
             command,
@@ -72,9 +72,14 @@ def run_phases(
         except BaseException as error:
             _stop(process, grace)
             if isinstance(error, subprocess.TimeoutExpired):
-                raise TimeoutError("Invoice sync process watchdog interrupted a phase") from None
+                raise TimeoutError(
+                    f"Invoice sync process watchdog interrupted phase {phase}"
+                ) from None
             raise
         # Reap descendants also when their leader exited successfully.
         _stop(process, grace)
         if process.returncode:
-            raise RuntimeError("Invoice sync phase failed (private output withheld)")
+            raise RuntimeError(
+                f"Invoice sync phase {phase} failed "
+                f"(exit {process.returncode}; private output withheld)"
+            )
