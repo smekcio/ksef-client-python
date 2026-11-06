@@ -65,7 +65,9 @@ jobs:
   required-test:
     needs: build-development
     if: ${{ always() && !cancelled() && (inputs.artifact-name != '' || needs.build-development.result == 'success') }}
-    runs-on: ubuntu-latest
+    # Ubuntu 26.04 renamed libxmlsec1-openssl to libxmlsec1-openssl1.
+    # Keep this runner pinned until the package installation is distro-agnostic.
+    runs-on: ubuntu-24.04
     environment: ksef-test
     # Both restart scenarios may encounter a full hourly TEST API cooldown.
     timeout-minutes: 160
