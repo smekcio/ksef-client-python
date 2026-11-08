@@ -100,6 +100,22 @@ def test_e2e_rate_limit_retry_honors_retry_after(monkeypatch):
     sleep.assert_called_once_with(12.0)
 
 
+def test_e2e_rate_limit_retry_caps_retry_after(monkeypatch):
+    monkeypatch.setenv("KSEF_E2E_RATE_LIMIT_RETRIES", "2")
+    monkeypatch.setenv("KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS", "5")
+    call_operation = Mock(
+        side_effect=[
+            KsefRateLimitError(429, "Too Many Requests", retry_after=900),
+            "ok",
+        ]
+    )
+
+    with patch("tests.test_e2e_token_flows.time.sleep") as sleep:
+        assert _with_rate_limit_retry(call_operation) == "ok"
+
+    sleep.assert_called_once_with(5.0)
+
+
 def test_e2e_rate_limit_retry_uses_bounded_exponential_backoff(monkeypatch):
     monkeypatch.setenv("KSEF_E2E_RATE_LIMIT_RETRIES", "4")
     monkeypatch.setenv("KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS", "2")

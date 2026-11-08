@@ -137,7 +137,10 @@ def _with_rate_limit_retry(call: Callable[[], T]) -> T:
             if attempt == retries - 1:
                 raise
             if error.retry_after is not None:
-                sleep_seconds = float(error.retry_after)
+                # A misconfigured or overloaded demo endpoint can return a
+                # very large Retry-After value. Never let one response sleep
+                # past the bounded retry policy (and the CI job timeout).
+                sleep_seconds = min(max(float(error.retry_after), 0.0), max_delay)
             else:
                 sleep_seconds = min(delay * (2**attempt), max_delay)
             time.sleep(sleep_seconds)
@@ -735,18 +738,22 @@ def _run_full_e2e_flow(config: E2EConfig) -> None:
                 _extract_ksef_number(invoice) == ksef_number for invoice in invoices_in_session
             ), "Sent invoice not found in session invoice list."
 
+            def refresh_access_token() -> str:
+                nonlocal access_token
+                access_token = _authenticate_access_token(
+                    client,
+                    config=config,
+                    token_cert=token_cert,
+                )
+                return access_token
+
             metadata_invoices = _poll_metadata_until_contains(
                 client,
                 access_token=access_token,
                 subject_type=config.subject_type,
                 expected_ksef_number=ksef_number,
                 # Metadata indexing can outlive the access-token lifetime in demo.
-                refresh_access_token=partial(
-                    _authenticate_access_token,
-                    client,
-                    config=config,
-                    token_cert=token_cert,
-                ),
+                refresh_access_token=refresh_access_token,
             )
             latest_ksef_number = _first_ksef_number(metadata_invoices)
 
