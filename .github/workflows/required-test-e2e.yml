@@ -69,7 +69,8 @@ jobs:
     # Keep this runner pinned until the package installation is distro-agnostic.
     runs-on: ubuntu-24.04
     environment: ksef-test
-    timeout-minutes: 60
+    # TEST API can require a full hourly cooldown during the seven live scenarios.
+    timeout-minutes: 160
     concurrency:
       group: ksef-test-live
       cancel-in-progress: false
