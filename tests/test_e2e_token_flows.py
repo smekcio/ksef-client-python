@@ -719,6 +719,15 @@ def _run_full_e2e_flow(config: E2EConfig) -> None:
                 _extract_ksef_number(invoice) == ksef_number for invoice in invoices_in_session
             ), "Sent invoice not found in session invoice list."
 
+            # Metadata indexing can take longer than the access-token lifetime in demo.
+            # Re-authenticate before the final read so a slow but successful flow does not
+            # fail with 401 while waiting for the invoice to become searchable.
+            access_token = _authenticate_access_token(
+                client,
+                config=config,
+                token_cert=token_cert,
+            )
+            assert access_token, "Re-authentication did not return access token."
             metadata_invoices = _poll_metadata_until_contains(
                 client,
                 access_token=access_token,
