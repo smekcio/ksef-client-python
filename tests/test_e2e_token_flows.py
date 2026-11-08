@@ -8,6 +8,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from functools import partial
 from typing import TypeVar
 
@@ -116,10 +117,36 @@ def _select_certificate(certs: list[m.PublicKeyCertificate], usage_name: str) ->
     raise RuntimeError(f"Missing public cert usage: {usage_name}")
 
 
+def _retry_after_seconds(error: KsefRateLimitError) -> float | None:
+    """Read the server cooldown before falling back to the SDK's capped value."""
+    raw_value = error.retry_after_raw
+    if isinstance(raw_value, str):
+        normalized_value = raw_value.strip()
+        if normalized_value.isdigit():
+            return max(float(normalized_value), 0.0)
+        try:
+            retry_after_dt = parsedate_to_datetime(normalized_value)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            pass
+        else:
+            if retry_after_dt.tzinfo is None:
+                retry_after_dt = retry_after_dt.replace(tzinfo=timezone.utc)
+            delay_seconds = (
+                retry_after_dt.astimezone(timezone.utc) - datetime.now(timezone.utc)
+            ).total_seconds()
+            return max(
+                delay_seconds,
+                0.0,
+            )
+    if error.retry_after is None:
+        return None
+    return max(float(error.retry_after), 0.0)
+
+
 def _with_rate_limit_retry(call: Callable[[], T]) -> T:
     retries = _env_int("KSEF_E2E_RATE_LIMIT_RETRIES", 3)
     delay = _env_float("KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS", 5.0)
-    max_delay = _env_float("KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS", 60.0)
+    max_delay = _env_float("KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS", 300.0)
     if retries < 1:
         raise ValueError("KSEF_E2E_RATE_LIMIT_RETRIES must be >= 1")
     if delay < 0:
@@ -136,11 +163,11 @@ def _with_rate_limit_retry(call: Callable[[], T]) -> T:
         except KsefRateLimitError as error:
             if attempt == retries - 1:
                 raise
-            if error.retry_after is not None:
-                # A misconfigured or overloaded demo endpoint can return a
-                # very large Retry-After value. Never let one response sleep
-                # past the bounded retry policy (and the CI job timeout).
-                sleep_seconds = min(max(float(error.retry_after), 0.0), max_delay)
+            retry_after_seconds = _retry_after_seconds(error)
+            if retry_after_seconds is not None:
+                # The SDK caps its parsed value at 300 s, but KSeF's demo
+                # window can return a longer raw cooldown after repeated 429s.
+                sleep_seconds = min(retry_after_seconds, max_delay)
             else:
                 sleep_seconds = min(delay * (2**attempt), max_delay)
             time.sleep(sleep_seconds)

@@ -50,10 +50,10 @@ jobs:
       group: ksef-demo-e2e
       cancel-in-progress: false
     env:
-      # KSeF's demo window can require the full SDK Retry-After cooldown.
-      KSEF_E2E_RATE_LIMIT_RETRIES: "3"
+      # KSeF's demo window can require a cooldown longer than the SDK cap.
+      KSEF_E2E_RATE_LIMIT_RETRIES: "2"
       KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS: "5"
-      KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "300"
+      KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "900"
       # Metadata indexing is rate-limited; leave a safety margin over one minute.
       KSEF_E2E_METADATA_POLL_INTERVAL_SECONDS: "90"
 
@@ -129,16 +129,16 @@ jobs:
     if: github.event_name != 'pull_request' && inputs.test-only != true
     runs-on: ubuntu-24.04
     environment: ksef-demo
-    timeout-minutes: 40
+    timeout-minutes: 50
     # Keep this job behind any other demo job to avoid deterministic 429s.
     concurrency:
       group: ksef-demo-e2e
       cancel-in-progress: false
     env:
-      # KSeF's demo window can require the full SDK Retry-After cooldown.
-      KSEF_E2E_RATE_LIMIT_RETRIES: "3"
+      # KSeF's demo window can require a cooldown longer than the SDK cap.
+      KSEF_E2E_RATE_LIMIT_RETRIES: "2"
       KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS: "5"
-      KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "300"
+      KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "900"
       # Metadata indexing is rate-limited; leave a safety margin over one minute.
       KSEF_E2E_METADATA_POLL_INTERVAL_SECONDS: "90"
 
