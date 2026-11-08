@@ -44,7 +44,7 @@ jobs:
     if: github.event_name != 'pull_request' && inputs.test-only != true
     runs-on: ubuntu-24.04
     environment: ksef-demo
-    timeout-minutes: 50
+    timeout-minutes: 70
     # The demo API rate limit is shared by token and XAdES scenarios.
     concurrency:
       group: ksef-demo-e2e
@@ -129,7 +129,7 @@ jobs:
     if: github.event_name != 'pull_request' && inputs.test-only != true
     runs-on: ubuntu-24.04
     environment: ksef-demo
-    timeout-minutes: 50
+    timeout-minutes: 70
     # Keep this job behind any other demo job to avoid deterministic 429s.
     concurrency:
       group: ksef-demo-e2e
