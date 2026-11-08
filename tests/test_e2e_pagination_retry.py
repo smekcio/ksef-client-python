@@ -11,10 +11,14 @@ import httpx
 import pytest
 
 from ksef_client import KsefClient, KsefRateLimitError
+from ksef_client.exceptions import KsefAuthenticationError
 from ksef_client.http import BaseHttpClient
 from ksef_client.retry import should_retry_request
 from tests.test_e2e_pagination import _CHILD, _metadata_options
-from tests.test_e2e_token_flows import _with_rate_limit_retry
+from tests.test_e2e_token_flows import (
+    _poll_metadata_until_contains,
+    _with_rate_limit_retry,
+)
 from tests.test_invoice_search import filters, invoice, response
 
 
@@ -113,3 +117,29 @@ def test_e2e_rate_limit_retry_uses_bounded_exponential_backoff(monkeypatch):
         assert _with_rate_limit_retry(call_operation) == "ok"
 
     assert sleep.call_args_list == [call(2.0), call(4.0), call(5.0)]
+
+
+def test_metadata_poll_refreshes_access_token_after_401(monkeypatch):
+    monkeypatch.setenv("KSEF_E2E_METADATA_MAX_ATTEMPTS", "2")
+    client = Mock()
+    query = Mock(
+        side_effect=[
+            KsefAuthenticationError(401, "API error"),
+            [invoice(2)],
+        ]
+    )
+    refresh = Mock(return_value="new-access-token")
+
+    with patch("tests.test_e2e_token_flows._query_invoice_metadata", query):
+        invoices = _poll_metadata_until_contains(
+            client,
+            access_token="expired-access-token",
+            subject_type="Subject1",
+            expected_ksef_number="2",
+            refresh_access_token=refresh,
+        )
+
+    assert invoices == [invoice(2)]
+    refresh.assert_called_once_with()
+    assert query.call_args_list[0].kwargs["access_token"] == "expired-access-token"
+    assert query.call_args_list[1].kwargs["access_token"] == "new-access-token"

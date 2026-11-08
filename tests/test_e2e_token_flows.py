@@ -18,7 +18,11 @@ from cryptography.hazmat.primitives.serialization import load_der_private_key, l
 
 from ksef_client import KsefClient, KsefClientOptions, KsefEnvironment
 from ksef_client import models as m
-from ksef_client.exceptions import KsefHttpError, KsefRateLimitError
+from ksef_client.exceptions import (
+    KsefAuthenticationError,
+    KsefHttpError,
+    KsefRateLimitError,
+)
 from ksef_client.services import AuthCoordinator, OnlineSessionWorkflow
 from ksef_client.services.auth import DEFAULT_AUTH_TOKEN_REQUEST_SCHEMA_VERSION
 
@@ -470,16 +474,28 @@ def _poll_metadata_until_contains(
     access_token: str,
     subject_type: str,
     expected_ksef_number: str,
+    refresh_access_token: Callable[[], str] | None = None,
 ) -> list[m.InvoiceMetadata]:
     max_attempts = _env_int("KSEF_E2E_METADATA_MAX_ATTEMPTS", 45)
     poll_interval = _env_float("KSEF_E2E_POLL_INTERVAL_SECONDS", 2.0)
+    max_token_refreshes = _env_int("KSEF_E2E_AUTH_REFRESH_RETRIES", 2)
+    if max_token_refreshes < 0:
+        raise ValueError("KSEF_E2E_AUTH_REFRESH_RETRIES must be >= 0")
+    token_refreshes = 0
 
     for _ in range(max_attempts):
-        invoices = _query_invoice_metadata(
-            client,
-            access_token=access_token,
-            subject_type=subject_type,
-        )
+        try:
+            invoices = _query_invoice_metadata(
+                client,
+                access_token=access_token,
+                subject_type=subject_type,
+            )
+        except KsefAuthenticationError:
+            if refresh_access_token is None or token_refreshes >= max_token_refreshes:
+                raise
+            access_token = refresh_access_token()
+            token_refreshes += 1
+            continue
         if any(_extract_ksef_number(invoice) == expected_ksef_number for invoice in invoices):
             return invoices
         time.sleep(poll_interval)
@@ -719,20 +735,18 @@ def _run_full_e2e_flow(config: E2EConfig) -> None:
                 _extract_ksef_number(invoice) == ksef_number for invoice in invoices_in_session
             ), "Sent invoice not found in session invoice list."
 
-            # Metadata indexing can take longer than the access-token lifetime in demo.
-            # Re-authenticate before the final read so a slow but successful flow does not
-            # fail with 401 while waiting for the invoice to become searchable.
-            access_token = _authenticate_access_token(
-                client,
-                config=config,
-                token_cert=token_cert,
-            )
-            assert access_token, "Re-authentication did not return access token."
             metadata_invoices = _poll_metadata_until_contains(
                 client,
                 access_token=access_token,
                 subject_type=config.subject_type,
                 expected_ksef_number=ksef_number,
+                # Metadata indexing can outlive the access-token lifetime in demo.
+                refresh_access_token=partial(
+                    _authenticate_access_token,
+                    client,
+                    config=config,
+                    token_cert=token_cert,
+                ),
             )
             latest_ksef_number = _first_ksef_number(metadata_invoices)
 
