@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import json
 from contextlib import closing, redirect_stdout
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import httpx
 import pytest
@@ -14,6 +14,7 @@ from ksef_client import KsefClient, KsefRateLimitError
 from ksef_client.http import BaseHttpClient
 from ksef_client.retry import should_retry_request
 from tests.test_e2e_pagination import _CHILD, _metadata_options
+from tests.test_e2e_token_flows import _with_rate_limit_retry
 from tests.test_invoice_search import filters, invoice, response
 
 
@@ -78,3 +79,37 @@ def test_cursor_child_has_the_same_bounded_read_only_retry(monkeypatch):
     assert not should_retry_request("POST", "/sessions/online/session/invoices", 429, options.retry)
     search.items.assert_called_once_with("DUMMY_CURSOR")
     assert json.loads(output.getvalue()) == ["2"]
+
+
+def test_e2e_rate_limit_retry_honors_retry_after(monkeypatch):
+    monkeypatch.setenv("KSEF_E2E_RATE_LIMIT_RETRIES", "2")
+    call_operation = Mock(
+        side_effect=[
+            KsefRateLimitError(429, "Too Many Requests", retry_after=12),
+            "ok",
+        ]
+    )
+
+    with patch("tests.test_e2e_token_flows.time.sleep") as sleep:
+        assert _with_rate_limit_retry(call_operation) == "ok"
+
+    sleep.assert_called_once_with(12.0)
+
+
+def test_e2e_rate_limit_retry_uses_bounded_exponential_backoff(monkeypatch):
+    monkeypatch.setenv("KSEF_E2E_RATE_LIMIT_RETRIES", "4")
+    monkeypatch.setenv("KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS", "2")
+    monkeypatch.setenv("KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS", "5")
+    call_operation = Mock(
+        side_effect=[
+            KsefRateLimitError(429, "Too Many Requests"),
+            KsefRateLimitError(429, "Too Many Requests"),
+            KsefRateLimitError(429, "Too Many Requests"),
+            "ok",
+        ]
+    )
+
+    with patch("tests.test_e2e_token_flows.time.sleep") as sleep:
+        assert _with_rate_limit_retry(call_operation) == "ok"
+
+    assert sleep.call_args_list == [call(2.0), call(4.0), call(5.0)]

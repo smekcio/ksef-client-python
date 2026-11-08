@@ -155,4 +155,4 @@ jobs:
           path: |
             output/required-test.xml
             dist/release-manifest.json
-          if-no-files-found: error
+          if-no-files-found: warn

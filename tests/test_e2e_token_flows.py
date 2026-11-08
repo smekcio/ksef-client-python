@@ -115,13 +115,28 @@ def _select_certificate(certs: list[m.PublicKeyCertificate], usage_name: str) ->
 def _with_rate_limit_retry(call: Callable[[], T]) -> T:
     retries = _env_int("KSEF_E2E_RATE_LIMIT_RETRIES", 3)
     delay = _env_float("KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS", 5.0)
+    max_delay = _env_float("KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS", 60.0)
+    if retries < 1:
+        raise ValueError("KSEF_E2E_RATE_LIMIT_RETRIES must be >= 1")
+    if delay < 0:
+        raise ValueError("KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS must be >= 0")
+    if max_delay < delay:
+        raise ValueError(
+            "KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS must be >= "
+            "KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS"
+        )
+
     for attempt in range(retries):
         try:
             return call()
-        except KsefRateLimitError:
+        except KsefRateLimitError as error:
             if attempt == retries - 1:
                 raise
-            time.sleep(delay)
+            if error.retry_after is not None:
+                sleep_seconds = float(error.retry_after)
+            else:
+                sleep_seconds = min(delay * (2**attempt), max_delay)
+            time.sleep(sleep_seconds)
     raise RuntimeError("Rate limit retry loop terminated unexpectedly.")
 
 
@@ -477,7 +492,8 @@ def _build_invoice_xml(*, seller_nip: str, environment_name: str) -> bytes:
     period_start = now.date().replace(day=1).isoformat()
     payment_due = (now.date() + timedelta(days=14)).isoformat()
     invoice_number = (
-        f"E2E/{environment_name.upper()}/{now.strftime('%Y%m%d%H%M%S')}/{uuid.uuid4().hex[:8]}"
+        f"E2E/{environment_name.upper()}/{now.strftime('%Y%m%d%H%M%S')}/"
+        f"{uuid.uuid4().hex[:8]}"
     )
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>

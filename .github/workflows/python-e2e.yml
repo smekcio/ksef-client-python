@@ -42,9 +42,17 @@ jobs:
   e2e-demo-token:
     name: E2E DEMO (token)
     if: github.event_name != 'pull_request' && inputs.test-only != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: ksef-demo
     timeout-minutes: 50
+    # The demo API rate limit is shared by token and XAdES scenarios.
+    concurrency:
+      group: ksef-demo-e2e
+      cancel-in-progress: false
+    env:
+      KSEF_E2E_RATE_LIMIT_RETRIES: "8"
+      KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS: "5"
+      KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "60"
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -116,9 +124,17 @@ jobs:
   e2e-demo-xades:
     name: E2E DEMO (xades)
     if: github.event_name != 'pull_request' && inputs.test-only != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: ksef-demo
     timeout-minutes: 40
+    # Keep this job behind any other demo job to avoid deterministic 429s.
+    concurrency:
+      group: ksef-demo-e2e
+      cancel-in-progress: false
+    env:
+      KSEF_E2E_RATE_LIMIT_RETRIES: "8"
+      KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS: "5"
+      KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "60"
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
