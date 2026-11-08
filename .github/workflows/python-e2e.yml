@@ -50,11 +50,12 @@ jobs:
       group: ksef-demo-e2e
       cancel-in-progress: false
     env:
-      KSEF_E2E_RATE_LIMIT_RETRIES: "8"
+      # KSeF's demo window can require the full SDK Retry-After cooldown.
+      KSEF_E2E_RATE_LIMIT_RETRIES: "3"
       KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS: "5"
-      KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "60"
-      # Metadata indexing is rate-limited; poll it at most once per minute.
-      KSEF_E2E_METADATA_POLL_INTERVAL_SECONDS: "60"
+      KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "300"
+      # Metadata indexing is rate-limited; leave a safety margin over one minute.
+      KSEF_E2E_METADATA_POLL_INTERVAL_SECONDS: "90"
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -134,11 +135,12 @@ jobs:
       group: ksef-demo-e2e
       cancel-in-progress: false
     env:
-      KSEF_E2E_RATE_LIMIT_RETRIES: "8"
+      # KSeF's demo window can require the full SDK Retry-After cooldown.
+      KSEF_E2E_RATE_LIMIT_RETRIES: "3"
       KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS: "5"
-      KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "60"
-      # Metadata indexing is rate-limited; poll it at most once per minute.
-      KSEF_E2E_METADATA_POLL_INTERVAL_SECONDS: "60"
+      KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "300"
+      # Metadata indexing is rate-limited; leave a safety margin over one minute.
+      KSEF_E2E_METADATA_POLL_INTERVAL_SECONDS: "90"
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
