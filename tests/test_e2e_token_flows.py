@@ -480,7 +480,9 @@ def _poll_metadata_until_contains(
     refresh_access_token: Callable[[], str] | None = None,
 ) -> list[m.InvoiceMetadata]:
     max_attempts = _env_int("KSEF_E2E_METADATA_MAX_ATTEMPTS", 45)
-    poll_interval = _env_float("KSEF_E2E_POLL_INTERVAL_SECONDS", 2.0)
+    poll_interval = _env_float("KSEF_E2E_METADATA_POLL_INTERVAL_SECONDS", 60.0)
+    if poll_interval < 0:
+        raise ValueError("KSEF_E2E_METADATA_POLL_INTERVAL_SECONDS must be >= 0")
     max_token_refreshes = _env_int("KSEF_E2E_AUTH_REFRESH_RETRIES", 2)
     if max_token_refreshes < 0:
         raise ValueError("KSEF_E2E_AUTH_REFRESH_RETRIES must be >= 0")

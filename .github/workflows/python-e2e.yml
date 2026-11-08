@@ -53,6 +53,8 @@ jobs:
       KSEF_E2E_RATE_LIMIT_RETRIES: "8"
       KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS: "5"
       KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "60"
+      # Metadata indexing is rate-limited; poll it at most once per minute.
+      KSEF_E2E_METADATA_POLL_INTERVAL_SECONDS: "60"
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -135,6 +137,8 @@ jobs:
       KSEF_E2E_RATE_LIMIT_RETRIES: "8"
       KSEF_E2E_RATE_LIMIT_SLEEP_SECONDS: "5"
       KSEF_E2E_RATE_LIMIT_MAX_SLEEP_SECONDS: "60"
+      # Metadata indexing is rate-limited; poll it at most once per minute.
+      KSEF_E2E_METADATA_POLL_INTERVAL_SECONDS: "60"
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5

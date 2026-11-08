@@ -159,3 +159,23 @@ def test_metadata_poll_refreshes_access_token_after_401(monkeypatch):
     refresh.assert_called_once_with()
     assert query.call_args_list[0].kwargs["access_token"] == "expired-access-token"
     assert query.call_args_list[1].kwargs["access_token"] == "new-access-token"
+
+
+def test_metadata_poll_uses_rate_limit_safe_interval(monkeypatch):
+    monkeypatch.setenv("KSEF_E2E_METADATA_MAX_ATTEMPTS", "2")
+    client = Mock()
+    query = Mock(side_effect=[[], [invoice(2)]])
+
+    with (
+        patch("tests.test_e2e_token_flows._query_invoice_metadata", query),
+        patch("tests.test_e2e_token_flows.time.sleep") as sleep,
+    ):
+        invoices = _poll_metadata_until_contains(
+            client,
+            access_token="access-token",
+            subject_type="Subject1",
+            expected_ksef_number="2",
+        )
+
+    assert invoices == [invoice(2)]
+    sleep.assert_called_once_with(60.0)
