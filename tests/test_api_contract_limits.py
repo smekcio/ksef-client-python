@@ -10,12 +10,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import ModuleType
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
-from typer.main import get_command
+from typer.testing import CliRunner
 
 from ksef_client.cli import app as cli_app
+from ksef_client.cli import typer_app
+from ksef_client.cli.commands import invoice_cmd, iz_cmd
+from ksef_client.cli.config.schema import CliConfig
 from ksef_client.clients.invoices import INVOICE_QUERY_MAX_RANGE_DAYS
 from ksef_client.utils import (
     MAX_BATCH_PART_SIZE_BYTES,
@@ -47,13 +52,6 @@ def _page_size_limits(path: str, method: str) -> tuple[int, int]:
             schema = entry["schema"]
             return schema["minimum"], schema["maximum"]
     raise AssertionError(f"brak parametru pageSize w {method.upper()} {path}")
-
-
-def _cli_param(command_path: list[str], name: str) -> Any:
-    command: Any = get_command(cli_app)
-    for part in command_path:
-        command = command.commands[part]
-    return next(param for param in command.params if param.name == name)
 
 
 def test_page_size_minimum_is_the_same_for_every_endpoint() -> None:
@@ -90,23 +88,59 @@ def test_sdk_page_size_constants_match_the_contract(
     )
 
 
-def test_cli_page_size_bounds_match_the_contract() -> None:
-    """Opcje CLI mają przyjmować dokładnie zakres z kontraktu (inaczej blokują legalne wartości)."""
-    cases = {
-        ("invoice", "list"): ("/invoices/query/metadata", "post"),
-        ("iz", "query"): ("/collective-identifiers/query", "post"),
-        ("iz", "by-ksef"): ("/collective-identifiers/ksef/{ksefNumber}", "get"),
-        ("iz", "invoices"): ("/collective-identifiers/invoices", "post"),
-    }
-    for command_path, (path, method) in cases.items():
-        minimum, maximum = _page_size_limits(path, method)
-        param = _cli_param(list(command_path), "page_size")
-        command_name = " ".join(command_path)
-        assert param.type.min == minimum, f"{command_name}: min {param.type.min} != {minimum}"
-        assert param.type.max == maximum, (
-            f"{command_name}: max {param.type.max} != {maximum} "
-            f"(kontrakt {method.upper()} {path})"
-        )
+@pytest.mark.parametrize(
+    ("args", "module", "service_name", "path", "method"),
+    [
+        (["invoice", "list"], invoice_cmd, "list_invoices", "/invoices/query/metadata", "post"),
+        (
+            ["iz", "query", "--from", "2026-01-01", "--to", "2026-01-02"],
+            iz_cmd,
+            "query_collective_identifiers",
+            "/collective-identifiers/query",
+            "post",
+        ),
+        (
+            ["iz", "by-ksef", "--ksef-number", "example"],
+            iz_cmd,
+            "list_collective_identifiers_by_ksef_number",
+            "/collective-identifiers/ksef/{ksefNumber}",
+            "get",
+        ),
+        (
+            ["iz", "invoices"],
+            iz_cmd,
+            "list_collective_identifier_invoices",
+            "/collective-identifiers/invoices",
+            "post",
+        ),
+    ],
+)
+def test_cli_page_size_bounds_match_the_contract(
+    args: list[str],
+    module: ModuleType,
+    service_name: str,
+    path: str,
+    method: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    minimum, maximum = _page_size_limits(path, method)
+    monkeypatch.setattr(typer_app, "load_config", lambda: CliConfig(active_profile="demo"))
+    service = Mock(return_value={})
+    monkeypatch.setattr(module, service_name, service)
+    runner = CliRunner()
+    args = ["--json", *args, "--base-url", "https://example.test"]
+
+    for page_size in (minimum, maximum):
+        result = runner.invoke(cli_app, [*args, "--page-size", str(page_size)])
+        assert result.exit_code == 0, result.output
+        service.assert_called_once()
+        assert service.call_args.kwargs["page_size"] == page_size
+        service.reset_mock()
+
+    for page_size in (minimum - 1, maximum + 1):
+        result = runner.invoke(cli_app, [*args, "--page-size", str(page_size)])
+        assert result.exit_code == 2, result.output
+        service.assert_not_called()
 
 
 def test_collective_identifier_invoice_limits_match_the_contract() -> None:

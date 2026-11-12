@@ -39,6 +39,7 @@ FA3 = m.FormCode(system_code="FA (3)", schema_version="1-0E", value="FA")
 
 if TYPE_CHECKING:
     from .invoice_sync import InvoiceSync
+    from .invoice_xml_sync import InvoiceDocumentSync, InvoiceXmlSync
     from .streaming_export import ExportOperation
 
 
@@ -319,15 +320,56 @@ class Invoices:
     def __init__(self, owner: Ksef) -> None:
         self.owner = owner
 
-    def sync(self, *, namespace: str, sync_key: str, since: str | None = None,
-             subject_types: Sequence[m.InvoiceQuerySubjectType | str] | None = None,
-             queries: Sequence[m.InvoiceQueryFilters] | None = None,
-             page_size: int = 100, window_days: int = 100) -> InvoiceSync:
+    def sync(
+        self,
+        *,
+        namespace: str,
+        sync_key: str,
+        since: str | None = None,
+        subject_types: Sequence[m.InvoiceQuerySubjectType | str] | None = None,
+        queries: Sequence[m.InvoiceQueryFilters] | None = None,
+        page_size: int = 100,
+        window_days: int = 100,
+    ) -> InvoiceSync:
         return self.owner.api.invoices.sync(
-            namespace=namespace, sync_key=sync_key, context_key=self.owner.context_key,
-            since=since, subject_types=subject_types, queries=queries,
-            page_size=page_size, window_days=window_days,
+            namespace=namespace,
+            sync_key=sync_key,
+            context_key=self.owner.context_key,
+            since=since,
+            subject_types=subject_types,
+            queries=queries,
+            page_size=page_size,
+            window_days=window_days,
         )
+
+    def sync_documents(
+        self,
+        *,
+        namespace: str,
+        sync_key: str,
+        since: str | None = None,
+        subject_types: Sequence[m.InvoiceQuerySubjectType | str] | None = None,
+        queries: Sequence[m.InvoiceQueryFilters] | None = None,
+        page_size: int = 100,
+        window_days: int = 100,
+        xml_options: dict[str, Any] | None = None,
+    ) -> InvoiceDocumentSync:
+        return self.owner.api.invoices.sync_documents(
+            namespace=namespace,
+            sync_key=sync_key,
+            context_key=self.owner.context_key,
+            since=since,
+            subject_types=subject_types,
+            queries=queries,
+            page_size=page_size,
+            window_days=window_days,
+            xml_options=xml_options,
+        )
+
+    def xml_sync(self, metadata_sync: InvoiceSync, **options: Any) -> InvoiceXmlSync:
+        if any(s.scope.context_key != self.owner.context_key for s in metadata_sync.streams):
+            raise ValueError("XML worker context differs from connection")
+        return self.owner.api.invoices.xml_sync(metadata_sync, **options)
 
     def download(self, ksef_number: str) -> bytes:
         return self.owner.api.invoices.get_invoice_bytes(ksef_number).content

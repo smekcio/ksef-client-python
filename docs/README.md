@@ -54,6 +54,8 @@ Wybierz sposób pracy:
 - **Scenariusze (workflow)** – klasy z `ksef_client.services`, m.in. `AuthCoordinator`, `OnlineSessionWorkflow`, `BatchSessionWorkflow`, `ExportWorkflow`, pozwalają osobno składać kroki operacji API, szyfrowania i archiwizacji.
 - **Dokumenty FA(3)** – moduł `ksef_client.documents.fa3` buduje faktury, serializuje XML i opcjonalnie waliduje XSD przed wysyłką online/batch.
 
+Synchronizacja metadanych i XML: [trwała kolejka i gotowość dokumentów](invoice-xml-sync.md).
+
 ## Nawigacja
 
 - [Fasada klienta, operacje `.wait()` i eksport strumieniowy](facade.md)

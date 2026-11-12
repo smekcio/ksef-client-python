@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-29",
+  "status": "local_acceptance_passed_live_pending",
+  "base_commit": "5da7b69b4cb2355ba4c7e8704f0d79d0fd70d97e",
+  "sdk_tree": "4fb929828089a23bc1b0e6d64093ca8aeeda36fe",
+  "branch": "feat/invoice-xml-sync",
+  "matrix": [
+    {
+      "platform": "Linux",
+      "python": "3.10",
+      "full_suite": {
+        "passed": 3656,
+        "skipped": 14,
+        "subtests_passed": 61
+      },
+      "final_supplemental": {
+        "passed": 6
+      }
+    },
+    {
+      "platform": "Linux",
+      "python": "3.11",
+      "full_suite": {
+        "passed": 3656,
+        "skipped": 14,
+        "subtests_passed": 61
+      },
+      "final_supplemental": {
+        "passed": 6
+      }
+    },
+    {
+      "platform": "Linux",
+      "python": "3.12",
+      "full_suite": {
+        "passed": 3662,
+        "skipped": 14,
+        "subtests_passed": 61
+      }
+    },
+    {
+      "platform": "Linux",
+      "python": "3.13",
+      "full_suite": {
+        "passed": 3656,
+        "skipped": 14,
+        "subtests_passed": 61
+      },
+      "final_supplemental": {
+        "passed": 6
+      }
+    },
+    {
+      "platform": "Linux",
+      "python": "3.14",
+      "full_suite": {
+        "passed": 3656,
+        "skipped": 14,
+        "subtests_passed": 61
+      },
+      "final_supplemental": {
+        "passed": 6
+      }
+    },
+    {
+      "platform": "Windows",
+      "python": "3.12.9",
+      "full_suite": {
+        "passed": 3643,
+        "skipped": 27,
+        "subtests_passed": 61
+      }
+    }
+  ],
+  "coverage": {
+    "kind": "SDK statement/line coverage, not branch coverage",
+    "platform": "Linux/Python 3.12",
+    "totals": {
+      "covered_lines": 19943,
+      "num_statements": 19943,
+      "percent_covered": 100.0,
+      "percent_covered_display": "100",
+      "missing_lines": 0,
+      "excluded_lines": 481,
+      "percent_statements_covered": 100.0,
+      "percent_statements_covered_display": "100"
+    }
+  },
+  "installed_wheel": {
+    "suite": {
+      "passed": 350,
+      "skipped": 4
+    },
+    "additional_final_cases": 6,
+    "sdk_files_compared_to_current_worktree": 140,
+    "distribution_version": "0.22.0 (local verification artifact; next release is minor)",
+    "selection": "Historical focused installed-wheel run; exact selection was not recorded. The 350 count is retained as log evidence, not claimed as a reproducible full suite."
+  },
+  "artifacts_sha256": {
+    "ksef_client-0.22.0-py3-none-any.whl": "6e606a2f9e92f6cc8566781135a19f3891aab0910f0e12adc850a1cad715d60a",
+    "ksef_client-0.22.0.tar.gz": "2aed83431facfa8e623ac9b08731fe467427473c27196190037e80ac069fdd44"
+  },
+  "queue_rss": {
+    "results": [
+      {
+        "records": 50000,
+        "peak_rss_bytes": 57761792
+      },
+      {
+        "records": 500000,
+        "peak_rss_bytes": 57745408
+      }
+    ],
+    "growth_bytes": -16384,
+    "limit_bytes": 33554432
+  },
+  "checks": {
+    "ruff": "passed",
+    "mypy": "passed",
+    "strict_lint_linux_and_windows": "passed",
+    "generated_facade": "passed",
+    "openapi_endpoint_coverage": "83/83",
+    "base_cli_fa3_packaging": "passed"
+  },
+  "live_test": {
+    "status": "not_run",
+    "reason": "No KSEF_TEST_* credentials in local environment; protected CI required before publication",
+    "required_manifest": "tests/required_test_e2e.json",
+    "scenario": "tests/test_e2e_invoice_xml_sync.py::test_e2e_test_environment_invoice_xml_restart"
+  },
+  "publication": {
+    "status": "not_published",
+    "target": "Next minor release after 0.22.0 via Release Please"
+  },
+  "evidence_note": "Historical phased runs: final_supplemental cases were run after the initial full suites; Python 3.12 full_suite already includes these six cases. Do not compare initial full_suite counts as a single simultaneous collection. New validation reports supersede this evidence."
+}

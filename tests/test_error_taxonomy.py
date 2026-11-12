@@ -198,6 +198,8 @@ def test_error_codes_and_forbidden_reasons_are_stable() -> None:
         "sync_store_error",
         "sync_run_failed",
         "response_limit_exceeded",
+        "xml_integrity_error",
+        "xml_storage_error",
 
         "document_error",
         "document_validation_failed",
@@ -621,6 +623,8 @@ def test_exit_code_for_error_covers_every_error_code() -> None:
         ErrorCode.SYNC_STORE_ERROR: ExitCode.IO_ERROR,
         ErrorCode.SYNC_RUN_FAILED: ExitCode.API_ERROR,
         ErrorCode.RESPONSE_LIMIT_EXCEEDED: ExitCode.API_ERROR,
+        ErrorCode.XML_INTEGRITY_ERROR: ExitCode.VALIDATION_ERROR,
+        ErrorCode.XML_STORAGE_ERROR: ExitCode.IO_ERROR,
 
     }
 

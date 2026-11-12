@@ -919,10 +919,10 @@ class RetryAfterOnRetryableStatusesTests(unittest.TestCase):
         self.assertIsNone(exc.retry_after_raw)
         self.assertEqual(self._delay_for(exc), 0.25)
 
-    def test_retry_after_is_not_exposed_for_non_retryable_statuses(self):
+    def test_raw_retry_after_is_preserved_without_enabling_transport_retry(self):
         exc = self._raise_for_status(500, {"Retry-After": "30"})
         self.assertIsNone(exc.retry_after)
-        self.assertIsNone(exc.retry_after_raw)
+        self.assertEqual(exc.retry_after_raw, "30")
 
     def test_non_json_5xx_keeps_the_header(self):
         response = httpx.Response(

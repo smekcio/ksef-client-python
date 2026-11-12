@@ -20,6 +20,7 @@ REQUIRED = [
     "tests/test_e2e_pagination.py::test_e2e_test_environment_cursor_restart",
     "tests/test_e2e_facade.py::test_e2e_test_environment_facade_streaming_export",
     "tests/test_e2e_invoice_sync.py::test_e2e_test_environment_invoice_sync_restart",
+    "tests/test_e2e_invoice_xml_sync.py::test_e2e_test_environment_invoice_xml_restart",
 ]
 
 
@@ -98,15 +99,21 @@ def main(argv: list[str] | None = None) -> int:
             result = subprocess.run(
                 [
                     sys.executable,
+                    "-u",
                     "-m",
                     "pytest",
-                    "-q",
+                    "-v",
                     "--tb=short",
                     "--show-capture=no",
+                    "--durations=0",
+                    "--maxfail=1",
                     "-o",
                     "xfail_strict=true",
                     f"--junitxml={args.report}",
-                    *required,
+                    # Exercise durable XML before the other metadata-heavy flows.
+                    # Verification still requires every approved scenario exactly once.
+                    required[-1],
+                    *required[:-1],
                 ],
                 check=False,
             )

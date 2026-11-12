@@ -8,7 +8,8 @@ KSEF_NUMBER_PATTERN = re.compile(
     r"(20[2-9][0-9]|2[1-9]\d{2}|[3-9]\d{3})"
     r"(0[1-9]|1[0-2])"
     r"(0[1-9]|[12]\d|3[01])"
-    r"-([0-9A-F]{6})-?([0-9A-F]{6})-([0-9A-F]{2})$"
+    r"-([0-9A-F]{6})-?([0-9A-F]{6})-([0-9A-F]{2})$",
+    re.ASCII,
 )
 
 
@@ -67,3 +68,14 @@ def require_ksef_number(ksef_number: str) -> str:
 
 def is_valid_ksef_number(ksef_number: str) -> bool:
     return validate_ksef_number(ksef_number).is_valid
+
+
+def canonical_ksef_number(ksef_number: str) -> str:
+    """Validate and return the canonical 35-character document identity."""
+    require_ksef_number(ksef_number)
+    parts = ksef_number.split("-")
+    return (
+        "-".join((parts[0], parts[1], parts[2] + parts[3], parts[4]))
+        if len(parts) == 5
+        else ksef_number
+    )
