@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import json
 import os
 import sqlite3
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from ._async_cleanup import shield_and_drain
 from ._offline_invoice_state import (
     OfflineInvoiceProgress,
     OfflineInvoiceStatus,
@@ -290,3 +295,56 @@ class SQLiteOfflineInvoiceStore:
             if result.rowcount != 1:
                 raise KsefSyncConflictError("offline_invoice_revision_conflict")
         return updated
+
+
+class AsyncSQLiteOfflineInvoiceStore:
+    """Own the SQLite connection on a dedicated thread and drain started writes."""
+
+    def __init__(self) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ksef-offline")
+        self._store: SQLiteOfflineInvoiceStore | None = None
+
+    @classmethod
+    async def open(
+        cls, path: str | Path, *, key: bytes, timeout: float = 5
+    ) -> AsyncSQLiteOfflineInvoiceStore:
+        instance = cls()
+
+        async def initialize() -> None:
+            instance._store = await asyncio.get_running_loop().run_in_executor(
+                instance._executor,
+                partial(SQLiteOfflineInvoiceStore.open, path, key=key, timeout=timeout),
+            )
+
+        try:
+            await shield_and_drain(initialize())
+        except BaseException:
+            await instance.close()
+            raise
+        return instance
+
+    async def _call(self, method: str, *args: Any, **kwargs: Any) -> Any:
+        store = self._store
+        if store is None:
+            raise ValueError("Offline archive is closed")
+        return await shield_and_drain(
+            asyncio.get_running_loop().run_in_executor(
+                self._executor, partial(getattr(store, method), *args, **kwargs)
+            )
+        )
+
+    async def close(self) -> None:
+        store, self._store = self._store, None
+        try:
+            if store is not None:
+                await shield_and_drain(
+                    asyncio.get_running_loop().run_in_executor(self._executor, store.close)
+                )
+        finally:
+            await shield_and_drain(asyncio.to_thread(self._executor.shutdown, wait=True))
+
+    async def __aenter__(self) -> AsyncSQLiteOfflineInvoiceStore:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.close()

@@ -1,10 +1,16 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
 from ksef_client import models as m
 from ksef_client._offline_invoice_store import SQLiteOfflineInvoiceStore
-from ksef_client.offline_invoices import OfflineInvoices, OfflineInvoiceStatus
+from ksef_client.offline_invoices import (
+    AsyncOfflineInvoices,
+    AsyncSQLiteOfflineInvoiceStore,
+    OfflineInvoices,
+    OfflineInvoiceStatus,
+)
 from ksef_client.operations import OperationState
 from tests.test_offline_invoice_state import NUMBER, remote_invoice
 from tests.test_offline_invoice_store import DUE, KEY, XML
@@ -107,3 +113,48 @@ def test_duplicate_does_not_make_original_eligible_for_correction(tmp_path):
         assert outbox.advance(digest).progress.status is OfflineInvoiceStatus.DUPLICATE
         with pytest.raises(ValueError, match="requires a rejection"):
             outbox.enqueue(b"<corrected/>", due_at=DUE, correction_of=digest)
+
+
+def test_async_submission_reconciles_cancelled_send(tmp_path):
+    class AsyncClient(TestClient):
+        async def online_session(self):
+            return super().online_session()
+
+        async def send_invoice(self, xml, *, offline_mode, hash_of_corrected_invoice):
+            self.send_count += 1
+            raise asyncio.CancelledError
+
+        async def get_session_invoices(self, *args, **kwargs):
+            return super().get_session_invoices(*args, **kwargs)
+
+        async def get_session_status(self, reference_number):
+            return super().get_session_status(reference_number)
+
+        async def close_online_session(self, reference_number):
+            self.close_count += 1
+
+        async def get_session_invoice_upo_by_ref(self, reference, invoice_reference):
+            return b"<UPO/>"
+
+    async def run():
+        client = AsyncClient()
+        path = tmp_path / "offline.db"
+        async with await AsyncSQLiteOfflineInvoiceStore.open(path, key=KEY) as store:
+            outbox = AsyncOfflineInvoices(client, store, namespace="company")
+            entry = await outbox.enqueue(XML, due_at=DUE)
+            digest = entry.progress.invoice_hash
+            await outbox.advance(digest)
+            with pytest.raises(asyncio.CancelledError):
+                await outbox.advance(digest)
+        async with await AsyncSQLiteOfflineInvoiceStore.open(path, key=KEY) as store:
+            outbox = AsyncOfflineInvoices(client, store, namespace="company")
+            assert (await outbox.status(digest)).progress.status is (
+                OfflineInvoiceStatus.SUBMISSION_UNKNOWN
+            )
+            assert (await outbox.advance(digest)).progress.ksef_number == NUMBER
+            assert (await outbox.advance(digest)).progress.status is OfflineInvoiceStatus.ACCEPTED
+            assert (await outbox.advance(digest)).progress.status is OfflineInvoiceStatus.COMPLETE
+            assert await outbox.read_upo(digest) == b"<UPO/>"
+        assert client.send_count == client.close_count == 1
+
+    asyncio.run(run())
