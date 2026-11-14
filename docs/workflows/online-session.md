@@ -163,7 +163,9 @@ Termin jest znacznikiem UTC wyliczonym przez aplikację na podstawie trybu
 offline i obowiązujących komunikatów KSeF. Wybór zapisuje parametr `mode`
 (`OfflineInvoiceMode.OFFLINE24`, `UNAVAILABLE` albo `EMERGENCY`). `pending()` zwraca ograniczoną
 stronę aktywnych dokumentów w kolejności terminów. Do kolejnej strony przekaż
-ostatnią parę `(due_at, invoice_hash)` jako `after`. Każde `advance()`
+ostatnią parę `(due_at, invoice_hash)` jako `after`. Gdy aplikacja otrzyma aktualizację terminu,
+wywołaj `reschedule(invoice_hash, due_at=..., expected_revision=entry.revision)`.
+W razie konfliktu odczytaj bieżący wpis przed ponowieniem aktualizacji. Każde `advance()`
 wykonuje jeden krok. Wywołuj je ponownie z harmonogramu aplikacji, uwzględniając
 `Retry-After` i zachowując czas na przetworzenie kolejnych dokumentów.
 
@@ -175,13 +177,13 @@ anulowanie sesji, liczbę zero faktur i pustą pełną listę dokumentów.
 Po zaakceptowaniu dokumentu kolejny
 cykl finalizuje sesję i zapisuje indywidualne UPO, które odczytasz przez
 `read_upo(invoice_hash)`. Dokument zwrócony przez KSeF jako duplikat ma osobny
-stan `duplicate`. Odr�bnym przypadkiem jest kod 550, czyli potwierdzone
+stan `duplicate`. Odrębnym przypadkiem jest kod 550, czyli potwierdzone
 anulowanie przetwarzania przez KSeF. Stan `retryable` pozostaje w kolejce.
-Po odczekaniu okresu wybranego przez aplikacj� wywo�aj `retry_cancelled(invoice_hash)`.
-SDK zachowa szyfrowany zapis poprzedniej pr�by i kolejny cykl u�yje oryginalnego XML-a.
-Podczas otwierania sesji worker ma czasow� rezerwacj� wpisu.
-Je�li proces przerwie prac� przed zapisaniem referencji, inny worker mo�e
-przej�� wpis po wyga�ni�ciu rezerwacji.
+Po odczekaniu okresu wybranego przez aplikację wywołaj `retry_cancelled(invoice_hash)`.
+SDK zachowa szyfrowany zapis poprzedniej próby i kolejny cykl użyje oryginalnego XML-a.
+Podczas otwierania sesji worker ma czasową rezerwację wpisu.
+Jeśli proces przerwie pracę przed zapisaniem referencji, inny worker może
+przejąć wpis po wygaśnięciu rezerwacji.
 
 Korektę techniczną dodaj jako nowy XML z argumentem
 `correction_of=original_invoice_hash`, po zapisaniu odrzucenia oryginału.
