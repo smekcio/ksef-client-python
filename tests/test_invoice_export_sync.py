@@ -1,13 +1,14 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
 from ksef_client._invoice_export_state import ExportCheckpoint
-from ksef_client.invoice_export_sync import InvoiceExportSync
-from ksef_client.invoice_xml_storage import FileInvoiceXmlStore
+from ksef_client.invoice_export_sync import AsyncInvoiceExportSync, InvoiceExportSync
+from ksef_client.invoice_xml_storage import AsyncFileInvoiceXmlStore, FileInvoiceXmlStore
 from ksef_client.invoice_xml_types import InvoiceXmlKey
 from ksef_client.operations import OperationState
-from ksef_client.sqlite_store import SQLiteInvoiceSyncStore
+from ksef_client.sqlite_store import AsyncSQLiteInvoiceSyncStore, SQLiteInvoiceSyncStore
 from tests.test_invoice_export_package import END, HASH, START, XML, package
 from tests.test_invoice_xml_sync import NUMBER, NUMBER2
 
@@ -105,3 +106,56 @@ def test_wrong_checkpoint_key_stops_before_remote_operations(tmp_path, monkeypat
                 store, storage, until=END
             )
         assert client.downloads == 1 and len(client.requests) == 1
+
+
+def test_async_import_resumes_the_same_archive_and_checkpoint_as_sync(tmp_path, monkeypatch):
+    class AsyncExport(Export):
+        async def download_to(self, destination, **kwargs):
+            return super().download_to(destination, **kwargs)
+
+        async def wait(self, **kwargs):
+            return super().wait(**kwargs)
+
+    class AsyncClient(Client):
+        async def start(self, filters, **kwargs):
+            export = super().start(filters, **kwargs)
+            return AsyncExport(self, export.state)
+
+    monkeypatch.setattr("ksef_client.invoice_export_sync.AsyncExportOperation", AsyncExport)
+    args = dict(
+        namespace="company",
+        sync_key="history",
+        since=START,
+        work_dir=tmp_path / "work",
+        state_key=KEY,
+    )
+    descriptor = package(tmp_path).package
+    db = tmp_path / "archive.db"
+    folder = tmp_path / "xml"
+
+    async def import_first():
+        async with (
+            await AsyncFileInvoiceXmlStore.open(folder) as storage,
+            await AsyncSQLiteInvoiceSyncStore.open(
+                db, enqueue_xml=True, xml_storage_id=storage.storage_id
+            ) as store,
+        ):
+            sync = AsyncInvoiceExportSync(async_client, **args)
+            result = await sync.run_once(store, storage, until=END, max_documents=1)
+            assert result.status == "importing" and result.committed_hwm is None
+
+    async_client = AsyncClient(descriptor)
+    asyncio.run(import_first())
+    monkeypatch.setattr("ksef_client.invoice_export_sync.ExportOperation", Export)
+    client = Client(descriptor)
+    with (
+        FileInvoiceXmlStore(folder) as storage,
+        SQLiteInvoiceSyncStore.open(
+            db, enqueue_xml=True, xml_storage_id=storage.storage_id
+        ) as store,
+    ):
+        sync = InvoiceExportSync(client, **args)
+        result = sync.run_once(store, storage, until=END)
+        assert result.status == "committed" and result.committed_hwm == END
+        assert len(store.list_xml([sync.scope])) == 2
+    assert async_client.downloads == 1 and client.downloads == 0
