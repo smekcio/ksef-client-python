@@ -143,7 +143,7 @@ class InvoiceExportSync(_InvoiceExportConfig["Ksef"]):
         max_documents: int,
     ) -> InvoiceExportSyncReport:
         client = self._client
-        revision, state = self._resume(store._load_export(self.scope))
+        revision, state = self._resume(store._load_export(self.scope, self._state_key))
 
         bounds = (
             state.progress.bounds(until) if state.end is None else (state.progress.start, state.end)
@@ -157,14 +157,22 @@ class InvoiceExportSync(_InvoiceExportConfig["Ksef"]):
         if state.operation is None:
             state = replace(state, end=end)
             revision, _ = store._commit_export(
-                self.scope, revision, state.encode(self._state_key), storage_id=storage.storage_id
+                self.scope,
+                revision,
+                state.encode(self._state_key),
+                self._state_key,
+                storage_id=storage.storage_id,
             )
             operation = client.exports.start(
                 self._query(start, end), compression_type=self._compression_type
             )
             state = replace(state, operation=operation.resume_state())
             revision, _ = store._commit_export(
-                self.scope, revision, state.encode(self._state_key), storage_id=storage.storage_id
+                self.scope,
+                revision,
+                state.encode(self._state_key),
+                self._state_key,
+                storage_id=storage.storage_id,
             )
         else:
             operation = ExportOperation(client, state.operation)
@@ -180,7 +188,11 @@ class InvoiceExportSync(_InvoiceExportConfig["Ksef"]):
                 raise
             fresh = ExportCheckpoint(state.progress, end=end)
             store._commit_export(
-                self.scope, revision, fresh.encode(self._state_key), storage_id=storage.storage_id
+                self.scope,
+                revision,
+                fresh.encode(self._state_key),
+                self._state_key,
+                storage_id=storage.storage_id,
             )
             shutil.rmtree(directory)
             status = "expired" if error.status_code == 210 else "waiting_hwm"
@@ -207,6 +219,7 @@ class InvoiceExportSync(_InvoiceExportConfig["Ksef"]):
                 self.scope,
                 revision,
                 state.encode(self._state_key),
+                self._state_key,
                 storage_id=storage.storage_id,
                 documents=documents,
                 count_insertions=True,
@@ -220,6 +233,7 @@ class InvoiceExportSync(_InvoiceExportConfig["Ksef"]):
             self.scope,
             revision,
             ExportCheckpoint(progress).encode(self._state_key),
+            self._state_key,
             storage_id=storage.storage_id,
         )
         shutil.rmtree(directory)
@@ -259,7 +273,9 @@ class AsyncInvoiceExportSync(_InvoiceExportConfig["AsyncKsef"]):
         max_documents: int,
     ) -> InvoiceExportSyncReport:
         client = self._client
-        revision, state = self._resume(await store._call("_load_export", self.scope))
+        revision, state = self._resume(
+            await store._call("_load_export", self.scope, self._state_key)
+        )
 
         bounds = (
             state.progress.bounds(until) if state.end is None else (state.progress.start, state.end)
@@ -277,6 +293,7 @@ class AsyncInvoiceExportSync(_InvoiceExportConfig["AsyncKsef"]):
                 self.scope,
                 revision,
                 state.encode(self._state_key),
+                self._state_key,
                 storage_id=storage.storage_id,
             )
             operation = await client.exports.start(
@@ -288,6 +305,7 @@ class AsyncInvoiceExportSync(_InvoiceExportConfig["AsyncKsef"]):
                 self.scope,
                 revision,
                 state.encode(self._state_key),
+                self._state_key,
                 storage_id=storage.storage_id,
             )
         else:
@@ -308,6 +326,7 @@ class AsyncInvoiceExportSync(_InvoiceExportConfig["AsyncKsef"]):
                 self.scope,
                 revision,
                 fresh.encode(self._state_key),
+                self._state_key,
                 storage_id=storage.storage_id,
             )
             await shield_and_drain(asyncio.to_thread(shutil.rmtree, directory))
@@ -340,6 +359,7 @@ class AsyncInvoiceExportSync(_InvoiceExportConfig["AsyncKsef"]):
                 self.scope,
                 revision,
                 state.encode(self._state_key),
+                self._state_key,
                 storage_id=storage.storage_id,
                 documents=documents,
                 count_insertions=True,
@@ -354,6 +374,7 @@ class AsyncInvoiceExportSync(_InvoiceExportConfig["AsyncKsef"]):
             self.scope,
             revision,
             ExportCheckpoint(progress).encode(self._state_key),
+            self._state_key,
             storage_id=storage.storage_id,
         )
         await shield_and_drain(asyncio.to_thread(shutil.rmtree, directory))

@@ -206,24 +206,26 @@ def test_commit_export_records_ready_xml_and_rejects_stale_progress(tmp_path):
         receipt = storage.put_verified(key, XML, HASH)
         opts = {"enqueue_xml": True, "xml_storage_id": storage.storage_id}
         with SQLiteInvoiceSyncStore.open(database, **opts) as store:
-            assert store._load_export(scope) is None
+            assert store._load_export(scope, b"k" * 32) is None
             assert store._commit_export(
                 scope,
                 0,
                 {"index": 1},
+                b"k" * 32,
                 storage_id=storage.storage_id,
                 documents=[(metadata, receipt)],
             ) == (1, 1)
         with SQLiteInvoiceSyncStore.open(database, **opts) as store:
-            assert store._load_export(scope) == (1, b'{"index":1}')
+            assert store._load_export(scope, b"k" * 32) == (1, b'{"index":1}')
             assert store.list_xml([scope])[0]["status"] == "ready"
             assert store.claim_xml([scope], lease_seconds=120) is None
             with pytest.raises(KsefSyncConflictError):
-                store._commit_export(scope, 0, {}, storage_id=storage.storage_id)
+                store._commit_export(scope, 0, {}, b"k" * 32, storage_id=storage.storage_id)
             assert store._commit_export(
                 scope,
                 1,
                 {"index": 2},
+                b"k" * 32,
                 storage_id=storage.storage_id,
                 documents=[(metadata, receipt)],
             ) == (2, 0)

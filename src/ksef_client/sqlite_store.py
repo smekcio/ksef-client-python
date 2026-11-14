@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
 import sqlite3
@@ -21,7 +22,12 @@ from ._async_cleanup import shield_and_drain
 from ._sqlite_metadata import KEY as METADATA_KEY
 from ._sqlite_metadata import SCHEMA as METADATA_SCHEMA
 from ._sqlite_metadata import MetadataSQLiteStore
-from .exceptions import KsefSyncConflictError, KsefSyncDataConflictError, KsefSyncStoreError
+from .exceptions import (
+    KsefDocumentValidationError,
+    KsefSyncConflictError,
+    KsefSyncDataConflictError,
+    KsefSyncStoreError,
+)
 from .invoice_sync_state import (
     InvoiceSyncBatch,
     InvoiceSyncCheckpoint,
@@ -487,7 +493,15 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
         if row is None or row[0] != storage_id or self.xml_storage_id != storage_id:
             raise KsefXmlStorageError("storage_id_mismatch")
 
-    def _load_export(self, scope: InvoiceSyncScope) -> tuple[int, bytes] | None:
+    @staticmethod
+    def _export_tag(key: bytes, scope: InvoiceSyncScope, revision: int, encoded: bytes) -> bytes:
+        identity = canonical_json({"scope": scope.to_dict(), "revision": revision}, 8192)
+        mac = hmac.new(key, b"ksef:invoice-export:v1\x00", "sha256")
+        mac.update(identity)
+        mac.update(encoded)
+        return mac.digest()
+
+    def _load_export(self, scope: InvoiceSyncScope, state_key: bytes) -> tuple[int, bytes] | None:
         self._require_idle("load")
         exists = self._execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='invoice_export_progress'"
@@ -500,13 +514,21 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
         ).fetchone()
         if row is None:
             return None
-        return int(row[0]), bytes(row[1])
+        revision = int(row[0])
+        blob = bytes(row[1])
+        tag, encoded = blob[:32], blob[32:]
+        if len(encoded) > EXPORT_STATE_LIMIT or not hmac.compare_digest(
+            tag, self._export_tag(state_key, scope, revision, encoded)
+        ):
+            raise KsefDocumentValidationError("Invalid or unreadable export checkpoint")
+        return revision, encoded
 
     def _commit_export(
         self,
         scope: InvoiceSyncScope,
         revision: int,
         state: dict[str, Any],
+        state_key: bytes,
         *,
         storage_id: str,
         documents: Sequence[tuple[dict[str, Any], InvoiceXmlReceipt]] = (),
@@ -515,6 +537,8 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
         """CAS the export progress and commit a bounded chunk of verified XML receipts."""
         self.validate_xml((scope,), storage_id)
         encoded = canonical_json(state, EXPORT_STATE_LIMIT)
+        next_revision = revision + 1
+        sealed = self._export_tag(state_key, scope, next_revision, encoded) + encoded
         identity = _scope_values(scope)
         new_documents = 0
         with self._transaction():
@@ -529,14 +553,14 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                 updated = self._execute(
                     "INSERT INTO invoice_export_progress VALUES (?,?,?,?,?,1,?) "
                     "ON CONFLICT DO NOTHING",
-                    (*identity, encoded),
+                    (*identity, sealed),
                 )
             else:
                 updated = self._execute(
                     "UPDATE invoice_export_progress SET revision=revision+1,state=? WHERE "
                     + METADATA_KEY
                     + " AND revision=?",
-                    (encoded, *identity, revision),
+                    (sealed, *identity, revision),
                 )
             if updated.rowcount != 1:
                 raise KsefSyncConflictError("checkpoint_conflict")
@@ -570,7 +594,10 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                 )
                 self._execute(
                     "UPDATE invoice_export_progress SET state=? WHERE " + METADATA_KEY,
-                    (encoded, *identity),
+                    (
+                        self._export_tag(state_key, scope, next_revision, encoded) + encoded,
+                        *identity,
+                    ),
                 )
         return revision + 1, new_documents
 
