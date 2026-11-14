@@ -8,8 +8,11 @@ import pytest
 from ksef_client import models as m
 from ksef_client._invoice_export_package import ValidatedInvoicePackage, validate_invoice_package
 from ksef_client._invoice_export_state import ExportProgress
-from ksef_client.exceptions import KsefDocumentValidationError
-from ksef_client.invoice_xml_types import KsefXmlIntegrityError
+from ksef_client.exceptions import KsefDocumentValidationError, KsefSyncConflictError
+from ksef_client.invoice_sync_state import InvoiceSyncScope
+from ksef_client.invoice_xml_storage import FileInvoiceXmlStore
+from ksef_client.invoice_xml_types import InvoiceXmlKey, KsefXmlIntegrityError
+from ksef_client.sqlite_store import SQLiteInvoiceSyncStore
 from ksef_client.streaming_export import ExportFiles
 from tests.test_invoice_xml_sync import NUMBER, NUMBER2
 
@@ -131,3 +134,35 @@ def test_long_history_bounds_each_request_to_one_hundred_utc_days():
         "2025-01-01T23:30:00Z",
         "2025-04-11T00:00:00Z",
     )
+
+
+def test_commit_export_records_ready_xml_and_rejects_stale_progress(tmp_path):
+    database = tmp_path / "archive.db"
+    scope = InvoiceSyncScope("company", "a" * 64, "Nip:test", "archive", "b" * 64)
+    key = InvoiceXmlKey(scope.namespace, scope.environment, scope.context_key, NUMBER)
+    metadata = {"ksefNumber": NUMBER, "invoiceHash": HASH, "permanentStorageDate": LAST}
+    with FileInvoiceXmlStore(tmp_path / "xml") as storage:
+        receipt = storage.put_verified(key, XML, HASH)
+        opts = {"enqueue_xml": True, "xml_storage_id": storage.storage_id}
+        with SQLiteInvoiceSyncStore.open(database, **opts) as store:
+            assert store._load_export(scope) is None
+            assert store._commit_export(
+                scope,
+                0,
+                {"index": 1},
+                storage_id=storage.storage_id,
+                documents=[(metadata, receipt)],
+            ) == (1, 1)
+        with SQLiteInvoiceSyncStore.open(database, **opts) as store:
+            assert store._load_export(scope) == (1, b'{"index":1}')
+            assert store.list_xml([scope])[0]["status"] == "ready"
+            assert store.claim_xml([scope], lease_seconds=120) is None
+            with pytest.raises(KsefSyncConflictError):
+                store._commit_export(scope, 0, {}, storage_id=storage.storage_id)
+            assert store._commit_export(
+                scope,
+                1,
+                {"index": 2},
+                storage_id=storage.storage_id,
+                documents=[(metadata, receipt)],
+            ) == (2, 0)

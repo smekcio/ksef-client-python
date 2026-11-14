@@ -18,14 +18,16 @@ from pathlib import Path
 from typing import Any
 
 from ._async_cleanup import shield_and_drain
+from ._sqlite_metadata import KEY as METADATA_KEY
 from ._sqlite_metadata import SCHEMA as METADATA_SCHEMA
 from ._sqlite_metadata import MetadataSQLiteStore
-from .exceptions import KsefSyncDataConflictError, KsefSyncStoreError
+from .exceptions import KsefSyncConflictError, KsefSyncDataConflictError, KsefSyncStoreError
 from .invoice_sync_state import (
     InvoiceSyncBatch,
     InvoiceSyncCheckpoint,
     InvoiceSyncCommitReceipt,
     InvoiceSyncScope,
+    canonical_json,
 )
 from .invoice_xml_storage import _safe_directory
 from .invoice_xml_types import (
@@ -74,6 +76,7 @@ CREATE TABLE xml_backfill (
 );
 """
 DOC_KEY = "namespace=? AND environment=? AND context_key=? AND ksef_number=? AND variant=?"
+EXPORT_STATE_LIMIT = 4 * 1024 * 1024
 SAFE_REASONS = frozenset(
     {
         "not_available",
@@ -483,6 +486,82 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             raise KsefXmlStorageError("xml_enqueue_disabled")
         if row is None or row[0] != storage_id or self.xml_storage_id != storage_id:
             raise KsefXmlStorageError("storage_id_mismatch")
+
+    def _load_export(self, scope: InvoiceSyncScope) -> tuple[int, bytes] | None:
+        self._require_idle("load")
+        exists = self._execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='invoice_export_progress'"
+        ).fetchone()
+        if exists is None:
+            return None
+        row = self._execute(
+            "SELECT revision,state FROM invoice_export_progress WHERE " + METADATA_KEY,
+            _scope_values(scope),
+        ).fetchone()
+        if row is None:
+            return None
+        return int(row[0]), bytes(row[1])
+
+    def _commit_export(
+        self,
+        scope: InvoiceSyncScope,
+        revision: int,
+        state: dict[str, Any],
+        *,
+        storage_id: str,
+        documents: Sequence[tuple[dict[str, Any], InvoiceXmlReceipt]] = (),
+    ) -> tuple[int, int]:
+        """CAS the export progress and commit a bounded chunk of verified XML receipts."""
+        self.validate_xml((scope,), storage_id)
+        encoded = canonical_json(state, EXPORT_STATE_LIMIT)
+        identity = _scope_values(scope)
+        new_documents = 0
+        with self._transaction():
+            self._execute(
+                "CREATE TABLE IF NOT EXISTS invoice_export_progress ("
+                "namespace TEXT NOT NULL, environment TEXT NOT NULL, context_key TEXT NOT NULL,"
+                "sync_key TEXT NOT NULL, stream_id TEXT NOT NULL, revision INTEGER NOT NULL,"
+                "state BLOB NOT NULL, "
+                "PRIMARY KEY(namespace,environment,context_key,sync_key,stream_id))"
+            )
+            if revision == 0:
+                updated = self._execute(
+                    "INSERT INTO invoice_export_progress VALUES (?,?,?,?,?,1,?) "
+                    "ON CONFLICT DO NOTHING",
+                    (*identity, encoded),
+                )
+            else:
+                updated = self._execute(
+                    "UPDATE invoice_export_progress SET revision=revision+1,state=? WHERE "
+                    + METADATA_KEY
+                    + " AND revision=?",
+                    (encoded, *identity, revision),
+                )
+            if updated.rowcount != 1:
+                raise KsefSyncConflictError("checkpoint_conflict")
+            self._prepare_xml_scope(scope, revision == 0)
+            for value, receipt in documents:
+                key = InvoiceXmlKey(*identity[:3], value["ksefNumber"])
+                expected_hash = value["invoiceHash"]
+                receipt.validate(key, expected_hash, storage_id)
+                observed = self._execute(
+                    "SELECT 1 FROM invoice_observations WHERE "
+                    + METADATA_KEY
+                    + " AND ksef_number=?",
+                    (*identity, key.ksef_number),
+                ).fetchone()
+                new_documents += int(observed is None)
+                self._write_observation(scope, value)
+                result = self._execute(
+                    "UPDATE invoice_xml_documents SET status='ready',receipt_json=?,verified_at=?,"
+                    "lease_token=NULL,lease_until=NULL,lease_epoch=NULL,"
+                    "last_reason=NULL,failures=0 "
+                    "WHERE " + DOC_KEY + " AND expected_hash=?",
+                    (json.dumps(asdict(receipt)), time.time(), *key.values, expected_hash),
+                )
+                if result.rowcount != 1:
+                    raise KsefSyncDataConflictError("invoice_hash_conflict")
+        return revision + 1, new_documents
 
     def _selected(self, scopes: Sequence[InvoiceSyncScope]) -> tuple[str, tuple[str, ...]]:
         condition, values = _selection(scopes)
