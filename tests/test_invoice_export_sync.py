@@ -23,6 +23,7 @@ from ksef_client.invoice_xml_storage import AsyncFileInvoiceXmlStore, FileInvoic
 from ksef_client.invoice_xml_types import InvoiceXmlKey, KsefXmlIntegrityError, KsefXmlStorageError
 from ksef_client.operations import ExportOperationError, OperationState
 from ksef_client.sqlite_store import AsyncSQLiteInvoiceSyncStore, SQLiteInvoiceSyncStore
+from ksef_client.streaming_export import KsefExportTransferError
 from tests.test_invoice_export_package import END, HASH, LAST, START, XML, package
 from tests.test_invoice_sync import make_sync, row
 from tests.test_invoice_xml_sync import NUMBER, NUMBER2, XmlServer
@@ -718,9 +719,7 @@ def test_redownload_after_expiry_preserves_partial_import_at_same_boundary(tmp_p
     class Fragment(Export):
         def download_to(self, destination, **kwargs):
             if self.state.reference_number == "op-2" and self.owner.cancelled:
-                raise ExportOperationError(
-                    "rejected", self.state, SimpleNamespace(status=SimpleNamespace(code=550))
-                )
+                raise KsefExportTransferError("Export is no longer available", status_code=550)
             destination.mkdir()
             first = self.state.reference_number == "op-1"
             return package(

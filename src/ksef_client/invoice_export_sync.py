@@ -35,6 +35,7 @@ from .streaming_export import (
     AsyncExportOperation,
     ExportFiles,
     ExportOperation,
+    KsefExportTransferError,
     directory_lock,
 )
 from .utils.zip_utils import EXPORT_MAX_ARCHIVE_ENTRIES
@@ -192,8 +193,8 @@ class InvoiceExportSync(_InvoiceExportConfig["Ksef"]):
         cached = (directory / "documents").exists()
         try:
             files = _receive(operation, directory, timeout)
-        except ExportOperationError as error:
-            if error.status_code not in _RESTART_STATUS:
+        except (ExportOperationError, KsefExportTransferError) as error:
+            if error.status_code is None or error.status_code not in _RESTART_STATUS:
                 raise
             fresh = ExportCheckpoint(
                 state.progress, end=end, replayed_new=state.replayed_new or state.inserted > 0
@@ -345,8 +346,8 @@ class AsyncInvoiceExportSync(_InvoiceExportConfig["AsyncKsef"]):
         cached = await asyncio.to_thread((directory / "documents").exists)
         try:
             files = await _receive_async(operation, directory, timeout)
-        except ExportOperationError as error:
-            if error.status_code not in _RESTART_STATUS:
+        except (ExportOperationError, KsefExportTransferError) as error:
+            if error.status_code is None or error.status_code not in _RESTART_STATUS:
                 raise
             fresh = ExportCheckpoint(
                 state.progress, end=end, replayed_new=state.replayed_new or state.inserted > 0

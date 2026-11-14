@@ -21,7 +21,7 @@ import pytest
 from ksef_client import KsefClientOptions
 from ksef_client import models as m
 from ksef_client.http import BaseHttpClient
-from ksef_client.operations import ExportOperationError, OperationState
+from ksef_client.operations import OperationState
 from ksef_client.services.crypto import encrypt_aes_cbc_pkcs7
 from ksef_client.streaming_export import (
     AsyncExportOperation,
@@ -364,7 +364,10 @@ def test_transfer_propagates_operation_termination_during_url_refresh(storage, t
         get_status.return_value,
         m.InvoiceExportStatusResponse.from_dict({"status": {"code": code, "description": ""}}),
     ]
-    with pytest.raises(ExportOperationError) as caught:
-        export.download_to(tmp_path / "final", work_dir=tmp_path / "transfer")
-    assert caught.value.status_code == code
-    assert not (tmp_path / "final").exists()
+    try:
+        with pytest.raises(KsefExportTransferError) as caught:
+            export.download_to(tmp_path / "final", work_dir=tmp_path / "transfer")
+        assert caught.value.status_code == code
+        assert not (tmp_path / "final").exists()
+    finally:
+        export.owner.api.http_client.close()

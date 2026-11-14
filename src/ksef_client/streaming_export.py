@@ -32,7 +32,6 @@ from .exceptions import ErrorCode, KsefError
 from .http import _validate_presigned_url_security, _wire_timeout
 from .operations import (
     AsyncOperation,
-    ExportOperationError,
     KsefOperationTimeout,
     Operation,
     OperationState,
@@ -131,6 +130,10 @@ class _TarStream:
 
 class KsefExportTransferError(KsefError):
     code = ErrorCode.EXPORT_ERROR
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def check_control() -> None:
@@ -359,10 +362,10 @@ class ExportOperation(Operation[m.InvoiceExportStatusResponse]):
                 with self._stream(part, headers) as response:
                     if response.status_code in {401, 403} and attempt < 2:
                         fresh = self.get_status()
-                        if fresh.status.code in {210, 550}:
-                            raise ExportOperationError("rejected", self.resume_state(), fresh)
                         if fresh.status.code != 200 or fresh.package is None:
-                            raise KsefExportTransferError("Export is no longer available")
+                            raise KsefExportTransferError(
+                                "Export is no longer available", status_code=fresh.status.code
+                            )
                         candidates = {p.ordinal_number: p for p in fresh.package.parts}
                         replacement = candidates.get(part.ordinal_number)
                         if replacement is None or part_identity(
