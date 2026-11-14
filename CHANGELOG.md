@@ -595,6 +595,18 @@
   enforces per pre-encryption part; `build_zip` sanitises entry names like `build_tar_gz`, and both
   readers reject duplicate entry names instead of silently dropping content
 
+## 0.23.0 (2026-11-14)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* feat: add durable invoice XML synchronization and readiness reports by @smekcio in https://github.com/smekcio/ksef-client-python/pull/115
+* fix(ci): seed XML restart E2E when TEST metadata is empty by @smekcio in https://github.com/smekcio/ksef-client-python/pull/118
+
+
+**Full Changelog**: https://github.com/smekcio/ksef-client-python/compare/v0.22.0...v0.23.0
+
 ## 0.22.0 (2026-10-28)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
