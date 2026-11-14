@@ -5,6 +5,7 @@ import pytest
 
 from ksef_client import models as m
 from ksef_client._offline_invoice_store import SQLiteOfflineInvoiceStore
+from ksef_client.exceptions import KsefSyncConflictError
 from ksef_client.offline_invoices import (
     AsyncOfflineInvoices,
     AsyncSQLiteOfflineInvoiceStore,
@@ -158,3 +159,48 @@ def test_async_submission_reconciles_cancelled_send(tmp_path):
         assert client.send_count == client.close_count == 1
 
     asyncio.run(run())
+
+
+def test_queue_pages_order_precise_deadlines_and_exclude_terminal_rows(tmp_path):
+    client = TestClient()
+    with SQLiteOfflineInvoiceStore.open(tmp_path / "offline.db", key=KEY) as store:
+        outbox = OfflineInvoices(client, store, namespace="company")
+        later = outbox.enqueue(b"<later/>", due_at="2026-12-01T00:00:00.01Z")
+        earlier = outbox.enqueue(XML, due_at=DUE)
+        assert outbox.pending(limit=1) == (earlier,)
+        digest = earlier.progress.invoice_hash
+        assert outbox.pending(after=(earlier.due_at, digest)) == (later,)
+        outbox.advance(digest)
+        with pytest.raises(OSError):
+            outbox.advance(digest)
+        client.get_session_invoices = lambda *args, **kwargs: m.SessionInvoicesResponse(
+            [remote_invoice(450)]
+        )
+        assert outbox.advance(digest).progress.status is OfflineInvoiceStatus.REJECTED
+        assert outbox.pending() == (later,)
+
+
+def test_concurrent_workers_cannot_both_submit_the_same_document(tmp_path):
+    client = TestClient()
+    path = tmp_path / "offline.db"
+    with (
+        SQLiteOfflineInvoiceStore.open(path, key=KEY) as first_store,
+        SQLiteOfflineInvoiceStore.open(path, key=KEY) as second_store,
+    ):
+        first = OfflineInvoices(client, first_store, namespace="company")
+        second = OfflineInvoices(client, second_store, namespace="company")
+        digest = first.enqueue(XML, due_at=DUE).progress.invoice_hash
+        first.advance(digest)
+        resume = client.resume_session
+
+        def race(state):
+            client.resume_session = resume
+            with pytest.raises(OSError, match="lost response"):
+                second.advance(digest)
+            return resume(state)
+
+        client.resume_session = race
+        with pytest.raises(KsefSyncConflictError):
+            first.advance(digest)
+        assert client.send_count == 1
+        assert first.status(digest).progress.status is OfflineInvoiceStatus.SUBMISSION_UNKNOWN

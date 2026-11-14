@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from typing import TYPE_CHECKING, cast
 
@@ -12,9 +13,11 @@ from ._offline_invoice_store import (
     SQLiteOfflineInvoiceStore,
     StoredOfflineInvoice,
 )
+from ._offline_verification import OfflineVerificationLinks, build_offline_verification_links
 from .exceptions import KsefDocumentValidationError
 from .invoice_sync_state import InvoiceSyncScope
 from .request_control import request_control
+from .services.xades import XadesKeyPair
 
 if TYPE_CHECKING:
     from .async_facade import AsyncKsef
@@ -46,11 +49,31 @@ class OfflineInvoices:
     def status(self, invoice_hash: str) -> StoredOfflineInvoice | None:
         return self._store.load(self.scope, invoice_hash)
 
+    def pending(
+        self, *, limit: int = 100, after: tuple[str, str] | None = None
+    ) -> tuple[StoredOfflineInvoice, ...]:
+        """Return active entries ordered by deadline, including unresolved submissions."""
+        return self._store.pending(self.scope, limit=limit, after=after)
+
     def read_xml(self, invoice_hash: str) -> bytes:
         return self._store.read_xml(self.scope, invoice_hash)
 
     def read_upo(self, invoice_hash: str) -> bytes:
         return self._store.read_upo(self.scope, invoice_hash)
+
+    def verification_links(
+        self, invoice_hash: str, signer: XadesKeyPair
+    ) -> OfflineVerificationLinks:
+        row = self.status(invoice_hash)
+        if row is None:
+            raise KsefDocumentValidationError("Offline invoice is missing in this scope")
+        return build_offline_verification_links(
+            self._client.options,
+            self.scope.context_key,
+            row.progress,
+            self.read_xml(invoice_hash),
+            signer,
+        )
 
     def advance(self, invoice_hash: str, *, timeout: float = 60) -> StoredOfflineInvoice:
         with request_control(timeout_seconds=timeout):
@@ -157,11 +180,33 @@ class AsyncOfflineInvoices:
     async def status(self, invoice_hash: str) -> StoredOfflineInvoice | None:
         return await self._store._call("load", self.scope, invoice_hash)
 
+    async def pending(
+        self, *, limit: int = 100, after: tuple[str, str] | None = None
+    ) -> tuple[StoredOfflineInvoice, ...]:
+        """Return active entries ordered by deadline, including unresolved submissions."""
+        return await self._store._call("pending", self.scope, limit=limit, after=after)
+
     async def read_xml(self, invoice_hash: str) -> bytes:
         return await self._store._call("read_xml", self.scope, invoice_hash)
 
     async def read_upo(self, invoice_hash: str) -> bytes:
         return await self._store._call("read_upo", self.scope, invoice_hash)
+
+    async def verification_links(
+        self, invoice_hash: str, signer: XadesKeyPair
+    ) -> OfflineVerificationLinks:
+        row = await self.status(invoice_hash)
+        if row is None:
+            raise KsefDocumentValidationError("Offline invoice is missing in this scope")
+        xml = await self.read_xml(invoice_hash)
+        return await asyncio.to_thread(
+            build_offline_verification_links,
+            self._client.options,
+            self.scope.context_key,
+            row.progress,
+            xml,
+            signer,
+        )
 
     async def advance(self, invoice_hash: str, *, timeout: float = 60) -> StoredOfflineInvoice:
         with request_control(timeout_seconds=timeout):
@@ -281,6 +326,7 @@ __all__ = [
     "AsyncSQLiteOfflineInvoiceStore",
     "OfflineInvoiceStatus",
     "OfflineInvoices",
+    "OfflineVerificationLinks",
     "SQLiteOfflineInvoiceStore",
     "StoredOfflineInvoice",
 ]

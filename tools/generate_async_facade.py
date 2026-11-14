@@ -16,6 +16,8 @@ NAMES = {
         "Operation",
         "AuthenticationOperation",
         "Session",
+        "OfflineInvoices",
+        "SQLiteOfflineInvoiceStore",
         "Invoices",
         "Exports",
         "Permissions",
@@ -248,6 +250,7 @@ from .token_manager import DEFAULT_REFRESH_MARGIN_SECONDS
 if TYPE_CHECKING:
     from .invoice_sync import AsyncInvoiceSync
     from .invoice_xml_sync import AsyncInvoiceDocumentSync, AsyncInvoiceXmlSync
+    from .offline_invoices import AsyncOfflineInvoices, AsyncSQLiteOfflineInvoiceStore
     from .streaming_export import AsyncExportOperation
 
 
