@@ -141,7 +141,11 @@ magazynu sekretów. Używaj prywatnego katalogu i osobnego połączenia dla
 każdego workera. Przy restarcie użyj tej samej bazy, klucza i namespace.
 
 ```python
-from ksef_client.offline_invoices import OfflineInvoiceQueue, SQLiteOfflineInvoiceStore
+from ksef_client.offline_invoices import (
+    OfflineInvoiceQueue,
+    OfflineInvoiceStatus,
+    SQLiteOfflineInvoiceStore,
+)
 
 # Wystawienie i podpisanie linku może odbyć się przy niedostępnym KSeF.
 with SQLiteOfflineInvoiceStore.open("private/offline.db", key=archive_key) as store:
@@ -156,7 +160,10 @@ with SQLiteOfflineInvoiceStore.open("private/offline.db", key=archive_key) as st
 # Po odzyskaniu połączenia, wewnątrz kontekstu zalogowanego klienta.
 with SQLiteOfflineInvoiceStore.open("private/offline.db", key=archive_key) as store:
     outbox = client.invoices.offline(store, namespace="company")
+    # Jeden krok workera. Kolejne kroki wykonuje harmonogram aplikacji.
     entry = outbox.advance(invoice_hash)
+    if entry.progress.status is OfflineInvoiceStatus.COMPLETE:
+        upo_xml = outbox.read_upo(invoice_hash)
 ```
 
 Termin jest znacznikiem UTC wyliczonym przez aplikację na podstawie trybu
@@ -174,10 +181,10 @@ Worker sprawdza zapisany numer sesji i dokładny skrót dokumentu. Pusta lista
 faktur nie wystarcza do ponownej wysyłki. `retry_if_unsubmitted()` może
 zamknąć otwartą sesję i zwolnić wpis dopiero po tym, jak KSeF potwierdzi
 anulowanie sesji, liczbę zero faktur i pustą pełną listę dokumentów.
-Po zaakceptowaniu dokumentu kolejny
-cykl finalizuje sesję i zapisuje indywidualne UPO, które odczytasz przez
-`read_upo(invoice_hash)`. Dokument zwrócony przez KSeF jako duplikat ma osobny
-stan `duplicate`. Odrębnym przypadkiem jest kod 550, czyli potwierdzone
+Po stanie `accepted` kolejne wywołania `advance()` zamykają sesję,
+czekają na jej przetworzenie i zapisują indywidualne UPO. Harmonogram wywołuje
+`advance()` do stanu `complete`, po którym `read_upo(invoice_hash)` odczytuje
+lokalny dokument. Dokument zwrócony przez KSeF jako duplikat ma stan `duplicate`. Odrębnym przypadkiem jest kod 550, czyli potwierdzone
 anulowanie przetwarzania przez KSeF. Stan `retryable` pozostaje w kolejce.
 Po odczekaniu okresu wybranego przez aplikację wywołaj `retry_cancelled(invoice_hash)`.
 SDK zachowa szyfrowany zapis poprzedniej próby i kolejny cykl użyje oryginalnego XML-a.
@@ -201,3 +208,15 @@ odtworzeniu takiej kopii sprawdź stan KSeF przed ponownym uruchomieniem worker�
 [Tryby offline](https://github.com/CIRFMF/ksef-api/blob/ce3670e/tryby-offline.md)
 · [Kody QR](https://github.com/CIRFMF/ksef-api/blob/ce3670e/kody-qr.md)
 · [Korekta techniczna](https://github.com/CIRFMF/ksef-api/blob/ce3670e/offline/korekta-techniczna.md)
+
+### Weryfikacja z KSeF TEST
+
+Z ustawionymi `KSEF_E2E=1`, `KSEF_TEST_TOKEN`, `KSEF_TEST_CONTEXT_TYPE=Nip` i
+`KSEF_TEST_CONTEXT_VALUE` uruchom:
+
+```shell
+python -m pytest -q tests/test_e2e_offline_queue.py
+```
+
+Test zapisuje fakturę w kolejce przed uwierzytelnieniem, wznawia pracę z zapisaną
+sesją, przesyła oryginalny XML do KSeF TEST i weryfikuje zapisane UPO.
