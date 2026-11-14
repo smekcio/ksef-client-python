@@ -510,6 +510,7 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
         *,
         storage_id: str,
         documents: Sequence[tuple[dict[str, Any], InvoiceXmlReceipt]] = (),
+        count_insertions: bool = False,
     ) -> tuple[int, int]:
         """CAS the export progress and commit a bounded chunk of verified XML receipts."""
         self.validate_xml((scope,), storage_id)
@@ -541,7 +542,9 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                 raise KsefSyncConflictError("checkpoint_conflict")
             self._prepare_xml_scope(scope, revision == 0)
             for value, receipt in documents:
-                key = InvoiceXmlKey(*identity[:3], value["ksefNumber"])
+                key = InvoiceXmlKey(
+                    scope.namespace, scope.environment, scope.context_key, value["ksefNumber"]
+                )
                 expected_hash = value["invoiceHash"]
                 receipt.validate(key, expected_hash, storage_id)
                 observed = self._execute(
@@ -561,6 +564,14 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                 )
                 if result.rowcount != 1:
                     raise KsefSyncDataConflictError("invoice_hash_conflict")
+            if count_insertions and new_documents:
+                encoded = canonical_json(
+                    dict(state, inserted=state["inserted"] + new_documents), EXPORT_STATE_LIMIT
+                )
+                self._execute(
+                    "UPDATE invoice_export_progress SET state=? WHERE " + METADATA_KEY,
+                    (encoded, *identity),
+                )
         return revision + 1, new_documents
 
     def _selected(self, scopes: Sequence[InvoiceSyncScope]) -> tuple[str, tuple[str, ...]]:
