@@ -28,6 +28,7 @@ class OfflineInvoiceStatus(str, Enum):
     SUBMISSION_UNKNOWN = "submission_unknown"
     SUBMITTED = "submitted"
     ACCEPTED = "accepted"
+    RETRYABLE = "retryable"
     REJECTED = "rejected"
     DUPLICATE = "duplicate"
     COMPLETE = "complete"
@@ -64,6 +65,7 @@ class OfflineInvoiceProgress:
         has_reference = self.status in {
             OfflineInvoiceStatus.SUBMITTED,
             OfflineInvoiceStatus.ACCEPTED,
+            OfflineInvoiceStatus.RETRYABLE,
             OfflineInvoiceStatus.REJECTED,
             OfflineInvoiceStatus.DUPLICATE,
             OfflineInvoiceStatus.COMPLETE,
@@ -114,7 +116,9 @@ class OfflineInvoiceProgress:
         elif code == 440 and not invoice.ksef_number:
             # A duplicate is not eligible for technical correction.
             status = OfflineInvoiceStatus.DUPLICATE
-        elif code in {405, 410, 415, 430, 435, 450, 500, 550} and not invoice.ksef_number:
+        elif code == 550 and not invoice.ksef_number:
+            status = OfflineInvoiceStatus.RETRYABLE
+        elif code in {405, 410, 415, 430, 435, 450, 500} and not invoice.ksef_number:
             status = OfflineInvoiceStatus.REJECTED
         elif code in {100, 150} and not invoice.ksef_number:
             status = OfflineInvoiceStatus.SUBMITTED

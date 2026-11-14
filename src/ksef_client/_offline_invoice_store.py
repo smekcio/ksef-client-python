@@ -8,9 +8,11 @@ import hashlib
 import json
 import os
 import sqlite3
+import time
+import uuid
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -28,7 +30,7 @@ from ._offline_invoice_state import (
 from .exceptions import KsefDocumentValidationError, KsefSyncConflictError
 from .invoice_sync_state import InvoiceSyncScope, utc_timestamp
 from .invoice_xml_storage import _safe_directory
-from .invoice_xml_types import hash_bytes, positive
+from .invoice_xml_types import hash_bytes, positive, positive_int
 from .operations import OperationState
 
 _PROGRESS_COLUMNS = "revision,due_at,progress,correction_of,active,due_sort"
@@ -52,6 +54,22 @@ CREATE INDEX IF NOT EXISTS offline_active_due_v1
     ON offline_invoices_v1(scope, due_sort, invoice_hash) WHERE active=1;
 CREATE INDEX IF NOT EXISTS offline_corrections_v1
     ON offline_invoices_v1(scope, correction_of) WHERE correction_of IS NOT NULL;
+CREATE TABLE IF NOT EXISTS offline_session_open_v1 (
+    scope TEXT NOT NULL,
+    invoice_hash TEXT NOT NULL,
+    fence TEXT NOT NULL,
+    expires REAL NOT NULL,
+    PRIMARY KEY(scope, invoice_hash),
+    FOREIGN KEY(scope, invoice_hash) REFERENCES offline_invoices_v1(scope, invoice_hash)
+);
+CREATE TABLE IF NOT EXISTS offline_attempts_v1 (
+    scope TEXT NOT NULL,
+    invoice_hash TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    progress BLOB NOT NULL,
+    PRIMARY KEY(scope, invoice_hash, revision),
+    FOREIGN KEY(scope, invoice_hash) REFERENCES offline_invoices_v1(scope, invoice_hash)
+);
 """
 MAX_OFFLINE_XML_BYTES = 16 * 1024 * 1024
 _TERMINAL = {
@@ -228,17 +246,7 @@ class SQLiteOfflineInvoiceStore:
                     or original.progress.ksef_status not in {430, 450}
                 ):
                     raise KsefDocumentValidationError("Technical correction requires a rejection")
-                previous_corrections = self._db.execute(
-                    f"SELECT invoice_hash,{_PROGRESS_COLUMNS} FROM offline_invoices_v1 "
-                    "WHERE scope=? AND correction_of=?",
-                    (identity, correction_of),
-                )
-                if any(
-                    self._decode_progress(identity, digest, columns).progress.status
-                    is not OfflineInvoiceStatus.REJECTED
-                    for digest, *columns in previous_corrections
-                ):
-                    raise KsefSyncConflictError("offline_correction_already_exists")
+                self._ensure_no_live_correction(identity, correction_of, invoice_hash)
             self._db.execute(
                 "INSERT INTO offline_invoices_v1 "
                 "(scope,invoice_hash,revision,due_at,due_sort,active,progress,correction_of,xml) "
@@ -254,6 +262,19 @@ class SQLiteOfflineInvoiceStore:
                 ),
             )
         return record
+
+    def _ensure_no_live_correction(self, identity: str, original: str, current: str) -> None:
+        attempts = self._db.execute(
+            f"SELECT invoice_hash,{_PROGRESS_COLUMNS} FROM offline_invoices_v1 "
+            "WHERE scope=? AND correction_of=? AND invoice_hash<>?",
+            (identity, original, current),
+        )
+        if any(
+            self._decode_progress(identity, digest, columns).progress.status
+            is not OfflineInvoiceStatus.REJECTED
+            for digest, *columns in attempts
+        ):
+            raise KsefSyncConflictError("offline_correction_already_exists")
 
     def pending(
         self,
@@ -312,6 +333,63 @@ class SQLiteOfflineInvoiceStore:
             raise KsefDocumentValidationError("Offline archive session identity mismatch")
         return state
 
+    def reschedule(
+        self, scope: InvoiceSyncScope, invoice_hash: str, *, due_at: str, expected_revision: int
+    ) -> StoredOfflineInvoice:
+        positive_int(expected_revision, "expected_revision")
+        due_at = utc_timestamp(due_at)
+        identity = self._scope(scope)
+        with self._write():
+            row = self.load(scope, invoice_hash)
+            if row is None or row.progress.status in _TERMINAL:
+                raise KsefDocumentValidationError("Offline invoice is not active")
+            if row.revision != expected_revision:
+                raise KsefSyncConflictError("offline_invoice_revision_conflict")
+            if row.due_at == due_at:
+                return row
+            updated = replace(row, revision=row.revision + 1, due_at=due_at)
+            self._db.execute(
+                "UPDATE offline_invoices_v1 SET revision=?,due_at=?,due_sort=?,progress=? "
+                "WHERE scope=? AND invoice_hash=?",
+                (
+                    updated.revision,
+                    due_at,
+                    _due_sort(due_at),
+                    self._seal_progress(identity, updated),
+                    identity,
+                    invoice_hash,
+                ),
+            )
+        return updated
+
+    def retry_cancelled(self, scope: InvoiceSyncScope, invoice_hash: str) -> StoredOfflineInvoice:
+        row = self.load(scope, invoice_hash)
+        if (
+            row is None
+            or row.progress.ksef_status != 550
+            or row.progress.status
+            not in {OfflineInvoiceStatus.RETRYABLE, OfflineInvoiceStatus.REJECTED}
+        ):
+            raise KsefDocumentValidationError("Offline invoice has no confirmed cancellation")
+        return self._advance(scope, row, OfflineInvoiceProgress(invoice_hash))
+
+    def _claim_open(self, scope: InvoiceSyncScope, invoice_hash: str, timeout: float) -> str | None:
+        identity = self._scope(scope)
+        with self._write():
+            row = self.load(scope, invoice_hash)
+            if row is None or row.progress.status is not OfflineInvoiceStatus.QUEUED:
+                return None
+            now = time.time()
+            fence = uuid.uuid4().hex
+            result = self._db.execute(
+                "INSERT INTO offline_session_open_v1 VALUES (?,?,?,?) "
+                "ON CONFLICT(scope,invoice_hash) DO UPDATE SET "
+                "fence=excluded.fence,expires=excluded.expires "
+                "WHERE offline_session_open_v1.expires<=?",
+                (identity, invoice_hash, fence, now + timeout, now),
+            )
+            return fence if result.rowcount == 1 else None
+
     def _advance(
         self,
         scope: InvoiceSyncScope,
@@ -320,6 +398,7 @@ class SQLiteOfflineInvoiceStore:
         *,
         upo: bytes | None = None,
         session: OperationState | None = None,
+        opening_token: str | None = None,
     ) -> StoredOfflineInvoice:
         invoice_hash = current.progress.invoice_hash
         if invoice_hash != progress.invoice_hash:
@@ -340,10 +419,24 @@ class SQLiteOfflineInvoiceStore:
             session_bytes = self._encrypt(
                 identity, invoice_hash, "session", session.to_json().encode()
             )
-        updated = StoredOfflineInvoice(
-            progress, current.revision + 1, current.due_at, current.correction_of, current.mode
-        )
         with self._write():
+            if opening_token is not None:
+                claim = self._db.execute(
+                    "SELECT fence FROM offline_session_open_v1 WHERE scope=? AND invoice_hash=?",
+                    (identity, invoice_hash),
+                ).fetchone()
+                latest = self.load(scope, invoice_hash)
+                if (
+                    claim is None
+                    or claim[0] != opening_token
+                    or latest is None
+                    or (latest.progress.status is not OfflineInvoiceStatus.QUEUED)
+                ):
+                    raise KsefSyncConflictError("offline_session_open_claim_lost")
+                current = latest
+            if progress.status is OfflineInvoiceStatus.QUEUED and current.correction_of is not None:
+                self._ensure_no_live_correction(identity, current.correction_of, invoice_hash)
+            updated = replace(current, progress=progress, revision=current.revision + 1)
             result = self._db.execute(
                 "UPDATE offline_invoices_v1 SET progress=?,revision=revision+1,upo=?, "
                 "active=?, session_state=CASE WHEN ? THEN NULL ELSE COALESCE(?,session_state) END "
@@ -361,6 +454,22 @@ class SQLiteOfflineInvoiceStore:
             )
             if result.rowcount != 1:
                 raise KsefSyncConflictError("offline_invoice_revision_conflict")
+            if opening_token is not None:
+                self._db.execute(
+                    "DELETE FROM offline_session_open_v1 WHERE scope=? AND invoice_hash=?",
+                    (identity, invoice_hash),
+                )
+            if progress.status is OfflineInvoiceStatus.QUEUED:
+                attempt = self._encrypt(
+                    identity,
+                    invoice_hash,
+                    f"attempt:{current.revision}",
+                    json.dumps(asdict(current.progress)).encode(),
+                )
+                self._db.execute(
+                    "INSERT INTO offline_attempts_v1 VALUES (?,?,?,?)",
+                    (identity, invoice_hash, current.revision, attempt),
+                )
         return updated
 
 

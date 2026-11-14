@@ -185,3 +185,105 @@ def test_unrecoverable_rollback_closes_the_connection():
         store.enqueue(SCOPE, XML, due_at="2026-12-02T00:00:00Z")
     with pytest.raises(sqlite3.ProgrammingError, match="closed"):
         connection.execute("SELECT 1")
+
+
+def test_reschedule_keeps_hash_and_fences_stale_revision(tmp_path):
+    later = "2026-12-03T00:00:00Z"
+    with SQLiteOfflineInvoiceStore.open(tmp_path / "db", key=KEY) as store:
+        row = store.enqueue(SCOPE, XML, due_at=DUE)
+        digest = row.progress.invoice_hash
+        other = store.enqueue(SCOPE, b"<other/>", due_at="2026-12-02T00:00:00Z")
+        with pytest.raises(ValueError, match="not active"):
+            store.reschedule(
+                SCOPE, other.progress.invoice_hash + "x", due_at=later, expected_revision=1
+            )
+        unchanged = store.reschedule(SCOPE, digest, due_at=DUE, expected_revision=row.revision)
+        assert unchanged == row
+        updated = store.reschedule(SCOPE, digest, due_at=later, expected_revision=row.revision)
+        assert store.pending(SCOPE) == (other, updated)
+        assert updated.progress == row.progress
+        assert store.read_xml(SCOPE, digest) == XML
+        with pytest.raises(KsefSyncConflictError):
+            store.reschedule(SCOPE, digest, due_at=DUE, expected_revision=row.revision)
+
+
+def test_session_open_claim_recovers_after_expiry_without_stale_publish(tmp_path, monkeypatch):
+    clock = [1.0]
+    monkeypatch.setattr("ksef_client._offline_invoice_store.time.time", lambda: clock[0])
+    path = tmp_path / "db"
+    with (
+        SQLiteOfflineInvoiceStore.open(path, key=KEY) as first,
+        SQLiteOfflineInvoiceStore.open(path, key=KEY) as second,
+    ):
+        row = first.enqueue(SCOPE, XML, due_at=DUE)
+        digest = row.progress.invoice_hash
+        assert first._claim_open(SCOPE, digest + "wrong", 5) is None
+        original_claim = first._claim_open(SCOPE, digest, 5)
+        assert original_claim is not None
+        assert second._claim_open(SCOPE, digest, 5) is None
+        clock[0] = 7.0
+        current_claim = second._claim_open(SCOPE, digest, 5)
+        assert current_claim is not None and current_claim != original_claim
+        with pytest.raises(KsefSyncConflictError):
+            first._advance(
+                SCOPE, row, row.progress.open_session("stale"), opening_token=original_claim
+            )
+        moved = first.reschedule(
+            SCOPE, digest, due_at="2026-12-02T00:00:00Z", expected_revision=row.revision
+        )
+        reopened = second._advance(
+            SCOPE, row, row.progress.open_session("fresh"), opening_token=current_claim
+        )
+        assert reopened.due_at == moved.due_at and reopened.revision == moved.revision + 1
+        assert first._claim_open(SCOPE, digest, 5) is None
+
+
+def test_retry_confirmed_cancellation_keeps_encrypted_attempt_history_after_restart(tmp_path):
+    path = tmp_path / "db"
+    with SQLiteOfflineInvoiceStore.open(path, key=KEY) as store:
+        initial = store.enqueue(SCOPE, XML, due_at=DUE)
+        digest = initial.progress.invoice_hash
+        opened = store._advance(SCOPE, initial, initial.progress.open_session("old-session"))
+        sent = store._advance(SCOPE, opened, opened.progress.begin_submission())
+        cancelled = sent.progress.observe(remote_invoice(550))
+        # Prior versions stored status 550 as REJECTED. The upgrade can requeue it.
+        legacy = replace(cancelled, status=OfflineInvoiceStatus.REJECTED)
+        old = store._advance(SCOPE, sent, legacy)
+    with SQLiteOfflineInvoiceStore.open(path, key=KEY) as store:
+        current = store.retry_cancelled(SCOPE, digest)
+        assert current.progress == initial.progress
+        auth_scope = store._scope(SCOPE)
+        attempt = store._db.execute(
+            "SELECT revision, progress FROM offline_attempts_v1 WHERE scope=? AND invoice_hash=?",
+            (auth_scope, digest),
+        ).fetchone()
+        assert attempt[0] == old.revision and b"old-session" not in attempt[1]
+        assert b"old-session" in store._decrypt(
+            auth_scope, digest, f"attempt:{attempt[0]}", attempt[1]
+        )
+
+
+def test_retry_correction_respects_newer_active_correction(tmp_path):
+    with SQLiteOfflineInvoiceStore.open(tmp_path / "db", key=KEY) as store:
+
+        def reject(row, code):
+            opened = store._advance(SCOPE, row, row.progress.open_session("session-1"))
+            sent = store._advance(SCOPE, opened, opened.progress.begin_submission())
+            observed = sent.progress.observe(
+                remote_invoice(code, invoice_hash=sent.progress.invoice_hash)
+            )
+            return store._advance(
+                SCOPE, sent, replace(observed, status=OfflineInvoiceStatus.REJECTED)
+            )
+
+        original = reject(store.enqueue(SCOPE, XML, due_at=DUE), 450)
+        original_hash = original.progress.invoice_hash
+        cancelled = reject(
+            store.enqueue(SCOPE, b"<first/>", due_at=DUE, correction_of=original_hash), 550
+        )
+        digest = cancelled.progress.invoice_hash
+        newer = store.enqueue(SCOPE, b"<second/>", due_at=DUE, correction_of=original_hash)
+        with pytest.raises(KsefSyncConflictError):
+            store.retry_cancelled(SCOPE, digest)
+        reject(newer, 450)
+        assert store.retry_cancelled(SCOPE, digest).correction_of == original_hash

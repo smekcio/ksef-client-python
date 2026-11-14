@@ -509,3 +509,62 @@ def test_correction_sends_distinct_xml_with_exact_original_hash(tmp_path):
         assert queue.advance(digest).progress.invoice_reference == "correction-1"
         assert queue.read_xml(original) == XML
         assert client.send_count == 2
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_confirmed_cancellation_requeues_original_and_preserves_new_deadline(
+    tmp_path, monkeypatch, asynchronous
+):
+    clock = [1.0]
+    monkeypatch.setattr("ksef_client._offline_invoice_store.time.time", lambda: clock[0])
+
+    async def run():
+        client = AsyncProtocolClient() if asynchronous else ProtocolClient()
+        path = tmp_path / "offline.db"
+        async with AsyncExitStack() as stack:
+            queue: OfflineInvoices | AsyncOfflineInvoices
+            if asynchronous:
+                async_store = await stack.enter_async_context(
+                    await AsyncSQLiteOfflineInvoiceStore.open(path, key=KEY)
+                )
+                queue = AsyncOfflineInvoices(
+                    cast(AsyncKsef, client), async_store, namespace="company"
+                )
+            else:
+                store = stack.enter_context(SQLiteOfflineInvoiceStore.open(path, key=KEY))
+                queue = OfflineInvoices(cast(Ksef, client), store, namespace="company")
+            row = await invoke(queue.enqueue, XML, due_at=DUE)
+            digest = row.progress.invoice_hash
+            with pytest.raises(ValueError, match="no confirmed cancellation"):
+                await invoke(queue.retry_cancelled, digest)
+            # Another connection holds the open claim. Neither client may open until it expires.
+            with SQLiteOfflineInvoiceStore.open(path, key=KEY) as other:
+                assert other._claim_open(queue.scope, digest, 5) is not None
+                assert (await invoke(queue.advance, digest)) == row
+                assert client.open_count == 0
+            clock[0] = 7.0
+            await invoke(queue.advance, digest)
+            await invoke(queue.advance, digest)
+            client.remote_code = 550
+            cancelled = await invoke(queue.advance, digest)
+            assert cancelled.progress.status is OfflineInvoiceStatus.RETRYABLE
+            assert await invoke(queue.pending) == (cancelled,)
+            assert (await invoke(queue.advance, digest)) == cancelled
+            updated = await invoke(
+                queue.reschedule,
+                digest,
+                due_at="2026-12-02T00:00:00Z",
+                expected_revision=cancelled.revision,
+            )
+            queued = await invoke(queue.retry_cancelled, digest)
+            assert queued.progress.status is OfflineInvoiceStatus.QUEUED
+            assert queued.due_at == updated.due_at
+            assert await invoke(queue.read_xml, digest) == XML
+            assert client.send_count == 1
+            await invoke(queue.advance, digest)
+            await invoke(queue.advance, digest)
+            client.remote_code = 200
+            assert (await invoke(queue.advance, digest)).progress.ksef_number == NUMBER
+            assert client.send_count == 2 and client.open_count == 2
+
+    asyncio.run(run())

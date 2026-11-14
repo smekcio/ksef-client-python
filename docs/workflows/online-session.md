@@ -175,7 +175,13 @@ anulowanie sesji, liczbÄ™ zero faktur i pustÄ… peÅ‚nÄ… listÄ™ dokumentÃ³w.
 Po zaakceptowaniu dokumentu kolejny
 cykl finalizuje sesjÄ™ i zapisuje indywidualne UPO, ktÃ³re odczytasz przez
 `read_upo(invoice_hash)`. Dokument zwrÃ³cony przez KSeF jako duplikat ma osobny
-stan `duplicate`.
+stan `duplicate`. Odrêbnym przypadkiem jest kod 550, czyli potwierdzone
+anulowanie przetwarzania przez KSeF. Stan `retryable` pozostaje w kolejce.
+Po odczekaniu okresu wybranego przez aplikacjê wywo³aj `retry_cancelled(invoice_hash)`.
+SDK zachowa szyfrowany zapis poprzedniej próby i kolejny cykl u¿yje oryginalnego XML-a.
+Podczas otwierania sesji worker ma czasow¹ rezerwacjê wpisu.
+Jeœli proces przerwie pracê przed zapisaniem referencji, inny worker mo¿e
+przej¹æ wpis po wygaœniêciu rezerwacji.
 
 KorektÄ™ technicznÄ… dodaj jako nowy XML z argumentem
 `correction_of=original_invoice_hash`, po zapisaniu odrzucenia oryginaÅ‚u.

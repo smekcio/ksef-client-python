@@ -73,6 +73,18 @@ class OfflineInvoiceQueue:
     def status(self, invoice_hash: str) -> StoredOfflineInvoice | None:
         return self._store.load(self.scope, invoice_hash)
 
+    def reschedule(
+        self, invoice_hash: str, *, due_at: str, expected_revision: int
+    ) -> StoredOfflineInvoice:
+        """Update the deadline on the specified revision of an active invoice."""
+        return self._store.reschedule(
+            self.scope, invoice_hash, due_at=due_at, expected_revision=expected_revision
+        )
+
+    def retry_cancelled(self, invoice_hash: str) -> StoredOfflineInvoice:
+        """Queue the original XML again after KSeF confirms cancellation (status 550)."""
+        return self._store.retry_cancelled(self.scope, invoice_hash)
+
     def pending(
         self, *, limit: int = 100, after: tuple[str, str] | None = None
     ) -> tuple[StoredOfflineInvoice, ...]:
@@ -116,7 +128,7 @@ class OfflineInvoices(OfflineInvoiceQueue):
 
     def advance(self, invoice_hash: str, *, timeout: float = 60) -> StoredOfflineInvoice:
         with request_control(timeout_seconds=timeout):
-            return self._advance(invoice_hash)
+            return self._advance(invoice_hash, timeout)
 
     def retry_if_unsubmitted(
         self, invoice_hash: str, *, timeout: float = 60
@@ -139,7 +151,7 @@ class OfflineInvoices(OfflineInvoiceQueue):
                 return self._store._advance(self.scope, row, OfflineInvoiceProgress(invoice_hash))
             return row
 
-    def _advance(self, invoice_hash: str) -> StoredOfflineInvoice:
+    def _advance(self, invoice_hash: str, timeout: float) -> StoredOfflineInvoice:
         row = self.status(invoice_hash)
         if row is None:
             raise KsefDocumentValidationError("Offline invoice is missing in this scope")
@@ -148,9 +160,16 @@ class OfflineInvoices(OfflineInvoiceQueue):
         if status is OfflineInvoiceStatus.QUEUED:
             # Check that the archive can be decrypted before producing remote state.
             self.read_xml(invoice_hash)
+            claim = self._store._claim_open(self.scope, invoice_hash, timeout)
+            if claim is None:
+                return row
             session = self._client.online_session().resume_state()
             return self._store._advance(
-                self.scope, row, progress.open_session(session.reference_number), session=session
+                self.scope,
+                row,
+                progress.open_session(session.reference_number),
+                session=session,
+                opening_token=claim,
             )
         if status is OfflineInvoiceStatus.SESSION_OPEN:
             state = self._store._read_session(self.scope, row)
@@ -262,6 +281,22 @@ class AsyncOfflineInvoiceQueue:
     async def status(self, invoice_hash: str) -> StoredOfflineInvoice | None:
         return await self._store._call("load", self.scope, invoice_hash)
 
+    async def reschedule(
+        self, invoice_hash: str, *, due_at: str, expected_revision: int
+    ) -> StoredOfflineInvoice:
+        """Update the deadline on the specified revision of an active invoice."""
+        return await self._store._call(
+            "reschedule",
+            self.scope,
+            invoice_hash,
+            due_at=due_at,
+            expected_revision=expected_revision,
+        )
+
+    async def retry_cancelled(self, invoice_hash: str) -> StoredOfflineInvoice:
+        """Queue the original XML again after KSeF confirms cancellation (status 550)."""
+        return await self._store._call("retry_cancelled", self.scope, invoice_hash)
+
     async def pending(
         self, *, limit: int = 100, after: tuple[str, str] | None = None
     ) -> tuple[StoredOfflineInvoice, ...]:
@@ -302,7 +337,7 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
 
     async def advance(self, invoice_hash: str, *, timeout: float = 60) -> StoredOfflineInvoice:
         with request_control(timeout_seconds=timeout):
-            return await self._advance(invoice_hash)
+            return await self._advance(invoice_hash, timeout)
 
     async def retry_if_unsubmitted(
         self, invoice_hash: str, *, timeout: float = 60
@@ -327,7 +362,7 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
                 )
             return row
 
-    async def _advance(self, invoice_hash: str) -> StoredOfflineInvoice:
+    async def _advance(self, invoice_hash: str, timeout: float) -> StoredOfflineInvoice:
         row = await self.status(invoice_hash)
         if row is None:
             raise KsefDocumentValidationError("Offline invoice is missing in this scope")
@@ -336,6 +371,9 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
         if status is OfflineInvoiceStatus.QUEUED:
             # Check that the archive can be decrypted before producing remote state.
             await self.read_xml(invoice_hash)
+            claim = await self._store._call("_claim_open", self.scope, invoice_hash, timeout)
+            if claim is None:
+                return row
             session = (await self._client.online_session()).resume_state()
             return await self._store._call(
                 "_advance",
@@ -343,6 +381,7 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
                 row,
                 progress.open_session(session.reference_number),
                 session=session,
+                opening_token=claim,
             )
         if status is OfflineInvoiceStatus.SESSION_OPEN:
             state = await self._store._call("_read_session", self.scope, row)
