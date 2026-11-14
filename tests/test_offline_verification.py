@@ -74,3 +74,71 @@ def test_offline_verification_uses_exact_xml_identity_and_correct_labels():
 def test_rejects_unsuitable_offline_certificates(problem):
     with pytest.raises(KsefDocumentValidationError, match="offline certificate"):
         links(signer(**{problem: True}))
+
+
+def test_offline_certificate_rsa_and_other_key_types(monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
+
+    from ksef_client import _offline_verification as verification
+
+    rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    small_rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=1024)
+    alternate_curve = ec.generate_private_key(ec.SECP384R1())
+    key_factory = ec.generate_private_key
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ec, "generate_private_key", lambda curve: rsa_key)
+        assert links(signer()).certificate_label == "CERTYFIKAT"
+
+    for invalid in (small_rsa_key, alternate_curve):
+        with monkeypatch.context() as patch:
+            patch.setattr(ec, "generate_private_key", lambda curve, invalid=invalid: invalid)
+            with pytest.raises(KsefDocumentValidationError, match="offline certificate"):
+                links(signer())
+
+    key_pair = signer()
+    unsupported_private = ed25519.Ed25519PrivateKey.generate()
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            verification.serialization, "load_pem_private_key", lambda *args: unsupported_private
+        )
+        with pytest.raises(KsefDocumentValidationError, match="offline certificate"):
+            links(key_pair)
+    assert ec.generate_private_key is key_factory
+
+
+def test_invalid_offline_verification_inputs():
+    options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
+    context = f"Nip:{SELLER}"
+    xml = _build_invoice_xml(seller_nip=SELLER, environment_name="offline-qr")
+    progress = OfflineInvoiceProgress(offline_invoice_hash(xml))
+    with pytest.raises(TypeError, match="certificate and private key"):
+        build_offline_verification_links(options, context, progress, xml, None)  # type: ignore[arg-type]
+    with pytest.raises(KsefDocumentValidationError, match="recorded hash"):
+        build_offline_verification_links(options, context, progress, xml + b" ", signer())
+    malformed = b"<not-an-invoice/>"
+    with pytest.raises(KsefDocumentValidationError, match="Invalid FA"):
+        build_offline_verification_links(
+            options,
+            context,
+            OfflineInvoiceProgress(offline_invoice_hash(malformed)),
+            malformed,
+            signer(),
+        )
+    with pytest.raises(KsefDocumentValidationError, match="Invalid FA"):
+        build_offline_verification_links(options, "unknown:x", progress, xml, signer())
+
+
+def test_offline_verification_requires_seller_nip():
+    key_pair = signer()
+    xml = _build_invoice_xml(seller_nip=SELLER, environment_name="offline-qr")
+    xml = xml.replace(f"<NIP>{SELLER}</NIP>".encode(), b"<NIP>1234</NIP>", 1)
+    progress = OfflineInvoiceProgress(offline_invoice_hash(xml))
+    with pytest.raises(KsefDocumentValidationError, match="Invalid FA"):
+        build_offline_verification_links(
+            KsefClientOptions(base_url=KsefEnvironment.TEST.value),
+            f"Nip:{SELLER}",
+            progress,
+            xml,
+            key_pair,
+        )

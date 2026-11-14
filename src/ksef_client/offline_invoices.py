@@ -134,7 +134,7 @@ class OfflineInvoices(OfflineInvoiceQueue):
                 status.status.code == 440
                 and type(status.invoice_count) is int
                 and status.invoice_count == 0
-                and self._find_submission(reference, invoice_hash) is None
+                and not self._scan_submission(reference, invoice_hash)[1]
             ):
                 return self._store._advance(self.scope, row, OfflineInvoiceProgress(invoice_hash))
             return row
@@ -174,7 +174,7 @@ class OfflineInvoices(OfflineInvoiceQueue):
             reference = cast(str, progress.session_reference)
             sessions = self._client.api.sessions
             if progress.invoice_reference is None:
-                match = self._find_submission(reference, invoice_hash)
+                match, _ = self._scan_submission(reference, invoice_hash)
                 if match is None:
                     return row
             else:
@@ -201,20 +201,22 @@ class OfflineInvoices(OfflineInvoiceQueue):
             return self._store._advance(self.scope, row, progress.confirm_upo(), upo=upo)
         return row
 
-    def _find_submission(
+    def _scan_submission(
         self, session: str, invoice_hash: str
-    ) -> m.SessionInvoiceStatusResponse | None:
+    ) -> tuple[m.SessionInvoiceStatusResponse | None, bool]:
         match = None
+        nonempty = False
         seen: set[str] = set()
         token = None
         for _ in range(_RECONCILIATION_PAGE_LIMIT):
             page = self._client.api.sessions.get_session_invoices(
                 session, page_size=100, continuation_token=token
             )
+            nonempty |= bool(page.invoices)
             match = _match_invoice(match, page, invoice_hash)
             token = page.continuation_token
-            if token is None:
-                return match
+            if not token:
+                return match, nonempty
             if len(token) > 16_384 or token in seen:
                 break
             seen.add(token)
@@ -318,7 +320,7 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
                 status.status.code == 440
                 and type(status.invoice_count) is int
                 and status.invoice_count == 0
-                and await self._find_submission(reference, invoice_hash) is None
+                and not (await self._scan_submission(reference, invoice_hash))[1]
             ):
                 return await self._store._call(
                     "_advance", self.scope, row, OfflineInvoiceProgress(invoice_hash)
@@ -367,7 +369,7 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
             reference = cast(str, progress.session_reference)
             sessions = self._client.api.sessions
             if progress.invoice_reference is None:
-                match = await self._find_submission(reference, invoice_hash)
+                match, _ = await self._scan_submission(reference, invoice_hash)
                 if match is None:
                     return row
             else:
@@ -398,20 +400,22 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
             )
         return row
 
-    async def _find_submission(
+    async def _scan_submission(
         self, session: str, invoice_hash: str
-    ) -> m.SessionInvoiceStatusResponse | None:
+    ) -> tuple[m.SessionInvoiceStatusResponse | None, bool]:
         match = None
+        nonempty = False
         seen: set[str] = set()
         token = None
         for _ in range(_RECONCILIATION_PAGE_LIMIT):
             page = await self._client.api.sessions.get_session_invoices(
                 session, page_size=100, continuation_token=token
             )
+            nonempty |= bool(page.invoices)
             match = _match_invoice(match, page, invoice_hash)
             token = page.continuation_token
-            if token is None:
-                return match
+            if not token:
+                return match, nonempty
             if len(token) > 16_384 or token in seen:
                 break
             seen.add(token)

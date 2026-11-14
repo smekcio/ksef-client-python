@@ -8,7 +8,7 @@ Aplikacja jawnie wybiera tryb offline oraz przekazuje oryginalny XML i termin wy
 - Worker zapisuje referencję nowej sesji przed wysłaniem faktury. Przed POST utrwala dowód rozpoczęcia próby. Po utracie odpowiedzi sprawdza tę samą sesję i wyszukuje dokument po hash. Niepewny wynik pozostaje jawny, dopóki nie ma rozstrzygającego dowodu. Ten stan nie prowadzi automatycznie do ponownej wysyłki.
 - Po przyjęciu worker zapisuje numer KSeF, finalizuje sesję i pobiera UPO. Każdy z tych kroków można wznowić z zapisanych referencji. Porażka pobrania UPO zachowuje numer KSeF i pozwala ponowić wyłącznie odczyt.
 - Korekta techniczna jest odrębnym dokumentem związanym z odrzuconym oryginałem. Korzysta z jego skrótu jako hashOfCorrectedInvoice i ustawia offlineMode. Wydanie korekty wymaga jawnej decyzji aplikacji i nowego XML.
-- Lokalna baza koordynuje workerów przez transakcje i warunkowe przejścia stanu. Po utracie dzierżawy starszy wykonawca nie nadpisuje późniejszych ustaleń. Raporty pokazują stany, terminy i dozwolone kody bez kluczy, XML ani poufnych parametrów operacji.
+- Lokalna baza koordynuje workerów przez transakcje i warunkowe przejścia stanu. Zmiana wersji wpisu chroni późniejsze ustalenia przed zapisem starszego wykonawcy. Raporty pokazują stany, terminy i dozwolone kody bez kluczy, XML ani poufnych parametrów operacji.
 
 ## Odbiór
 

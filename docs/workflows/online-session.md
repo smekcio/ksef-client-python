@@ -171,7 +171,7 @@ W razie utraty odpowiedzi na POST stan `submission_unknown` pozostaje na dysku.
 Worker sprawdza zapisany numer sesji i dokładny skrót dokumentu. Pusta lista
 faktur nie wystarcza do ponownej wysyłki. `retry_if_unsubmitted()` może
 zamknąć otwartą sesję i zwolnić wpis dopiero po tym, jak KSeF potwierdzi
-anulowanie sesji, liczbę zero faktur i brak zgodnego dokumentu na pełnej liście.
+anulowanie sesji, liczbę zero faktur i pustą pełną listę dokumentów.
 Po zaakceptowaniu dokumentu kolejny
 cykl finalizuje sesję i zapisuje indywidualne UPO, które odczytasz przez
 `read_upo(invoice_hash)`. Dokument zwrócony przez KSeF jako duplikat ma osobny
@@ -179,6 +179,8 @@ stan `duplicate`.
 
 Korektę techniczną dodaj jako nowy XML z argumentem
 `correction_of=original_invoice_hash`, po zapisaniu odrzucenia oryginału.
+Jeśli próba korekty została jednoznacznie odrzucona, wskaż ten sam oryginał
+w następnej korekcie. Weryfikacja, że poprawka zachowuje treść faktury, należy do aplikacji.
 Kody QR pochodzą z oryginalnych bajtów FA(3). SDK sprawdza użycie klucza,
 ważność oraz zgodność klucza z certyfikatem offline. Stan odwołania i uprawnienia
 wystawcy zależą od rejestru KSeF.

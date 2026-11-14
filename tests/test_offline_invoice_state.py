@@ -62,3 +62,38 @@ def test_rejection_preserves_reference_for_technical_correction():
     assert rejected.invoice_hash == HASH
     with pytest.raises(ValueError, match="has not been accepted"):
         rejected.confirm_upo()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"status": "queued"},
+        {"status": OfflineInvoiceStatus.SESSION_OPEN},
+        {"status": OfflineInvoiceStatus.SESSION_OPEN, "session_reference": "../wrong"},
+        {"status": OfflineInvoiceStatus.SUBMITTED, "session_reference": "session-1"},
+        {
+            "status": OfflineInvoiceStatus.ACCEPTED,
+            "session_reference": "session-1",
+            "invoice_reference": "invoice-1",
+        },
+    ],
+)
+def test_invalid_progress_cannot_resume(overrides):
+    with pytest.raises(ValueError):
+        OfflineInvoiceProgress(HASH, **overrides)
+
+
+def test_rejects_invalid_transition_and_status_type():
+    queued = OfflineInvoiceProgress(HASH)
+    opened = queued.open_session("session-1")
+    for transition in (
+        lambda: opened.open_session("session-2"),
+        lambda: opened.confirm_reference("invoice-1"),
+        lambda: opened.observe(remote_invoice(150)),
+    ):
+        with pytest.raises(ValueError):
+            transition()
+    with pytest.raises(KsefDocumentValidationError, match="Invalid KSeF"):
+        opened.begin_submission().observe(remote_invoice(True))
+    with pytest.raises(KsefDocumentValidationError, match="requires original XML"):
+        offline_invoice_hash(b"")

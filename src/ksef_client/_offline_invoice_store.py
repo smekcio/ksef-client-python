@@ -8,7 +8,7 @@ import hashlib
 import json
 import os
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from functools import partial
@@ -28,9 +28,10 @@ from ._offline_invoice_state import (
 from .exceptions import KsefDocumentValidationError, KsefSyncConflictError
 from .invoice_sync_state import InvoiceSyncScope, utc_timestamp
 from .invoice_xml_storage import _safe_directory
-from .invoice_xml_types import positive
+from .invoice_xml_types import hash_bytes, positive
 from .operations import OperationState
 
+_PROGRESS_COLUMNS = "revision,due_at,progress,correction_of,active,due_sort"
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS offline_invoices_v1 (
     scope TEXT NOT NULL,
@@ -49,7 +50,7 @@ CREATE TABLE IF NOT EXISTS offline_invoices_v1 (
 );
 CREATE INDEX IF NOT EXISTS offline_active_due_v1
     ON offline_invoices_v1(scope, due_sort, invoice_hash) WHERE active=1;
-CREATE UNIQUE INDEX IF NOT EXISTS offline_single_correction_v1
+CREATE INDEX IF NOT EXISTS offline_corrections_v1
     ON offline_invoices_v1(scope, correction_of) WHERE correction_of IS NOT NULL;
 """
 MAX_OFFLINE_XML_BYTES = 16 * 1024 * 1024
@@ -161,15 +162,19 @@ class SQLiteOfflineInvoiceStore:
         )
 
     def load(self, scope: InvoiceSyncScope, invoice_hash: str) -> StoredOfflineInvoice | None:
+        identity = self._scope(scope)
         row = self._db.execute(
-            "SELECT revision,due_at,progress,correction_of,active,due_sort "
-            "FROM offline_invoices_v1 "
-            "WHERE scope=? AND invoice_hash=?",
-            (self._scope(scope), invoice_hash),
+            f"SELECT {_PROGRESS_COLUMNS} FROM offline_invoices_v1 WHERE scope=? AND invoice_hash=?",
+            (identity, invoice_hash),
         ).fetchone()
         if row is None:
             return None
-        raw = self._decrypt(self._scope(scope), invoice_hash, "progress", row[2])
+        return self._decode_progress(identity, invoice_hash, row)
+
+    def _decode_progress(
+        self, identity: str, invoice_hash: str, row: Sequence[Any]
+    ) -> StoredOfflineInvoice:
+        raw = self._decrypt(identity, invoice_hash, "progress", row[2])
         payload = json.loads(raw)
         attributes = payload.pop("progress")
         attributes["status"] = OfflineInvoiceStatus(attributes["status"])
@@ -178,7 +183,9 @@ class SQLiteOfflineInvoiceStore:
             payload["revision"],
             payload["due_at"],
             payload["correction_of"],
-        ) != (row[0], row[1], row[3]):
+            int(progress.status not in _TERMINAL),
+            _due_sort(payload["due_at"]),
+        ) != (row[0], row[1], row[3], row[4], row[5]):
             raise KsefDocumentValidationError("Offline archive identity mismatch")
         payload["mode"] = OfflineInvoiceMode(payload["mode"])
         return StoredOfflineInvoice(progress=progress, **payload)
@@ -216,14 +223,21 @@ class SQLiteOfflineInvoiceStore:
                 original = self.load(scope, correction_of)
                 if (
                     original is None
+                    or original.correction_of is not None
                     or original.progress.status is not OfflineInvoiceStatus.REJECTED
                     or original.progress.ksef_status not in {430, 450}
                 ):
                     raise KsefDocumentValidationError("Technical correction requires a rejection")
-                if self._db.execute(
-                    "SELECT 1 FROM offline_invoices_v1 WHERE scope=? AND correction_of=?",
+                previous_corrections = self._db.execute(
+                    f"SELECT invoice_hash,{_PROGRESS_COLUMNS} FROM offline_invoices_v1 "
+                    "WHERE scope=? AND correction_of=?",
                     (identity, correction_of),
-                ).fetchone():
+                )
+                if any(
+                    self._decode_progress(identity, digest, columns).progress.status
+                    is not OfflineInvoiceStatus.REJECTED
+                    for digest, *columns in previous_corrections
+                ):
                     raise KsefSyncConflictError("offline_correction_already_exists")
             self._db.execute(
                 "INSERT INTO offline_invoices_v1 "
@@ -250,22 +264,19 @@ class SQLiteOfflineInvoiceStore:
     ) -> tuple[StoredOfflineInvoice, ...]:
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("Offline queue page limit must be 1 to 100")
-        sql = "SELECT invoice_hash FROM offline_invoices_v1 WHERE scope=? AND active=1 "
-        values: tuple[object, ...] = (self._scope(scope),)
+        identity = self._scope(scope)
+        sql = (
+            f"SELECT invoice_hash,{_PROGRESS_COLUMNS} FROM offline_invoices_v1 "
+            "WHERE scope=? AND active=1 "
+        )
+        values: tuple[object, ...] = (identity,)
         if after is not None:
             timestamp, invoice_hash = after
-            from .invoice_xml_types import hash_bytes
-
             hash_bytes(invoice_hash)
             sql += "AND (due_sort,invoice_hash)>(?,?) "
             values += (_due_sort(utc_timestamp(timestamp)), invoice_hash)
         rows = self._db.execute(sql + "ORDER BY due_sort,invoice_hash LIMIT ?", (*values, limit))
-        return tuple(
-            entry
-            for (digest,) in rows
-            if (entry := self.load(scope, digest)) is not None
-            and entry.progress.status not in _TERMINAL
-        )
+        return tuple(self._decode_progress(identity, digest, columns) for digest, *columns in rows)
 
     def read_xml(self, scope: InvoiceSyncScope, invoice_hash: str) -> bytes:
         return self._read_blob(scope, invoice_hash, upo=False)
@@ -335,12 +346,13 @@ class SQLiteOfflineInvoiceStore:
         with self._write():
             result = self._db.execute(
                 "UPDATE offline_invoices_v1 SET progress=?,revision=revision+1,upo=?, "
-                "active=?, session_state=COALESCE(?,session_state) "
+                "active=?, session_state=CASE WHEN ? THEN NULL ELSE COALESCE(?,session_state) END "
                 "WHERE scope=? AND invoice_hash=? AND revision=?",
                 (
                     self._seal_progress(identity, updated),
                     encrypted,
                     int(progress.status not in _TERMINAL),
+                    int(progress.status is OfflineInvoiceStatus.QUEUED),
                     session_bytes,
                     identity,
                     invoice_hash,
