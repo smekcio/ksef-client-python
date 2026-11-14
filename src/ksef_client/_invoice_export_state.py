@@ -55,12 +55,13 @@ class ExportProgress:
             if stop is not None
             else utc_timestamp((now if now is not None else datetime.now(timezone.utc)).isoformat())
         )
-        if _date(end) <= _date(start):
+        end_time = _date(end)
+        if end_time <= _date(start):
             return None
         # A UTC midnight on day 100 is within the API's calendar-day bound,
         # independent of fractional-second precision or the original offset.
         first_day = _date(start)[0].replace(hour=0, minute=0, second=0, microsecond=0)
-        if (_date(end)[0].date() - first_day.date()).days > 100:
+        if (end_time[0] - first_day).days >= 100:
             end = utc_timestamp((first_day + timedelta(days=100)).isoformat())
         return start, end
 

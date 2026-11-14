@@ -197,6 +197,14 @@ def test_long_history_bounds_each_request_to_one_hundred_utc_days():
     )
 
 
+def test_long_history_never_uses_more_than_one_hundred_days():
+    progress = ExportProgress("2025-01-01T00:00:00Z")
+    assert progress.bounds("2025-04-11T00:00:00.0000001Z") == (
+        "2025-01-01T00:00:00Z",
+        "2025-04-11T00:00:00Z",
+    )
+
+
 def test_commit_export_records_ready_xml_and_rejects_stale_progress(tmp_path):
     database = tmp_path / "archive.db"
     scope = InvoiceSyncScope("company", "a" * 64, "Nip:test", "archive", "b" * 64)
