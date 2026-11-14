@@ -117,7 +117,9 @@ Uwagi:
 `client.exports.sync_archive(...)` tworzy strumień przyrostowej synchronizacji
 dla jednej roli. Domyślna rola `Subject2` obejmuje zakupy. Użyj tego samego
 `namespace`, kontekstu i magazynu XML co przy synchronizacji przez metadane,
-żeby współdzielić zapisane dokumenty.
+żeby współdzielić zapisane dokumenty. Dla większej historii lub regularnego
+importu paczek wybierz `sync_archive()`. `sync_documents()` jest przydatne,
+gdy chcesz synchronizować metadane i pobierać poszczególne pliki XML.
 
 ```python
 from ksef_client import FileInvoiceXmlStore, SQLiteInvoiceSyncStore
@@ -135,13 +137,21 @@ with (
         work_dir="private/export-work",
         state_key=export_state_key,  # 32 bajty z magazynu sekretów aplikacji
     )
-    report = sync.run_once(store, storage, max_documents=500)
+    # Zachowaj tę samą datę końcową w kolejnych cyklach importu historii.
+    report = sync.run_once(store, storage, until="2025-01-01T00:00:00Z", max_documents=500)
+    print(report.status, report.committed_hwm)
 ```
 
 Każde wywołanie obsługuje najwyżej jeden fragment paczki. `importing` oznacza
 zapis części paczki, a `truncated` wskazuje, że trzeba pobrać dalszy fragment
 od zapisanej daty granicznej. `committed` potwierdza pokrycie do
-`committed_hwm`. `idle` oznacza brak przedziału do pobrania.
+`committed_hwm`. W imporcie historii planuj kolejne wywołania z tym samym
+`until`, dopóki zatwierdzony HWM nie osiągnie tej daty. `idle` oznacza brak
+przedziału do pobrania. Przy synchronizacji bieżącej możesz pominąć `until`.
+Harmonogram kolejnych cykli należy do aplikacji. Przykładowo pierwszy cykl
+zwraca `importing` po zapisaniu 500 dokumentów. Następny z tym samym `until`
+wznawia tę paczkę. Po `committed` dla wcześniejszego HWM scheduler uruchamia
+kolejny cykl i sprawdza ponownie, czy HWM osiągnął docelową datę.
 `expired`, `waiting_hwm` i `retry_later` pozwalają zaplanować ponowny cykl
 według limitów KSeF. Po potwierdzonym anulowaniu eksportu (550) kolejny cykl
 otworzy operację dla zachowanego zakresu. `retrying_package` oznacza odrzucenie
@@ -151,9 +161,22 @@ i zweryfikuje tożsamość paczki przed wznowieniem importu.
 pozycje zakończone w bieżącym wywołaniu. `store.list_xml([sync.scope])`
 pokazuje gotowe dokumenty tej roli.
 
-Po restarcie użyj tego samego klucza, bazy, magazynu i lokalnego katalogu
-roboczego. Katalog zawiera poufne faktury oraz zaszyfrowane części przekazane
+Po restarcie zachowaj ten sam klucz, bazę, magazyn, katalog roboczy, kontekst,
+`namespace`, `sync_key` i rolę. Katalog zawiera poufne faktury oraz zaszyfrowane części przekazane
 przez KSeF. Trzymaj go poza współdzielonymi lokalizacjami i ogranicz dostęp
 systemowy. Wariant `AsyncKsef` udostępnia tę samą fabrykę. Użyj adapterów
 `AsyncSQLiteInvoiceSyncStore` i `AsyncFileInvoiceXmlStore` oraz
 `await sync.run_once(...)`.
+
+### Weryfikacja z KSeF TEST
+
+Z ustawionymi `KSEF_E2E=1`, `KSEF_TEST_TOKEN`, `KSEF_TEST_CONTEXT_TYPE=Nip` i
+`KSEF_TEST_CONTEXT_VALUE` uruchom:
+
+```shell
+python -m pytest -q tests/test_e2e_export_archive.py
+```
+
+Test zapisuje dwie faktury w KSeF TEST, otwiera ponownie lokalne archiwum po
+częściowym imporcie i porównuje oba zarchiwizowane XML-e z dokumentami pobranymi
+z KSeF.
