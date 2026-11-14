@@ -477,3 +477,35 @@ def test_offline_verification_public_sync_and_async_paths(tmp_path):
             assert await client.invoices.offline(store, namespace="company").read_xml(digest) == xml
 
     asyncio.run(run())
+
+
+def test_correction_sends_distinct_xml_with_exact_original_hash(tmp_path):
+    class CorrectionClient(TestClient):
+        def send_invoice(self, xml, *, offline_mode, hash_of_corrected_invoice):
+            self.send_count += 1
+            if hash_of_corrected_invoice is None:
+                assert xml == XML and offline_mode is True
+                raise OSError("lost original response")
+            assert xml == b"<corrected/>" and offline_mode is True
+            assert hash_of_corrected_invoice == original
+            return SimpleNamespace(
+                resume_state=lambda: SimpleNamespace(reference_number="correction-1")
+            )
+
+        def get_session_invoices(self, reference_number, *, page_size, continuation_token):
+            return m.SessionInvoicesResponse([remote_invoice(450)])
+
+    client = CorrectionClient()
+    with SQLiteOfflineInvoiceStore.open(tmp_path / "offline.db", key=KEY) as store:
+        queue = OfflineInvoices(cast(Ksef, client), store, namespace="company")
+        original = queue.enqueue(XML, due_at=DUE).progress.invoice_hash
+        queue.advance(original)
+        with pytest.raises(OSError, match="lost original response"):
+            queue.advance(original)
+        assert queue.advance(original).progress.status is OfflineInvoiceStatus.REJECTED
+        correction = queue.enqueue(b"<corrected/>", due_at=DUE, correction_of=original)
+        digest = correction.progress.invoice_hash
+        queue.advance(digest)
+        assert queue.advance(digest).progress.invoice_reference == "correction-1"
+        assert queue.read_xml(original) == XML
+        assert client.send_count == 2
