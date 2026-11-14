@@ -35,8 +35,8 @@ Najważniejsze cechy:
 - **lokalne archiwum faktur i XML** — przyrostowe pobieranie, wznowienie po restarcie,
   kontrola SHA-256 i raport gotowości; gotowe SQLite i magazyn plikowy sync/async;
   [przykład synchronizacji](#synchronizacja-metadanych-i-xml),
-- **archiwizacja z paczek KSeF** — import XML do SQLite i magazynu plikowego z osobnym
-  punktem kontrolnym HWM dla każdej roli i wznowieniem po przerwaniu;
+- **archiwizacja z paczek KSeF** — metadane w SQLite, XML w magazynie plikowym,
+  osobny punkt kontrolny HWM dla każdej roli i wznowienie po przerwaniu;
   [przewodnik](docs/workflows/export.md#wznawialny-import-do-lokalnego-archiwum),
 - **synchronizacja metadanych** — `client.invoices.sync(...).run_once(store)`, niezależne role,
   trwałe checkpointy HWM i atomowy zapis z CAS; [przewodnik i SQLite](docs/invoice-sync.md),
