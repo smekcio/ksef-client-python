@@ -30,6 +30,7 @@ from tests.invoice_live_diagnostics import diagnostic  # noqa: E402
 from tests.invoice_live_options import live_options  # noqa: E402
 from tests.invoice_sync_live_worker import verify  # noqa: E402
 from tests.test_e2e_token_flows import (  # noqa: E402
+    _build_invoice_xml,
     _load_test_token_config,
 )
 
@@ -51,6 +52,18 @@ def target_job(store: Any, scopes: Any, number: str) -> dict[str, Any] | None:
                 return row
         after = rows[-1]["ksef_number"]
     return None
+
+
+def submit_fixture(client: Ksef, seller_nip: str) -> str:
+    diagnostic(stage="submit")
+    with client.online_session() as session:
+        submitted = session.send_invoice(
+            _build_invoice_xml(seller_nip=seller_nip, environment_name="invoice-xml-restart")
+        ).wait(timeout=120)
+    session.wait(timeout=360)
+    assert session.upo().wait(timeout=360).pages
+    assert submitted.ksef_number
+    return canonical_ksef_number(submitted.ksef_number)
 
 
 def run(phase: str) -> None:
@@ -89,9 +102,9 @@ def run(phase: str) -> None:
 
         cast(Any, client.api.invoices)._query_invoice_metadata_observation_page = checked_wire
         if phase == "metadata":
-            # Use real, already indexed metadata. Fresh submission/HWM propagation is
-            # exercised separately by the metadata restart gate; this gate verifies
-            # the durable XML obligation across a process restart.
+            # Prefer an indexed invoice. A quiet TEST context needs its own fixture,
+            # since this scenario runs before the other invoice-submission flows.
+            submitted_number = None
             while True:
                 diagnostic(stage="observe")
                 scan = client.api.invoices.search_invoice_metadata_range(
@@ -102,6 +115,7 @@ def run(phase: str) -> None:
                         ),
                     ),
                     context_key=client.context_key,
+                    page_size=250,
                 )
                 selected: tuple[str, str] | None = None
                 cursor, visible = None, 0
@@ -113,13 +127,15 @@ def run(phase: str) -> None:
                             if not item.ksef_number or not item.permanent_storage_date:
                                 continue
                             try:
-                                canonical_ksef_number(item.ksef_number)
+                                number = canonical_ksef_number(item.ksef_number)
                             except ValueError:
+                                continue
+                            if submitted_number is not None and number != submitted_number:
                                 continue
                             if selected is None or _date(item.permanent_storage_date) >= _date(
                                 selected[1]
                             ):
-                                selected = (item.ksef_number, item.permanent_storage_date)
+                                selected = (number, item.permanent_storage_date)
                         cursor = page.next_cursor
                         if cursor is None:
                             break
@@ -136,11 +152,16 @@ def run(phase: str) -> None:
                         stage="observe", observation="hwm_before_start", visibility=(0, False)
                     )
                 if selected is not None:
-                    state["number"] = canonical_ksef_number(selected[0])
+                    state["number"] = selected[0]
                     state["metadata_from"] = selected[1]
                     state_path.write_text(json.dumps(state), encoding="utf-8")
                     break
-                wait_seconds(30)
+                if submitted_number is None:
+                    since = datetime.now(timezone.utc).isoformat()
+                    submitted_number = submit_fixture(client, config.context_value)
+                    query = replace(query, date_range=replace(query.date_range, from_=since))
+                # Leave time for TEST indexing and avoid repeated empty metadata queries.
+                wait_seconds(300)
         query = replace(query, date_range=replace(query.date_range, from_=state["metadata_from"]))
         sync = client.invoices.sync_documents(
             namespace="wheel-xml-test", sync_key="xml", queries=[query]

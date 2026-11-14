@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from contextlib import nullcontext
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
@@ -12,13 +13,13 @@ import pytest
 from ksef_client.exceptions import KsefHttpError
 from ksef_client.rate_limiting import KsefRateLimitWaitTimeout
 from tests import invoice_xml_live_worker as worker
-from tests.test_invoice_sync import H1, START, row
+from tests.test_invoice_sync import START, row
 from tests.test_invoice_xml_sync import HASH, NUMBER, NUMBER2, XmlServer, environment
 
 
 @pytest.mark.parametrize("blocked", [False, True])
 @pytest.mark.parametrize("extra", [False, True])
-@pytest.mark.parametrize("delayed", [False, True])
+@pytest.mark.parametrize("delayed", [None, "hwm_before_start", "not_visible"])
 @pytest.mark.parametrize("observed_number", [NUMBER, NUMBER[:26] + "-" + NUMBER[26:]])
 def test_live_helper_completes_both_phases_with_real_sdk_adapters(
     tmp_path, monkeypatch, blocked, extra, delayed, observed_number
@@ -28,6 +29,8 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(
         original = server.handle
         visible = not delayed
         waits = 0
+        submitted = 0
+        selected_date = "2025-01-01T00:00:00Z"
 
         def handle(request):
             # Discovery uses bounded role/date observations without an exact-number filter.
@@ -42,9 +45,11 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(
                                 "invoices": [],
                                 "hasMore": False,
                                 "isTruncated": False,
-                                "permanentStorageHwmDate": H1
-                                if visible
-                                else "2000-01-01T00:00:00Z",
+                                "permanentStorageHwmDate": (
+                                    "2000-01-01T00:00:00Z"
+                                    if delayed == "hwm_before_start" and not waits
+                                    else json.loads(request.content)["dateRange"]["to"]
+                                ),
                             }
                         ).encode()
                     ),
@@ -95,17 +100,29 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(
             )
             monkeypatch.setattr(worker.Ksef, "connect", lambda **kwargs: nullcontext(client))
 
-            def unexpected_wait(*args):
+            def submit_fixture(*args):
+                nonlocal submitted, selected_date
+                submitted += 1
+                selected_date = datetime.now(timezone.utc).isoformat()
+                server.hwm = selected_date
+                server.rows = [row(item.ksef_number, selected_date, HASH) for item in server.rows]
+                return NUMBER
+
+            monkeypatch.setattr(worker, "submit_fixture", submit_fixture)
+
+            def wait_for_indexing(seconds):
                 nonlocal visible, waits
                 if visible:
                     raise AssertionError("Helper waited despite an observable invoice")
+                assert seconds == 300
+                assert submitted == 1
                 safe = json.loads((tmp_path / "xml-live-diagnostic.json").read_text())
                 assert safe["stage"] == "observe"
-                assert safe["observation"] == "hwm_before_start"
+                assert safe["observation"] == (delayed if not waits else "not_visible")
                 waits += 1
-                visible = True
+                visible = waits == 2
 
-            monkeypatch.setattr(worker, "wait_seconds", unexpected_wait)
+            monkeypatch.setattr(worker, "wait_seconds", wait_for_indexing)
             if blocked:
                 with pytest.raises(worker.KsefXmlRunError) as caught:
                     worker.run("metadata")
@@ -114,7 +131,7 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(
                 assert safe["stage"] == "metadata"
                 assert safe["reasons"] == ["invalid_ksef_number"]
                 assert server.downloads == 0
-                assert waits == int(delayed)
+                assert waits == (2 if delayed else 0)
                 return
             worker.run("metadata")
             assert server.downloads == 0
@@ -125,8 +142,9 @@ def test_live_helper_completes_both_phases_with_real_sdk_adapters(
             assert json.loads((tmp_path / "xml-live-diagnostic.json").read_text())["target_visible"]
             saved = json.loads((tmp_path / "state.json").read_text())
             assert saved["number"] == NUMBER
-            assert saved["metadata_from"] == "2025-01-01T00:00:00Z"
-            assert waits == int(delayed)
+            assert saved["metadata_from"] == selected_date
+            assert submitted == int(bool(delayed))
+            assert waits == (2 if delayed else 0)
 
     asyncio.run(run())
 

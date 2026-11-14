@@ -27,7 +27,7 @@ def test_e2e_test_environment_invoice_xml_restart(tmp_path):
     assert os.environ.get("KSEF_TEST_WHEEL"), "Exact wheel path required"
     tmp_path.chmod(0o700)
     state = {
-        "since": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+        "since": (datetime.now(timezone.utc) - timedelta(days=7)).isoformat(),
         "soft_deadline": time.monotonic() + LIVE_SCENARIO_SOFT_TIMEOUT,
     }
     (tmp_path / "state.json").write_text(json.dumps(state), encoding="utf-8")
