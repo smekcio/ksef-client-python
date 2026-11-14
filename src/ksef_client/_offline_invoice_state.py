@@ -23,6 +23,7 @@ class OfflineInvoiceStatus(str, Enum):
     SUBMITTED = "submitted"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
+    DUPLICATE = "duplicate"
     COMPLETE = "complete"
 
 
@@ -58,6 +59,7 @@ class OfflineInvoiceProgress:
             OfflineInvoiceStatus.SUBMITTED,
             OfflineInvoiceStatus.ACCEPTED,
             OfflineInvoiceStatus.REJECTED,
+            OfflineInvoiceStatus.DUPLICATE,
             OfflineInvoiceStatus.COMPLETE,
         }
         if has_reference != (self.invoice_reference is not None):
@@ -103,7 +105,10 @@ class OfflineInvoiceProgress:
             raise KsefDocumentValidationError("Invalid KSeF offline invoice status")
         if code == 200 and invoice.ksef_number:
             status = OfflineInvoiceStatus.ACCEPTED
-        elif 400 <= code < 500 and code != 429 and not invoice.ksef_number:
+        elif code == 440 and not invoice.ksef_number:
+            # A duplicate is not eligible for technical correction.
+            status = OfflineInvoiceStatus.DUPLICATE
+        elif code in {405, 410, 415, 430, 435, 450, 500, 550} and not invoice.ksef_number:
             status = OfflineInvoiceStatus.REJECTED
         elif code in {100, 150} and not invoice.ksef_number:
             status = OfflineInvoiceStatus.SUBMITTED

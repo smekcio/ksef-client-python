@@ -52,7 +52,7 @@ def test_technical_correction_requires_same_scope_and_a_terminal_rejection(tmp_p
             store.enqueue(SCOPE, b"<corrected/>", due_at=DUE, correction_of=original)
         row = store._advance(SCOPE, row, row.progress.open_session("session-1"))
         row = store._advance(SCOPE, row, row.progress.begin_submission())
-        store._advance(SCOPE, row, row.progress.observe(remote_invoice(440)))
+        store._advance(SCOPE, row, row.progress.observe(remote_invoice(450)))
         corrected = store.enqueue(SCOPE, b"<corrected/>", due_at=DUE, correction_of=original)
         assert corrected.correction_of == original
         with pytest.raises(KsefSyncConflictError):

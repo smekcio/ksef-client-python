@@ -56,9 +56,9 @@ def test_ambiguous_or_mismatched_result_cannot_advance(result):
 
 def test_rejection_preserves_reference_for_technical_correction():
     state = OfflineInvoiceProgress(HASH).open_session("session-1").begin_submission()
-    rejected = state.observe(remote_invoice(440))
+    rejected = state.observe(remote_invoice(450))
     assert rejected.status is OfflineInvoiceStatus.REJECTED
-    assert rejected.ksef_status == 440
+    assert rejected.ksef_status == 450
     assert rejected.invoice_hash == HASH
     with pytest.raises(ValueError, match="has not been accepted"):
         rejected.confirm_upo()
