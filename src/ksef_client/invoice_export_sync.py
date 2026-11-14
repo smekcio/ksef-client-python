@@ -8,6 +8,7 @@ import os
 import shutil
 import stat
 from dataclasses import dataclass, replace
+from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING, Generic, TypeVar
 
@@ -35,6 +36,7 @@ from .streaming_export import (
     ExportOperation,
     directory_lock,
 )
+from .utils.zip_utils import EXPORT_MAX_ARCHIVE_ENTRIES
 
 if TYPE_CHECKING:
     from .async_facade import AsyncKsef
@@ -407,7 +409,10 @@ def _local_files(destination: Path, package: m.InvoicePackage | None) -> ExportF
     _safe_directory(destination)
     if package is None:
         raise KsefDocumentValidationError("Successful export has no package")
-    names = tuple(path.name for path in destination.iterdir())
+    with os.scandir(destination) as entries:
+        names = tuple(entry.name for entry in islice(entries, EXPORT_MAX_ARCHIVE_ENTRIES + 1))
+    if len(names) > EXPORT_MAX_ARCHIVE_ENTRIES:
+        raise KsefDocumentValidationError("Local export has too many files")
     metadata = next(
         (destination / name for name in names if name.lower() == "_metadata.json"), None
     )
@@ -440,10 +445,8 @@ def _prepare_package(
 
 
 def _fingerprint(package: ValidatedInvoicePackage) -> str:
-    checksum = hashlib.sha256(f"{package.continuation}:{package.truncated}".encode("ascii"))
-    for invoice in package.invoices:
-        checksum.update(canonical_json(invoice.metadata, _MAX_METADATA, page=True))
-    return checksum.hexdigest()
+    identity = f"{package.continuation}:{package.truncated}:{package.metadata_digest}"
+    return hashlib.sha256(identity.encode("ascii")).hexdigest()
 
 
 def _report(

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,7 @@ class ValidatedInvoicePackage:
     invoices: tuple[ExportInvoice, ...] = field(repr=False)
     continuation: str
     truncated: bool
+    metadata_digest: str = field(default="", repr=False)
 
 
 def _read(path: Path, limit: int) -> bytes:
@@ -48,6 +51,13 @@ def _read(path: Path, limit: int) -> bytes:
                 return bytes(data)
             data.extend(chunk)
     raise KsefDocumentValidationError("Export file exceeds its size limit")
+
+
+def _finite_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("Non-finite export metadata number")
+    return parsed
 
 
 def validate_invoice_package(
@@ -104,7 +114,12 @@ def validate_invoice_package(
             raise ValueError
         raw = _read(metadata, max_metadata_bytes)
         check_json_structure(raw, max_depth=24, max_nodes=2_000_000)
-        payload = json.loads(raw, object_pairs_hook=_json_object, parse_constant=_reject_constant)
+        payload = json.loads(
+            raw,
+            object_pairs_hook=_json_object,
+            parse_constant=_reject_constant,
+            parse_float=_finite_float,
+        )
         rows = payload.get("invoices") if type(payload) is dict else None
         if type(rows) is not list or len(rows) != package.invoice_count:
             raise ValueError
@@ -126,4 +141,6 @@ def validate_invoice_package(
             raise ValueError
     except (KeyError, TypeError, ValueError, OverflowError):
         raise KsefDocumentValidationError("Invalid export metadata or invoice file set") from None
-    return ValidatedInvoicePackage(tuple(invoices), boundary, package.is_truncated)
+    return ValidatedInvoicePackage(
+        tuple(invoices), boundary, package.is_truncated, hashlib.sha256(raw).hexdigest()
+    )

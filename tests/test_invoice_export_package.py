@@ -114,6 +114,66 @@ def test_rejects_duplicate_json_keys(tmp_path):
         validate_invoice_package(files, start=START, end=END, max_metadata_bytes=4096)
 
 
+def test_rejects_floating_point_overflow_before_import(tmp_path):
+    files = package(tmp_path)
+    assert files.metadata_path is not None
+    raw = files.metadata_path.read_bytes().replace(
+        b'"invoiceHash"', b'"amount": 1e999, "invoiceHash"'
+    )
+    files.metadata_path.write_bytes(raw)
+    with pytest.raises(KsefDocumentValidationError, match="metadata"):
+        validate_invoice_package(files, start=START, end=END, max_metadata_bytes=4096)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"invoice_count": True},
+        {"is_truncated": True, "last_permanent_storage_date": None},
+        {"is_truncated": True, "last_permanent_storage_date": "2025-01-04T00:00:00Z"},
+    ],
+)
+def test_rejects_bad_package_descriptor(tmp_path, overrides):
+    files = package(tmp_path)
+    files = replace(files, package=replace(files.package, **overrides))
+    with pytest.raises(KsefDocumentValidationError):
+        validate_invoice_package(files, start=START, end=END, max_metadata_bytes=4096)
+
+
+@pytest.mark.parametrize("value", [None, [], [None, None], [{}, {}]])
+def test_rejects_invalid_metadata_rows(tmp_path, value):
+    files = package(tmp_path)
+    assert files.metadata_path is not None
+    files.metadata_path.write_text(json.dumps({"invoices": value}), encoding="utf-8")
+    with pytest.raises(KsefDocumentValidationError, match="metadata"):
+        validate_invoice_package(files, start=START, end=END, max_metadata_bytes=4096)
+
+
+def test_missing_or_unexpected_archive_member_stops_import(tmp_path):
+    files = package(tmp_path)
+    for listing in (files.files[:-1], files.files + ("extra.txt",)):
+        with pytest.raises(KsefDocumentValidationError, match="metadata"):
+            validate_invoice_package(
+                replace(files, files=listing), start=START, end=END, max_metadata_bytes=4096
+            )
+
+
+def test_rejects_row_beyond_package_boundary_and_accepts_finite_float(tmp_path):
+    files = package(tmp_path)
+    assert files.metadata_path is not None
+    metadata = json.loads(files.metadata_path.read_bytes())
+    metadata["invoices"][0]["grossAmount"] = 15.5
+    files.metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    valid = validate_invoice_package(files, start=START, end=END, max_metadata_bytes=4096)
+    assert valid.invoices[0].metadata["grossAmount"] == 15.5
+    with pytest.raises(ValueError, match="positive integer"):
+        valid.invoices[0].read_xml(0)
+    metadata["invoices"][0]["permanentStorageDate"] = "2025-01-04T00:00:00Z"
+    files.metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    with pytest.raises(KsefDocumentValidationError, match="metadata"):
+        validate_invoice_package(files, start=START, end=END, max_metadata_bytes=4096)
+
+
 def test_truncated_package_does_not_advance_committed_hwm():
     progress = ExportProgress(START, committed_hwm=START)
     truncated = ValidatedInvoicePackage((), LAST, True)
@@ -182,3 +242,54 @@ def test_export_checkpoint_encrypts_operation_and_resumes_partial_import():
     invalid = dict(checkpoint.encode(key), version=2)
     with pytest.raises(KsefDocumentValidationError, match="unreadable"):
         ExportCheckpoint.decode(json.dumps(invalid).encode(), key)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"continuation": LAST},
+        {"committed_hwm": "2024-12-31T00:00:00Z"},
+        {"continuation": END, "window_end": LAST},
+    ],
+)
+def test_rejects_inconsistent_export_progress(values):
+    with pytest.raises(ValueError):
+        ExportProgress(START, **values)
+
+
+def test_active_continuation_cannot_be_shortened_or_move_outside_its_window():
+    progress = ExportProgress(START, continuation=LAST, window_end=END)
+    with pytest.raises(ValueError, match="shorten"):
+        progress.bounds(LAST)
+    with pytest.raises(KsefDocumentValidationError, match="window changed"):
+        progress.finish(
+            ValidatedInvoicePackage((), LAST, False), window_end=LAST, new_at_boundary=1
+        )
+    with pytest.raises(KsefDocumentValidationError, match="outside the active window"):
+        progress.finish(
+            ValidatedInvoicePackage((), START, False), window_end=END, new_at_boundary=1
+        )
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"end": "2024-12-31T00:00:00Z"},
+        {"operation": OperationState("export", "a" * 64, "Nip:test", "export")},
+        {"offset": 1},
+        {
+            "end": END,
+            "operation": OperationState("export", "a" * 64, "Nip:test", "export"),
+            "package_id": "invalid",
+        },
+    ],
+)
+def test_rejects_inconsistent_export_checkpoint(values):
+    with pytest.raises(ValueError):
+        ExportCheckpoint(ExportProgress(START), **values)
+
+
+@pytest.mark.parametrize("raw", [b"[]", b'{"version":1}', b" " * (4 * 1024 * 1024 + 1)])
+def test_rejects_oversized_or_malformed_checkpoint(raw):
+    with pytest.raises(KsefDocumentValidationError, match="unreadable"):
+        ExportCheckpoint.decode(raw, b"k" * 32)
