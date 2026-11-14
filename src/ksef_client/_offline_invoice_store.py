@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from ._async_cleanup import shield_and_drain
 from ._offline_invoice_state import (
+    OfflineInvoiceMode,
     OfflineInvoiceProgress,
     OfflineInvoiceStatus,
     offline_invoice_hash,
@@ -70,6 +71,7 @@ class StoredOfflineInvoice:
     revision: int
     due_at: str
     correction_of: str | None = field(default=None, repr=False)
+    mode: OfflineInvoiceMode = OfflineInvoiceMode.OFFLINE24
 
 
 class SQLiteOfflineInvoiceStore:
@@ -178,6 +180,7 @@ class SQLiteOfflineInvoiceStore:
             payload["correction_of"],
         ) != (row[0], row[1], row[3]):
             raise KsefDocumentValidationError("Offline archive identity mismatch")
+        payload["mode"] = OfflineInvoiceMode(payload["mode"])
         return StoredOfflineInvoice(progress=progress, **payload)
 
     def enqueue(
@@ -187,19 +190,26 @@ class SQLiteOfflineInvoiceStore:
         *,
         due_at: str,
         correction_of: str | None = None,
+        mode: OfflineInvoiceMode = OfflineInvoiceMode.OFFLINE24,
     ) -> StoredOfflineInvoice:
         if type(xml) is not bytes or len(xml) > MAX_OFFLINE_XML_BYTES:
             raise KsefDocumentValidationError("Offline XML exceeds the storage policy")
+        if not isinstance(mode, OfflineInvoiceMode):
+            raise ValueError("Offline invoice mode must be explicit")
         invoice_hash = offline_invoice_hash(xml)
         due_at = utc_timestamp(due_at)
         identity = self._scope(scope)
         progress = OfflineInvoiceProgress(invoice_hash)
-        record = StoredOfflineInvoice(progress, 1, due_at, correction_of)
+        record = StoredOfflineInvoice(progress, 1, due_at, correction_of, mode)
         encrypted = self._encrypt(identity, invoice_hash, "xml", xml)
         with self._write():
             previous = self.load(scope, invoice_hash)
             if previous is not None:
-                if previous.due_at != due_at or previous.correction_of != correction_of:
+                if (
+                    previous.due_at != due_at
+                    or previous.correction_of != correction_of
+                    or previous.mode is not mode
+                ):
                     raise KsefSyncConflictError("offline_invoice_identity_conflict")
                 return previous
             if correction_of is not None:
@@ -320,7 +330,7 @@ class SQLiteOfflineInvoiceStore:
                 identity, invoice_hash, "session", session.to_json().encode()
             )
         updated = StoredOfflineInvoice(
-            progress, current.revision + 1, current.due_at, current.correction_of
+            progress, current.revision + 1, current.due_at, current.correction_of, current.mode
         )
         with self._write():
             result = self._db.execute(

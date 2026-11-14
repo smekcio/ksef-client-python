@@ -3,12 +3,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from ksef_client import Ksef, KsefClientOptions, KsefEnvironment
 from ksef_client import models as m
 from ksef_client._offline_invoice_store import SQLiteOfflineInvoiceStore
 from ksef_client.exceptions import KsefSyncConflictError
 from ksef_client.offline_invoices import (
     AsyncOfflineInvoices,
     AsyncSQLiteOfflineInvoiceStore,
+    OfflineInvoiceMode,
+    OfflineInvoiceQueue,
     OfflineInvoices,
     OfflineInvoiceStatus,
 )
@@ -204,3 +207,53 @@ def test_concurrent_workers_cannot_both_submit_the_same_document(tmp_path):
             first.advance(digest)
         assert client.send_count == 1
         assert first.status(digest).progress.status is OfflineInvoiceStatus.SUBMISSION_UNKNOWN
+
+
+def test_explicit_retry_requires_an_authoritatively_empty_finalized_session(tmp_path):
+    client = TestClient()
+    path = tmp_path / "offline.db"
+    with SQLiteOfflineInvoiceStore.open(path, key=KEY) as store:
+        outbox = OfflineInvoices(client, store, namespace="company")
+        row = outbox.enqueue(XML, due_at=DUE, mode=OfflineInvoiceMode.UNAVAILABLE)
+        digest = row.progress.invoice_hash
+        with pytest.raises(ValueError, match="no unknown submission"):
+            outbox.retry_if_unsubmitted(digest)
+        outbox.advance(digest)
+        with pytest.raises(OSError, match="lost response"):
+            outbox.advance(digest)
+        client.get_session_status = lambda _: SimpleNamespace(
+            status=m.StatusInfo(440, ""), invoice_count=None
+        )
+        assert outbox.retry_if_unsubmitted(digest).progress.status is (
+            OfflineInvoiceStatus.SUBMISSION_UNKNOWN
+        )
+        client.get_session_status = lambda _: SimpleNamespace(
+            status=m.StatusInfo(440, ""), invoice_count=0
+        )
+        assert outbox.retry_if_unsubmitted(digest).progress.status is (
+            OfflineInvoiceStatus.SUBMISSION_UNKNOWN
+        )
+        client.get_session_invoices = lambda *args, **kwargs: m.SessionInvoicesResponse([])
+        queued = outbox.retry_if_unsubmitted(digest)
+        assert queued.progress.status is OfflineInvoiceStatus.QUEUED
+        assert queued.mode is OfflineInvoiceMode.UNAVAILABLE
+        assert client.send_count == 1
+
+
+def test_stage_before_authentication_and_resume_using_normal_facade(tmp_path):
+    options = KsefClientOptions(base_url=KsefEnvironment.TEST.value)
+    path = tmp_path / "offline.db"
+    with SQLiteOfflineInvoiceStore.open(path, key=KEY) as store:
+        local = OfflineInvoiceQueue(
+            store,
+            options=options,
+            context_type="nip",
+            context_value="5265877635",
+            namespace="company",
+        )
+        staged = local.enqueue(XML, due_at=DUE, mode=OfflineInvoiceMode.EMERGENCY)
+        digest = staged.progress.invoice_hash
+    with SQLiteOfflineInvoiceStore.open(path, key=KEY) as store:
+        client = Ksef(None, options, context_type="Nip", context_value="5265877635")
+        assert client.invoices.offline(store, namespace="company").status(digest) == staged
+        assert client.invoices.offline(store, namespace="other").status(digest) is None

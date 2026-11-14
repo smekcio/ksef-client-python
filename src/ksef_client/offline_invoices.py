@@ -7,16 +7,23 @@ import hashlib
 from typing import TYPE_CHECKING, cast
 
 from . import models as m
-from ._offline_invoice_state import OfflineInvoiceStatus
+from ._offline_invoice_state import (
+    OfflineInvoiceMode,
+    OfflineInvoiceProgress,
+    OfflineInvoiceStatus,
+)
 from ._offline_invoice_store import (
     AsyncSQLiteOfflineInvoiceStore,
     SQLiteOfflineInvoiceStore,
     StoredOfflineInvoice,
 )
 from ._offline_verification import OfflineVerificationLinks, build_offline_verification_links
+from .config import KsefClientOptions
 from .exceptions import KsefDocumentValidationError
 from .invoice_sync_state import InvoiceSyncScope
+from .operations import environment_key
 from .request_control import request_control
+from .services.auth import _normalize_context_identifier_type
 from .services.xades import XadesKeyPair
 
 if TYPE_CHECKING:
@@ -27,24 +34,41 @@ _OFFLINE_STREAM = hashlib.sha256(b"ksef-offline-submission/v1").hexdigest()
 _RECONCILIATION_PAGE_LIMIT = 10
 
 
-class OfflineInvoices:
-    """One-step worker with a persistent, context-bound submission record.
+class OfflineInvoiceQueue:
+    """Stage and present offline invoices without connecting to KSeF."""
 
-    Run advance again after a pending result or a transient read failure. A
-    lost submission response is reconciled using the persisted session and
-    exact invoice hash. The worker never automatically resends that invoice.
-    """
-
-    def __init__(self, client: Ksef, store: SQLiteOfflineInvoiceStore, *, namespace: str):
-        self._client, self._store = client, store
+    def __init__(
+        self,
+        store: SQLiteOfflineInvoiceStore,
+        *,
+        options: KsefClientOptions,
+        context_type: str,
+        context_value: str,
+        namespace: str,
+    ) -> None:
+        kind = _normalize_context_identifier_type(context_type).value
+        if not context_value or not context_value.strip():
+            raise ValueError("Offline invoice context is required")
+        self._store, self._options = store, options
         self.scope = InvoiceSyncScope(
-            namespace, client.environment, client.context_key, "offline-invoices", _OFFLINE_STREAM
+            namespace,
+            environment_key(options.normalized_base_url()),
+            f"{kind}:{context_value}",
+            "offline-invoices",
+            _OFFLINE_STREAM,
         )
 
     def enqueue(
-        self, xml: bytes, *, due_at: str, correction_of: str | None = None
+        self,
+        xml: bytes,
+        *,
+        due_at: str,
+        correction_of: str | None = None,
+        mode: OfflineInvoiceMode = OfflineInvoiceMode.OFFLINE24,
     ) -> StoredOfflineInvoice:
-        return self._store.enqueue(self.scope, xml, due_at=due_at, correction_of=correction_of)
+        return self._store.enqueue(
+            self.scope, xml, due_at=due_at, correction_of=correction_of, mode=mode
+        )
 
     def status(self, invoice_hash: str) -> StoredOfflineInvoice | None:
         return self._store.load(self.scope, invoice_hash)
@@ -68,16 +92,52 @@ class OfflineInvoices:
         if row is None:
             raise KsefDocumentValidationError("Offline invoice is missing in this scope")
         return build_offline_verification_links(
-            self._client.options,
+            self._options,
             self.scope.context_key,
             row.progress,
             self.read_xml(invoice_hash),
             signer,
         )
 
+
+class OfflineInvoices(OfflineInvoiceQueue):
+    """One-step worker with a persistent, context-bound submission record.
+
+    Run advance again after a pending result or a transient read failure. A
+    lost submission response is reconciled using the persisted session and
+    exact invoice hash. The worker never automatically resends that invoice.
+    """
+
+    def __init__(self, client: Ksef, store: SQLiteOfflineInvoiceStore, *, namespace: str):
+        self._client, self._store, self._options = client, store, client.options
+        self.scope = InvoiceSyncScope(
+            namespace, client.environment, client.context_key, "offline-invoices", _OFFLINE_STREAM
+        )
+
     def advance(self, invoice_hash: str, *, timeout: float = 60) -> StoredOfflineInvoice:
         with request_control(timeout_seconds=timeout):
             return self._advance(invoice_hash)
+
+    def retry_if_unsubmitted(
+        self, invoice_hash: str, *, timeout: float = 60
+    ) -> StoredOfflineInvoice:
+        """Release an unknown send only after KSeF finalizes an empty session."""
+        with request_control(timeout_seconds=timeout):
+            row = _require_unknown(self.status(invoice_hash))
+            reference = cast(str, row.progress.session_reference)
+            sessions = self._client.api.sessions
+            status = sessions.get_session_status(reference)
+            if status.status.code == 100:
+                sessions.close_online_session(reference)
+                return row
+            if (
+                status.status.code == 440
+                and type(status.invoice_count) is int
+                and status.invoice_count == 0
+                and self._find_submission(reference, invoice_hash) is None
+            ):
+                return self._store._advance(self.scope, row, OfflineInvoiceProgress(invoice_hash))
+            return row
 
     def _advance(self, invoice_hash: str) -> StoredOfflineInvoice:
         row = self.status(invoice_hash)
@@ -161,20 +221,40 @@ class OfflineInvoices:
         raise KsefDocumentValidationError("KSeF offline session listing did not complete")
 
 
-class AsyncOfflineInvoices:
-    """Asynchronous variant of OfflineInvoices using native async KSeF requests."""
+class AsyncOfflineInvoiceQueue:
+    """Stage and present offline invoices without connecting to KSeF."""
 
-    def __init__(self, client: AsyncKsef, store: AsyncSQLiteOfflineInvoiceStore, *, namespace: str):
-        self._client, self._store = client, store
+    def __init__(
+        self,
+        store: AsyncSQLiteOfflineInvoiceStore,
+        *,
+        options: KsefClientOptions,
+        context_type: str,
+        context_value: str,
+        namespace: str,
+    ) -> None:
+        kind = _normalize_context_identifier_type(context_type).value
+        if not context_value or not context_value.strip():
+            raise ValueError("Offline invoice context is required")
+        self._store, self._options = store, options
         self.scope = InvoiceSyncScope(
-            namespace, client.environment, client.context_key, "offline-invoices", _OFFLINE_STREAM
+            namespace,
+            environment_key(options.normalized_base_url()),
+            f"{kind}:{context_value}",
+            "offline-invoices",
+            _OFFLINE_STREAM,
         )
 
     async def enqueue(
-        self, xml: bytes, *, due_at: str, correction_of: str | None = None
+        self,
+        xml: bytes,
+        *,
+        due_at: str,
+        correction_of: str | None = None,
+        mode: OfflineInvoiceMode = OfflineInvoiceMode.OFFLINE24,
     ) -> StoredOfflineInvoice:
         return await self._store._call(
-            "enqueue", self.scope, xml, due_at=due_at, correction_of=correction_of
+            "enqueue", self.scope, xml, due_at=due_at, correction_of=correction_of, mode=mode
         )
 
     async def status(self, invoice_hash: str) -> StoredOfflineInvoice | None:
@@ -201,16 +281,49 @@ class AsyncOfflineInvoices:
         xml = await self.read_xml(invoice_hash)
         return await asyncio.to_thread(
             build_offline_verification_links,
-            self._client.options,
+            self._options,
             self.scope.context_key,
             row.progress,
             xml,
             signer,
         )
 
+
+class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
+    """Asynchronous variant of OfflineInvoices using native async KSeF requests."""
+
+    def __init__(self, client: AsyncKsef, store: AsyncSQLiteOfflineInvoiceStore, *, namespace: str):
+        self._client, self._store, self._options = client, store, client.options
+        self.scope = InvoiceSyncScope(
+            namespace, client.environment, client.context_key, "offline-invoices", _OFFLINE_STREAM
+        )
+
     async def advance(self, invoice_hash: str, *, timeout: float = 60) -> StoredOfflineInvoice:
         with request_control(timeout_seconds=timeout):
             return await self._advance(invoice_hash)
+
+    async def retry_if_unsubmitted(
+        self, invoice_hash: str, *, timeout: float = 60
+    ) -> StoredOfflineInvoice:
+        """Release an unknown send only after KSeF finalizes an empty session."""
+        with request_control(timeout_seconds=timeout):
+            row = _require_unknown(await self.status(invoice_hash))
+            reference = cast(str, row.progress.session_reference)
+            sessions = self._client.api.sessions
+            status = await sessions.get_session_status(reference)
+            if status.status.code == 100:
+                await sessions.close_online_session(reference)
+                return row
+            if (
+                status.status.code == 440
+                and type(status.invoice_count) is int
+                and status.invoice_count == 0
+                and await self._find_submission(reference, invoice_hash) is None
+            ):
+                return await self._store._call(
+                    "_advance", self.scope, row, OfflineInvoiceProgress(invoice_hash)
+                )
+            return row
 
     async def _advance(self, invoice_hash: str) -> StoredOfflineInvoice:
         row = await self.status(invoice_hash)
@@ -305,6 +418,12 @@ class AsyncOfflineInvoices:
         raise KsefDocumentValidationError("KSeF offline session listing did not complete")
 
 
+def _require_unknown(row: StoredOfflineInvoice | None) -> StoredOfflineInvoice:
+    if row is None or row.progress.status is not OfflineInvoiceStatus.SUBMISSION_UNKNOWN:
+        raise KsefDocumentValidationError("Offline invoice has no unknown submission to release")
+    return row
+
+
 def _match_invoice(
     match: m.SessionInvoiceStatusResponse | None,
     page: m.SessionInvoicesResponse,
@@ -322,9 +441,12 @@ def _match_invoice(
 
 
 __all__ = [
+    "AsyncOfflineInvoiceQueue",
     "AsyncOfflineInvoices",
     "AsyncSQLiteOfflineInvoiceStore",
     "OfflineInvoiceStatus",
+    "OfflineInvoiceMode",
+    "OfflineInvoiceQueue",
     "OfflineInvoices",
     "OfflineVerificationLinks",
     "SQLiteOfflineInvoiceStore",

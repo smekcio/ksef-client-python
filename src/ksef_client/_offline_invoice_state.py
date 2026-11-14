@@ -16,6 +16,12 @@ from .utils.ksef_number import canonical_ksef_number
 _REFERENCE = re.compile(r"[A-Za-z0-9_-]{1,256}")
 
 
+class OfflineInvoiceMode(str, Enum):
+    OFFLINE24 = "offline24"
+    UNAVAILABLE = "unavailable"
+    EMERGENCY = "emergency"
+
+
 class OfflineInvoiceStatus(str, Enum):
     QUEUED = "queued"
     SESSION_OPEN = "session_open"

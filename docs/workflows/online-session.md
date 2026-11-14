@@ -141,18 +141,27 @@ magazynu sekretów. Używaj prywatnego katalogu i osobnego połączenia dla
 każdego workera. Przy restarcie użyj tej samej bazy, klucza i namespace.
 
 ```python
-from ksef_client.offline_invoices import SQLiteOfflineInvoiceStore
+from ksef_client.offline_invoices import OfflineInvoiceQueue, SQLiteOfflineInvoiceStore
 
+# Wystawienie i podpisanie linku może odbyć się przy niedostępnym KSeF.
+with SQLiteOfflineInvoiceStore.open("private/offline.db", key=archive_key) as store:
+    queue = OfflineInvoiceQueue(
+        store, options=options, context_type="Nip", context_value=company_nip,
+        namespace="company",
+    )
+    entry = queue.enqueue(invoice_xml_bytes, due_at=application_due_at)
+    invoice_hash = entry.progress.invoice_hash
+    links = queue.verification_links(invoice_hash, offline_signing_key_pair)
+
+# Po odzyskaniu połączenia, wewnątrz kontekstu zalogowanego klienta.
 with SQLiteOfflineInvoiceStore.open("private/offline.db", key=archive_key) as store:
     outbox = client.invoices.offline(store, namespace="company")
-    entry = outbox.enqueue(invoice_xml_bytes, due_at=application_due_at)
-    invoice_hash = entry.progress.invoice_hash
-    links = outbox.verification_links(invoice_hash, offline_signing_key_pair)
     entry = outbox.advance(invoice_hash)
 ```
 
 Termin jest znacznikiem UTC wyliczonym przez aplikację na podstawie trybu
-offline i obowiązujących komunikatów KSeF. `pending()` zwraca ograniczoną
+offline i obowiązujących komunikatów KSeF. Wybór zapisuje parametr `mode`
+(`OfflineInvoiceMode.OFFLINE24`, `UNAVAILABLE` albo `EMERGENCY`). `pending()` zwraca ograniczoną
 stronę aktywnych dokumentów w kolejności terminów. Do kolejnej strony przekaż
 ostatnią parę `(due_at, invoice_hash)` jako `after`. Każde `advance()`
 wykonuje jeden krok. Wywołuj je ponownie z harmonogramu aplikacji, uwzględniając
@@ -160,7 +169,10 @@ wykonuje jeden krok. Wywołuj je ponownie z harmonogramu aplikacji, uwzględniaj
 
 W razie utraty odpowiedzi na POST stan `submission_unknown` pozostaje na dysku.
 Worker sprawdza zapisany numer sesji i dokładny skrót dokumentu. Pusta lista
-faktur nie wystarcza do ponownej wysyłki. Po zaakceptowaniu dokumentu kolejny
+faktur nie wystarcza do ponownej wysyłki. `retry_if_unsubmitted()` może
+zamknąć otwartą sesję i zwolnić wpis dopiero po tym, jak KSeF potwierdzi
+anulowanie sesji, liczbę zero faktur i brak zgodnego dokumentu na pełnej liście.
+Po zaakceptowaniu dokumentu kolejny
 cykl finalizuje sesję i zapisuje indywidualne UPO, które odczytasz przez
 `read_upo(invoice_hash)`. Dokument zwrócony przez KSeF jako duplikat ma osobny
 stan `duplicate`.
