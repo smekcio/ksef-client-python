@@ -20,7 +20,7 @@ from ksef_client.invoice_export_sync import (
     _private_workspace,
 )
 from ksef_client.invoice_xml_storage import AsyncFileInvoiceXmlStore, FileInvoiceXmlStore
-from ksef_client.invoice_xml_types import InvoiceXmlKey, KsefXmlStorageError
+from ksef_client.invoice_xml_types import InvoiceXmlKey, KsefXmlIntegrityError, KsefXmlStorageError
 from ksef_client.operations import ExportOperationError, OperationState
 from ksef_client.sqlite_store import AsyncSQLiteInvoiceSyncStore, SQLiteInvoiceSyncStore
 from tests.test_invoice_export_package import END, HASH, LAST, START, XML, package
@@ -234,7 +234,9 @@ def test_expired_export_and_overlapping_truncated_fragments_keep_committed_hwm(t
     assert [query.date_range.from_ for query in client.requests] == [START, START, LAST, LAST]
 
 
-@pytest.mark.parametrize("code,expected", [(210, "expired"), (420, "waiting_hwm"), (500, None)])
+@pytest.mark.parametrize(
+    "code,expected", [(210, "expired"), (420, "waiting_hwm"), (550, "retry_later"), (500, None)]
+)
 @pytest.mark.parametrize("asynchronous", [False, True])
 def test_export_operation_failure_keeps_checkpoint(tmp_path, code, expected, asynchronous):
     def failure(state):
@@ -262,6 +264,7 @@ def test_export_operation_failure_keeps_checkpoint(tmp_path, code, expected, asy
         namespace="test", sync_key="history", since=START, work_dir=tmp_path / "work", state_key=KEY
     )
     descriptor = package(tmp_path).package
+    client = AsyncFailingClient(descriptor) if asynchronous else FailingClient(descriptor)
 
     async def run_async():
         async with (
@@ -270,9 +273,9 @@ def test_export_operation_failure_keeps_checkpoint(tmp_path, code, expected, asy
                 tmp_path / "db", enqueue_xml=True, xml_storage_id=storage.storage_id
             ) as store,
         ):
-            return await AsyncInvoiceExportSync(
-                cast(AsyncKsef, AsyncFailingClient(descriptor)), **args
-            ).run_once(store, storage, until=END)
+            return await AsyncInvoiceExportSync(cast(AsyncKsef, client), **args).run_once(
+                store, storage, until=END
+            )
 
     def run_sync():
         with (
@@ -281,9 +284,7 @@ def test_export_operation_failure_keeps_checkpoint(tmp_path, code, expected, asy
                 tmp_path / "db", enqueue_xml=True, xml_storage_id=storage.storage_id
             ) as store,
         ):
-            return InvoiceExportSync(cast(Ksef, FailingClient(descriptor)), **args).run_once(
-                store, storage, until=END
-            )
+            return InvoiceExportSync(cast(Ksef, client), **args).run_once(store, storage, until=END)
 
     def run():
         return asyncio.run(run_async()) if asynchronous else run_sync()
@@ -294,6 +295,10 @@ def test_export_operation_failure_keeps_checkpoint(tmp_path, code, expected, asy
     else:
         report = run()
         assert report.status == expected and report.committed_hwm is None
+        if code == 550:
+            assert run().status == "retry_later"
+            assert len(client.requests) == 2
+            assert client.requests[0] == client.requests[1]
 
 
 @pytest.mark.parametrize("corrupt", ["metadata", "offset", "shorter-window", "different-start"])
@@ -333,9 +338,16 @@ def test_rejects_changed_state_or_package_before_advancing_hwm(tmp_path, monkeyp
             end = LAST
         else:
             sync = InvoiceExportSync(cast(Ksef, client), **dict(args, since=LAST))
-        with pytest.raises(ValueError):
-            sync.run_once(store, storage, until=end)
-        assert len(store.list_xml([sync.scope])) == 1
+        if corrupt == "metadata":
+            report = sync.run_once(store, storage, until=end)
+            assert report.status == "retrying_package" and report.committed_hwm is None
+            assert len(store.list_xml([sync.scope])) == 1
+            assert sync.run_once(store, storage, until=end).committed_hwm == END
+            assert client.downloads == 2 and len(client.requests) == 1
+        else:
+            with pytest.raises(ValueError):
+                sync.run_once(store, storage, until=end)
+            assert len(store.list_xml([sync.scope])) == 1
 
 
 def test_export_rejects_invalid_configuration_and_local_descriptor(tmp_path, monkeypatch):
@@ -606,3 +618,97 @@ def test_export_requires_bound_storage_and_rolls_back_failed_receipt(tmp_path):
             checkpoint = ExportCheckpoint.decode(saved[1], KEY)
             assert checkpoint.offset == 0 and checkpoint.progress.committed_hwm is None
             assert store._load_export(replace(export.scope, sync_key="other"), KEY) is None
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("damage", ["xml", "metadata", "fresh-xml", "fresh-metadata"])
+def test_export_rebuilds_only_the_damaged_cache(tmp_path, monkeypatch, asynchronous, damage):
+    class CachedExport(Export):
+        def download_to(self, destination, **kwargs):
+            files = super().download_to(destination, **kwargs)
+            if self.owner.downloads == 1:
+                if damage == "fresh-xml":
+                    (destination / f"{NUMBER}.xml").write_bytes(b"<damaged/>")
+                if damage == "fresh-metadata":
+                    (destination / "_metadata.json").write_bytes(b"invalid JSON")
+            return files
+
+        def wait(self, **kwargs):
+            return SimpleNamespace(package=self.owner.descriptor)
+
+    class AsyncCachedExport(CachedExport):
+        async def download_to(self, destination, **kwargs):
+            return super().download_to(destination, **kwargs)
+
+        async def wait(self, **kwargs):
+            return super().wait(**kwargs)
+
+    class CachedClient(Client):
+        def start(self, filters, **kwargs):
+            return CachedExport(self, super().start(filters, **kwargs).resume_state())
+
+    class AsyncCachedClient(Client):
+        async def start(self, filters, **kwargs):
+            return AsyncCachedExport(self, super().start(filters, **kwargs).resume_state())
+
+    options = dict(
+        namespace="company",
+        sync_key="history",
+        since=START,
+        work_dir=tmp_path / "work",
+        state_key=KEY,
+    )
+    descriptor = package(tmp_path).package
+
+    async def invoke(call, *args, **kwargs):
+        value = call(*args, **kwargs)
+        return await value if asyncio.iscoroutine(value) else value
+
+    async def exercise(sync, store, storage, client):
+        if damage.startswith("fresh-"):
+            error = KsefXmlIntegrityError if damage == "fresh-xml" else KsefDocumentValidationError
+            with pytest.raises(error):
+                await invoke(sync.run_once, store, storage, until=END)
+        else:
+            first = await invoke(sync.run_once, store, storage, until=END, max_documents=1)
+            assert first.status == "importing"
+            cached = next((tmp_path / "work").glob("*/*/documents"))
+            if damage == "xml":
+                (cached / f"{NUMBER2}.xml").write_bytes(b"<damaged/>")
+            else:
+                (cached / "_metadata.json").unlink()
+
+        damaged = await invoke(sync.run_once, store, storage, until=END)
+        assert damaged.status == "retrying_package" and damaged.committed_hwm is None
+        repaired = await invoke(sync.run_once, store, storage, until=END)
+        assert repaired.committed_hwm == END and repaired.inserted == 2
+        assert client.downloads == 2 and len(client.requests) == 1
+
+    if asynchronous:
+        monkeypatch.setattr(
+            "ksef_client.invoice_export_sync.AsyncExportOperation", AsyncCachedExport
+        )
+
+        async def run():
+            client = AsyncCachedClient(descriptor)
+            sync = AsyncInvoiceExportSync(cast(AsyncKsef, client), **options)
+            async with (
+                await AsyncFileInvoiceXmlStore.open(tmp_path / "xml") as storage,
+                await AsyncSQLiteInvoiceSyncStore.open(
+                    tmp_path / "db", enqueue_xml=True, xml_storage_id=storage.storage_id
+                ) as store,
+            ):
+                await exercise(sync, store, storage, client)
+
+        asyncio.run(run())
+    else:
+        monkeypatch.setattr("ksef_client.invoice_export_sync.ExportOperation", CachedExport)
+        client = CachedClient(descriptor)
+        sync = InvoiceExportSync(cast(Ksef, client), **options)
+        with (
+            FileInvoiceXmlStore(tmp_path / "xml") as storage,
+            SQLiteInvoiceSyncStore.open(
+                tmp_path / "db", enqueue_xml=True, xml_storage_id=storage.storage_id
+            ) as store,
+        ):
+            asyncio.run(exercise(sync, store, storage, client))

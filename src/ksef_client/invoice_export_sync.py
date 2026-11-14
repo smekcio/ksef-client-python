@@ -24,6 +24,7 @@ from .invoice_xml_types import (
     AsyncInvoiceXmlStorage,
     InvoiceXmlKey,
     InvoiceXmlStorage,
+    KsefXmlIntegrityError,
     positive,
     positive_int,
 )
@@ -44,6 +45,13 @@ if TYPE_CHECKING:
 
 _CHUNK = 32
 _MAX_METADATA = 32 * 1024 * 1024
+_RESTART_STATUS = {210: "expired", 420: "waiting_hwm", 550: "retry_later"}
+
+
+class _InvalidLocalPackage(KsefDocumentValidationError):
+    pass
+
+
 _Client = TypeVar("_Client", bound="Ksef | AsyncKsef")
 
 
@@ -181,12 +189,15 @@ class InvoiceExportSync(_InvoiceExportConfig["Ksef"]):
         operation_state.bind(self.scope.environment, self.scope.context_key)
         directory = _operation_directory(self._workspace, operation_state)
         _private_workspace(directory)
+        cached = (directory / "documents").exists()
         try:
             files = _receive(operation, directory, timeout)
         except ExportOperationError as error:
-            if error.status_code not in {210, 420}:
+            if error.status_code not in _RESTART_STATUS:
                 raise
-            fresh = ExportCheckpoint(state.progress, end=end)
+            fresh = ExportCheckpoint(
+                state.progress, end=end, replayed_new=state.replayed_new or state.inserted > 0
+            )
             store._commit_export(
                 self.scope,
                 revision,
@@ -195,17 +206,31 @@ class InvoiceExportSync(_InvoiceExportConfig["Ksef"]):
                 storage_id=storage.storage_id,
             )
             shutil.rmtree(directory)
-            status = "expired" if error.status_code == 210 else "waiting_hwm"
+            status = _RESTART_STATUS[error.status_code]
             return _report(state.progress, status=status)
 
-        package, state, fingerprint = _prepare_package(files, state, operation_state, start, end)
+        try:
+            package, state, fingerprint = _prepare_package(
+                files, state, operation_state, start, end
+            )
+        except (_InvalidLocalPackage, FileNotFoundError):
+            if not cached:
+                raise
+            shutil.rmtree(files.destination)
+            return _report(state.progress, status="retrying_package")
         offset, inserted = state.offset, state.inserted
         last = min(offset + max_documents, len(package.invoices))
         for first in range(offset, last, _CHUNK):
             stop = min(first + _CHUNK, last)
             documents = []
             for invoice in package.invoices[first:stop]:
-                content = invoice.read_xml(self._max_xml_bytes)
+                try:
+                    content = invoice.read_xml(self._max_xml_bytes)
+                except (KsefXmlIntegrityError, FileNotFoundError):
+                    if not cached:
+                        raise
+                    shutil.rmtree(files.destination)
+                    return _report(state.progress, first - offset, inserted, "retrying_package")
                 key = InvoiceXmlKey(
                     self.scope.namespace,
                     self.scope.environment,
@@ -228,7 +253,9 @@ class InvoiceExportSync(_InvoiceExportConfig["Ksef"]):
 
         if last < len(package.invoices):
             return _report(state.progress, last - offset, inserted, "importing")
-        progress = state.progress.finish(package, window_end=end, new_at_boundary=inserted)
+        progress = state.progress.finish(
+            package, window_end=end, new_at_boundary=inserted or int(state.replayed_new)
+        )
         store._commit_export(
             self.scope,
             revision,
@@ -315,12 +342,15 @@ class AsyncInvoiceExportSync(_InvoiceExportConfig["AsyncKsef"]):
         operation_state.bind(self.scope.environment, self.scope.context_key)
         directory = _operation_directory(self._workspace, operation_state)
         await asyncio.to_thread(_private_workspace, directory)
+        cached = await asyncio.to_thread((directory / "documents").exists)
         try:
             files = await _receive_async(operation, directory, timeout)
         except ExportOperationError as error:
-            if error.status_code not in {210, 420}:
+            if error.status_code not in _RESTART_STATUS:
                 raise
-            fresh = ExportCheckpoint(state.progress, end=end)
+            fresh = ExportCheckpoint(
+                state.progress, end=end, replayed_new=state.replayed_new or state.inserted > 0
+            )
             await store._call(
                 "_commit_export",
                 self.scope,
@@ -330,21 +360,33 @@ class AsyncInvoiceExportSync(_InvoiceExportConfig["AsyncKsef"]):
                 storage_id=storage.storage_id,
             )
             await shield_and_drain(asyncio.to_thread(shutil.rmtree, directory))
-            status = "expired" if error.status_code == 210 else "waiting_hwm"
+            status = _RESTART_STATUS[error.status_code]
             return _report(state.progress, status=status)
 
-        package, state, fingerprint = await shield_and_drain(
-            asyncio.to_thread(_prepare_package, files, state, operation_state, start, end)
-        )
+        try:
+            package, state, fingerprint = await shield_and_drain(
+                asyncio.to_thread(_prepare_package, files, state, operation_state, start, end)
+            )
+        except (_InvalidLocalPackage, FileNotFoundError):
+            if not cached:
+                raise
+            await shield_and_drain(asyncio.to_thread(shutil.rmtree, files.destination))
+            return _report(state.progress, status="retrying_package")
         offset, inserted = state.offset, state.inserted
         last = min(offset + max_documents, len(package.invoices))
         for first in range(offset, last, _CHUNK):
             stop = min(first + _CHUNK, last)
             documents = []
             for invoice in package.invoices[first:stop]:
-                content = await shield_and_drain(
-                    asyncio.to_thread(invoice.read_xml, self._max_xml_bytes)
-                )
+                try:
+                    content = await shield_and_drain(
+                        asyncio.to_thread(invoice.read_xml, self._max_xml_bytes)
+                    )
+                except (KsefXmlIntegrityError, FileNotFoundError):
+                    if not cached:
+                        raise
+                    await shield_and_drain(asyncio.to_thread(shutil.rmtree, files.destination))
+                    return _report(state.progress, first - offset, inserted, "retrying_package")
                 key = InvoiceXmlKey(
                     self.scope.namespace,
                     self.scope.environment,
@@ -368,7 +410,9 @@ class AsyncInvoiceExportSync(_InvoiceExportConfig["AsyncKsef"]):
 
         if last < len(package.invoices):
             return _report(state.progress, last - offset, inserted, "importing")
-        progress = state.progress.finish(package, window_end=end, new_at_boundary=inserted)
+        progress = state.progress.finish(
+            package, window_end=end, new_at_boundary=inserted or int(state.replayed_new)
+        )
         await store._call(
             "_commit_export",
             self.scope,
@@ -447,12 +491,15 @@ def _prepare_package(
     start: str,
     end: str,
 ) -> tuple[ValidatedInvoicePackage, ExportCheckpoint, str]:
-    package = validate_invoice_package(
-        files, start=start, end=end, max_metadata_bytes=_MAX_METADATA
-    )
+    try:
+        package = validate_invoice_package(
+            files, start=start, end=end, max_metadata_bytes=_MAX_METADATA
+        )
+    except KsefDocumentValidationError as error:
+        raise _InvalidLocalPackage(str(error)) from None
     fingerprint = _fingerprint(package)
     if state.package_id is not None and state.package_id != fingerprint:
-        raise KsefDocumentValidationError("Export package changed after import began")
+        raise _InvalidLocalPackage("Export package changed after import began")
     if state.offset > len(package.invoices):
         raise KsefDocumentValidationError("Export import offset is outside the package")
     # Authenticate the descriptor without storing signed URLs. A local import

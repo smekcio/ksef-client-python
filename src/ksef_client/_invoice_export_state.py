@@ -89,6 +89,7 @@ class ExportCheckpoint:
     offset: int = 0
     inserted: int = 0
     package_id: str | None = field(default=None, repr=False)
+    replayed_new: bool = False
 
     def __post_init__(self) -> None:
         if self.end is not None:
@@ -128,6 +129,7 @@ class ExportCheckpoint:
             "offset": self.offset,
             "inserted": self.inserted,
             "package_id": self.package_id,
+            "replayed_new": self.replayed_new,
         }
 
     @classmethod
@@ -141,7 +143,20 @@ class ExportCheckpoint:
             version = value.pop("version")
             if type(version) is not int or version != 1:
                 raise ValueError
-            if value.keys() != {"progress", "end", "operation", "offset", "inserted", "package_id"}:
+            value.setdefault("replayed_new", False)
+            if (
+                value.keys()
+                != {
+                    "progress",
+                    "end",
+                    "operation",
+                    "offset",
+                    "inserted",
+                    "package_id",
+                    "replayed_new",
+                }
+                or type(value["replayed_new"]) is not bool
+            ):
                 raise ValueError
             encrypted = value["operation"]
             value["operation"] = (
