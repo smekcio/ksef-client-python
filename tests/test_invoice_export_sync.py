@@ -7,9 +7,9 @@ from ksef_client._invoice_export_state import ExportCheckpoint
 from ksef_client.invoice_export_sync import AsyncInvoiceExportSync, InvoiceExportSync
 from ksef_client.invoice_xml_storage import AsyncFileInvoiceXmlStore, FileInvoiceXmlStore
 from ksef_client.invoice_xml_types import InvoiceXmlKey
-from ksef_client.operations import OperationState
+from ksef_client.operations import ExportOperationError, OperationState
 from ksef_client.sqlite_store import AsyncSQLiteInvoiceSyncStore, SQLiteInvoiceSyncStore
-from tests.test_invoice_export_package import END, HASH, START, XML, package
+from tests.test_invoice_export_package import END, HASH, LAST, START, XML, package
 from tests.test_invoice_xml_sync import NUMBER, NUMBER2
 
 KEY = b"k" * 32
@@ -159,3 +159,48 @@ def test_async_import_resumes_the_same_archive_and_checkpoint_as_sync(tmp_path, 
         assert result.status == "committed" and result.committed_hwm == END
         assert len(store.list_xml([sync.scope])) == 2
     assert async_client.downloads == 1 and client.downloads == 0
+
+
+def test_expired_export_and_overlapping_truncated_fragments_keep_committed_hwm(tmp_path):
+    class Fragments(Client):
+        def start(self, filters, **kwargs):
+            self.requests.append(filters)
+            sequence = len(self.requests)
+            state = OperationState("export", self.environment, self.context_key, f"op-{sequence}")
+            return Fragment(self, state)
+
+    class Fragment(Export):
+        def download_to(self, destination, **kwargs):
+            if self.state.reference_number == "op-1":
+                result = SimpleNamespace(status=SimpleNamespace(code=210))
+                raise ExportOperationError("rejected", self.state, result)
+            destination.mkdir()
+            if self.state.reference_number == "op-2":
+                return package(destination, truncated=True, numbers=(NUMBER,))
+            return package(destination, truncated=self.state.reference_number == "op-3")
+
+    client = Fragments(package(tmp_path).package)
+    sync = InvoiceExportSync(
+        client,
+        namespace="company",
+        sync_key="history",
+        since=START,
+        work_dir=tmp_path / "work",
+        state_key=KEY,
+    )
+    with (
+        FileInvoiceXmlStore(tmp_path / "xml") as storage,
+        SQLiteInvoiceSyncStore.open(
+            tmp_path / "archive.db", enqueue_xml=True, xml_storage_id=storage.storage_id
+        ) as store,
+    ):
+        expired = sync.run_once(store, storage, until=END)
+        assert expired.status == "expired" and expired.committed_hwm is None
+        for _ in range(2):
+            result = sync.run_once(store, storage, until=END)
+            assert result.status == "truncated" and result.continuation == LAST
+            assert result.committed_hwm is None and result.inserted == 1
+        complete = sync.run_once(store, storage, until=END)
+        assert complete.status == "committed" and complete.committed_hwm == END
+        assert complete.inserted == 0 and len(store.list_xml([sync.scope])) == 2
+    assert [query.date_range.from_ for query in client.requests] == [START, START, LAST, LAST]

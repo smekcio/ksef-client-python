@@ -7,6 +7,7 @@ import base64
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from . import models as m
@@ -42,6 +43,7 @@ from .services.workflows import (
 from .token_manager import DEFAULT_REFRESH_MARGIN_SECONDS
 
 if TYPE_CHECKING:
+    from .invoice_export_sync import AsyncInvoiceExportSync
     from .invoice_sync import AsyncInvoiceSync
     from .invoice_xml_sync import AsyncInvoiceDocumentSync, AsyncInvoiceXmlSync
     from .streaming_export import AsyncExportOperation
@@ -266,6 +268,33 @@ class AsyncInvoices:
 class AsyncExports:
     def __init__(self, owner: AsyncKsef) -> None:
         self.owner = owner
+
+    def sync_archive(
+        self,
+        *,
+        namespace: str,
+        sync_key: str,
+        since: str,
+        work_dir: str | Path,
+        state_key: bytes,
+        subject_type: m.InvoiceQuerySubjectType = m.InvoiceQuerySubjectType.SUBJECT2,
+        compression_type: m.CompressionType = m.CompressionType.TARGZ,
+        max_xml_bytes: int = 16 * 1024 * 1024,
+    ) -> AsyncInvoiceExportSync:
+        """Create an explicit export-based archive stream without starting remote work."""
+        from .invoice_export_sync import AsyncInvoiceExportSync
+
+        return AsyncInvoiceExportSync(
+            self.owner,
+            namespace=namespace,
+            sync_key=sync_key,
+            since=since,
+            work_dir=work_dir,
+            state_key=state_key,
+            subject_type=subject_type,
+            compression_type=compression_type,
+            max_xml_bytes=max_xml_bytes,
+        )
 
     async def start(
         self,

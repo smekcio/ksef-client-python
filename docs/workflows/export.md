@@ -111,3 +111,45 @@ Mapowanie opcji CLI na payload eksportu:
 
 Uwagi:
 - Dla synchronizacji przyrostowej/HWM uzyj `--date-type PermanentStorage` razem z `--restrict-to-permanent-storage-hwm-date`.
+
+## Wznawialny import do lokalnego archiwum
+
+`client.exports.sync_archive(...)` tworzy strumień przyrostowej synchronizacji
+dla jednej roli. Domyślna rola `Subject2` obejmuje zakupy. Użyj tego samego
+`namespace`, kontekstu i magazynu XML co przy synchronizacji przez metadane,
+żeby współdzielić zapisane dokumenty.
+
+```python
+from ksef_client import FileInvoiceXmlStore, SQLiteInvoiceSyncStore
+
+with (
+    FileInvoiceXmlStore("private/xml") as storage,
+    SQLiteInvoiceSyncStore.open(
+        "private/invoices.db", enqueue_xml=True, xml_storage_id=storage.storage_id
+    ) as store,
+):
+    sync = client.exports.sync_archive(
+        namespace="company",
+        sync_key="history",
+        since="2024-01-01T00:00:00Z",
+        work_dir="private/export-work",
+        state_key=export_state_key,  # 32 bajty z magazynu sekretów aplikacji
+    )
+    report = sync.run_once(store, storage, max_documents=500)
+```
+
+Każde wywołanie obsługuje najwyżej jeden fragment paczki. `importing` oznacza
+zapis części paczki, a `truncated` wskazuje, że trzeba pobrać dalszy fragment
+od zapisanej daty granicznej. `committed` potwierdza pokrycie do
+`committed_hwm`. `idle` oznacza brak przedziału do pobrania.
+`expired` i `waiting_hwm` pozwalają zaplanować ponowny cykl według limitów KSeF.
+`inserted` liczy nowe obserwacje danego fragmentu, a `imported` liczy
+pozycje zakończone w bieżącym wywołaniu. `store.list_xml([sync.scope])`
+pokazuje gotowe dokumenty tej roli.
+
+Po restarcie użyj tego samego klucza, bazy, magazynu i lokalnego katalogu
+roboczego. Katalog zawiera poufne faktury oraz zaszyfrowane części przekazane
+przez KSeF. Trzymaj go poza współdzielonymi lokalizacjami i ogranicz dostęp
+systemowy. Wariant `AsyncKsef` udostępnia tę samą fabrykę. Użyj adapterów
+`AsyncSQLiteInvoiceSyncStore` i `AsyncFileInvoiceXmlStore` oraz
+`await sync.run_once(...)`.
