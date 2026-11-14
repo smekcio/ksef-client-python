@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import base64
+import binascii
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from ._invoice_export_package import ValidatedInvoicePackage
 from .exceptions import KsefDocumentValidationError
 from .invoice_search import _date
-from .invoice_sync_state import utc_timestamp
+from .invoice_sync_state import _loads, utc_timestamp
+from .operations import OperationState
+from .utils.zip_utils import EXPORT_MAX_INVOICES
 
 
 @dataclass(frozen=True)
@@ -73,3 +78,79 @@ class ExportProgress:
                 raise KsefDocumentValidationError("Truncated export cannot advance")
             return replace(self, continuation=package.continuation, window_end=window_end)
         return replace(self, committed_hwm=package.continuation, continuation=None, window_end=None)
+
+
+@dataclass(frozen=True)
+class ExportCheckpoint:
+    progress: ExportProgress
+    end: str | None = None
+    operation: OperationState | None = field(default=None, repr=False)
+    offset: int = 0
+    inserted: int = 0
+    package_id: str | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.end is not None:
+            object.__setattr__(self, "end", utc_timestamp(self.end))
+            if _date(self.end) < _date(self.progress.start) or self.progress.window_end not in (
+                None,
+                self.end,
+            ):
+                raise ValueError("Export checkpoint has inconsistent bounds")
+        if self.operation is not None and (self.end is None or self.operation.kind != "export"):
+            raise ValueError("Export operation does not belong to an active window")
+        if (
+            type(self.offset) is not int
+            or type(self.inserted) is not int
+            or not 0 <= self.inserted <= self.offset <= EXPORT_MAX_INVOICES
+            or (self.package_id is None and self.offset)
+            or (self.package_id is not None and self.operation is None)
+        ):
+            raise ValueError("Invalid export import checkpoint")
+        if self.package_id is not None and (
+            type(self.package_id) is not str
+            or len(self.package_id) != 64
+            or any(char not in "0123456789abcdef" for char in self.package_id)
+        ):
+            raise ValueError("Invalid export package fingerprint")
+
+    def encode(self, key: bytes) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "progress": asdict(self.progress),
+            "end": self.end,
+            "operation": (
+                base64.b64encode(self.operation.to_encrypted_bytes(key)).decode("ascii")
+                if self.operation is not None
+                else None
+            ),
+            "offset": self.offset,
+            "inserted": self.inserted,
+            "package_id": self.package_id,
+        }
+
+    @classmethod
+    def decode(cls, raw: bytes, key: bytes) -> ExportCheckpoint:
+        try:
+            if len(raw) > 4 * 1024 * 1024:
+                raise ValueError
+            value = _loads(raw)
+            if type(value) is not dict:
+                raise ValueError
+            version = value.pop("version")
+            if type(version) is not int or version != 1:
+                raise ValueError
+            if value.keys() != {"progress", "end", "operation", "offset", "inserted", "package_id"}:
+                raise ValueError
+            encrypted = value["operation"]
+            value["operation"] = (
+                None
+                if encrypted is None
+                else OperationState.from_encrypted_bytes(
+                    base64.b64decode(encrypted, validate=True), key
+                )
+            )
+            value["progress"] = ExportProgress(**value["progress"])
+            return cls(**value)
+        except (KeyError, TypeError, ValueError, OverflowError, binascii.Error, RecursionError):
+            raise KsefDocumentValidationError("Invalid or unreadable export checkpoint") from None

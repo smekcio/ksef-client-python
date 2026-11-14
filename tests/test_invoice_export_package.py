@@ -7,11 +7,12 @@ import pytest
 
 from ksef_client import models as m
 from ksef_client._invoice_export_package import ValidatedInvoicePackage, validate_invoice_package
-from ksef_client._invoice_export_state import ExportProgress
+from ksef_client._invoice_export_state import ExportCheckpoint, ExportProgress
 from ksef_client.exceptions import KsefDocumentValidationError, KsefSyncConflictError
 from ksef_client.invoice_sync_state import InvoiceSyncScope
 from ksef_client.invoice_xml_storage import FileInvoiceXmlStore
 from ksef_client.invoice_xml_types import InvoiceXmlKey, KsefXmlIntegrityError
+from ksef_client.operations import OperationState
 from ksef_client.sqlite_store import SQLiteInvoiceSyncStore
 from ksef_client.streaming_export import ExportFiles
 from tests.test_invoice_xml_sync import NUMBER, NUMBER2
@@ -166,3 +167,18 @@ def test_commit_export_records_ready_xml_and_rejects_stale_progress(tmp_path):
                 storage_id=storage.storage_id,
                 documents=[(metadata, receipt)],
             ) == (2, 0)
+
+
+def test_export_checkpoint_encrypts_operation_and_resumes_partial_import():
+    operation = OperationState("export", "a" * 64, "Nip:private", "export-1", {"key": "secret"})
+    checkpoint = ExportCheckpoint(ExportProgress(START), END, operation, 5, 3, "a" * 64)
+    key = b"k" * 32
+    encoded = json.dumps(checkpoint.encode(key)).encode()
+    assert b"secret" not in encoded
+    assert b"export-1" not in encoded
+    assert ExportCheckpoint.decode(encoded, key) == checkpoint
+    with pytest.raises(KsefDocumentValidationError, match="unreadable"):
+        ExportCheckpoint.decode(encoded, b"x" * 32)
+    invalid = dict(checkpoint.encode(key), version=2)
+    with pytest.raises(KsefDocumentValidationError, match="unreadable"):
+        ExportCheckpoint.decode(json.dumps(invalid).encode(), key)
