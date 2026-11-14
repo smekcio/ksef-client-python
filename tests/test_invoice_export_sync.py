@@ -712,3 +712,58 @@ def test_export_rebuilds_only_the_damaged_cache(tmp_path, monkeypatch, asynchron
             ) as store,
         ):
             asyncio.run(exercise(sync, store, storage, client))
+
+
+def test_redownload_after_expiry_preserves_partial_import_at_same_boundary(tmp_path, monkeypatch):
+    class Fragment(Export):
+        def download_to(self, destination, **kwargs):
+            if self.state.reference_number == "op-2" and self.owner.cancelled:
+                raise ExportOperationError(
+                    "rejected", self.state, SimpleNamespace(status=SimpleNamespace(code=550))
+                )
+            destination.mkdir()
+            first = self.state.reference_number == "op-1"
+            return package(
+                destination,
+                numbers=(NUMBER,) if first else (NUMBER2, NUMBER),
+                truncated=self.state.reference_number != "op-4",
+            )
+
+    class Fragments(Client):
+        cancelled = False
+
+        def start(self, filters, **kwargs):
+            self.requests.append(filters)
+            state = OperationState(
+                "export", self.environment, self.context_key, f"op-{len(self.requests)}"
+            )
+            return Fragment(self, state)
+
+    monkeypatch.setattr("ksef_client.invoice_export_sync.ExportOperation", Fragment)
+    client = Fragments(package(tmp_path).package)
+    sync = InvoiceExportSync(
+        cast(Ksef, client),
+        namespace="company",
+        sync_key="history",
+        since=START,
+        work_dir=tmp_path / "work",
+        state_key=KEY,
+    )
+    with (
+        FileInvoiceXmlStore(tmp_path / "xml") as xml,
+        SQLiteInvoiceSyncStore.open(
+            tmp_path / "db", enqueue_xml=True, xml_storage_id=xml.storage_id
+        ) as store,
+    ):
+        assert sync.run_once(store, xml, until=END).continuation == LAST
+        assert sync.run_once(store, xml, until=END, max_documents=1).inserted == 1
+        cached = next((tmp_path / "work").glob("*/*/documents"))
+        (cached / f"{NUMBER}.xml").write_bytes(b"<damaged/>")
+        assert sync.run_once(store, xml, until=END).status == "retrying_package"
+        client.cancelled = True
+        assert sync.run_once(store, xml, until=END).status == "retry_later"
+        replayed = sync.run_once(store, xml, until=END)
+        assert replayed.status == "truncated" and replayed.inserted == 0
+        assert replayed.committed_hwm is None and replayed.continuation == LAST
+        assert sync.run_once(store, xml, until=END).committed_hwm == END
+        assert len(store.list_xml([sync.scope])) == 2

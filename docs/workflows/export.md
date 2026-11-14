@@ -142,7 +142,11 @@ Każde wywołanie obsługuje najwyżej jeden fragment paczki. `importing` oznacz
 zapis części paczki, a `truncated` wskazuje, że trzeba pobrać dalszy fragment
 od zapisanej daty granicznej. `committed` potwierdza pokrycie do
 `committed_hwm`. `idle` oznacza brak przedziału do pobrania.
-`expired` i `waiting_hwm` pozwalają zaplanować ponowny cykl według limitów KSeF.
+`expired`, `waiting_hwm` i `retry_later` pozwalają zaplanować ponowny cykl
+według limitów KSeF. Po potwierdzonym anulowaniu eksportu (550) kolejny cykl
+otworzy operację dla zachowanego zakresu. `retrying_package` oznacza odrzucenie
+uszkodzonej kopii roboczej. Kolejny cykl ponowi transfer przy zachowanym HWM
+i zweryfikuje tożsamość paczki przed wznowieniem importu.
 `inserted` liczy nowe obserwacje danego fragmentu, a `imported` liczy
 pozycje zakończone w bieżącym wywołaniu. `store.list_xml([sync.scope])`
 pokazuje gotowe dokumenty tej roli.
