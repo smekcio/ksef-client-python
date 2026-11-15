@@ -131,39 +131,8 @@ class MetadataSQLiteStore:
             if checkpoint.revision != (previous.revision + 1 if previous else 1):
                 raise KsefSyncConflictError("checkpoint_conflict")
             self._prepare_xml_scope(scope, previous is None)
-            document_scope = (scope.namespace, scope.environment, scope.context_key)
             for value in batch.observation_dicts:
-                number = self._document_number(value["ksefNumber"])
-                document = (*document_scope, number)
-                self._execute(
-                    "INSERT INTO invoices VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-                    (*document, value["invoiceHash"]),
-                )
-                existing = self._execute(
-                    "SELECT invoice_hash FROM invoices WHERE namespace=? AND environment=? "
-                    "AND context_key=? AND ksef_number=?",
-                    document,
-                ).fetchone()
-                if existing is None or existing[0] != value["invoiceHash"]:
-                    raise KsefSyncDataConflictError("invoice_hash_conflict")
-                # Batch snapshots are already validated and bounded by the SDK.
-                metadata = json.dumps(
-                    value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-                )
-                self._execute(
-                    "INSERT INTO invoice_observations VALUES (?, ?, ?, ?, ?, ?, ?) "
-                    "ON CONFLICT(namespace, environment, context_key, sync_key, stream_id, "
-                    "ksef_number) DO UPDATE SET metadata_json=excluded.metadata_json",
-                    (*_key(scope), number, metadata),
-                )
-                if self.enqueue_xml:
-                    self._execute(
-                        "INSERT INTO outbox "
-                        "(namespace,environment,context_key,ksef_number,kind,variant) "
-                        "VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-                        (*document, "invoice-xml", "v1"),
-                    )
-                    self._enqueue_xml(document, value["invoiceHash"])
+                self._write_observation(scope, value)
             columns = (
                 checkpoint.generation_id,
                 checkpoint.revision,
@@ -217,6 +186,40 @@ class MetadataSQLiteStore:
                 original_error=error,
             ) from None
         return batch.receipt
+
+    def _write_observation(self, scope: InvoiceSyncScope, value: dict[str, Any]) -> None:
+        document_scope = (scope.namespace, scope.environment, scope.context_key)
+        number = self._document_number(value["ksefNumber"])
+        document = (*document_scope, number)
+        self._execute(
+            "INSERT INTO invoices VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            (*document, value["invoiceHash"]),
+        )
+        existing = self._execute(
+            "SELECT invoice_hash FROM invoices WHERE namespace=? AND environment=? "
+            "AND context_key=? AND ksef_number=?",
+            document,
+        ).fetchone()
+        if existing is None or existing[0] != value["invoiceHash"]:
+            raise KsefSyncDataConflictError("invoice_hash_conflict")
+        # Batch snapshots are already validated and bounded by the SDK.
+        metadata = json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+        )
+        self._execute(
+            "INSERT INTO invoice_observations VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(namespace, environment, context_key, sync_key, stream_id, "
+            "ksef_number) DO UPDATE SET metadata_json=excluded.metadata_json",
+            (*_key(scope), number, metadata),
+        )
+        if self.enqueue_xml:
+            self._execute(
+                "INSERT INTO outbox "
+                "(namespace,environment,context_key,ksef_number,kind,variant) "
+                "VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                (*document, "invoice-xml", "v1"),
+            )
+            self._enqueue_xml(document, value["invoiceHash"])
 
     def _document_number(self, number: str) -> str:
         return number
