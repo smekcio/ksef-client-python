@@ -816,3 +816,97 @@ def test_store_directories_are_owner_only(
 
     assert store.directory.stat().st_mode & 0o777 == 0o700
     assert (store.directory / "prod").stat().st_mode & 0o777 == 0o700
+
+
+def test_profile_rotation_verifies_before_switch_and_preserves_in_flight_client(
+    tmp_path, store, rsa_pair, monkeypatch
+):
+    from contextlib import nullcontext
+
+    from ksef_client.certificate_rotation import CertificateRotationError, ProfileCertificates
+    from ksef_client.config import KsefEnvironment
+    from ksef_client.facade import Ksef
+    from ksef_client.profiles import Profile
+
+    profile = Profile("worker", KsefEnvironment.TEST.value, "nip", "123", "TEST")
+    first, key = rsa_pair
+    second = _certificate(key, common_name="Rotated")
+    store.save("first", certificate=first, private_key=key, environment="TEST")
+    store.save("second", certificate=second, private_key=key, environment="TEST")
+    selector = ProfileCertificates(tmp_path / "certificate-selector.db", profile, store=store)
+
+    def connect(*, credentials, profile, timeout):
+        assert profile.context_value == "123"
+        return nullcontext(credentials.key_pair.certificate_pem)
+
+    monkeypatch.setattr(Ksef, "connect", connect)
+    initial = selector.activate("first", expected_generation=0)
+    assert selector.status().selection == initial
+    with selector.connect() as old_worker:
+        rotated = selector.activate("second", expected_generation=initial.generation)
+        assert selector.status().selection == rotated
+        with selector.connect() as new_worker:
+            assert new_worker == _pem_certificate(second).decode()
+        assert old_worker == _pem_certificate(first).decode()
+    with pytest.raises(CertificateRotationError, match="changed"):
+        selector.activate("first", expected_generation=initial.generation)
+
+
+def test_failed_candidate_and_concurrent_rotation_keep_working_selection(
+    tmp_path, store, rsa_pair, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import nullcontext
+    from threading import Barrier
+
+    from ksef_client.certificate_rotation import CertificateRotationError, ProfileCertificates
+    from ksef_client.config import KsefEnvironment
+    from ksef_client.facade import Ksef
+    from ksef_client.profiles import Profile
+
+    profile = Profile("worker", KsefEnvironment.TEST.value, "nip", "123", "TEST")
+    for name in ("initial", "candidate-a", "candidate-b"):
+        cert, key = rsa_pair
+        store.save(name, certificate=cert, private_key=key, environment="TEST", password=name)
+    selector = ProfileCertificates(tmp_path / "selector.db", profile, store=store)
+    assert selector.status().status == "unconfigured"
+    with pytest.raises(CertificateRotationError, match="No active"):
+        selector.connect()
+    monkeypatch.setattr(Ksef, "connect", lambda **kwargs: nullcontext(object()))
+    initial = selector.activate("initial", expected_generation=0, password="initial")
+    assert selector.status(warn_before=timedelta(days=365)).status == "expiring"
+
+    def rejected(_client):
+        raise RuntimeError("Required permission missing")
+
+    with pytest.raises(RuntimeError, match="Required permission"):
+        selector.activate(
+            "candidate-a", expected_generation=1, password="candidate-a", verify=rejected
+        )
+    assert selector.status().selection == initial
+    barrier = Barrier(2)
+
+    def rotate(name):
+        try:
+            return selector.activate(
+                name,
+                expected_generation=1,
+                password=name,
+                subject_identifier_type="certificateFingerprint",
+                verify=lambda _: barrier.wait(timeout=5),
+            )
+        except CertificateRotationError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(rotate, ("candidate-a", "candidate-b")))
+    successes = [selection for selection in results if selection is not None]
+    assert len(successes) == 1
+    active = successes[0]
+    assert active.generation == 2
+    assert active.subject_identifier_type == "certificateFingerprint"
+    assert selector.status().selection == active
+    with selector.connect(password_for=lambda name: name):
+        pass
+    store.delete(active.name)
+    assert selector.status().status == "unavailable"
