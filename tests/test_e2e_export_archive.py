@@ -71,8 +71,8 @@ def test_e2e_test_environment_export_archive_restart(tmp_path):
                 restrict_to_permanent_storage_hwm_date=True,
             ),
         )
+        _wait_for_invoice_at_hwm(client, filters, expected)
         for number in expected:
-            _wait_for_invoice_at_hwm(client, filters, number)
             expected[number] = client.invoices.download(number)
         until = datetime.now(timezone.utc).isoformat()
         state_key = os.urandom(32)

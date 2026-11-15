@@ -23,6 +23,7 @@ from ksef_client import (
 )
 from ksef_client import models as m
 from ksef_client.clients.security import _select_public_key_certificate
+from ksef_client.exceptions import KsefHttpError
 from ksef_client.facade import auth_payload
 from ksef_client.operations import STATE_ENVELOPE, STATE_MAX_BYTES
 from ksef_client.services.crypto import EncryptionData
@@ -340,6 +341,46 @@ def test_hwm_wait_requires_the_specific_submission(monkeypatch):
     monkeypatch.setattr("tests.test_e2e_facade.wait_seconds", waits.append)
     _wait_for_invoice_at_hwm(client, Mock(), "EXPECTED", poll_interval=1)
     assert waits == [1]
+
+
+@pytest.mark.parametrize("code", [21183, 21405])
+def test_hwm_wait_only_retries_out_of_range_response(monkeypatch, code):
+    problem = m.ExceptionResponse.from_dict(
+        {"exception": {"exceptionDetailList": [{"exceptionCode": code}]}}
+    )
+    error = KsefHttpError(400, "TEST metadata response", problem=problem)
+
+    def delayed_error():
+        yield SimpleNamespace(ksef_number="FIRST")
+        raise error
+
+    client = SimpleNamespace(
+        context_key="Nip:test",
+        api=SimpleNamespace(
+            invoices=SimpleNamespace(
+                search_invoice_metadata=Mock(
+                    side_effect=[
+                        delayed_error(),
+                        [SimpleNamespace(ksef_number="SECOND")],
+                        [
+                            SimpleNamespace(ksef_number="FIRST"),
+                            SimpleNamespace(ksef_number="SECOND"),
+                        ],
+                    ]
+                )
+            )
+        ),
+    )
+    waits: list[float] = []
+    monkeypatch.setattr("tests.test_e2e_facade.wait_seconds", waits.append)
+    if code == 21405:
+        with pytest.raises(KsefHttpError) as caught:
+            _wait_for_invoice_at_hwm(client, Mock(), {"FIRST", "SECOND"}, poll_interval=1)
+        assert caught.value is error
+        assert waits == []
+    else:
+        _wait_for_invoice_at_hwm(client, Mock(), {"FIRST", "SECOND"}, poll_interval=1)
+        assert waits == [1, 1]
 
 
 def test_generator_does_not_require_ruff_and_offloads_auth_helpers():
