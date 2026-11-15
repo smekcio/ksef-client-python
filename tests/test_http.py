@@ -986,6 +986,8 @@ class TransportErrorTests(unittest.TestCase):
         return ctx.exception
 
     def test_transport_errors_are_wrapped(self):
+        from ksef_client.exceptions import KsefTransportError, KsefTransportTimeoutError
+
         for error in (
             httpx.ConnectError("nodename nor servname provided"),
             httpx.ConnectTimeout("timed out"),
@@ -995,6 +997,12 @@ class TransportErrorTests(unittest.TestCase):
         ):
             with self.subTest(error=type(error).__name__):
                 wrapped = self._request_with_error(error)
+                expected_type = (
+                    KsefTransportTimeoutError
+                    if isinstance(error, httpx.TimeoutException)
+                    else KsefTransportError
+                )
+                self.assertIs(type(wrapped), expected_type)
                 self.assertIsNone(wrapped.__cause__)
                 self.assertEqual(wrapped.status_code, NO_HTTP_STATUS_CODE)
                 self.assertIsNone(wrapped.problem)

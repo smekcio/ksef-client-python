@@ -555,9 +555,13 @@ class KsefApiError(KsefHttpError):
 
 
 class KsefTransportError(KsefHttpError):
-    """Błąd transportu (status ``0``) — żądanie nie dotarło do KSeF."""
+    """Błąd transportu (status ``0``) — brak odpowiedzi HTTP."""
 
     code: ClassVar[ErrorCode] = ErrorCode.TRANSPORT_ERROR
+
+
+class KsefTransportTimeoutError(KsefTransportError):
+    """The HTTP operation timed out. The outcome of a sent request may be unknown."""
 
 
 class KsefBadRequestError(KsefApiError):
@@ -884,6 +888,7 @@ __all__ = [
     "KsefSyncStateError",
     "KsefSyncStoreError",
     "KsefTransportError",
+    "KsefTransportTimeoutError",
     "KsefUpoNotFoundError",
     "KsefValidationError",
     "KsefVerificationError",
