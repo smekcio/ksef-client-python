@@ -6,19 +6,21 @@ import json
 import os
 import sqlite3
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
+from importlib import import_module
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import typer
 
 from ksef_client import AuthenticatedClient, Ksef, KsefClientOptions
+from ksef_client.certificates import FileCertificateStore
 from ksef_client.exceptions import KsefError, KsefRateLimitError
 from ksef_client.facade import connection_options
 from ksef_client.models import TokenInfo
 from ksef_client.offline_invoices import SQLiteOfflineInvoiceStore
 from ksef_client.operations import environment_key
-from ksef_client.profiles import ProfileStore
+from ksef_client.profiles import Profile, ProfileStore
 from ksef_client.retry import parse_retry_after_seconds
 from ksef_client.token_manager import TokenManager
 
@@ -62,7 +64,53 @@ def workflow_key(variable: str) -> bytes:
     return key
 
 
-def workflow_client(profile: str, options: KsefClientOptions, kind: str, context: str) -> Ksef:
+def _xades_flag(name: str) -> bool | None:
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    if value not in {"true", "false"}:
+        raise CliError(f"{name} must be true or false.", ExitCode.CONFIG_ERROR)
+    return value == "true"
+
+
+def _xades_workflow_client(path: str, profile: Profile) -> AbstractContextManager[Ksef]:
+    try:
+        rotation = import_module("ksef_client.certificate_rotation")
+    except ModuleNotFoundError as exc:
+        if exc.name != "ksef_client.certificate_rotation":
+            raise
+        raise CliError(
+            "XAdES certificate rotation is unavailable.", ExitCode.CONFIG_ERROR
+        ) from None
+
+    try:
+        passwords = json.loads(os.environ.get("KSEF_XADES_KEY_PASSWORDS", "{}"))
+    except ValueError:
+        raise CliError("Invalid XAdES password configuration.", ExitCode.CONFIG_ERROR) from None
+
+    def password_for(name: str) -> str:
+        password = passwords.get(name) if isinstance(passwords, dict) else None
+        if not isinstance(password, str) or not password:
+            raise CliError("No password for the active XAdES certificate.", ExitCode.CONFIG_ERROR)
+        return password
+
+    store = FileCertificateStore(
+        os.environ.get("KSEF_XADES_CERTIFICATE_DIR"), require_password=True
+    )
+    selector = rotation.ProfileCertificates(
+        path,
+        profile,
+        store=store,
+        verify_certificate_chain=_xades_flag("KSEF_XADES_VERIFY_CHAIN"),
+        enforce_xades_compliance=bool(_xades_flag("KSEF_XADES_ENFORCE_COMPLIANCE")),
+    )
+    session: AbstractContextManager[Ksef] = selector.session(password_for=password_for)
+    return session
+
+
+def workflow_client(
+    profile: str, options: KsefClientOptions, kind: str, context: str
+) -> AbstractContextManager[Ksef]:
     endpoint = urlsplit(options.normalized_base_url())
     if (
         endpoint.scheme != "https"
@@ -72,6 +120,9 @@ def workflow_client(profile: str, options: KsefClientOptions, kind: str, context
         or endpoint.fragment
     ):
         raise CliError("A fixed HTTPS API endpoint is required.", ExitCode.CONFIG_ERROR)
+    selector = os.environ.get("KSEF_XADES_SELECTOR")
+    if selector:
+        return _xades_workflow_client(selector, Profile(profile, options.base_url, kind, context))
     scope = login_scope(options.base_url, kind, context)
     with auth_state_lock(profile):
         tokens = get_tokens(profile)

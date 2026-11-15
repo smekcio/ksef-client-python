@@ -479,3 +479,68 @@ def test_interrupted_refresh_keeps_bound_credentials_usable(runner, monkeypatch,
         assert client.api.token_manager.get_access_token() == (
             "new-access" if switched else "old-access"
         )
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["ok", "defaults", "invalid_json", "no_password", "bad_flag", "unavailable", "dependency"],
+)
+def test_rotated_xades_session_for_durable_commands(runner, tmp_path, monkeypatch, case):
+    from contextlib import contextmanager
+
+    from ksef_client import KsefClientOptions
+    from ksef_client.cli.errors import CliError
+
+    settings = {}
+    opened = []
+
+    class Selector:
+        def __init__(self, path, profile, **kwargs):
+            settings.update(path=path, profile=profile, **kwargs)
+
+        @contextmanager
+        def session(self, *, password_for):
+            assert password_for("active-name") == "secret-value"
+            try:
+                opened.append("open")
+                yield "authenticated client"
+            finally:
+                opened.append("closed")
+
+    def import_rotation(name):
+        assert name == "ksef_client.certificate_rotation"
+        if case in {"unavailable", "dependency"}:
+            raise ModuleNotFoundError(name=name if case == "unavailable" else "xmlsec")
+        return SimpleNamespace(ProfileCertificates=Selector)
+
+    monkeypatch.setattr(_workflow, "import_module", import_rotation)
+    monkeypatch.setattr(_workflow, "get_tokens", lambda _: pytest.fail("Unexpected token lookup"))
+    monkeypatch.setenv("KSEF_XADES_SELECTOR", str(tmp_path / "selector.db"))
+    monkeypatch.setenv("KSEF_XADES_CERTIFICATE_DIR", str(tmp_path / "certs"))
+    monkeypatch.setenv(
+        "KSEF_XADES_KEY_PASSWORDS",
+        {"invalid_json": "invalid", "no_password": "{}"}.get(
+            case, '{"active-name":"secret-value"}'
+        ),
+    )
+    monkeypatch.setenv("KSEF_XADES_VERIFY_CHAIN", "invalid" if case == "bad_flag" else "true")
+    monkeypatch.setenv("KSEF_XADES_ENFORCE_COMPLIANCE", "true")
+    options = KsefClientOptions("https://api-demo.ksef.mf.gov.pl")
+    if case == "defaults":
+        monkeypatch.delenv("KSEF_XADES_VERIFY_CHAIN")
+        monkeypatch.delenv("KSEF_XADES_ENFORCE_COMPLIANCE")
+    if case not in {"ok", "defaults"}:
+        expected_error = ModuleNotFoundError if case == "dependency" else CliError
+        with (
+            pytest.raises(expected_error),
+            _workflow.workflow_client("demo", options, "Nip", "123"),
+        ):
+            pytest.fail("Unexpected client")
+        return
+    with _workflow.workflow_client("demo", options, "Nip", "123") as client:
+        assert client == "authenticated client"
+    assert opened == ["open", "closed"]
+    assert settings["profile"].context_value == "123"
+    assert settings["store"].require_password
+    assert settings["verify_certificate_chain"] is (True if case == "ok" else None)
+    assert settings["enforce_xades_compliance"] is (case == "ok")

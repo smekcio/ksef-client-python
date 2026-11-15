@@ -73,11 +73,13 @@ def main() -> None:
             next_offline = time.monotonic() + max(args.interval, retry_after or 0)
             if limited:
                 next_archive = max(next_archive, next_offline)
+                next_offline += args.interval
         if time.monotonic() >= next_archive:
             _, limited, retry_after = cycle(args.profile, archive)
             next_archive = time.monotonic() + max(args.interval, retry_after or 0)
             if limited:
                 next_offline = max(next_offline, next_archive)
+                next_archive += args.interval
         time.sleep(min(60, max(0, min(next_archive, next_offline) - time.monotonic())))
 
 

@@ -378,8 +378,9 @@ def login_with_xades(
 
 
 def get_auth_status(profile: str) -> dict[str, Any]:
-    tokens = get_tokens(profile)
-    metadata = get_cached_metadata(profile) or {}
+    with auth_state_lock(profile):
+        tokens = get_tokens(profile)
+        metadata = recover_refreshed_metadata(get_cached_metadata(profile) or {}, tokens)
     return {
         "profile": profile,
         "has_tokens": bool(tokens),

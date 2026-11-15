@@ -96,3 +96,18 @@ obsługiwane, a operator może sprawdzić stan konkretnej faktury przez
 `offline status --invoice-hash`. Harmonogram powinien monitorować obie
 listy, `invoices` i `failures`. Przekroczenie limitu API lub błąd
 uwierzytelnienia przerywa bieżący cykl profilu.
+
+### Logowanie aktywnym certyfikatem
+
+`KSEF_XADES_SELECTOR` wskazuje bazę wyboru certyfikatów utworzoną przez
+[rotację XAdES](../certificate-rotation.md). Przy takim ustawieniu każde
+sieciowe polecenie `archive` i `offline` otwiera sesję dla aktualnego
+certyfikatu i kończy ją po cyklu. Wybór korzysta z nazwy, adresu API
+i kontekstu profilu CLI. Żeby zmienić certyfikat kolejnego cyklu,
+aktywuj nowy wpis w tej samej bazie.
+
+Dla tego trybu przekaż hasła wersji w `KSEF_XADES_KEY_PASSWORDS` jako obiekt
+JSON. Opcjonalne `KSEF_XADES_CERTIFICATE_DIR` wskazuje katalog z szyfrowanymi
+kluczami. Jeśli operator wybrał dodatkową weryfikację, ustaw
+`KSEF_XADES_VERIFY_CHAIN` i `KSEF_XADES_ENFORCE_COMPLIANCE` odpowiednio na
+`true` lub `false`, zgodnie z konfiguracją aktywacji.
