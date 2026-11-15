@@ -88,7 +88,8 @@ def test_archive_status_preserves_watermark_across_cli_invocations(runner, tmp_p
     monkeypatch.setattr(archive_cmd, "workflow_client", lambda *args: nullcontext(client))
     common = ["--state-dir", str(tmp_path / "private")]
     status = runner.invoke(app, ["--json", "archive", "status", *common])
-    assert json.loads(status.output)["data"]["status"] == "uninitialized"
+    empty = json.loads(status.output)["data"]
+    assert empty["status"] == "uninitialized" and empty["committed_hwm"] is None
     sync = ["--json", "archive", "sync", *common, "--since", START, "--until", END]
     first = runner.invoke(app, [*sync, "--max-documents", "1"])
     assert first.exit_code == 0, first.output
@@ -135,7 +136,14 @@ def test_offline_run_reconciles_lost_send_and_honors_429(
 
     monkeypatch.setenv("KSEF_OFFLINE_STATE_KEY", base64.b64encode(bytes(range(32))).decode())
     client = OfflineClient()
-    monkeypatch.setattr(offline_cmd, "workflow_client", lambda *args: nullcontext(client))
+    other_client = OfflineClient()
+    other_client.context_key = "Nip:456"
+    other_client.failed_once = True
+    ProfileStore.default().create("other", env="DEMO", context_type="nip", context_value="456")
+    clients = {"demo": client, "other": other_client}
+    monkeypatch.setattr(
+        offline_cmd, "workflow_client", lambda name, *args: nullcontext(clients[name])
+    )
     xml = tmp_path / "invoice.xml"
     xml.write_bytes(XML)
     common = ["--state-dir", str(tmp_path / "private")]
@@ -147,6 +155,16 @@ def test_offline_run_reconciles_lost_send_and_honors_429(
     limited = runner.invoke(app, run)
     assert limited.exit_code == ExitCode.RETRY_EXHAUSTED
     assert json.loads(limited.output)["errors"][0]["retry_after_seconds"] == 17
+
+    other = ["--profile", "other", "--json", "offline"]
+    staged_other = runner.invoke(
+        app, [*other, "enqueue", *common, "--xml", str(xml), "--due-at", DUE]
+    )
+    assert staged_other.exit_code == 0
+    processed_other = runner.invoke(app, [*other, "run", *common])
+    assert processed_other.exit_code == 0
+    assert json.loads(processed_other.output)["data"]["invoices"][0]["status"] == "session_open"
+    assert client.open_count == 0 and other_client.open_count == 1
 
     # KSeF session opening has a durable claim. A subsequent cycle can open it
     # after the failed owner's claim expires.

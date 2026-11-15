@@ -7,7 +7,7 @@ from typing import Annotated
 import typer
 
 from ksef_client import FileInvoiceXmlStore, SQLiteInvoiceSyncStore
-from ksef_client.invoice_export_sync import inspect_archive_progress
+from ksef_client.invoice_export_sync import InvoiceExportSyncReport, inspect_archive_progress
 from ksef_client.models import InvoiceQuerySubjectType
 from ksef_client.operations import environment_key
 
@@ -83,9 +83,8 @@ def status(
                     state_key=state_key,
                     subject_type=role,
                 )
-            data = asdict(report)
         else:
-            data = {"status": "uninitialized"}
+            report = InvoiceExportSyncReport(None, None, status="uninitialized")
         get_renderer(require_context(ctx)).success(
-            command="archive.status", profile=profile, data={**data, "role": role.value}
+            command="archive.status", profile=profile, data={**asdict(report), "role": role.value}
         )
