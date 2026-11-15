@@ -47,6 +47,7 @@ Najważniejsze cechy:
 - **typowane modele** `ksef_client.models` dla publicznych żądań i odpowiedzi SDK,
 - **pełny dostęp do API** przez `client.api` oraz samodzielne `KsefClient` / `AsyncKsefClient`,
 - **CLI `ksef`** do konfiguracji, diagnostyki, uwierzytelniania, wysyłki i pobierania faktur,
+- **rotacja certyfikatów XAdES** — [zmiana certyfikatu dla kolejnych cykli workera i diagnostyka ważności](docs/certificate-rotation.md),
 - **profile i magazyn certyfikatów w SDK** — te same dane co CLI, bez zależności od `typer`/`keyring`,
 - **kompletne pobieranie metadanych faktur** — `search_invoice_metadata()` w wersji sync i async,
   z paginacją, trwałymi kursorami, deduplikacją granic i kontrolą HWM,

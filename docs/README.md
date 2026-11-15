@@ -97,6 +97,7 @@ Synchronizacja metadanych i XML: [trwała kolejka i gotowość dokumentów](invo
 
 - [Profile klienta (`ksef_client.profiles`)](profiles.md)
 - [Magazyn certyfikatów (`ksef_client.certificates`)](certificate-store.md)
+- [Rotacja certyfikatu uwierzytelniającego XAdES](certificate-rotation.md)
 
 **Dokumenty FA(3):**
 
