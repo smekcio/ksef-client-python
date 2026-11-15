@@ -595,6 +595,18 @@
   enforces per pre-encryption part; `build_zip` sanitises entry names like `build_tar_gz`, and both
   readers reject duplicate entry names instead of silently dropping content
 
+## 0.24.0 (2026-11-15)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* feat(auth): rotate XAdES certificates for KSeF workers by @smekcio in https://github.com/smekcio/ksef-client-python/pull/122
+* feat(cli): operate the invoice archive and offline queue by @smekcio in https://github.com/smekcio/ksef-client-python/pull/123
+
+
+**Full Changelog**: https://github.com/smekcio/ksef-client-python/compare/v0.23.0...v0.24.0
+
 ## 0.23.0 (2026-11-15)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
