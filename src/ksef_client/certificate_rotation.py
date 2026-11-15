@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -45,6 +45,8 @@ class CertificateSelection:
     fingerprint_sha256: str
     generation: int
     subject_identifier_type: str
+    verify_certificate_chain: bool | None = None
+    enforce_xades_compliance: bool = False
 
     def __post_init__(self) -> None:
         if (
@@ -108,16 +110,31 @@ class ProfileCertificates:
             or endpoint.fragment
         ):
             raise CertificateRotationError("XAdES rotation requires a fixed HTTPS profile endpoint")
-        identity_parts: list[str | bool | None] = [
+        identity_parts = [
             profile.name,
             environment_key(options.normalized_base_url()),
             kind,
             context,
         ]
-        if verify_certificate_chain is not None or enforce_xades_compliance:
-            identity_parts.extend((verify_certificate_chain, enforce_xades_compliance))
-        identity = json.dumps(identity_parts, separators=(",", ":")).encode()
-        self._scope = hashlib.sha256(identity).hexdigest()
+        self._scope = self._scope_hash(identity_parts)
+        self._legacy_policies = {
+            self._scope_hash([*identity_parts, chain, compliance]): (chain, compliance)
+            for chain in (None, False, True)
+            for compliance in (False, True)
+            if chain is not None or compliance
+        }
+        self._legacy_policies[self._scope] = (None, False)
+        self._legacy_matcher = ",".join("?" for _ in self._legacy_policies)
+
+    @staticmethod
+    def _scope_hash(parts: Sequence[str | bool | None]) -> str:
+        return hashlib.sha256(json.dumps(parts, separators=(",", ":")).encode()).hexdigest()
+
+    def _policy_matches(self, selection: CertificateSelection) -> bool:
+        return (
+            selection.verify_certificate_chain == self._verify_certificate_chain
+            and selection.enforce_xades_compliance == self._enforce_xades_compliance
+        )
 
     def _open(self) -> sqlite3.Connection:
         _safe_directory(self._path.parent, allow_missing=True)
@@ -143,32 +160,75 @@ class ProfileCertificates:
         connection = sqlite3.connect(self._path)
         try:
             connection.execute(
-                "CREATE TABLE IF NOT EXISTS certificate_selection ("
+                "CREATE TABLE IF NOT EXISTS certificate_selection_v2 ("
                 "scope TEXT PRIMARY KEY, name TEXT NOT NULL, fingerprint TEXT NOT NULL, "
                 "generation INTEGER NOT NULL CHECK(generation > 0), "
-                "subject_identifier_type TEXT NOT NULL)"
+                "subject_identifier_type TEXT NOT NULL, "
+                "verify_certificate_chain INTEGER CHECK(verify_certificate_chain IN (0, 1)), "
+                "enforce_xades_compliance INTEGER NOT NULL "
+                "CHECK(enforce_xades_compliance IN (0, 1)))"
             )
         except BaseException:
             connection.close()
             raise
         return connection
 
-    def _select(self, connection: sqlite3.Connection) -> CertificateSelection | None:
+    @staticmethod
+    def _has_legacy_table(connection: sqlite3.Connection) -> bool:
+        return (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'certificate_selection'"
+            ).fetchone()
+            is not None
+        )
+
+    def _selection_state(
+        self, connection: sqlite3.Connection
+    ) -> tuple[CertificateSelection | None, bool]:
+        """Read the current selection or a unique entry from the pre-release schema."""
         row = connection.execute(
-            "SELECT name, fingerprint, generation, subject_identifier_type "
-            "FROM certificate_selection WHERE scope = ?",
+            "SELECT name, fingerprint, generation, subject_identifier_type, "
+            "verify_certificate_chain, enforce_xades_compliance "
+            "FROM certificate_selection_v2 WHERE scope = ?",
             (self._scope,),
         ).fetchone()
-        return CertificateSelection(*row) if row is not None else None
+        if row is not None:
+            name, fingerprint, generation, subject, chain, compliance = row
+            return CertificateSelection(
+                name,
+                fingerprint,
+                generation,
+                subject,
+                None if chain is None else bool(chain),
+                bool(compliance),
+            ), False
+        if not self._has_legacy_table(connection):
+            return None, False
+        matches = connection.execute(
+            "SELECT scope, name, fingerprint, generation, subject_identifier_type "
+            f"FROM certificate_selection WHERE scope IN ({self._legacy_matcher})",
+            tuple(self._legacy_policies),
+        ).fetchall()
+        if len(matches) != 1:
+            return None, len(matches) > 1
+        scope, name, fingerprint, generation, subject = matches[0]
+        return CertificateSelection(
+            name, fingerprint, generation, subject, *self._legacy_policies[scope]
+        ), False
 
     def status(self, *, warn_before: timedelta = timedelta(days=30)) -> CertificateHealth:
         """Inspect validity and fingerprint without loading/decrypting the key."""
         if warn_before < timedelta(0):
             raise ValueError("warn_before must be non-negative")
         with closing(self._open()) as connection:
-            selected = self._select(connection)
+            selected, conflict = self._selection_state(connection)
+        if conflict:
+            return CertificateHealth(None, "reactivation_required")
         if selected is None:
             return CertificateHealth(None, "unconfigured")
+        if not self._policy_matches(selected):
+            return CertificateHealth(selected, "policy_mismatch")
         try:
             record = self._store.record(selected.name, require_key=True)
         except CertificateStoreError:
@@ -231,7 +291,7 @@ class ProfileCertificates:
         if type(expected_generation) is not int or expected_generation < 0:
             raise ValueError("expected_generation must be a non-negative integer")
         with closing(self._open()) as connection:
-            current = self._select(connection)
+            current, _ = self._selection_state(connection)
         if (current.generation if current else 0) != expected_generation:
             raise CertificateRotationError("Certificate selection changed")
         if subject_identifier_type not in _SUBJECT_IDENTIFIER_TYPES:
@@ -259,7 +319,7 @@ class ProfileCertificates:
         self._checked_certificate(name, password, record.fingerprint_sha256)
         with closing(self._open()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            current = self._select(connection)
+            current, _ = self._selection_state(connection)
             if (current.generation if current else 0) != expected_generation:
                 raise CertificateRotationError("Certificate selection changed")
             selected = CertificateSelection(
@@ -267,20 +327,31 @@ class ProfileCertificates:
                 record.fingerprint_sha256,
                 expected_generation + 1,
                 subject_identifier_type,
+                self._verify_certificate_chain,
+                self._enforce_xades_compliance,
             )
             connection.execute(
-                "INSERT INTO certificate_selection VALUES (?, ?, ?, ?, ?) "
+                "INSERT INTO certificate_selection_v2 VALUES (?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(scope) DO UPDATE SET name = excluded.name, "
                 "fingerprint = excluded.fingerprint, generation = excluded.generation, "
-                "subject_identifier_type = excluded.subject_identifier_type",
+                "subject_identifier_type = excluded.subject_identifier_type, "
+                "verify_certificate_chain = excluded.verify_certificate_chain, "
+                "enforce_xades_compliance = excluded.enforce_xades_compliance",
                 (
                     self._scope,
                     selected.name,
                     selected.fingerprint_sha256,
                     selected.generation,
                     selected.subject_identifier_type,
+                    selected.verify_certificate_chain,
+                    selected.enforce_xades_compliance,
                 ),
             )
+            if self._has_legacy_table(connection):
+                connection.execute(
+                    f"DELETE FROM certificate_selection WHERE scope IN ({self._legacy_matcher})",
+                    tuple(self._legacy_policies),
+                )
         return selected
 
     def connect(
@@ -292,9 +363,17 @@ class ProfileCertificates:
     ) -> Ksef:
         """Start a fresh SDK client with the active credential for this worker cycle."""
         with closing(self._open()) as connection:
-            selected = self._select(connection)
+            selected, conflict = self._selection_state(connection)
+        if conflict:
+            raise CertificateRotationError(
+                "Multiple legacy selections require explicit reactivation"
+            )
         if selected is None:
             raise CertificateRotationError("No active XAdES certificate for this profile")
+        if not self._policy_matches(selected):
+            raise CertificateRotationError(
+                "Worker XAdES policy does not match the active selection"
+            )
         if password_for is not None:
             if password is not None:
                 raise ValueError("Pass a password or a version-specific password provider")

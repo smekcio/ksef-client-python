@@ -95,3 +95,16 @@ do `ProfileCertificates`. Wartości obowiązują przy sprawdzaniu kandydata
 i przy otwieraniu sesji workera. Użyj tych samych ustawień u operatora
 i w workerze. Zmiana polityki wymaga zweryfikowania i aktywacji certyfikatu
 w konfiguracji z nową polityką.
+
+Stan `policy_mismatch` oznacza, że worker ma inne ustawienia niż ostatnia
+aktywacja. Do czasu ujednolicenia konfiguracji nie zaloguje się certyfikatem
+dla tego profilu. Gdy baza z wersji przed wydaniem ma kilka wyborów dla
+tego samego profilu, stan `reactivation_required` wymaga jawnej aktywacji
+zweryfikowanego certyfikatu z `expected_generation=0`. Udana aktywacja
+usuwa stare wskazania tego profilu z bazy wyboru.
+
+Przykładowe `run` podaje błędy poszczególnych pozycji w `failures` i zwraca
+`next_cursor`. Do następnego uruchomienia przekaż pola kursora przez
+`--after-due-at` i `--after-hash`. Gdy `next_cursor` jest pusty, zacznij
+kolejną rundę od początku. Nowe pozycje mogą otworzyć sesję i wysłać
+fakturę w tym samym cyklu.

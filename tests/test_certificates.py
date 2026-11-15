@@ -1102,7 +1102,7 @@ def test_selection_validates_database_record_before_password_provider(
     selector = profile_certificate_selector
     with closing(selector._open()) as connection, connection:
         connection.execute(
-            "INSERT INTO certificate_selection VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO certificate_selection_v2 VALUES (?, ?, ?, ?, ?, NULL, 0)",
             (selector._scope, "valid-name", "invalid", 1, "certificateSubject"),
         )
     callback = Mock()
@@ -1110,7 +1110,7 @@ def test_selection_validates_database_record_before_password_provider(
         selector.connect(password_for=callback)
     with closing(selector._open()) as connection, connection:
         connection.execute(
-            "UPDATE certificate_selection SET name = ?, fingerprint = ?",
+            "UPDATE certificate_selection_v2 SET name = ?, fingerprint = ?",
             (name, "a" * 64),
         )
     with pytest.raises(CertificateRotationError, match="Invalid stored certificate name"):
@@ -1127,7 +1127,7 @@ def test_rotation_preserves_xades_policy_across_activation_and_connect(
     from contextlib import nullcontext
     from types import SimpleNamespace
 
-    from ksef_client.certificate_rotation import ProfileCertificates
+    from ksef_client.certificate_rotation import CertificateRotationError, ProfileCertificates
     from ksef_client.config import KsefEnvironment
     from ksef_client.facade import Ksef
     from ksef_client.profiles import Profile
@@ -1151,11 +1151,17 @@ def test_rotation_preserves_xades_policy_across_activation_and_connect(
         )
 
     monkeypatch.setattr(Ksef, "connect", connect)
-    selector.activate("first", expected_generation=0)
+    old_worker = ProfileCertificates(path, profile, store=store)
+    original = old_worker.activate("first", expected_generation=0)
+    selected = selector.activate("first", expected_generation=original.generation)
+    assert selected.generation == original.generation + 1
+    assert old_worker.status().selection == selected
+    assert old_worker.status().status == "policy_mismatch"
+    with pytest.raises(CertificateRotationError, match="policy does not match"):
+        old_worker.connect(password_for=lambda _: pytest.fail("Do not load the password"))
     with selector.session():
         pass
-    assert calls == [(True, True), (True, True)]
-    assert ProfileCertificates(path, profile, store=store).status().status == "unconfigured"
+    assert calls == [(None, False), (True, True), (True, True)]
 
 
 def test_rotation_reports_nonregular_certificate_material_as_unavailable(
@@ -1184,3 +1190,61 @@ def test_rotation_reports_nonregular_certificate_material_as_unavailable(
     assert selector.status().status == "unavailable"
     with pytest.raises(CertificateStoreError, match="regular files"):
         selector.connect()
+
+
+@pytest.mark.parametrize("multiple", [False, True])
+def test_legacy_certificate_choices_require_explicit_activation_when_ambiguous(
+    profile_certificate_selector, store, rsa_pair, monkeypatch, multiple
+):
+    from contextlib import closing, nullcontext
+    from types import SimpleNamespace
+
+    from ksef_client.certificate_rotation import CertificateRotationError
+    from ksef_client.facade import Ksef
+
+    selector = profile_certificate_selector
+    record = store.save("legacy", certificate=rsa_pair[0], private_key=rsa_pair[1])
+    with closing(selector._open()) as db, db:
+        db.execute(
+            "CREATE TABLE certificate_selection (scope TEXT PRIMARY KEY, name TEXT, "
+            "fingerprint TEXT, generation INTEGER, subject_identifier_type TEXT)"
+        )
+        assert selector.status().status == "unconfigured"
+        db.execute(
+            "INSERT INTO certificate_selection VALUES (?, ?, ?, ?, ?)",
+            ("another-profile", "legacy", record.fingerprint_sha256, 1, "certificateSubject"),
+        )
+        db.execute(
+            "INSERT INTO certificate_selection VALUES (?, ?, ?, ?, ?)",
+            (selector._scope, "legacy", record.fingerprint_sha256, 3, "certificateSubject"),
+        )
+        if multiple:
+            legacy_scope = next(
+                scope for scope in selector._legacy_policies if scope != selector._scope
+            )
+            db.execute(
+                "INSERT INTO certificate_selection VALUES (?, ?, ?, ?, ?)",
+                (legacy_scope, "legacy", record.fingerprint_sha256, 1, "certificateSubject"),
+            )
+
+    client = SimpleNamespace(
+        api=SimpleNamespace(auth=SimpleNamespace(revoke_current_session=lambda: None))
+    )
+    monkeypatch.setattr(Ksef, "connect", lambda **kwargs: nullcontext(client))
+    if multiple:
+        assert selector.status().status == "reactivation_required"
+        with pytest.raises(CertificateRotationError, match="explicit reactivation"):
+            selector.connect()
+        previous_generation = 0
+    else:
+        assert selector.status().status == "valid"
+        previous_generation = 3
+        with selector.session():
+            pass
+    selected = selector.activate("legacy", expected_generation=previous_generation)
+    assert selector.status().selection == selected
+    assert selected.generation == previous_generation + 1
+    with closing(selector._open()) as db:
+        assert db.execute("SELECT scope FROM certificate_selection").fetchall() == [
+            ("another-profile",)
+        ]

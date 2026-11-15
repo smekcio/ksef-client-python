@@ -13,7 +13,7 @@ from pathlib import Path
 from ksef_client import Ksef
 from ksef_client.certificate_rotation import ProfileCertificates
 from ksef_client.certificates import FileCertificateStore
-from ksef_client.offline_invoices import SQLiteOfflineInvoiceStore
+from ksef_client.offline_invoices import OfflineInvoiceQueue, SQLiteOfflineInvoiceStore
 from ksef_client.profiles import ProfileStore
 
 
@@ -47,6 +47,9 @@ def main() -> None:
     run = actions.add_parser("run")
     run.add_argument("--queue", type=Path, required=True)
     run.add_argument("--limit", type=int, default=20, choices=range(1, 101))
+    run.add_argument("--after-due-at")
+    run.add_argument("--after-hash")
+
     args = parser.parse_args()
 
     profile = ProfileStore.default().get(args.profile)
@@ -90,14 +93,45 @@ def main() -> None:
         print(json.dumps(asdict(selection)))
         return
 
-    with (
-        open_queue(args.queue) as queue,
-        selector.session(password_for=read_password) as client,
-    ):
-        worker = client.invoices.offline(queue, namespace=profile.name)
-        for item in worker.pending(limit=args.limit):
-            row = worker.advance(item.progress.invoice_hash)
-            print(json.dumps({"status": row.progress.status.value, "due_at": row.due_at}))
+    if (args.after_due_at is None) != (args.after_hash is None):
+        parser.error("--after-due-at and --after-hash must be provided together")
+    after = (args.after_due_at, args.after_hash) if args.after_due_at is not None else None
+    rows, failures = [], []
+    with open_queue(args.queue) as store:
+        queue = OfflineInvoiceQueue(
+            store,
+            options=profile.to_options(),
+            context_type=profile.context_type,
+            context_value=profile.context_value,
+            namespace=profile.name,
+        )
+        page = queue.pending(limit=args.limit, after=after)
+        if page:
+            with selector.session(password_for=read_password) as client:
+                worker = client.invoices.offline(store, namespace=profile.name)
+                rows, failures = worker.advance_batch(page, submit_immediately=True)
+
+    cursor = (
+        {"due_at": page[-1].due_at, "invoice_hash": page[-1].progress.invoice_hash}
+        if len(page) == args.limit
+        else None
+    )
+    print(
+        json.dumps(
+            {
+                "invoices": [
+                    {
+                        "invoice_hash": row.progress.invoice_hash,
+                        "status": row.progress.status.value,
+                        "due_at": row.due_at,
+                    }
+                    for row in rows
+                ],
+                "failures": [asdict(failure) for failure in failures],
+                "next_cursor": cursor,
+            }
+        )
+    )
 
 
 if __name__ == "__main__":
