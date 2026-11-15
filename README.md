@@ -173,6 +173,7 @@ Najczęściej używane grupy komend:
 - konfiguracja profili: `init`, `profile ...`,
 - uwierzytelnianie: `auth login-token`, `auth login-xades`, `auth status`, `auth refresh`, `auth revoke-self-token`, `auth logout`,
 - faktury i sesje: `invoice ...`, `send ...`, `upo ...`, `export ...`,
+- wznawialne archiwum XML i kolejka offline do UPO — [`archive` i `offline`](docs/workflows/cli-operations.md),
 - diagnostyka: `health check`,
 - Latarnia KSeF: `lighthouse status`, `lighthouse messages`.
 

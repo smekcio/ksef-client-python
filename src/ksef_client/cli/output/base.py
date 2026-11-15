@@ -23,4 +23,5 @@ class Renderer(Protocol):
         code: str,
         message: str,
         hint: str | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None: ...

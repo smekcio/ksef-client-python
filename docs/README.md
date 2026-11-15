@@ -119,3 +119,5 @@ Synchronizacja metadanych i XML: [trwała kolejka i gotowość dokumentów](invo
 
 
 Zalecane API kompletnego pobierania: [paginacja z kursorami i checkpoint SQLite](reliable-pagination.md).
+
+- [Archiwum XML i kolejka offline w CLI](workflows/cli-operations.md)

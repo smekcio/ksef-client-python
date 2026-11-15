@@ -16,6 +16,7 @@ from ..errors import CliError
 from ..exit_codes import ExitCode
 from ..sdk.factory import create_client
 from .keyring_store import clear_tokens, get_tokens, save_tokens
+from .scope import login_scope, token_pair_digest
 from .token_cache import clear_cached_metadata, get_cached_metadata, set_cached_metadata
 
 
@@ -71,9 +72,9 @@ def _collect_active_token_reference_numbers(
         for item in listed.tokens:
             item_context = getattr(item, "context_identifier", None)
             item_context_type_raw = getattr(item_context, "type", "")
-            item_context_type = str(
-                getattr(item_context_type_raw, "value", item_context_type_raw)
-            ).strip().lower()
+            item_context_type = (
+                str(getattr(item_context_type_raw, "value", item_context_type_raw)).strip().lower()
+            )
             item_context_value = str(getattr(item_context, "value", "")).strip()
             if (
                 normalized_context_type
@@ -276,6 +277,10 @@ def login_with_token(
             profile,
             {
                 "method": "token",
+                "login_scope": login_scope(base_url, safe_context_type, safe_context_value),
+                "token_pair_digest": token_pair_digest(
+                    result.tokens.access_token.token, result.tokens.refresh_token.token
+                ),
                 "access_valid_until": result.tokens.access_token.valid_until or "",
                 "refresh_valid_until": result.tokens.refresh_token.valid_until or "",
                 "auth_reference_number": result.reference_number,
@@ -409,6 +414,10 @@ def login_with_xades(
             profile,
             {
                 "method": "xades",
+                "login_scope": login_scope(base_url, safe_context_type, safe_context_value),
+                "token_pair_digest": token_pair_digest(
+                    result.tokens.access_token.token, result.tokens.refresh_token.token
+                ),
                 "access_valid_until": result.tokens.access_token.valid_until or "",
                 "refresh_valid_until": result.tokens.refresh_token.valid_until or "",
                 "auth_reference_number": result.reference_number,
@@ -475,6 +484,19 @@ def refresh_access_token(*, profile: str, base_url: str, save: bool = True) -> d
         # NIE wymyślamy `method`: wcześniej brak wpisu w cache (np. uszkodzony
         # albo skasowany plik) dawał `method="token"` nawet dla profilu XAdES,
         # przez co `auth revoke-self-token` unieważniał firmowy token KSeF.
+        # Preserve durable workflow binding only when the refreshed pair and
+        # endpoint are the ones for which the scope was actually established.
+        _, kind, context = _profile_context(profile)
+        if (
+            kind
+            and context
+            and metadata.get("token_pair_digest") == token_pair_digest(*tokens)
+            and metadata.get("login_scope") == login_scope(base_url, kind, context)
+        ):
+            metadata["token_pair_digest"] = token_pair_digest(new_access_token, refresh_token)
+        else:
+            metadata.pop("login_scope", None)
+            metadata.pop("token_pair_digest", None)
         metadata["access_valid_until"] = str(access_valid_until or "")
         set_cached_metadata(profile, metadata)
 
