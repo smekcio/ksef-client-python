@@ -126,11 +126,13 @@ def workflow_errors(ctx: typer.Context, command: str) -> Iterator[None]:
             code, message, hint = exc.code, exc.message, exc.hint
         elif isinstance(exc, KsefRateLimitError):
             code, message = ExitCode.RETRY_EXHAUSTED, "KSeF rate limit reached."
-            hint = build_rate_limit_hint(exc, default_hint="Wait before the next cycle.")
-            retry_after_seconds = (
-                float(exc.retry_after)
-                if exc.retry_after is not None
-                else parse_retry_after_seconds(exc.retry_after_raw)
+            retry_after_seconds = parse_retry_after_seconds(exc.retry_after_raw, cap_seconds=None)
+            if retry_after_seconds is None and exc.retry_after is not None:
+                retry_after_seconds = float(exc.retry_after)
+            hint = (
+                f"Retry-After: {retry_after_seconds:g} seconds."
+                if retry_after_seconds is not None
+                else build_rate_limit_hint(exc, default_hint="Wait before the next cycle.")
             )
         elif isinstance(exc, KsefError):
             code = exit_code_for_error(exc) or ExitCode.API_ERROR

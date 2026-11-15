@@ -22,6 +22,7 @@ wymaga jawnego dodania ścieżki do ``retryable_post_paths``.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -113,15 +114,13 @@ class RetryConfig:
         object.__setattr__(self, "retryable_methods", methods)
 
 
-def parse_retry_after_seconds(value: str | None) -> float | None:
-    """Zamienia nagłówek ``Retry-After`` na sekundy (albo ``None``).
+def parse_retry_after_seconds(
+    value: str | None, *, cap_seconds: int | None = MAX_RETRY_AFTER_SECONDS
+) -> float | None:
+    """Parse seconds or an HTTP date, clamping by default for in-process retries.
 
-    Obsługuje obie formy z RFC 7231: liczbę sekund i datę HTTP. Wynik jest
-    przycięty do ``0..MAX_RETRY_AFTER_SECONDS`` — wartość od serwera nie może
-    usypiać procesu na dni.
-
-    Funkcja jest wspólna z CLI (``cli.policies.retry.parse_retry_after``), żeby
-    obie ścieżki czekały dokładnie tyle samo.
+    Pass ``cap_seconds=None`` to report the entire delay to an external scheduler.
+    Non-finite values without a cap have no usable scheduling deadline.
     """
     if value is None:
         return None
@@ -129,18 +128,21 @@ def parse_retry_after_seconds(value: str | None) -> float | None:
     if text == "":
         return None
 
-    if text.isdigit():
-        return min(max(0.0, float(text)), float(MAX_RETRY_AFTER_SECONDS))
+    if text.isascii() and text.isdigit():
+        delay = float(text)
+    else:
+        try:
+            parsed = parsedate_to_datetime(text)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        delay = (parsed.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds()
 
-    try:
-        parsed = parsedate_to_datetime(text)
-    except (TypeError, ValueError, IndexError, OverflowError):
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
-    delta_seconds = (parsed.astimezone(timezone.utc) - now).total_seconds()
-    return min(max(0.0, delta_seconds), float(MAX_RETRY_AFTER_SECONDS))
+    seconds = max(0.0, delay)
+    if cap_seconds is not None:
+        return min(seconds, float(cap_seconds))
+    return seconds if math.isfinite(seconds) else None
 
 
 def compute_retry_delay_seconds(
@@ -179,13 +181,11 @@ def compute_retry_delay_seconds(
     # Wykładnik ograniczamy, żeby `2 ** attempt` nie przepełnił `float`
     # przy dużym `max_retries` (wcześniej: OverflowError zamiast opóźnienia).
     exponent = min(attempt - 1, 63)
-    base = float(config.base_delay_ms) * (2 ** exponent)
+    base = float(config.base_delay_ms) * (2**exponent)
     jitter_factor = 1 + ((random_value * 2 - 1) * config.jitter_ratio)
     effective_ms = max(0.0, base * jitter_factor)
     cap_ms = (
-        float(config.max_delay_ms)
-        if config.max_delay_ms is not None
-        else float(MAX_RETRY_DELAY_MS)
+        float(config.max_delay_ms) if config.max_delay_ms is not None else float(MAX_RETRY_DELAY_MS)
     )
     effective_ms = min(effective_ms, cap_ms, float(MAX_RETRY_DELAY_MS))
     return effective_ms / 1000.0

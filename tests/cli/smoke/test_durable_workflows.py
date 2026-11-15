@@ -106,9 +106,16 @@ def test_archive_status_preserves_watermark_across_cli_invocations(runner, tmp_p
     assert client.downloads == len(client.requests) == 1
 
 
-@pytest.mark.parametrize("retry_after", [{"retry_after": 17}, {"retry_after_raw": "17"}])
+@pytest.mark.parametrize(
+    ("retry_after", "expected_seconds"),
+    [
+        ({"retry_after": 17}, 17),
+        ({"retry_after": 300, "retry_after_raw": "3600"}, 3600),
+        ({}, None),
+    ],
+)
 def test_offline_run_reconciles_lost_send_and_honors_429(
-    runner, tmp_path, monkeypatch, retry_after
+    runner, tmp_path, monkeypatch, retry_after, expected_seconds
 ):
     from contextlib import nullcontext
 
@@ -154,7 +161,7 @@ def test_offline_run_reconciles_lost_send_and_honors_429(
     run = ["--json", "offline", "run", *common]
     limited = runner.invoke(app, run)
     assert limited.exit_code == ExitCode.RETRY_EXHAUSTED
-    assert json.loads(limited.output)["errors"][0]["retry_after_seconds"] == 17
+    assert json.loads(limited.output)["errors"][0].get("retry_after_seconds") == expected_seconds
 
     other = ["--profile", "other", "--json", "offline"]
     staged_other = runner.invoke(

@@ -78,7 +78,7 @@ def main() -> None:
             next_archive = time.monotonic() + max(args.interval, retry_after or 0)
             if limited:
                 next_offline = max(next_offline, next_archive)
-        time.sleep(max(0, min(next_archive, next_offline) - time.monotonic()))
+        time.sleep(min(60, max(0, min(next_archive, next_offline) - time.monotonic())))
 
 
 if __name__ == "__main__":
