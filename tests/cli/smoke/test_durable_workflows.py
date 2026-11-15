@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 from typing import cast
 
+from ksef_client import Ksef
 from ksef_client.cli import app
 from ksef_client.cli.commands import _workflow
 from ksef_client.cli.exit_codes import ExitCode
@@ -65,7 +66,6 @@ def test_archive_status_preserves_watermark_across_cli_invocations(runner, tmp_p
     from tests.test_invoice_export_package import END, START, package
     from tests.test_invoice_export_sync import Client, Export
 
-    from ksef_client import Ksef
     from ksef_client.cli.commands import archive_cmd
     from ksef_client.operations import environment_key
 
@@ -118,7 +118,7 @@ def test_offline_run_reconciles_lost_send_and_honors_429(runner, tmp_path, monke
 
         def __init__(self):
             super().__init__()
-            self.invoices = Invoices(self)
+            self.invoices = Invoices(cast(Ksef, self))
 
         def online_session(self):
             if not self.failed_once:
