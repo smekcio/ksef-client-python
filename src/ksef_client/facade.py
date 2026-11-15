@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from cryptography.hazmat.primitives import serialization
 
 from . import models as m
-from .certificates import CertificateStore, FileCertificateStore
+from .certificates import CertificateStore, FileCertificateStore, StoredCertificate
 from .client import AuthenticatedClient, KsefClient
 from .config import KsefClientOptions
 from .operations import (
@@ -81,6 +81,13 @@ class XadesCredentials:
         **kwargs: Any,
     ) -> XadesCredentials:
         certificate = (store or FileCertificateStore.default()).load(name, password=password)
+        return cls.from_stored_certificate(certificate, **kwargs)
+
+    @classmethod
+    def from_stored_certificate(
+        cls, certificate: StoredCertificate, **kwargs: Any
+    ) -> XadesCredentials:
+        """Build XAdES credentials from an already verified snapshot of a store entry."""
         key = certificate.private_key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.PKCS8,

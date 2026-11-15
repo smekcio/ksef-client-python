@@ -10,7 +10,12 @@ from ksef_client import AsyncKsef, Ksef, KsefClientOptions, KsefEnvironment
 from ksef_client import models as m
 from ksef_client._offline_invoice_store import SQLiteOfflineInvoiceStore
 from ksef_client.client import AsyncAuthenticatedClient, AuthenticatedClient
-from ksef_client.exceptions import KsefSyncConflictError
+from ksef_client.exceptions import (
+    KsefAuthenticationError,
+    KsefDocumentValidationError,
+    KsefHttpError,
+    KsefSyncConflictError,
+)
 from ksef_client.offline_invoices import (
     AsyncOfflineInvoiceQueue,
     AsyncOfflineInvoices,
@@ -568,3 +573,111 @@ def test_confirmed_cancellation_requeues_original_and_preserves_new_deadline(
             assert client.send_count == 2 and client.open_count == 2
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("wire_timeout", [False, True])
+def test_batch_sends_open_sessions_before_opening_new_and_reconciles_timeout(
+    tmp_path, wire_timeout
+):
+    from ksef_client.exceptions import KsefTransportTimeoutError
+    from ksef_client.rate_limiting import KsefRateLimitWaitTimeout
+
+    calls: list[bytes | str] = []
+
+    class Client(TestClient):
+        def online_session(self):
+            calls.append("open")
+            return super().online_session()
+
+        def send_invoice(self, xml, *, offline_mode, hash_of_corrected_invoice):
+            assert offline_mode
+            calls.append(xml)
+            if xml == XML:
+                if wire_timeout:
+                    raise KsefTransportTimeoutError(0, "HTTP transport timeout")
+                raise KsefRateLimitWaitTimeout("timeout during the first send")
+            return SimpleNamespace(
+                resume_state=lambda: SimpleNamespace(reference_number="invoice-2")
+            )
+
+    client = Client()
+    with SQLiteOfflineInvoiceStore.open(tmp_path / "offline.db", key=KEY) as store:
+        outbox = OfflineInvoices(cast(Ksef, client), store, namespace="company")
+        first = outbox.enqueue(XML, due_at="2026-02-01T00:00:00Z")
+        next_ = outbox.enqueue(b"<other/>", due_at="2026-01-01T00:00:00Z")
+        outbox.advance(first.progress.invoice_hash)
+        calls.clear()
+        rows, failures = outbox.advance_batch(outbox.pending(), submit_immediately=True, timeout=10)
+        assert calls == [XML, "open", b"<other/>"]
+        assert [(row.progress.invoice_hash, row.progress.status) for row in rows] == [
+            (next_.progress.invoice_hash, OfflineInvoiceStatus.SUBMITTED)
+        ]
+        assert [(failure.invoice_hash, failure.code) for failure in failures] == [
+            (first.progress.invoice_hash, "request_timeout")
+        ]
+        timed_out = outbox.status(first.progress.invoice_hash)
+        assert timed_out is not None
+        assert timed_out.progress.status is OfflineInvoiceStatus.SUBMISSION_UNKNOWN
+        recovered, failures = outbox.advance_batch([timed_out], submit_immediately=True)
+        assert not failures
+        assert recovered[0].progress.status is OfflineInvoiceStatus.ACCEPTED
+        assert calls.count(XML) == 1
+
+
+@pytest.mark.parametrize(
+    ("exception", "stops"),
+    [
+        (KsefDocumentValidationError("document"), False),
+        (KsefSyncConflictError("revision"), False),
+        (KsefHttpError(404, "missing"), False),
+        (KsefHttpError(429, "limit"), True),
+        (KsefHttpError(401, "authentication"), True),
+        (KsefAuthenticationError(400, "invalid token"), True),
+    ],
+)
+def test_batch_isolates_only_item_errors(tmp_path, monkeypatch, exception, stops):
+    client = TestClient()
+    with SQLiteOfflineInvoiceStore.open(tmp_path / "offline.db", key=KEY) as store:
+        outbox = OfflineInvoices(cast(Ksef, client), store, namespace="company")
+        first = outbox.enqueue(XML, due_at="2026-01-01T00:00:00Z")
+        second = outbox.enqueue(b"<other/>", due_at="2026-01-02T00:00:00Z")
+        calls: list[str] = []
+
+        def advance(digest, *, timeout):
+            calls.append(digest)
+            if digest == first.progress.invoice_hash:
+                raise exception
+            return second
+
+        monkeypatch.setattr(outbox, "advance", advance)
+        if stops:
+            with pytest.raises(type(exception)):
+                outbox.advance_batch(outbox.pending())
+            assert calls == [first.progress.invoice_hash]
+        else:
+            rows, failures = outbox.advance_batch(outbox.pending())
+            assert rows == [second]
+            assert failures[0].invoice_hash == first.progress.invoice_hash
+
+
+def test_batch_respects_parent_cancellation_after_local_timeout(tmp_path, monkeypatch):
+    from ksef_client.rate_limiting import (
+        CancellationToken,
+        KsefRateLimitWaitTimeout,
+        KsefRequestCancelledError,
+    )
+    from ksef_client.request_control import request_control
+
+    cancellation = CancellationToken()
+    client = TestClient()
+    with SQLiteOfflineInvoiceStore.open(tmp_path / "offline.db", key=KEY) as store:
+        outbox = OfflineInvoices(cast(Ksef, client), store, namespace="company")
+        entry = outbox.enqueue(XML, due_at=DUE)
+
+        def advance(digest, *, timeout):
+            cancellation.cancel()
+            raise KsefRateLimitWaitTimeout("item timeout")
+
+        monkeypatch.setattr(outbox, "advance", advance)
+        with request_control(cancellation=cancellation), pytest.raises(KsefRequestCancelledError):
+            outbox.advance_batch([entry])

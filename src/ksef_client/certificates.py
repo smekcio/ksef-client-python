@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import tempfile
 import warnings
 from contextlib import suppress
@@ -167,11 +168,7 @@ def _validate_name(name: str) -> str:
     # trafiałby do jego katalogu głównego, a `delete(".")` usuwał pliki
     # magazynu i sam katalog. Kropka na końcu jest też niebezpieczna na
     # Windows: system obcina ją, więc `prod.` i `prod` to ten sam wpis.
-    if (
-        not _NAME_RE.fullmatch(normalized)
-        or ".." in normalized
-        or normalized.endswith(".")
-    ):
+    if not _NAME_RE.fullmatch(normalized) or ".." in normalized or normalized.endswith("."):
         raise CertificateStoreError(
             f"Niepoprawna nazwa certyfikatu: {name!r}. "
             "Dozwolone są litery, cyfry, '_', '-' i '.' (bez '..' i bez kropki "
@@ -480,8 +477,7 @@ class FileCertificateStore:
             # Odczyt kopii może się nie udać (blokada pliku, ACL), a `save()`
             # obiecuje `CertificateStoreError` — nie surowe `OSError`.
             raise CertificateStoreError(
-                f"Nie można odczytać poprzedniego wpisu '{normalized}' przed "
-                f"nadpisaniem: {exc}."
+                f"Nie można odczytać poprzedniego wpisu '{normalized}' przed nadpisaniem: {exc}."
             ) from exc
         try:
             self._directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -529,12 +525,31 @@ class FileCertificateStore:
             has_password=has_password,
         )
 
-    def load(self, name: str, *, password: str | bytes | None = None) -> StoredCertificate:
+    @staticmethod
+    def _require_regular_pair(name: str, entry: Path) -> None:
+        for filename in (_CERT_FILE, _KEY_FILE):
+            try:
+                info = (entry / filename).lstat()
+            except OSError as exc:
+                raise CertificateStoreError(f"Missing certificate material for {name!r}.") from exc
+            if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 1024:
+                raise CertificateStoreError(
+                    f"Certificate material for {name!r} must be regular files."
+                )
+
+    def load(
+        self,
+        name: str,
+        *,
+        password: str | bytes | None = None,
+        require_regular_files: bool = False,
+    ) -> StoredCertificate:
         """Odczytuje certyfikat i klucz.
 
         Args:
             name: Nazwa wpisu.
             password: Hasło klucza, jeśli był szyfrowany przy zapisie.
+            require_regular_files: Odrzuca dowiązania i inne pliki specjalne.
 
         Returns:
             Certyfikat, klucz i metadane.
@@ -548,6 +563,8 @@ class FileCertificateStore:
         self._reject_symlink(normalized, entry)
         if not entry.is_dir():
             raise CertificateStoreError(f"Certyfikat '{normalized}' nie istnieje.")
+        if require_regular_files:
+            self._require_regular_pair(normalized, entry)
         certificate_path = entry / _CERT_FILE
         key_path = entry / _KEY_FILE
         try:
@@ -649,8 +666,7 @@ class FileCertificateStore:
         # usunięty.
         if any(child.is_dir() for child in children):
             raise CertificateStoreError(
-                f"Nie można usunąć certyfikatu '{normalized}': katalog wpisu "
-                "zawiera podkatalogi."
+                f"Nie można usunąć certyfikatu '{normalized}': katalog wpisu zawiera podkatalogi."
             )
         try:
             for child in children:
@@ -681,13 +697,15 @@ class FileCertificateStore:
                 f"Certyfikat '{name}' ma niepoprawny plik cert.pem: {exc}."
             ) from exc
 
-    def record(self, name: str) -> CertificateRecord:
-        """Metadane wpisu — bez wczytywania i odszyfrowywania klucza."""
+    def record(self, name: str, *, require_key: bool = False) -> CertificateRecord:
+        """Read metadata, optionally requiring a regular private-key file to exist."""
         normalized = _validate_name(name)
         entry = self._entry_dir(normalized)
         self._reject_symlink(normalized, entry)
         if not entry.is_dir():
             raise CertificateStoreError(f"Certyfikat '{normalized}' nie istnieje.")
+        if require_key:
+            self._require_regular_pair(normalized, entry)
         return self._record_for(normalized, entry, self._read_certificate(normalized, entry))
 
 

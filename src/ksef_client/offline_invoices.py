@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from . import models as m
@@ -19,10 +21,19 @@ from ._offline_invoice_store import (
 )
 from ._offline_verification import OfflineVerificationLinks, build_offline_verification_links
 from .config import KsefClientOptions
-from .exceptions import KsefDocumentValidationError
+from .exceptions import (
+    KsefAuthenticationError,
+    KsefAuthorizationError,
+    KsefDocumentValidationError,
+    KsefHttpError,
+    KsefPermissionError,
+    KsefSyncConflictError,
+    KsefTransportTimeoutError,
+)
 from .invoice_sync_state import InvoiceSyncScope
 from .operations import environment_key
-from .request_control import request_control
+from .rate_limiting import KsefRateLimitWaitTimeout
+from .request_control import current_request_control, request_control
 from .services.auth import _normalize_context_identifier_type
 from .services.xades import XadesKeyPair
 
@@ -32,6 +43,14 @@ if TYPE_CHECKING:
 
 _OFFLINE_STREAM = hashlib.sha256(b"ksef-offline-submission/v1").hexdigest()
 _RECONCILIATION_PAGE_LIMIT = 10
+
+
+@dataclass(frozen=True)
+class OfflineBatchFailure:
+    """One failed item in a batch that can continue processing other invoices."""
+
+    invoice_hash: str
+    code: str
 
 
 class OfflineInvoiceQueue:
@@ -129,6 +148,57 @@ class OfflineInvoices(OfflineInvoiceQueue):
     def advance(self, invoice_hash: str, *, timeout: float = 60) -> StoredOfflineInvoice:
         with request_control(timeout_seconds=timeout):
             return self._advance(invoice_hash, timeout)
+
+    def advance_batch(
+        self,
+        entries: Sequence[StoredOfflineInvoice],
+        *,
+        timeout: float = 60,
+        submit_immediately: bool = False,
+    ) -> tuple[list[StoredOfflineInvoice], list[OfflineBatchFailure]]:
+        """Process independent entries, retaining state even if a send times out.
+
+        For scheduled submission, advance already-open sessions first within the
+        page and use the same item deadline for opening and sending a new entry.
+        """
+        rows: list[StoredOfflineInvoice] = []
+        failures: list[OfflineBatchFailure] = []
+        if submit_immediately:
+            entries = sorted(
+                entries,
+                key=lambda entry: entry.progress.status is not OfflineInvoiceStatus.SESSION_OPEN,
+            )
+        parent = current_request_control()
+        for entry in entries:
+            digest = entry.progress.invoice_hash
+            try:
+                with request_control(timeout_seconds=timeout):
+                    row = self.advance(digest, timeout=timeout)
+                    if (
+                        submit_immediately
+                        and entry.progress.status is OfflineInvoiceStatus.QUEUED
+                        and row.progress.status is OfflineInvoiceStatus.SESSION_OPEN
+                    ):
+                        row = self.advance(digest, timeout=timeout)
+                rows.append(row)
+            except (KsefRateLimitWaitTimeout, KsefTransportTimeoutError):
+                if parent is not None:
+                    parent.check()
+                failures.append(OfflineBatchFailure(digest, "request_timeout"))
+            except (KsefAuthenticationError, KsefAuthorizationError, KsefPermissionError):
+                raise
+            except (KsefDocumentValidationError, KsefSyncConflictError, KsefHttpError) as exc:
+                if isinstance(exc, KsefHttpError) and exc.status_code not in {
+                    400,
+                    404,
+                    409,
+                    410,
+                    422,
+                    425,
+                }:
+                    raise
+                failures.append(OfflineBatchFailure(digest, exc.code.value))
+        return rows, failures
 
     def retry_if_unsubmitted(
         self, invoice_hash: str, *, timeout: float = 60
