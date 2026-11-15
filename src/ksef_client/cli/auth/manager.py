@@ -15,7 +15,7 @@ from ..config.loader import load_config
 from ..errors import CliError
 from ..exit_codes import ExitCode
 from ..sdk.factory import create_client
-from .keyring_store import clear_tokens, get_tokens, save_tokens
+from .keyring_store import clear_tokens, get_tokens, save_refreshed_tokens, save_tokens
 from .scope import login_endpoint, login_scope, recover_refreshed_metadata, token_pair_digest
 from .token_cache import (
     auth_state_lock,
@@ -474,7 +474,7 @@ def save_refreshed_access(
             metadata.pop("login_endpoint", None)
             metadata.pop("token_pair_digest", None)
         metadata["access_valid_until"] = valid_until
-        save_tokens(profile, access_token, expected_tokens[1])
+        save_refreshed_tokens(profile, access_token, expected_tokens[1])
         set_cached_metadata(profile, metadata)
     return True
 

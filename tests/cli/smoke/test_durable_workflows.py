@@ -1,7 +1,7 @@
 import base64
 import json
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -296,7 +296,7 @@ def test_durable_auth_refresh_is_bound_and_remembers_access_token(runner, monkey
     monkeypatch.setattr(AuthClient, "refresh_access_token", refreshed)
     monkeypatch.setattr(_workflow, "get_tokens", lambda _: tokens)
     monkeypatch.setattr(manager, "get_tokens", lambda _: tokens)
-    monkeypatch.setattr(manager, "save_tokens", persist)
+    monkeypatch.setattr(manager, "save_refreshed_tokens", persist)
     scope = login_scope(options.base_url, "Nip", "123")
     set_cached_metadata(
         profile,
@@ -470,7 +470,7 @@ def test_interrupted_refresh_keeps_bound_credentials_usable(runner, monkeypatch,
 
     monkeypatch.setattr(manager, "get_tokens", lambda _: tokens)
     monkeypatch.setattr(_workflow, "get_tokens", lambda _: tokens)
-    monkeypatch.setattr(manager, "save_tokens", interrupted)
+    monkeypatch.setattr(manager, "save_refreshed_tokens", interrupted)
     with pytest.raises(OSError):
         manager.save_refreshed_access(
             "demo", tokens, "new-access", "2099-01-01T00:00:00Z", expected_scope=scope
@@ -491,7 +491,7 @@ def test_rotated_xades_session_for_durable_commands(runner, tmp_path, monkeypatc
     from ksef_client import KsefClientOptions
     from ksef_client.cli.errors import CliError
 
-    settings = {}
+    settings: dict[str, Any] = {}
     opened = []
 
     class Selector:

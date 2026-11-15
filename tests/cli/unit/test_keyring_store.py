@@ -786,3 +786,49 @@ def _isolate_platform_os(monkeypatch):
     isolated = ModuleType("isolated_os")
     isolated.__dict__.update(vars(keyring_store.os))
     monkeypatch.setattr(keyring_store, "os", isolated)
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+def test_refresh_updates_only_access_without_clearing_existing_tokens(monkeypatch, blocked):
+    values = {"demo:access_token": "old-access", "demo:refresh_token": "refresh"}
+    changed: list[str] = []
+
+    class Backend:
+        def get_password(self, service, key):
+            return values[key]
+
+        def set_password(self, service, key, value):
+            changed.append(key)
+            if blocked:
+                raise keyring_store.KeyringError("keyring is read-only")
+            values[key] = value
+
+        def delete_password(self, service, key):
+            pytest.fail("Refresh must preserve existing credentials on a storage failure")
+
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", True)
+    monkeypatch.setattr(keyring_store, "_keyring", Backend())
+    if blocked:
+        with pytest.raises(CliError, match="Cannot update the access token"):
+            keyring_store.save_refreshed_tokens("demo", "new-access", "refresh")
+    else:
+        keyring_store.save_refreshed_tokens("demo", "new-access", "refresh")
+    assert changed == ["demo:access_token"]
+    assert keyring_store.get_tokens("demo") == (
+        "old-access" if blocked else "new-access",
+        "refresh",
+    )
+
+
+def test_refresh_preserves_configured_fallback_storage(monkeypatch):
+    values: list[tuple[str, ...]] = []
+
+    class Backend:
+        def get_password(self, service, key):
+            raise keyring_store.NoKeyringError("unused")
+
+    monkeypatch.setattr(keyring_store, "_KEYRING_AVAILABLE", True)
+    monkeypatch.setattr(keyring_store, "_keyring", Backend())
+    monkeypatch.setattr(keyring_store, "_persist_fallback_pair", lambda *args: values.append(args))
+    keyring_store.save_refreshed_tokens("demo", "new-access", "refresh")
+    assert values == [("demo", "new-access", "refresh")]

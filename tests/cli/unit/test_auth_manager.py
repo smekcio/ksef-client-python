@@ -184,7 +184,7 @@ def test_refresh_access_token_requires_tokens(monkeypatch) -> None:
 def test_refresh_access_token_success(monkeypatch) -> None:
     monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
     monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
-    monkeypatch.setattr(manager, "save_tokens", lambda profile, access, refresh: None)
+    monkeypatch.setattr(manager, "save_refreshed_tokens", lambda profile, access, refresh: None)
     monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {"method": "token"})
     monkeypatch.setattr(manager, "set_cached_metadata", lambda profile, metadata: None)
 
@@ -207,7 +207,7 @@ def test_refresh_access_token_does_not_invent_the_auth_method(monkeypatch) -> No
     saved: dict[str, object] = {}
     monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
     monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
-    monkeypatch.setattr(manager, "save_tokens", lambda profile, access, refresh: None)
+    monkeypatch.setattr(manager, "save_refreshed_tokens", lambda profile, access, refresh: None)
     monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {})
     monkeypatch.setattr(
         manager, "set_cached_metadata", lambda profile, metadata: saved.update(metadata)
@@ -223,7 +223,7 @@ def test_refresh_access_token_keeps_the_recorded_auth_method(monkeypatch) -> Non
     saved: dict[str, object] = {}
     monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
     monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
-    monkeypatch.setattr(manager, "save_tokens", lambda profile, access, refresh: None)
+    monkeypatch.setattr(manager, "save_refreshed_tokens", lambda profile, access, refresh: None)
     monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {"method": "xades"})
     monkeypatch.setattr(
         manager, "set_cached_metadata", lambda profile, metadata: saved.update(metadata)
@@ -769,7 +769,7 @@ def test_refresh_access_token_success_without_save(monkeypatch) -> None:
     monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeClient())
     monkeypatch.setattr(
         manager,
-        "save_tokens",
+        "save_refreshed_tokens",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("save_tokens should not be called")
         ),
@@ -807,7 +807,7 @@ def test_refresh_access_token_accepts_typed_response(monkeypatch) -> None:
 
     monkeypatch.setattr(manager, "get_tokens", lambda profile: ("acc", "ref"))
     monkeypatch.setattr(manager, "create_client", lambda base_url: _FakeTypedClient())
-    monkeypatch.setattr(manager, "save_tokens", lambda profile, access, refresh: None)
+    monkeypatch.setattr(manager, "save_refreshed_tokens", lambda profile, access, refresh: None)
     monkeypatch.setattr(manager, "get_cached_metadata", lambda profile: {"method": "token"})
     monkeypatch.setattr(manager, "set_cached_metadata", lambda profile, metadata: None)
 
