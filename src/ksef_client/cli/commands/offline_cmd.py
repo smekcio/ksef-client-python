@@ -16,6 +16,7 @@ from ksef_client.invoice_search import _date
 from ksef_client.invoice_sync_state import utc_timestamp
 from ksef_client.invoice_xml_storage import _safe_directory
 from ksef_client.offline_invoices import (
+    OfflineBatchFailure,
     OfflineInvoiceMode,
     OfflineInvoiceQueue,
     OfflineInvoiceStatus,
@@ -135,8 +136,8 @@ def run(
         if submit_immediately and invoice_hash is not None:
             raise CliError("--submit-immediately is for batch runs.", ExitCode.VALIDATION_ERROR)
         profile, options, kind, context, directory = workflow_config(ctx, state_dir)
-        rows = []
-        failures = []
+        rows: list[StoredOfflineInvoice] = []
+        failures: list[OfflineBatchFailure] = []
         with offline_store(directory) as store:
             queue = OfflineInvoiceQueue(
                 store, options=options, context_type=kind, context_value=context, namespace=profile
