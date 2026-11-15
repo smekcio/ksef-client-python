@@ -130,29 +130,35 @@ def run(
     with workflow_errors(ctx, "offline.run"):
         after = _page_cursor(invoice_hash, after_due_at, after_hash)
         profile, options, kind, context, directory = workflow_config(ctx, state_dir)
-        with (
-            offline_store(directory) as store,
-            workflow_client(profile, options, kind, context) as client,
-        ):
-            worker = client.invoices.offline(store, namespace=profile)
-            page = worker.pending(limit=limit, after=after) if invoice_hash is None else ()
+        rows = []
+        failures = []
+        with offline_store(directory) as store:
+            queue = OfflineInvoiceQueue(
+                store, options=options, context_type=kind, context_value=context, namespace=profile
+            )
+            page = queue.pending(limit=limit, after=after) if invoice_hash is None else ()
             hashes = (
                 [invoice_hash]
                 if invoice_hash is not None
                 else [entry.progress.invoice_hash for entry in page]
             )
-            rows = []
-            failures = []
-            for digest in hashes:
-                try:
-                    rows.append(worker.advance(digest, timeout=timeout))
-                except (KsefDocumentValidationError, KsefSyncConflictError, KsefHttpError) as exc:
-                    if invoice_hash is not None or (
-                        isinstance(exc, KsefHttpError)
-                        and exc.status_code not in {400, 404, 409, 410, 422, 425}
-                    ):
-                        raise
-                    failures.append({"invoice_hash": digest, "code": exc.code.value})
+            if hashes:
+                with workflow_client(profile, options, kind, context) as client:
+                    worker = client.invoices.offline(store, namespace=profile)
+                    for digest in hashes:
+                        try:
+                            rows.append(worker.advance(digest, timeout=timeout))
+                        except (
+                            KsefDocumentValidationError,
+                            KsefSyncConflictError,
+                            KsefHttpError,
+                        ) as exc:
+                            if invoice_hash is not None or (
+                                isinstance(exc, KsefHttpError)
+                                and exc.status_code not in {400, 404, 409, 410, 422, 425}
+                            ):
+                                raise
+                            failures.append({"invoice_hash": digest, "code": exc.code.value})
         next_cursor = (
             {"due_at": page[-1].due_at, "invoice_hash": page[-1].progress.invoice_hash}
             if len(page) == limit

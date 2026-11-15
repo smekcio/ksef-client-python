@@ -192,6 +192,16 @@ def test_offline_run_reconciles_lost_send_and_honors_429(
     assert runner.invoke(app, run).exit_code == ExitCode.IO_ERROR
     assert json.loads(runner.invoke(app, run).output)["data"]["invoices"][0]["status"] == "complete"
     assert client.send_count == 1
+    monkeypatch.setattr(
+        offline_cmd, "workflow_client", lambda *args: pytest.fail("Empty queue must not log in")
+    )
+    empty = runner.invoke(app, run)
+    assert empty.exit_code == 0
+    assert json.loads(empty.output)["data"] == {
+        "invoices": [],
+        "failures": [],
+        "next_cursor": None,
+    }
 
     out = tmp_path / "receipt.xml"
     export = ["--json", "offline", "upo", *common, "--invoice-hash", invoice, "--out", str(out)]
