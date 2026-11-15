@@ -22,8 +22,11 @@ def read_password(name: str) -> str:
     return passwords[name]
 
 
-def check_api(client: Ksef) -> None:
-    client.api.limits.get_context_limits()
+def open_queue(path: Path) -> SQLiteOfflineInvoiceStore:
+    if not path.is_file():
+        raise ValueError("--queue must refer to an existing staged offline queue")
+    key = base64.b64decode(os.environ["KSEF_OFFLINE_STATE_KEY"], validate=True)
+    return SQLiteOfflineInvoiceStore.open(path, key=key)
 
 
 def main() -> None:
@@ -38,6 +41,7 @@ def main() -> None:
     activate.add_argument("name")
     activate.add_argument("--expected-generation", type=int, required=True)
     activate.add_argument("--fingerprint", action="store_true")
+    activate.add_argument("--queue", type=Path, help="Verify access to existing invoice sessions.")
     run = actions.add_parser("run")
     run.add_argument("--queue", type=Path, required=True)
     run.add_argument("--limit", type=int, default=20, choices=range(1, 101))
@@ -51,6 +55,21 @@ def main() -> None:
         print(json.dumps(asdict(health), default=str))
         return
     if args.action == "activate":
+
+        def verify(client: Ksef) -> None:
+            client.api.limits.get_context_limits()
+            if args.queue is None:
+                return
+            with open_queue(args.queue) as store:
+                worker = client.invoices.offline(store, namespace=profile.name)
+                after = None
+                while page := worker.pending(after=after):
+                    for item in page:
+                        reference = item.progress.session_reference
+                        if reference is not None:
+                            client.api.sessions.get_session_status(reference)
+                    after = page[-1].due_at, page[-1].progress.invoice_hash
+
         selection = selector.activate(
             args.name,
             expected_generation=args.expected_generation,
@@ -58,16 +77,13 @@ def main() -> None:
                 "certificateFingerprint" if args.fingerprint else "certificateSubject"
             ),
             password=read_password(args.name),
-            verify=check_api,
+            verify=verify,
         )
         print(json.dumps(asdict(selection)))
         return
 
-    if not args.queue.is_file():
-        parser.error("--queue must refer to an existing staged offline queue")
-    key = base64.b64decode(os.environ["KSEF_OFFLINE_STATE_KEY"], validate=True)
     with (
-        SQLiteOfflineInvoiceStore.open(args.queue, key=key) as queue,
+        open_queue(args.queue) as queue,
         selector.session(password_for=read_password) as client,
     ):
         worker = client.invoices.offline(queue, namespace=profile.name)

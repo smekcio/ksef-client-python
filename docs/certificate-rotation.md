@@ -80,3 +80,11 @@ z przestrzenią nazw równą nazwie profilu. W przykładzie proces otrzymuje has
 w `KSEF_XADES_KEY_PASSWORDS` jako obiekt JSON mapujący nazwy certyfikatów na
 ich hasła i osobny klucz kolejki w `KSEF_OFFLINE_STATE_KEY` jako Base64.
 Dostarczaj je przez konfigurację sekretów używaną przez nadzorcę procesu.
+
+Przy wymianie certyfikatu dla aktywnej kolejki zachowaj tożsamość podmiotu
+uwierzytelniającego i jego uprawnienia w KSeF. Jeśli równocześnie przenosisz
+integrację na inny podmiot, sprawdź przed aktywacją dostęp do rozpoczętych
+sesji i uprawnienia wymagane do ich dokończenia. Samo zalogowanie w tym
+samym kontekście potwierdza dostęp do kontekstu. Przykładowe
+`activate --queue <plik>` dodatkowo sprawdza odczyt statusu sesji
+zapisanych w kolejce. [Uprawnienia KSeF](https://github.com/CIRFMF/ksef-api/blob/main/uprawnienia.md)
