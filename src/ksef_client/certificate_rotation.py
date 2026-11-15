@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 from collections.abc import Callable
@@ -14,10 +15,13 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .certificates import CertificateRecord, CertificateStoreError, FileCertificateStore
+from .exceptions import KsefError
 from .facade import Ksef, XadesCredentials, connection_options
 from .invoice_xml_storage import _safe_directory
 from .operations import environment_key
 from .profiles import Profile
+
+_logger = logging.getLogger(__name__)
 
 
 class CertificateRotationError(CertificateStoreError):
@@ -188,8 +192,16 @@ class ProfileCertificates:
         with Ksef.connect(
             credentials=credentials, profile=self._profile, timeout=timeout
         ) as client:
-            if verify is not None:
-                verify(client)
+            try:
+                if verify is not None:
+                    verify(client)
+            finally:
+                try:
+                    client.api.auth.revoke_current_session()
+                except KsefError:
+                    _logger.warning("Could not revoke the temporary XAdES verification session")
+        if self._store.record(record.name).fingerprint_sha256 != record.fingerprint_sha256:
+            raise CertificateRotationError("Candidate certificate changed during verification")
         with closing(self._open()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             current = self._select(connection)

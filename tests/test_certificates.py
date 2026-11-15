@@ -822,6 +822,7 @@ def test_profile_rotation_verifies_before_switch_and_preserves_in_flight_client(
     tmp_path, store, rsa_pair, monkeypatch
 ):
     from contextlib import nullcontext
+    from types import SimpleNamespace
 
     from ksef_client.certificate_rotation import CertificateRotationError, ProfileCertificates
     from ksef_client.config import KsefEnvironment
@@ -837,7 +838,12 @@ def test_profile_rotation_verifies_before_switch_and_preserves_in_flight_client(
 
     def connect(*, credentials, profile, timeout):
         assert profile.context_value == "123"
-        return nullcontext(credentials.key_pair.certificate_pem)
+        return nullcontext(
+            SimpleNamespace(
+                pem=credentials.key_pair.certificate_pem,
+                api=SimpleNamespace(auth=SimpleNamespace(revoke_current_session=lambda: None)),
+            )
+        )
 
     monkeypatch.setattr(Ksef, "connect", connect)
     initial = selector.activate("first", expected_generation=0)
@@ -846,8 +852,8 @@ def test_profile_rotation_verifies_before_switch_and_preserves_in_flight_client(
         rotated = selector.activate("second", expected_generation=initial.generation)
         assert selector.status().selection == rotated
         with selector.connect() as new_worker:
-            assert new_worker == _pem_certificate(second).decode()
-        assert old_worker == _pem_certificate(first).decode()
+            assert new_worker.pem == _pem_certificate(second).decode()
+        assert old_worker.pem == _pem_certificate(first).decode()
     with pytest.raises(CertificateRotationError, match="changed"):
         selector.activate("first", expected_generation=initial.generation)
 
@@ -858,6 +864,7 @@ def test_failed_candidate_and_concurrent_rotation_keep_working_selection(
     from concurrent.futures import ThreadPoolExecutor
     from contextlib import nullcontext
     from threading import Barrier
+    from types import SimpleNamespace
 
     from ksef_client.certificate_rotation import CertificateRotationError, ProfileCertificates
     from ksef_client.config import KsefEnvironment
@@ -872,7 +879,15 @@ def test_failed_candidate_and_concurrent_rotation_keep_working_selection(
     assert selector.status().status == "unconfigured"
     with pytest.raises(CertificateRotationError, match="No active"):
         selector.connect()
-    monkeypatch.setattr(Ksef, "connect", lambda **kwargs: nullcontext(object()))
+
+    def connect(**kwargs):
+        return nullcontext(
+            SimpleNamespace(
+                api=SimpleNamespace(auth=SimpleNamespace(revoke_current_session=lambda: None)),
+            )
+        )
+
+    monkeypatch.setattr(Ksef, "connect", connect)
     initial = selector.activate("initial", expected_generation=0, password="initial")
     assert selector.status(warn_before=timedelta(days=365)).status == "expiring"
 
@@ -886,6 +901,9 @@ def test_failed_candidate_and_concurrent_rotation_keep_working_selection(
     assert selector.status().selection == initial
     barrier = Barrier(2)
 
+    def verify_candidate(_client) -> None:
+        barrier.wait(timeout=5)
+
     def rotate(name):
         try:
             return selector.activate(
@@ -893,7 +911,7 @@ def test_failed_candidate_and_concurrent_rotation_keep_working_selection(
                 expected_generation=1,
                 password=name,
                 subject_identifier_type="certificateFingerprint",
-                verify=lambda _: barrier.wait(timeout=5),
+                verify=verify_candidate,
             )
         except CertificateRotationError:
             return None
