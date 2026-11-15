@@ -1156,3 +1156,31 @@ def test_rotation_preserves_xades_policy_across_activation_and_connect(
         pass
     assert calls == [(True, True), (True, True)]
     assert ProfileCertificates(path, profile, store=store).status().status == "unconfigured"
+
+
+def test_rotation_reports_nonregular_certificate_material_as_unavailable(
+    store, profile_certificate_selector, rsa_pair, monkeypatch
+):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from ksef_client.facade import Ksef
+
+    cert, key = rsa_pair
+    store.save("active", certificate=cert, private_key=key)
+    client = SimpleNamespace(
+        api=SimpleNamespace(
+            auth=SimpleNamespace(
+                revoke_current_session=lambda: None,
+            )
+        )
+    )
+    monkeypatch.setattr(Ksef, "connect", lambda **kw: nullcontext(client))
+    selector = profile_certificate_selector
+    selector.activate("active", expected_generation=0)
+    material = store.directory / "active" / "key.pem"
+    material.unlink()
+    material.mkdir()
+    assert selector.status().status == "unavailable"
+    with pytest.raises(CertificateStoreError, match="regular files"):
+        selector.connect()

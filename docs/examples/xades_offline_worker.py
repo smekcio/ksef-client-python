@@ -34,6 +34,8 @@ def main() -> None:
     parser.add_argument("--profile", required=True)
     parser.add_argument("--selector", type=Path, required=True)
     parser.add_argument("--certificates", type=Path, required=True)
+    parser.add_argument("--verify-chain", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--enforce-compliance", action="store_true")
     actions = parser.add_subparsers(dest="action", required=True)
     status = actions.add_parser("status")
     status.add_argument("--warn-days", type=int, default=30)
@@ -49,7 +51,13 @@ def main() -> None:
 
     profile = ProfileStore.default().get(args.profile)
     store = FileCertificateStore(args.certificates, require_password=True)
-    selector = ProfileCertificates(args.selector, profile, store=store)
+    selector = ProfileCertificates(
+        args.selector,
+        profile,
+        store=store,
+        verify_certificate_chain=args.verify_chain,
+        enforce_xades_compliance=args.enforce_compliance,
+    )
     if args.action == "status":
         health = selector.status(warn_before=timedelta(days=args.warn_days))
         print(json.dumps(asdict(health), default=str))

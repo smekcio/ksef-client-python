@@ -198,7 +198,7 @@ class ProfileCertificates:
     ) -> StoredCertificate:
         if self._store.require_password and password is None:
             raise CertificateRotationError("This certificate store requires a key password")
-        stored = self._store.load(name, password=password)
+        stored = self._store.load(name, password=password, require_regular_files=True)
         record = stored.record
         if fingerprint is not None and record.fingerprint_sha256 != fingerprint:
             raise CertificateRotationError("Selected certificate fingerprint changed")
@@ -249,8 +249,9 @@ class ProfileCertificates:
         ) as client:
             try:
                 if verify is not None:
-                    with request_control(timeout_seconds=timeout):
+                    with request_control(timeout_seconds=timeout) as control:
                         verify(client)
+                        control.check()
             finally:
                 self._revoke_session(client)
         # Verify that the same usable pair is still available after the remote

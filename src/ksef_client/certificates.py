@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import tempfile
 import warnings
 from contextlib import suppress
@@ -524,12 +525,31 @@ class FileCertificateStore:
             has_password=has_password,
         )
 
-    def load(self, name: str, *, password: str | bytes | None = None) -> StoredCertificate:
+    @staticmethod
+    def _require_regular_pair(name: str, entry: Path) -> None:
+        for filename in (_CERT_FILE, _KEY_FILE):
+            try:
+                info = (entry / filename).lstat()
+            except OSError as exc:
+                raise CertificateStoreError(f"Missing certificate material for {name!r}.") from exc
+            if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 1024:
+                raise CertificateStoreError(
+                    f"Certificate material for {name!r} must be regular files."
+                )
+
+    def load(
+        self,
+        name: str,
+        *,
+        password: str | bytes | None = None,
+        require_regular_files: bool = False,
+    ) -> StoredCertificate:
         """Odczytuje certyfikat i klucz.
 
         Args:
             name: Nazwa wpisu.
             password: Hasło klucza, jeśli był szyfrowany przy zapisie.
+            require_regular_files: Odrzuca dowiązania i inne pliki specjalne.
 
         Returns:
             Certyfikat, klucz i metadane.
@@ -543,6 +563,8 @@ class FileCertificateStore:
         self._reject_symlink(normalized, entry)
         if not entry.is_dir():
             raise CertificateStoreError(f"Certyfikat '{normalized}' nie istnieje.")
+        if require_regular_files:
+            self._require_regular_pair(normalized, entry)
         certificate_path = entry / _CERT_FILE
         key_path = entry / _KEY_FILE
         try:
@@ -683,9 +705,7 @@ class FileCertificateStore:
         if not entry.is_dir():
             raise CertificateStoreError(f"Certyfikat '{normalized}' nie istnieje.")
         if require_key:
-            key = entry / _KEY_FILE
-            if key.is_symlink() or not key.is_file():
-                raise CertificateStoreError(f"Certyfikat '{normalized}' nie ma pliku klucza.")
+            self._require_regular_pair(normalized, entry)
         return self._record_for(normalized, entry, self._read_certificate(normalized, entry))
 
 
