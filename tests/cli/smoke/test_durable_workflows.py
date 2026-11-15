@@ -274,7 +274,7 @@ def test_durable_auth_refresh_is_bound_and_remembers_access_token(runner, monkey
     from ksef_client import KsefClientOptions
     from ksef_client import models as m
     from ksef_client.cli.auth import manager
-    from ksef_client.cli.auth.scope import login_scope, token_pair_digest
+    from ksef_client.cli.auth.scope import login_endpoint, login_scope, token_pair_digest
     from ksef_client.cli.auth.token_cache import get_cached_metadata, set_cached_metadata
     from ksef_client.cli.errors import CliError
     from ksef_client.clients.auth import AuthClient
@@ -301,6 +301,7 @@ def test_durable_auth_refresh_is_bound_and_remembers_access_token(runner, monkey
     set_cached_metadata(
         profile,
         {
+            "login_endpoint": login_endpoint(options.base_url),
             "login_scope": scope,
             "token_pair_digest": token_pair_digest(*tokens),
             "access_valid_until": "2000-01-01T00:00:00Z",
@@ -329,6 +330,14 @@ def test_durable_auth_refresh_is_bound_and_remembers_access_token(runner, monkey
     )
     with _workflow.workflow_client(profile, options, "Nip", "123") as client:
         assert client.api.token_manager.get_access_token() == "fresh-access"
+
+    # Manual refresh may renew a session created with a context override. The
+    # durable workflow still requires the context bound to its own profile.
+    override_scope = login_scope(options.base_url, "Nip", "other")
+    set_cached_metadata(profile, {**cached, "login_scope": override_scope})
+    assert manager.refresh_access_token(profile=profile, base_url=options.base_url)["saved"]
+    with pytest.raises(CliError, match="No stored authentication"):
+        _workflow.workflow_client(profile, options, "Nip", "123")
 
 
 @pytest.mark.parametrize("cancelled", [False, True])

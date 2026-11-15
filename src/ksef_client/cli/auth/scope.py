@@ -10,12 +10,15 @@ from ksef_client.services.auth import _normalize_context_identifier_type
 
 def login_scope(base_url: str, kind: str, context: str) -> str:
     """Bind durable workflows to the environment and context actually authenticated."""
-    options = KsefClientOptions(base_url)
     return _digest(
-        environment_key(options.normalized_base_url()),
+        login_endpoint(base_url),
         _normalize_context_identifier_type(kind).value,
         context,
     )
+
+
+def login_endpoint(base_url: str) -> str:
+    return environment_key(KsefClientOptions(base_url).normalized_base_url())
 
 
 def token_pair_digest(access_token: str, refresh_token: str) -> str:

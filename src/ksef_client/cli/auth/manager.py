@@ -16,7 +16,7 @@ from ..errors import CliError
 from ..exit_codes import ExitCode
 from ..sdk.factory import create_client
 from .keyring_store import clear_tokens, get_tokens, save_tokens
-from .scope import login_scope, token_pair_digest
+from .scope import login_endpoint, login_scope, token_pair_digest
 from .token_cache import (
     auth_state_lock,
     clear_cached_metadata,
@@ -283,6 +283,7 @@ def login_with_token(
                 profile,
                 {
                     "method": "token",
+                    "login_endpoint": login_endpoint(base_url),
                     "login_scope": login_scope(base_url, safe_context_type, safe_context_value),
                     "token_pair_digest": token_pair_digest(
                         result.tokens.access_token.token, result.tokens.refresh_token.token
@@ -421,6 +422,7 @@ def login_with_xades(
                 profile,
                 {
                     "method": "xades",
+                    "login_endpoint": login_endpoint(base_url),
                     "login_scope": login_scope(base_url, safe_context_type, safe_context_value),
                     "token_pair_digest": token_pair_digest(
                         result.tokens.access_token.token, result.tokens.refresh_token.token
@@ -464,15 +466,11 @@ def refresh_access_token(*, profile: str, base_url: str, save: bool = True) -> d
     _, refresh_token = tokens
     metadata = get_cached_metadata(profile) or {}
     scope = metadata.get("login_scope")
-    if scope is not None:
-        _, kind, context = _profile_context(profile)
-        if (
-            not kind
-            or not context
-            or scope != login_scope(base_url, kind, context)
-            or metadata.get("token_pair_digest") != token_pair_digest(*tokens)
-        ):
-            raise CliError("Stored login does not match the selected context.", ExitCode.AUTH_ERROR)
+    if scope is not None and (
+        metadata.get("login_endpoint") != login_endpoint(base_url)
+        or metadata.get("token_pair_digest") != token_pair_digest(*tokens)
+    ):
+        raise CliError("Stored login does not match the selected endpoint.", ExitCode.AUTH_ERROR)
     with create_client(base_url) as client:
         refreshed = client.auth.refresh_access_token(refresh_token)
 
@@ -528,6 +526,7 @@ def save_refreshed_access(
             metadata["token_pair_digest"] = token_pair_digest(access_token, expected_tokens[1])
         else:
             metadata.pop("login_scope", None)
+            metadata.pop("login_endpoint", None)
             metadata.pop("token_pair_digest", None)
         metadata["access_valid_until"] = valid_until
         save_tokens(profile, access_token, expected_tokens[1])
