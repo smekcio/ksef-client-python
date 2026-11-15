@@ -4,6 +4,7 @@ import os
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
@@ -11,7 +12,6 @@ from typing import Annotated, Any
 import typer
 
 from ksef_client._offline_invoice_store import MAX_OFFLINE_XML_BYTES
-from ksef_client.exceptions import KsefDocumentValidationError, KsefHttpError, KsefSyncConflictError
 from ksef_client.invoice_search import _date
 from ksef_client.invoice_sync_state import utc_timestamp
 from ksef_client.invoice_xml_storage import _safe_directory
@@ -126,9 +126,14 @@ def run(
     invoice_hash: str | None = typer.Option(None, "--invoice-hash"),
     after_due_at: str | None = typer.Option(None, "--after-due-at"),
     after_hash: str | None = typer.Option(None, "--after-hash"),
+    submit_immediately: Annotated[
+        bool, typer.Option("--submit-immediately", help="Open and send new entries in one batch.")
+    ] = False,
 ) -> None:
     with workflow_errors(ctx, "offline.run"):
         after = _page_cursor(invoice_hash, after_due_at, after_hash)
+        if submit_immediately and invoice_hash is not None:
+            raise CliError("--submit-immediately is for batch runs.", ExitCode.VALIDATION_ERROR)
         profile, options, kind, context, directory = workflow_config(ctx, state_dir)
         rows = []
         failures = []
@@ -137,28 +142,17 @@ def run(
                 store, options=options, context_type=kind, context_value=context, namespace=profile
             )
             page = queue.pending(limit=limit, after=after) if invoice_hash is None else ()
-            hashes = (
-                [invoice_hash]
-                if invoice_hash is not None
-                else [entry.progress.invoice_hash for entry in page]
-            )
-            if hashes:
+            if page or invoice_hash is not None:
                 with workflow_client(profile, options, kind, context) as client:
                     worker = client.invoices.offline(store, namespace=profile)
-                    for digest in hashes:
-                        try:
-                            rows.append(worker.advance(digest, timeout=timeout))
-                        except (
-                            KsefDocumentValidationError,
-                            KsefSyncConflictError,
-                            KsefHttpError,
-                        ) as exc:
-                            if invoice_hash is not None or (
-                                isinstance(exc, KsefHttpError)
-                                and exc.status_code not in {400, 404, 409, 410, 422, 425}
-                            ):
-                                raise
-                            failures.append({"invoice_hash": digest, "code": exc.code.value})
+                    if invoice_hash is not None:
+                        rows = [worker.advance(invoice_hash, timeout=timeout)]
+                    else:
+                        rows, failures = worker.advance_batch(
+                            page,
+                            timeout=timeout,
+                            submit_immediately=submit_immediately,
+                        )
         next_cursor = (
             {"due_at": page[-1].due_at, "invoice_hash": page[-1].progress.invoice_hash}
             if len(page) == limit
@@ -170,7 +164,7 @@ def run(
             profile=profile,
             data={
                 "invoices": [_summary(row, now) for row in rows],
-                "failures": failures,
+                "failures": [asdict(failure) for failure in failures],
                 "next_cursor": next_cursor,
             },
         )

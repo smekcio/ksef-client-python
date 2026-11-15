@@ -111,3 +111,10 @@ JSON. Opcjonalne `KSEF_XADES_CERTIFICATE_DIR` wskazuje katalog z szyfrowanymi
 kluczami. Jeśli operator wybrał dodatkową weryfikację, ustaw
 `KSEF_XADES_VERIFY_CHAIN` i `KSEF_XADES_ENFORCE_COMPLIANCE` odpowiednio na
 `true` lub `false`, zgodnie z konfiguracją aktywacji.
+
+Przykładowy harmonogram uruchamia `offline run --submit-immediately`.
+W obrębie każdej strony najpierw obsługuje faktury z otwartą sesją.
+Dla nowej faktury próbuje otworzyć sesję i wysłać dokument w tym samym
+cyklu, w ramach wspólnego limitu czasu dla tej pozycji. Timeout pozycji
+trafia do `data.failures` jako `request_timeout`. Następny cykl odczytuje
+utrwalony stan, w tym stan niejednoznacznej wysyłki, jeśli odpowiedź zaginęła.

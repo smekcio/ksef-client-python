@@ -403,7 +403,10 @@ def test_offline_cli_retry_requires_authoritative_result(runner, tmp_path, monke
     assert client.send_count == 1
 
 
-def test_batch_continues_after_an_invoice_error_and_preserves_cursor(runner, tmp_path, monkeypatch):
+@pytest.mark.parametrize("time_out", [False, True])
+def test_batch_continues_after_an_invoice_error_and_preserves_cursor(
+    runner, tmp_path, monkeypatch, time_out
+):
     from contextlib import nullcontext
 
     from tests.test_offline_invoice_store import DUE, XML
@@ -413,6 +416,7 @@ def test_batch_continues_after_an_invoice_error_and_preserves_cursor(runner, tmp
     from ksef_client.exceptions import KsefDocumentValidationError
     from ksef_client.facade import Invoices
     from ksef_client.operations import environment_key
+    from ksef_client.rate_limiting import KsefRateLimitWaitTimeout
 
     class WorkerClient(TestClient):
         environment = environment_key("https://api-demo.ksef.mf.gov.pl/v2")
@@ -425,6 +429,8 @@ def test_batch_continues_after_an_invoice_error_and_preserves_cursor(runner, tmp
         def online_session(self):
             if not self.failed_once:
                 self.failed_once = True
+                if time_out:
+                    raise KsefRateLimitWaitTimeout("sensitive invoice details")
                 raise KsefDocumentValidationError("sensitive invoice details")
             return super().online_session()
 
@@ -445,7 +451,12 @@ def test_batch_continues_after_an_invoice_error_and_preserves_cursor(runner, tmp
     result = runner.invoke(app, ["--json", "offline", "run", *common, "--limit", "2"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)["data"]
-    assert data["failures"][0]["invoice_hash"] == first
+    assert data["failures"] == [
+        {
+            "invoice_hash": first,
+            "code": "request_timeout" if time_out else "document_validation_failed",
+        }
+    ]
     assert data["invoices"][0]["invoice_hash"] == second
     assert data["invoices"][0]["status"] == "session_open"
     assert data["next_cursor"]["invoice_hash"] == second
@@ -554,3 +565,72 @@ def test_rotated_xades_session_for_durable_commands(runner, tmp_path, monkeypatc
     assert settings["store"].require_password
     assert settings["verify_certificate_chain"] is (True if case == "ok" else None)
     assert settings["enforce_xades_compliance"] is (case == "ok")
+
+
+def test_scheduled_batch_submits_first_page_without_waiting_for_backlog(
+    runner, tmp_path, monkeypatch
+):
+    import runpy
+    import sys
+    from contextlib import nullcontext
+    from pathlib import Path
+
+    from tests.test_offline_invoice_store import DUE, XML
+    from tests.test_offline_invoices import TestClient
+
+    from ksef_client.cli.commands import offline_cmd
+    from ksef_client.facade import Invoices
+    from ksef_client.operations import environment_key
+
+    class WorkerClient(TestClient):
+        environment = environment_key("https://api-demo.ksef.mf.gov.pl/v2")
+        context_key = "Nip:123"
+
+        def __init__(self):
+            super().__init__()
+            self.invoices = Invoices(cast(Ksef, self))
+
+        def send_invoice(self, xml, *, offline_mode, hash_of_corrected_invoice):
+            self.send_count += 1
+            return SimpleNamespace(
+                resume_state=lambda: SimpleNamespace(reference_number="invoice-1")
+            )
+
+    monkeypatch.setenv("KSEF_OFFLINE_STATE_KEY", base64.b64encode(bytes(range(32))).decode())
+    worker = WorkerClient()
+    monkeypatch.setattr(offline_cmd, "workflow_client", lambda *args: nullcontext(worker))
+    common = ["--state-dir", str(tmp_path / "private")]
+    hashes = []
+    for index in range(2):
+        xml = tmp_path / f"{index}.xml"
+        xml.write_bytes(XML + b" " * index)
+        queued = runner.invoke(
+            app, ["--json", "offline", "enqueue", *common, "--xml", str(xml), "--due-at", DUE]
+        )
+        assert queued.exit_code == 0, queued.output
+        hashes.append(json.loads(queued.output)["data"]["invoice_hash"])
+    cycle = ["--json", "offline", "run", *common, "--limit", "1", "--submit-immediately"]
+    scheduler = runpy.run_path(
+        str(Path(__file__).parents[3] / "docs/examples/scheduled_ksef_operations.py")
+    )
+
+    class EndFirstCycle(Exception):
+        pass
+
+    def run_first_cycle(profile, arguments):
+        arguments[arguments.index("--limit") + 1] = "1"
+        result = runner.invoke(app, ["--profile", profile, "--json", *arguments])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)["data"]
+        assert data["invoices"][0]["status"] == "submitted"
+        assert data["next_cursor"]["invoice_hash"] == min(hashes)
+        assert worker.open_count == worker.send_count == 1
+        raise EndFirstCycle
+
+    main = scheduler["main"]
+    monkeypatch.setitem(main.__globals__, "cycle", run_first_cycle)
+    monkeypatch.setattr(sys, "argv", ["worker", "--profile", "demo", *common, "--since", DUE])
+    with pytest.raises(EndFirstCycle):
+        main()
+    invalid = runner.invoke(app, [*cycle, "--invoice-hash", hashes[0]])
+    assert invalid.exit_code == ExitCode.VALIDATION_ERROR

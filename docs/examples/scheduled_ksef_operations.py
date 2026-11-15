@@ -17,7 +17,8 @@ def cycle(profile: str, options: list[str]) -> tuple[dict[str, Any], bool, float
             capture_output=True,
             text=True,
             encoding="utf-8",
-            timeout=180,
+            # Includes XAdES login and cleanup in addition to the work timeout.
+            timeout=300,
             check=False,
         )
         report = json.loads(result.stdout)
@@ -57,7 +58,7 @@ def main() -> None:
         "--timeout",
         "30",
     ]
-    offline = ["offline", "run", *common, "--limit", "5", "--timeout", "15"]
+    offline = ["offline", "run", *common, "--limit", "5", "--timeout", "15", "--submit-immediately"]
     next_archive = next_offline = time.monotonic()
     cursor: dict[str, str] | None = None
     while True:
