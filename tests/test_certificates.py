@@ -823,6 +823,7 @@ def test_profile_rotation_verifies_before_switch_and_preserves_in_flight_client(
 ):
     from contextlib import nullcontext
     from types import SimpleNamespace
+    from typing import cast
 
     from ksef_client.certificate_rotation import CertificateRotationError, ProfileCertificates
     from ksef_client.config import KsefEnvironment
@@ -852,8 +853,8 @@ def test_profile_rotation_verifies_before_switch_and_preserves_in_flight_client(
         rotated = selector.activate("second", expected_generation=initial.generation)
         assert selector.status().selection == rotated
         with selector.connect() as new_worker:
-            assert new_worker.pem == _pem_certificate(second).decode()
-        assert old_worker.pem == _pem_certificate(first).decode()
+            assert cast(SimpleNamespace, new_worker).pem == _pem_certificate(second).decode()
+        assert cast(SimpleNamespace, old_worker).pem == _pem_certificate(first).decode()
     with pytest.raises(CertificateRotationError, match="changed"):
         selector.activate("first", expected_generation=initial.generation)
 
