@@ -16,6 +16,8 @@ NAMES = {
         "Operation",
         "AuthenticationOperation",
         "Session",
+        "OfflineInvoices",
+        "SQLiteOfflineInvoiceStore",
         "Invoices",
         "Exports",
         "Permissions",
@@ -251,6 +253,7 @@ if TYPE_CHECKING:
     from .invoice_export_sync import AsyncInvoiceExportSync
     from .invoice_sync import AsyncInvoiceSync
     from .invoice_xml_sync import AsyncInvoiceDocumentSync, AsyncInvoiceXmlSync
+    from .offline_invoices import AsyncOfflineInvoices, AsyncSQLiteOfflineInvoiceStore
     from .streaming_export import AsyncExportOperation
 
 

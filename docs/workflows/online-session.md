@@ -132,3 +132,91 @@ Zgodność wsteczna:
   - dla sesji: `get_upo()`
 - `upo_v43=True` dodaje nagłówek `X-KSeF-Feature: upo-v4-3` przy otwieraniu sesji.
 - `AsyncOnlineSessionWorkflow` i `AsyncOnlineSessionHandle` oferują lustrzane API asynchroniczne.
+
+## Trwała wysyłka offline
+
+`client.invoices.offline(...)` wiąże lokalną kolejkę z uwierzytelnionym
+środowiskiem i kontekstem. Klucz 32-bajtowy dostarcza aplikacja z własnego
+magazynu sekretów. Używaj prywatnego katalogu i osobnego połączenia dla
+każdego workera. Przy restarcie użyj tej samej bazy, klucza i namespace.
+
+```python
+from ksef_client.offline_invoices import (
+    OfflineInvoiceQueue,
+    OfflineInvoiceStatus,
+    SQLiteOfflineInvoiceStore,
+)
+
+# Wystawienie i podpisanie linku może odbyć się przy niedostępnym KSeF.
+with SQLiteOfflineInvoiceStore.open("private/offline.db", key=archive_key) as store:
+    queue = OfflineInvoiceQueue(
+        store, options=options, context_type="Nip", context_value=company_nip,
+        namespace="company",
+    )
+    entry = queue.enqueue(invoice_xml_bytes, due_at=application_due_at)
+    invoice_hash = entry.progress.invoice_hash
+    links = queue.verification_links(invoice_hash, offline_signing_key_pair)
+
+# Po odzyskaniu połączenia, wewnątrz kontekstu zalogowanego klienta.
+with SQLiteOfflineInvoiceStore.open("private/offline.db", key=archive_key) as store:
+    outbox = client.invoices.offline(store, namespace="company")
+    # Jeden krok workera. Kolejne kroki wykonuje harmonogram aplikacji.
+    entry = outbox.advance(invoice_hash)
+    if entry.progress.status is OfflineInvoiceStatus.COMPLETE:
+        upo_xml = outbox.read_upo(invoice_hash)
+```
+
+Termin jest znacznikiem UTC wyliczonym przez aplikację na podstawie trybu
+offline i obowiązujących komunikatów KSeF. Wybór zapisuje parametr `mode`
+(`OfflineInvoiceMode.OFFLINE24`, `UNAVAILABLE` albo `EMERGENCY`). `pending()` zwraca ograniczoną
+stronę aktywnych dokumentów w kolejności terminów. Do kolejnej strony przekaż
+ostatnią parę `(due_at, invoice_hash)` jako `after`. Gdy aplikacja otrzyma aktualizację terminu,
+wywołaj `reschedule(invoice_hash, due_at=..., expected_revision=entry.revision)`.
+W razie konfliktu odczytaj bieżący wpis przed ponowieniem aktualizacji. Każde `advance()`
+wykonuje jeden krok. Wywołuj je ponownie z harmonogramu aplikacji, uwzględniając
+`Retry-After` i zachowując czas na przetworzenie kolejnych dokumentów.
+
+W razie utraty odpowiedzi na POST stan `submission_unknown` pozostaje na dysku.
+Worker sprawdza zapisany numer sesji i dokładny skrót dokumentu. Pusta lista
+faktur nie wystarcza do ponownej wysyłki. `retry_if_unsubmitted()` może
+zamknąć otwartą sesję i zwolnić wpis dopiero po tym, jak KSeF potwierdzi
+anulowanie sesji, liczbę zero faktur i pustą pełną listę dokumentów.
+Po stanie `accepted` kolejne wywołania `advance()` zamykają sesję,
+czekają na jej przetworzenie i zapisują indywidualne UPO. Harmonogram wywołuje
+`advance()` do stanu `complete`, po którym `read_upo(invoice_hash)` odczytuje
+lokalny dokument. Dokument zwrócony przez KSeF jako duplikat ma stan `duplicate`. Odrębnym przypadkiem jest kod 550, czyli potwierdzone
+anulowanie przetwarzania przez KSeF. Stan `retryable` pozostaje w kolejce.
+Po odczekaniu okresu wybranego przez aplikację wywołaj `retry_cancelled(invoice_hash)`.
+SDK zachowa szyfrowany zapis poprzedniej próby i kolejny cykl użyje oryginalnego XML-a.
+Podczas otwierania sesji worker ma czasową rezerwację wpisu.
+Jeśli proces przerwie pracę przed zapisaniem referencji, inny worker może
+przejąć wpis po wygaśnięciu rezerwacji.
+
+Korektę techniczną dodaj jako nowy XML z argumentem
+`correction_of=original_invoice_hash`, po zapisaniu odrzucenia oryginału.
+Jeśli próba korekty została jednoznacznie odrzucona, wskaż ten sam oryginał
+w następnej korekcie. Weryfikacja, że poprawka zachowuje treść faktury, należy do aplikacji.
+Kody QR pochodzą z oryginalnych bajtów FA(3). SDK sprawdza użycie klucza,
+ważność oraz zgodność klucza z certyfikatem offline. Stan odwołania i uprawnienia
+wystawcy zależą od rejestru KSeF.
+
+W `AsyncKsef` użyj `AsyncSQLiteOfflineInvoiceStore` i `await` dla operacji
+kolejki. Oryginalne XML, UPO i stan sesji są szyfrowane lokalnie. Kopia
+sprzed wysłania dokumentu nie zawiera informacji o tej próbie, więc po
+odtworzeniu takiej kopii sprawdź stan KSeF przed ponownym uruchomieniem workerów.
+
+[Tryby offline](https://github.com/CIRFMF/ksef-api/blob/ce3670e/tryby-offline.md)
+· [Kody QR](https://github.com/CIRFMF/ksef-api/blob/ce3670e/kody-qr.md)
+· [Korekta techniczna](https://github.com/CIRFMF/ksef-api/blob/ce3670e/offline/korekta-techniczna.md)
+
+### Weryfikacja z KSeF TEST
+
+Z ustawionymi `KSEF_E2E=1`, `KSEF_TEST_TOKEN`, `KSEF_TEST_CONTEXT_TYPE=Nip` i
+`KSEF_TEST_CONTEXT_VALUE` uruchom:
+
+```shell
+python -m pytest -q tests/test_e2e_offline_queue.py
+```
+
+Test zapisuje fakturę w kolejce przed uwierzytelnieniem, wznawia pracę z zapisaną
+sesją, przesyła oryginalny XML do KSeF TEST i weryfikuje zapisane UPO.

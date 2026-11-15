@@ -61,6 +61,9 @@ Najważniejsze cechy:
   błędy dokumentów i `to_dict()` dla CLI/MCP,
 - **uwierzytelnianie tokenem KSeF i XAdES**, w tym obsługa PKCS#12 oraz PEM,
 - **sesje online i wsadowe**, eksport faktur, UPO, linki weryfikacyjne, QR i Latarnia KSeF,
+- **faktury offline** — szyfrowana kolejka FA(3), linki do KOD I i KOD II
+  oraz wznawialna wysyłka i pobieranie UPO;
+  [przewodnik](docs/workflows/online-session.md#trwała-wysyłka-offline),
 - **FA(3)**: budowanie XML faktur, walidacja XSD, przygotowanie paczek ZIP/TarGz oraz **odczyt XML → model**,
 - narzędzia pomocnicze do szyfrowania, ZIP/TarGz, Base64Url i obsługi adresów pre-signed URL.
 
@@ -219,6 +222,7 @@ Masz już profil? Zastąp `options`, `context_type` i `context_value` przez
 | Synchronizować metadane i pliki XML | `client.invoices.sync_documents(...)` i `.run_once(store, storage)` |
 | Importować faktury z paczek KSeF do archiwum | `client.exports.sync_archive(...)` i `.run_once(store, storage)` |
 | Synchronizować tylko metadane | `client.invoices.sync(...)` i `.run_once(store)` |
+| Zapisać i później wysłać fakturę offline | `OfflineInvoiceQueue` i `client.invoices.offline(...)` |
 | Pobrać XML faktury | `client.invoices.download(ksef_number)` |
 | Pobrać eksport na dysk | `client.exports.start(filters).download_to(destination, work_dir=work)` |
 | Kontynuować po przerwaniu | `operation.resume_state()` i `client.resume_operation(state)` |

@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from .invoice_export_sync import AsyncInvoiceExportSync
     from .invoice_sync import AsyncInvoiceSync
     from .invoice_xml_sync import AsyncInvoiceDocumentSync, AsyncInvoiceXmlSync
+    from .offline_invoices import AsyncOfflineInvoices, AsyncSQLiteOfflineInvoiceStore
     from .streaming_export import AsyncExportOperation
 
 
@@ -209,6 +210,14 @@ class AsyncSession(AsyncOperation[m.SessionStatusResponse]):
 class AsyncInvoices:
     def __init__(self, owner: AsyncKsef) -> None:
         self.owner = owner
+
+    def offline(
+        self, store: AsyncSQLiteOfflineInvoiceStore, *, namespace: str
+    ) -> AsyncOfflineInvoices:
+        """Bind the offline outbox to this authenticated context."""
+        from .offline_invoices import AsyncOfflineInvoices
+
+        return AsyncOfflineInvoices(self.owner, store, namespace=namespace)
 
     def sync(
         self,

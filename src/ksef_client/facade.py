@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from .invoice_export_sync import InvoiceExportSync
     from .invoice_sync import InvoiceSync
     from .invoice_xml_sync import InvoiceDocumentSync, InvoiceXmlSync
+    from .offline_invoices import OfflineInvoices, SQLiteOfflineInvoiceStore
     from .streaming_export import ExportOperation
 
 
@@ -321,6 +322,12 @@ class Session(Operation[m.SessionStatusResponse]):
 class Invoices:
     def __init__(self, owner: Ksef) -> None:
         self.owner = owner
+
+    def offline(self, store: SQLiteOfflineInvoiceStore, *, namespace: str) -> OfflineInvoices:
+        """Bind the offline outbox to this authenticated context."""
+        from .offline_invoices import OfflineInvoices
+
+        return OfflineInvoices(self.owner, store, namespace=namespace)
 
     def sync(
         self,
