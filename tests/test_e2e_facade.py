@@ -10,6 +10,7 @@ import pytest
 
 from ksef_client import Ksef, KsefClientOptions, OperationState, RetryConfig, TokenCredentials
 from ksef_client import models as m
+from ksef_client.exceptions import KsefExceptionCode, KsefHttpError
 from ksef_client.request_control import request_control, wait_seconds
 from ksef_client.streaming_export import digest
 from tests.test_e2e_token_flows import (
@@ -22,13 +23,20 @@ pytestmark = pytest.mark.e2e
 
 
 def _wait_for_invoice_at_hwm(client, filters, expected, *, timeout=600, poll_interval=60):
+    expected_numbers = {expected} if isinstance(expected, str) else set(expected)
     with request_control(timeout_seconds=timeout):
         while True:
-            search = client.api.invoices.search_invoice_metadata(
-                filters, context_key=client.context_key, page_size=100
-            )
-            if any(row.ksef_number == expected for row in search):
-                return
+            try:
+                search = client.api.invoices.search_invoice_metadata(
+                    filters, context_key=client.context_key, page_size=100
+                )
+                if expected_numbers.issubset(row.ksef_number for row in search):
+                    return
+            except KsefHttpError as error:
+                if error.status_code != 400 or error.exception_codes != (
+                    KsefExceptionCode.FILTER_RANGE_OUT_OF_BOUNDS.value,
+                ):
+                    raise
             wait_seconds(poll_interval)
 
 
