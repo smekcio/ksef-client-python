@@ -42,6 +42,7 @@ try:
 
     _KEYRING_AVAILABLE = True
 except Exception:  # pragma: no cover - import fallback path
+
     class _KeyringError(Exception):
         pass
 
@@ -341,6 +342,29 @@ def save_tokens(profile: str, access_token: str, refresh_token: str) -> None:
                     f"{fallback_hint}",
                 ) from exc
 
+    _persist_fallback_pair(profile, access_token, refresh_token)
+
+
+def save_refreshed_tokens(profile: str, access_token: str, refresh_token: str) -> None:
+    """Replace the access token only in the store holding its refresh token."""
+    backend = cast(_KeyringBackend | None, _keyring)
+    if _KEYRING_AVAILABLE and backend is not None:
+        try:
+            current = backend.get_password(_SERVICE_NAME, _token_key(profile, _REFRESH_KEY))
+        except KeyringError:
+            current = None
+        if current == refresh_token:
+            try:
+                backend.set_password(_SERVICE_NAME, _token_key(profile, _ACCESS_KEY), access_token)
+            except KeyringError as exc:
+                raise CliError(
+                    "Cannot update the access token in the system keyring.", ExitCode.CONFIG_ERROR
+                ) from exc
+            return
+    _persist_fallback_pair(profile, access_token, refresh_token)
+
+
+def _persist_fallback_pair(profile: str, access_token: str, refresh_token: str) -> None:
     mode = _fallback_mode()
     if mode is None:
         _raise_no_secure_store()

@@ -54,10 +54,13 @@ class JsonRenderer:
         code: str,
         message: str,
         hint: str | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
-        error = {"code": code, "message": message}
+        error: dict[str, Any] = {"code": code, "message": message}
         if hint:
             error["hint"] = hint
+        if retry_after_seconds is not None:
+            error["retry_after_seconds"] = retry_after_seconds
         payload = {
             "ok": False,
             "command": command,

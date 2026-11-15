@@ -39,6 +39,7 @@ class HumanRenderer:
         code: str,
         message: str,
         hint: str | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         self._console.print(f"[red]{code}[/red] {message} ({command}, profile={profile})")
         if hint:

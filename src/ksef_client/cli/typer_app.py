@@ -6,6 +6,7 @@ from importlib import metadata
 import typer
 
 from .commands import (
+    archive_cmd,
     auth_cmd,
     export_cmd,
     health_cmd,
@@ -13,6 +14,7 @@ from .commands import (
     invoice_cmd,
     iz_cmd,
     lighthouse_cmd,
+    offline_cmd,
     profile_cmd,
     send_cmd,
     session_cmd,
@@ -103,6 +105,8 @@ app.add_typer(send_cmd.app, name="send")
 app.add_typer(session_cmd.app, name="session")
 app.add_typer(upo_cmd.app, name="upo")
 app.add_typer(export_cmd.app, name="export")
+app.add_typer(offline_cmd.app, name="offline")
+app.add_typer(archive_cmd.app, name="archive")
 app.command("init")(init_cmd.init_command)
 
 

@@ -67,6 +67,48 @@ class InvoiceExportSyncReport:
     status: str = "idle"
 
 
+def _archive_scope(
+    namespace: str,
+    environment: str,
+    context_key: str,
+    sync_key: str,
+    subject_type: m.InvoiceQuerySubjectType,
+) -> InvoiceSyncScope:
+    identity = hashlib.sha256(f"invoice-export/v1:{subject_type.value}".encode("ascii")).hexdigest()
+    return InvoiceSyncScope(namespace, environment, context_key, sync_key, identity)
+
+
+def inspect_archive_progress(
+    store: SQLiteInvoiceSyncStore,
+    *,
+    namespace: str,
+    environment: str,
+    context_key: str,
+    sync_key: str,
+    state_key: bytes,
+    subject_type: m.InvoiceQuerySubjectType,
+) -> InvoiceExportSyncReport:
+    """Read saved progress for the selected role without connecting to KSeF."""
+    scope = _archive_scope(namespace, environment, context_key, sync_key, subject_type)
+    saved = store._load_export(scope, state_key)
+    if saved is None:
+        return InvoiceExportSyncReport(None, None, status="uninitialized")
+    _, raw = saved
+    checkpoint = ExportCheckpoint.decode(raw, state_key)
+    return _report(
+        checkpoint.progress,
+        status=(
+            "importing"
+            if checkpoint.package_id is not None
+            else "pending"
+            if checkpoint.end is not None
+            else "truncated"
+            if checkpoint.progress.continuation is not None
+            else "committed"
+        ),
+    )
+
+
 class _InvoiceExportConfig(Generic[_Client]):
     def __init__(
         self,
@@ -89,11 +131,8 @@ class _InvoiceExportConfig(Generic[_Client]):
             raise TypeError("compression_type must be CompressionType")
         self._initial = ExportProgress(since)
         self._subject_type, self._compression_type = subject_type, compression_type
-        identity = hashlib.sha256(
-            f"invoice-export/v1:{subject_type.value}".encode("ascii")
-        ).hexdigest()
-        self.scope = InvoiceSyncScope(
-            namespace, client.environment, client.context_key, sync_key, identity
+        self.scope = _archive_scope(
+            namespace, client.environment, client.context_key, sync_key, subject_type
         )
         work_key = hashlib.sha256(canonical_json(self.scope.to_dict(), 8192)).hexdigest()
         self._workspace = Path(os.path.abspath(work_dir)) / work_key
