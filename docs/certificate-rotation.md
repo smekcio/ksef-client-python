@@ -88,3 +88,10 @@ sesji i uprawnienia wymagane do ich dokończenia. Samo zalogowanie w tym
 samym kontekście potwierdza dostęp do kontekstu. Przykładowe
 `activate --queue <plik>` dodatkowo sprawdza odczyt statusu sesji
 zapisanych w kolejce. [Uprawnienia KSeF](https://github.com/CIRFMF/ksef-api/blob/main/uprawnienia.md)
+
+Profil może wymagać weryfikacji łańcucha i zgodności podpisu XAdES.
+Przekaż `verify_certificate_chain=True` i `enforce_xades_compliance=True`
+do `ProfileCertificates`. Wartości obowiązują przy sprawdzaniu kandydata
+i przy otwieraniu sesji workera. Użyj tych samych ustawień u operatora
+i w workerze. Zmiana polityki wymaga zweryfikowania i aktywacji certyfikatu
+w konfiguracji z nową polityką.

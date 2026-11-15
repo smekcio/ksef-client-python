@@ -27,6 +27,7 @@ from .facade import Ksef, XadesCredentials, connection_options
 from .invoice_xml_storage import _safe_directory
 from .operations import environment_key
 from .profiles import Profile
+from .request_control import request_control
 
 _logger = logging.getLogger(__name__)
 _SUBJECT_IDENTIFIER_TYPES = {"certificateSubject", "certificateFingerprint"}
@@ -80,10 +81,22 @@ class ProfileCertificates:
     """
 
     def __init__(
-        self, path: str | Path, profile: Profile, *, store: FileCertificateStore | None = None
+        self,
+        path: str | Path,
+        profile: Profile,
+        *,
+        store: FileCertificateStore | None = None,
+        verify_certificate_chain: bool | None = None,
+        enforce_xades_compliance: bool = False,
     ) -> None:
         self._path = Path(path).absolute()
         self._profile = profile
+        if verify_certificate_chain is not None and type(verify_certificate_chain) is not bool:
+            raise TypeError("verify_certificate_chain must be bool or None")
+        if type(enforce_xades_compliance) is not bool:
+            raise TypeError("enforce_xades_compliance must be bool")
+        self._verify_certificate_chain = verify_certificate_chain
+        self._enforce_xades_compliance = enforce_xades_compliance
         self._store = store if store is not None else FileCertificateStore.default()
         options, kind, context = connection_options(profile=profile)
         endpoint = urlsplit(options.normalized_base_url())
@@ -95,10 +108,15 @@ class ProfileCertificates:
             or endpoint.fragment
         ):
             raise CertificateRotationError("XAdES rotation requires a fixed HTTPS profile endpoint")
-        identity = json.dumps(
-            [profile.name, environment_key(options.normalized_base_url()), kind, context],
-            separators=(",", ":"),
-        ).encode()
+        identity_parts: list[str | bool | None] = [
+            profile.name,
+            environment_key(options.normalized_base_url()),
+            kind,
+            context,
+        ]
+        if verify_certificate_chain is not None or enforce_xades_compliance:
+            identity_parts.extend((verify_certificate_chain, enforce_xades_compliance))
+        identity = json.dumps(identity_parts, separators=(",", ":")).encode()
         self._scope = hashlib.sha256(identity).hexdigest()
 
     def _open(self) -> sqlite3.Connection:
@@ -221,14 +239,18 @@ class ProfileCertificates:
         candidate = self._checked_certificate(name, password)
         record = candidate.record
         credentials = XadesCredentials.from_stored_certificate(
-            candidate, subject_identifier_type=subject_identifier_type
+            candidate,
+            subject_identifier_type=subject_identifier_type,
+            verify_certificate_chain=self._verify_certificate_chain,
+            enforce_xades_compliance=self._enforce_xades_compliance,
         )
         with Ksef.connect(
             credentials=credentials, profile=self._profile, timeout=timeout
         ) as client:
             try:
                 if verify is not None:
-                    verify(client)
+                    with request_control(timeout_seconds=timeout):
+                        verify(client)
             finally:
                 self._revoke_session(client)
         # Verify that the same usable pair is still available after the remote
@@ -278,7 +300,10 @@ class ProfileCertificates:
             password = password_for(selected.name)
         stored = self._checked_certificate(selected.name, password, selected.fingerprint_sha256)
         credentials = XadesCredentials.from_stored_certificate(
-            stored, subject_identifier_type=selected.subject_identifier_type
+            stored,
+            subject_identifier_type=selected.subject_identifier_type,
+            verify_certificate_chain=self._verify_certificate_chain,
+            enforce_xades_compliance=self._enforce_xades_compliance,
         )
         return Ksef.connect(credentials=credentials, profile=self._profile, timeout=timeout)
 

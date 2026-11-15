@@ -1116,3 +1116,43 @@ def test_selection_validates_database_record_before_password_provider(
     with pytest.raises(CertificateRotationError, match="Invalid stored certificate name"):
         selector.connect(password_for=callback)
     callback.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "invalid_policy", [{"verify_certificate_chain": "true"}, {"enforce_xades_compliance": 1}]
+)
+def test_rotation_preserves_xades_policy_across_activation_and_connect(
+    tmp_path, store, rsa_pair, monkeypatch, invalid_policy
+):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from ksef_client.certificate_rotation import ProfileCertificates
+    from ksef_client.config import KsefEnvironment
+    from ksef_client.facade import Ksef
+    from ksef_client.profiles import Profile
+
+    profile = Profile("worker", KsefEnvironment.TEST.value, "nip", "123", "TEST")
+    path = tmp_path / "selector.db"
+    store.save("first", certificate=rsa_pair[0], private_key=rsa_pair[1], environment="TEST")
+    with pytest.raises(TypeError):
+        ProfileCertificates(path, profile, store=store, **invalid_policy)
+    selector = ProfileCertificates(
+        path, profile, store=store, verify_certificate_chain=True, enforce_xades_compliance=True
+    )
+    calls = []
+
+    def connect(*, credentials, profile, timeout):
+        calls.append((credentials.verify_certificate_chain, credentials.enforce_xades_compliance))
+        return nullcontext(
+            SimpleNamespace(
+                api=SimpleNamespace(auth=SimpleNamespace(revoke_current_session=lambda: None)),
+            )
+        )
+
+    monkeypatch.setattr(Ksef, "connect", connect)
+    selector.activate("first", expected_generation=0)
+    with selector.session():
+        pass
+    assert calls == [(True, True), (True, True)]
+    assert ProfileCertificates(path, profile, store=store).status().status == "unconfigured"
