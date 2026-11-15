@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
@@ -9,6 +11,7 @@ import typer
 from ksef_client._offline_invoice_store import MAX_OFFLINE_XML_BYTES
 from ksef_client.invoice_search import _date
 from ksef_client.invoice_sync_state import utc_timestamp
+from ksef_client.invoice_xml_storage import _safe_directory
 from ksef_client.offline_invoices import (
     OfflineInvoiceMode,
     OfflineInvoiceQueue,
@@ -138,4 +141,37 @@ def run(
             command="offline.run",
             profile=profile,
             data={"invoices": [_summary(row, now) for row in rows], "next_cursor": next_cursor},
+        )
+
+
+@app.command("upo")
+def upo(
+    ctx: typer.Context,
+    state_dir: Annotated[Path, typer.Option("--state-dir", help="Private workflow directory.")],
+    invoice_hash: Annotated[str, typer.Option("--invoice-hash")],
+    out: Annotated[Path, typer.Option("--out", help="New private UPO file.")],
+) -> None:
+    with workflow_errors(ctx, "offline.upo"):
+        profile, options, kind, context, directory = workflow_config(ctx, state_dir)
+        with offline_store(directory) as store:
+            queue = OfflineInvoiceQueue(
+                store, options=options, context_type=kind, context_value=context, namespace=profile
+            )
+            receipt = queue.read_upo(invoice_hash)
+        # Write and close before publishing the file. Linking fails if the
+        # destination already exists, including an existing symbolic link.
+        destination = out.absolute()
+        _safe_directory(destination.parent)
+        fd, filename = tempfile.mkstemp(dir=destination.parent, prefix=".ksef-upo-")
+        temporary = Path(filename)
+        try:
+            with os.fdopen(fd, "wb") as file:
+                file.write(receipt)
+                file.flush()
+                os.fsync(file.fileno())
+            os.link(temporary, destination)
+        finally:
+            temporary.unlink()
+        get_renderer(require_context(ctx)).success(
+            command="offline.upo", profile=profile, data={"saved": str(out)}
         )

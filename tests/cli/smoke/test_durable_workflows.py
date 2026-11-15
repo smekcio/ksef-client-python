@@ -158,3 +158,11 @@ def test_offline_run_reconciles_lost_send_and_honors_429(runner, tmp_path, monke
     assert runner.invoke(app, run).exit_code == ExitCode.IO_ERROR
     assert json.loads(runner.invoke(app, run).output)["data"]["invoices"][0]["status"] == "complete"
     assert client.send_count == 1
+
+    out = tmp_path / "receipt.xml"
+    export = ["--json", "offline", "upo", *common, "--invoice-hash", invoice, "--out", str(out)]
+    assert runner.invoke(app, export).exit_code == 0
+    assert out.read_bytes() == b"<UPO/>"
+    out.write_bytes(b"existing")
+    assert runner.invoke(app, export).exit_code == ExitCode.IO_ERROR
+    assert out.read_bytes() == b"existing"

@@ -44,6 +44,9 @@ ksef --profile firma-a --json offline run --state-dir ./private --limit 10
 wystawiający dokument przekazuje rzeczywisty termin dosłania oraz tryb
 `offline24`, `unavailable` lub `emergency`. Zachowaj `invoice_hash`
 do sprawdzania wyniku przez `offline status --invoice-hash`.
+Po stanie `complete` użyj `offline upo --invoice-hash <hash> --out <plik>`
+z tym samym `--state-dir`. Wskaż nowy plik w istniejącym prywatnym katalogu.
+Polecenie pobiera zapisane UPO z kolejki bez uwierzytelniania w KSeF.
 
 `offline run` wykonuje po jednym kroku dla pozycji w kolejności terminów.
 `--timeout` dotyczy pojedynczej pozycji. Jeśli odpowiedź na wysyłkę zaginie,
