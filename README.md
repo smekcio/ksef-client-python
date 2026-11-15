@@ -35,6 +35,9 @@ Najważniejsze cechy:
 - **lokalne archiwum faktur i XML** — przyrostowe pobieranie, wznowienie po restarcie,
   kontrola SHA-256 i raport gotowości; gotowe SQLite i magazyn plikowy sync/async;
   [przykład synchronizacji](#synchronizacja-metadanych-i-xml),
+- **archiwizacja z paczek KSeF** — metadane w SQLite, XML w magazynie plikowym,
+  osobny punkt kontrolny HWM dla każdej roli i wznowienie po przerwaniu;
+  [przewodnik](docs/workflows/export.md#wznawialny-import-do-lokalnego-archiwum),
 - **synchronizacja metadanych** — `client.invoices.sync(...).run_once(store)`, niezależne role,
   trwałe checkpointy HWM i atomowy zapis z CAS; [przewodnik i SQLite](docs/invoice-sync.md),
 
@@ -217,6 +220,7 @@ Masz już profil? Zastąp `options`, `context_type` i `context_value` przez
 | --- | --- |
 | Wysłać paczkę faktur | `client.batch_session(archive_bytes)` i `session.upload_parts()` |
 | Synchronizować metadane i pliki XML | `client.invoices.sync_documents(...)` i `.run_once(store, storage)` |
+| Importować faktury z paczek KSeF do archiwum | `client.exports.sync_archive(...)` i `.run_once(store, storage)` |
 | Synchronizować tylko metadane | `client.invoices.sync(...)` i `.run_once(store)` |
 | Zapisać i później wysłać fakturę offline | `OfflineInvoiceQueue` i `client.invoices.offline(...)` |
 | Pobrać XML faktury | `client.invoices.download(ksef_number)` |
@@ -234,6 +238,10 @@ Do lokalnego archiwum użyj `sync_documents()`. SDK pobierze metadane oraz XML,
 a SQLite zapamięta postęp i zadania pobrania. **Po przerwaniu uruchom ten sam kod
 z tą samą bazą i katalogiem XML** — gotowe dokumenty nie będą pobierane ponownie.
 Domyślnie synchronizowane są role sprzedawcy i nabywcy.
+
+Przy imporcie większej historii wybierz `client.exports.sync_archive(...)`.
+[Przewodnik archiwizacji z paczek](docs/workflows/export.md#wznawialny-import-do-lokalnego-archiwum)
+pokazuje wybór roli i wznowienie importu.
 
 Przykład jest samodzielny: wymaga zmiennych `KSEF_NIP` i `KSEF_TOKEN` dla TEST.
 Dla bieżącego checkoutu zainstaluj SDK przez `pip install -e .`.

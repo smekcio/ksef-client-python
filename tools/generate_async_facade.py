@@ -25,6 +25,7 @@ NAMES = {
         "OnlineSessionWorkflow",
         "BatchSessionWorkflow",
         "ExportOperation",
+        "InvoiceExportSync",
         "InvoiceSync",
         "InvoiceDocumentSync",
         "InvoiceXmlSync",
@@ -213,6 +214,7 @@ import base64
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from . import models as m
@@ -248,6 +250,7 @@ from .services.workflows import (
 from .token_manager import DEFAULT_REFRESH_MARGIN_SECONDS
 
 if TYPE_CHECKING:
+    from .invoice_export_sync import AsyncInvoiceExportSync
     from .invoice_sync import AsyncInvoiceSync
     from .invoice_xml_sync import AsyncInvoiceDocumentSync, AsyncInvoiceXmlSync
     from .offline_invoices import AsyncOfflineInvoices, AsyncSQLiteOfflineInvoiceStore

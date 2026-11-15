@@ -352,3 +352,22 @@ def test_async_export_uses_worker_and_does_not_block_event_loop(tmp_path, storag
         asyncio.run(run())
     finally:
         sync.owner.api.http_client.close()
+
+
+@pytest.mark.parametrize("code", [210, 550])
+def test_transfer_propagates_operation_termination_during_url_refresh(storage, tmp_path, code):
+    _, _, _, package = make_package(size=512)
+    storage.mode = "forbidden"
+    export = operation(storage, package)
+    get_status = export.owner.api.invoices.get_export_status
+    get_status.side_effect = [
+        get_status.return_value,
+        m.InvoiceExportStatusResponse.from_dict({"status": {"code": code, "description": ""}}),
+    ]
+    try:
+        with pytest.raises(KsefExportTransferError) as caught:
+            export.download_to(tmp_path / "final", work_dir=tmp_path / "transfer")
+        assert caught.value.status_code == code
+        assert not (tmp_path / "final").exists()
+    finally:
+        export.owner.api.http_client.close()
