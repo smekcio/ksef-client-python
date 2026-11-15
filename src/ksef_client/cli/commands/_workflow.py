@@ -24,7 +24,7 @@ from ksef_client.token_manager import TokenManager
 
 from ..auth.keyring_store import get_tokens
 from ..auth.manager import save_refreshed_access
-from ..auth.scope import login_scope, token_pair_digest
+from ..auth.scope import login_scope, recover_refreshed_metadata, token_pair_digest
 from ..auth.token_cache import auth_state_lock, get_cached_metadata
 from ..context import profile_label, require_context, require_profile
 from ..errors import CliError
@@ -75,7 +75,7 @@ def workflow_client(profile: str, options: KsefClientOptions, kind: str, context
     scope = login_scope(options.base_url, kind, context)
     with auth_state_lock(profile):
         tokens = get_tokens(profile)
-        metadata = get_cached_metadata(profile) or {}
+        metadata = recover_refreshed_metadata(get_cached_metadata(profile) or {}, tokens)
     if (
         not tokens
         or metadata.get("login_scope") != scope

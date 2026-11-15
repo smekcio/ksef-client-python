@@ -391,3 +391,91 @@ def test_offline_cli_retry_requires_authoritative_result(runner, tmp_path, monke
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["data"]["status"] == "queued"
     assert client.send_count == 1
+
+
+def test_batch_continues_after_an_invoice_error_and_preserves_cursor(runner, tmp_path, monkeypatch):
+    from contextlib import nullcontext
+
+    from tests.test_offline_invoice_store import DUE, XML
+    from tests.test_offline_invoices import TestClient
+
+    from ksef_client.cli.commands import offline_cmd
+    from ksef_client.exceptions import KsefDocumentValidationError
+    from ksef_client.facade import Invoices
+    from ksef_client.operations import environment_key
+
+    class WorkerClient(TestClient):
+        environment = environment_key("https://api-demo.ksef.mf.gov.pl/v2")
+        context_key = "Nip:123"
+
+        def __init__(self):
+            super().__init__()
+            self.invoices = Invoices(cast(Ksef, self))
+
+        def online_session(self):
+            if not self.failed_once:
+                self.failed_once = True
+                raise KsefDocumentValidationError("sensitive invoice details")
+            return super().online_session()
+
+    monkeypatch.setenv("KSEF_OFFLINE_STATE_KEY", base64.b64encode(bytes(range(32))).decode())
+    worker = WorkerClient()
+    monkeypatch.setattr(offline_cmd, "workflow_client", lambda *args: nullcontext(worker))
+    common = ["--state-dir", str(tmp_path / "private")]
+    invoices = []
+    for index in range(2):
+        xml = tmp_path / f"{index}.xml"
+        xml.write_bytes(XML + b" " * index)
+        staged = runner.invoke(
+            app, ["--json", "offline", "enqueue", *common, "--xml", str(xml), "--due-at", DUE]
+        )
+        assert staged.exit_code == 0, staged.output
+        invoices.append(json.loads(staged.output)["data"]["invoice_hash"])
+    first, second = sorted(invoices)
+    result = runner.invoke(app, ["--json", "offline", "run", *common, "--limit", "2"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)["data"]
+    assert data["failures"][0]["invoice_hash"] == first
+    assert data["invoices"][0]["invoice_hash"] == second
+    assert data["invoices"][0]["status"] == "session_open"
+    assert data["next_cursor"]["invoice_hash"] == second
+    assert "sensitive invoice details" not in result.output
+
+
+@pytest.mark.parametrize("switched", [False, True])
+def test_interrupted_refresh_keeps_bound_credentials_usable(runner, monkeypatch, switched):
+    from ksef_client import KsefClientOptions
+    from ksef_client.cli.auth import manager
+    from ksef_client.cli.auth.scope import login_endpoint, login_scope, token_pair_digest
+    from ksef_client.cli.auth.token_cache import set_cached_metadata
+
+    options = KsefClientOptions("https://api-demo.ksef.mf.gov.pl")
+    tokens = ("old-access", "refresh")
+    scope = login_scope(options.base_url, "Nip", "123")
+    set_cached_metadata(
+        "demo",
+        {
+            "login_endpoint": login_endpoint(options.base_url),
+            "login_scope": scope,
+            "token_pair_digest": token_pair_digest(*tokens),
+            "access_valid_until": "2099-01-01T00:00:00Z",
+        },
+    )
+
+    def interrupted(_profile, access, refresh):
+        nonlocal tokens
+        if switched:
+            tokens = (access, refresh)
+        raise OSError("Interrupted persistence")
+
+    monkeypatch.setattr(manager, "get_tokens", lambda _: tokens)
+    monkeypatch.setattr(_workflow, "get_tokens", lambda _: tokens)
+    monkeypatch.setattr(manager, "save_tokens", interrupted)
+    with pytest.raises(OSError):
+        manager.save_refreshed_access(
+            "demo", tokens, "new-access", "2099-01-01T00:00:00Z", expected_scope=scope
+        )
+    with _workflow.workflow_client("demo", options, "Nip", "123") as client:
+        assert client.api.token_manager.get_access_token() == (
+            "new-access" if switched else "old-access"
+        )

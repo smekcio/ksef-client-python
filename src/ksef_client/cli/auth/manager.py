@@ -16,7 +16,7 @@ from ..errors import CliError
 from ..exit_codes import ExitCode
 from ..sdk.factory import create_client
 from .keyring_store import clear_tokens, get_tokens, save_tokens
-from .scope import login_endpoint, login_scope, token_pair_digest
+from .scope import login_endpoint, login_scope, recover_refreshed_metadata, token_pair_digest
 from .token_cache import (
     auth_state_lock,
     clear_cached_metadata,
@@ -36,70 +36,6 @@ def _extract_ksef_token_reference_number(token: str) -> str | None:
     if not separator or not reference_number:
         return None
     return reference_number
-
-
-def _discover_current_token_reference_number(
-    *,
-    client: Any,
-    access_token: str,
-    profile: str,
-) -> str | None:
-    matched_references = _collect_active_token_reference_numbers(
-        client=client,
-        access_token=access_token,
-        profile=profile,
-    )
-    if len(matched_references) == 1:
-        return next(iter(matched_references))
-    return None
-
-
-def _collect_active_token_reference_numbers(
-    *,
-    client: Any,
-    access_token: str,
-    profile: str,
-) -> set[str]:
-    continuation_token: str | None = None
-    seen_continuation_tokens: set[str] = set()
-    matched_references: set[str] = set()
-    _profile_base_url, profile_context_type, profile_context_value = _profile_context(profile)
-    normalized_context_type = (profile_context_type or "").strip().lower()
-    normalized_context_value = (profile_context_value or "").strip()
-
-    while True:
-        listed = client.tokens.list_tokens(
-            access_token=access_token,
-            statuses=["Active"],
-            continuation_token=continuation_token,
-        )
-
-        for item in listed.tokens:
-            item_context = getattr(item, "context_identifier", None)
-            item_context_type_raw = getattr(item_context, "type", "")
-            item_context_type = (
-                str(getattr(item_context_type_raw, "value", item_context_type_raw)).strip().lower()
-            )
-            item_context_value = str(getattr(item_context, "value", "")).strip()
-            if (
-                normalized_context_type
-                and normalized_context_value
-                and (
-                    item_context_type != normalized_context_type
-                    or item_context_value != normalized_context_value
-                )
-            ):
-                continue
-            matched_references.add(str(item.reference_number))
-
-        continuation_token = listed.continuation_token
-        if not continuation_token:
-            break
-        if continuation_token in seen_continuation_tokens:
-            break
-        seen_continuation_tokens.add(continuation_token)
-
-    return matched_references
 
 
 def _parse_certificate_datetime(value: Any) -> datetime | None:
@@ -456,7 +392,9 @@ def get_auth_status(profile: str) -> dict[str, Any]:
 
 
 def refresh_access_token(*, profile: str, base_url: str, save: bool = True) -> dict[str, Any]:
-    tokens = get_tokens(profile)
+    with auth_state_lock(profile):
+        tokens = get_tokens(profile)
+        metadata = recover_refreshed_metadata(get_cached_metadata(profile) or {}, tokens)
     if not tokens:
         raise CliError(
             "No stored tokens for selected profile.",
@@ -464,7 +402,6 @@ def refresh_access_token(*, profile: str, base_url: str, save: bool = True) -> d
             "Run `ksef auth login-token` first.",
         )
     _, refresh_token = tokens
-    metadata = get_cached_metadata(profile) or {}
     scope = metadata.get("login_scope")
     if scope is not None and (
         metadata.get("login_endpoint") != login_endpoint(base_url)
@@ -516,14 +453,21 @@ def save_refreshed_access(
     with auth_state_lock(profile):
         if get_tokens(profile) != expected_tokens:
             return False
-        metadata = get_cached_metadata(profile) or {}
+        metadata = recover_refreshed_metadata(get_cached_metadata(profile) or {}, expected_tokens)
         bound_to_pair = metadata.get("token_pair_digest") == token_pair_digest(*expected_tokens)
         if expected_scope is not None and (
             metadata.get("login_scope") != expected_scope or not bound_to_pair
         ):
             return False
+        metadata.pop("pending_pair_digest", None)
+        metadata.pop("pending_valid_until", None)
         if bound_to_pair:
-            metadata["token_pair_digest"] = token_pair_digest(access_token, expected_tokens[1])
+            digest = token_pair_digest(access_token, expected_tokens[1])
+            set_cached_metadata(
+                profile,
+                {**metadata, "pending_pair_digest": digest, "pending_valid_until": valid_until},
+            )
+            metadata["token_pair_digest"] = digest
         else:
             metadata.pop("login_scope", None)
             metadata.pop("login_endpoint", None)
@@ -535,7 +479,9 @@ def save_refreshed_access(
 
 
 def revoke_self_token(*, profile: str, base_url: str) -> dict[str, Any]:
-    tokens = get_tokens(profile)
+    with auth_state_lock(profile):
+        tokens = get_tokens(profile)
+        metadata = recover_refreshed_metadata(get_cached_metadata(profile) or {}, tokens)
     if not tokens:
         raise CliError(
             "No stored tokens for selected profile.",
@@ -544,7 +490,6 @@ def revoke_self_token(*, profile: str, base_url: str) -> dict[str, Any]:
         )
 
     access_token, _refresh_token = tokens
-    metadata = get_cached_metadata(profile) or {}
     if metadata.get("method") != "token":
         raise CliError(
             "Self-revoke is available only for sessions authenticated with KSeF token.",
@@ -552,31 +497,23 @@ def revoke_self_token(*, profile: str, base_url: str) -> dict[str, Any]:
             "Run `ksef auth login-token` first.",
         )
 
+    if metadata.get("token_pair_digest") != token_pair_digest(*tokens) or metadata.get(
+        "login_endpoint"
+    ) != login_endpoint(base_url):
+        raise CliError(
+            "Stored login does not match the selected endpoint.",
+            ExitCode.AUTH_ERROR,
+            "Log in again with the exact KSeF token before revoking it.",
+        )
+
+    reference_number = metadata.get("ksef_token_reference_number", "").strip()
+    if not reference_number:
+        raise CliError(
+            "The current login does not identify the KSeF token to revoke.",
+            ExitCode.AUTH_ERROR,
+            "Log in again using the original token with its reference number.",
+        )
     with create_client(base_url) as client:
-        reference_number = metadata.get("ksef_token_reference_number", "").strip()
-        if not reference_number:
-            matched_references = _collect_active_token_reference_numbers(
-                client=client,
-                access_token=access_token,
-                profile=profile,
-            )
-            if len(matched_references) > 1:
-                formatted_references = ", ".join(sorted(matched_references))
-                raise CliError(
-                    "Cannot safely identify current KSeF token reference number: "
-                    f"multiple active tokens match the profile context ({formatted_references}).",
-                    ExitCode.AUTH_ERROR,
-                    "Set `ksef_token_reference_number` in profile metadata or login again "
-                    "with the exact token intended for self-revoke.",
-                )
-            reference_number = next(iter(matched_references), "")
-        if not reference_number:
-            raise CliError(
-                "Missing KSeF token reference number for the current profile.",
-                ExitCode.AUTH_ERROR,
-                "Login again with `ksef auth login-token` or ensure GET /tokens "
-                "returns only the current token.",
-            )
         client.tokens.revoke_token(reference_number, access_token=access_token)
 
     with auth_state_lock(profile):

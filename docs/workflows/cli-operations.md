@@ -89,3 +89,10 @@ oczekiwania. Restart może
 powtórzyć odczyt pierwszej strony kolejki. Stan faktury i znak wodny XML
 pozostają w SQLite. Wspólny limit wyjściowego adresu IP KSeF nadal dotyczy
 procesów korzystających z tego samego połączenia sieciowego.
+
+W partii `offline run` błędy poszczególnych faktur trafiają do
+`data.failures` razem z identyfikatorem faktury. Kolejne pozycje pozostają
+obsługiwane, a operator może sprawdzić stan konkretnej faktury przez
+`offline status --invoice-hash`. Harmonogram powinien monitorować obie
+listy, `invoices` i `failures`. Przekroczenie limitu API lub błąd
+uwierzytelnienia przerywa bieżący cykl profilu.

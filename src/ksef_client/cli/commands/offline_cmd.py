@@ -11,6 +11,7 @@ from typing import Annotated, Any
 import typer
 
 from ksef_client._offline_invoice_store import MAX_OFFLINE_XML_BYTES
+from ksef_client.exceptions import KsefDocumentValidationError, KsefHttpError, KsefSyncConflictError
 from ksef_client.invoice_search import _date
 from ksef_client.invoice_sync_state import utc_timestamp
 from ksef_client.invoice_xml_storage import _safe_directory
@@ -140,7 +141,18 @@ def run(
                 if invoice_hash is not None
                 else [entry.progress.invoice_hash for entry in page]
             )
-            rows = [worker.advance(digest, timeout=timeout) for digest in hashes]
+            rows = []
+            failures = []
+            for digest in hashes:
+                try:
+                    rows.append(worker.advance(digest, timeout=timeout))
+                except (KsefDocumentValidationError, KsefSyncConflictError, KsefHttpError) as exc:
+                    if invoice_hash is not None or (
+                        isinstance(exc, KsefHttpError)
+                        and exc.status_code not in {400, 404, 409, 410, 422, 425}
+                    ):
+                        raise
+                    failures.append({"invoice_hash": digest, "code": exc.code.value})
         next_cursor = (
             {"due_at": page[-1].due_at, "invoice_hash": page[-1].progress.invoice_hash}
             if len(page) == limit
@@ -150,7 +162,11 @@ def run(
         get_renderer(require_context(ctx)).success(
             command="offline.run",
             profile=profile,
-            data={"invoices": [_summary(row, now) for row in rows], "next_cursor": next_cursor},
+            data={
+                "invoices": [_summary(row, now) for row in rows],
+                "failures": failures,
+                "next_cursor": next_cursor,
+            },
         )
 
 
