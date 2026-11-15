@@ -32,6 +32,7 @@ from .exceptions import (
     KsefHttpError,
     KsefRateLimitError,
     KsefTransportError,
+    KsefTransportTimeoutError,
     classify_http_error,
 )
 from .models import (
@@ -327,7 +328,11 @@ def _wrap_transport_error(
     ``NO_HTTP_STATUS_CODE`` (brak odpowiedzi); surowy oryginał jest wyciszony.
     Komunikat nie zawiera tekstu oryginału; może on nieść podpisane URL-e i sekrety.
     """
-    return KsefTransportError(
+    error_type = (
+        KsefTransportTimeoutError if isinstance(exc, httpx.TimeoutException)
+        else KsefTransportError
+    )
+    return error_type(
         status_code=NO_HTTP_STATUS_CODE,
         message=(f"Network error during {method} {_loggable_url(url)}: {type(exc).__name__}"),
     )
