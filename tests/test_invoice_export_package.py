@@ -299,7 +299,11 @@ def test_rejects_inconsistent_export_checkpoint(values):
         ExportCheckpoint(ExportProgress(START), **values)
 
 
-@pytest.mark.parametrize("raw", [b"[]", b'{"version":1}', b" " * (4 * 1024 * 1024 + 1)])
+@pytest.mark.parametrize(
+    "raw",
+    [b"[]", b'{"version":1}', b" " * (4 * 1024 * 1024 + 1)],
+    ids=["wrong-shape", "missing-fields", "over-size-limit"],
+)
 def test_rejects_oversized_or_malformed_checkpoint(raw):
     with pytest.raises(KsefDocumentValidationError, match="unreadable"):
         ExportCheckpoint.decode(raw, b"k" * 32)
