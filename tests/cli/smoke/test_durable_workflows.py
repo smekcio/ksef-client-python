@@ -1,5 +1,7 @@
 import base64
 import json
+from types import SimpleNamespace
+from typing import cast
 
 from ksef_client.cli import app
 from ksef_client.cli.commands import _workflow
@@ -63,6 +65,7 @@ def test_archive_status_preserves_watermark_across_cli_invocations(runner, tmp_p
     from tests.test_invoice_export_package import END, START, package
     from tests.test_invoice_export_sync import Client, Export
 
+    from ksef_client import Ksef
     from ksef_client.cli.commands import archive_cmd
     from ksef_client.operations import environment_key
 
@@ -73,7 +76,7 @@ def test_archive_status_preserves_watermark_across_cli_invocations(runner, tmp_p
 
             self.environment = environment_key("https://api-demo.ksef.mf.gov.pl/v2")
             self.context_key = "Nip:123"
-            self.exports.sync_archive = Exports(self).sync_archive
+            self.exports.sync_archive = Exports(cast(Ksef, self)).sync_archive
 
     monkeypatch.setenv("KSEF_EXPORT_STATE_KEY", base64.b64encode(bytes(range(32))).decode())
     monkeypatch.setattr("ksef_client.invoice_export_sync.ExportOperation", Export)
@@ -96,3 +99,62 @@ def test_archive_status_preserves_watermark_across_cli_invocations(runner, tmp_p
     status = runner.invoke(app, ["--json", "archive", "status", *common])
     assert json.loads(status.output)["data"]["committed_hwm"] == END
     assert client.downloads == len(client.requests) == 1
+
+
+def test_offline_run_reconciles_lost_send_and_honors_429(runner, tmp_path, monkeypatch):
+    from contextlib import nullcontext
+
+    from tests.test_offline_invoice_store import DUE, XML
+    from tests.test_offline_invoices import TestClient
+
+    from ksef_client.cli.commands import offline_cmd
+    from ksef_client.exceptions import KsefRateLimitError
+    from ksef_client.facade import Invoices
+    from ksef_client.operations import environment_key
+
+    class OfflineClient(TestClient):
+        environment = environment_key("https://api-demo.ksef.mf.gov.pl/v2")
+        context_key = "Nip:123"
+
+        def __init__(self):
+            super().__init__()
+            self.invoices = Invoices(self)
+
+        def online_session(self):
+            if not self.failed_once:
+                self.failed_once = True
+                raise KsefRateLimitError(429, "rate limited", retry_after=17)
+            return super().online_session()
+
+    monkeypatch.setenv("KSEF_OFFLINE_STATE_KEY", base64.b64encode(bytes(range(32))).decode())
+    client = OfflineClient()
+    monkeypatch.setattr(offline_cmd, "workflow_client", lambda *args: nullcontext(client))
+    xml = tmp_path / "invoice.xml"
+    xml.write_bytes(XML)
+    common = ["--state-dir", str(tmp_path / "private")]
+    enqueue = runner.invoke(
+        app, ["--json", "offline", "enqueue", *common, "--xml", str(xml), "--due-at", DUE]
+    )
+    invoice = json.loads(enqueue.output)["data"]["invoice_hash"]
+    run = ["--json", "offline", "run", *common]
+    limited = runner.invoke(app, run)
+    assert limited.exit_code == ExitCode.RETRY_EXHAUSTED
+    assert json.loads(limited.output)["errors"][0]["retry_after_seconds"] == 17
+
+    # KSeF session opening has a durable claim. A subsequent cycle can open it
+    # after the failed owner's claim expires.
+    monkeypatch.setattr(
+        "ksef_client._offline_invoice_store.time",
+        SimpleNamespace(time=lambda: 10**10),
+    )
+    opened = runner.invoke(app, run)
+    assert json.loads(opened.output)["data"]["invoices"][0]["status"] == "session_open"
+    assert runner.invoke(app, run).exit_code == ExitCode.IO_ERROR
+    status = runner.invoke(app, ["--json", "offline", "status", *common, "--invoice-hash", invoice])
+    assert json.loads(status.output)["data"]["status"] == "submission_unknown"
+
+    assert json.loads(runner.invoke(app, run).output)["data"]["invoices"][0]["status"] == "accepted"
+    assert runner.invoke(app, run).exit_code == ExitCode.IO_ERROR
+    assert runner.invoke(app, run).exit_code == ExitCode.IO_ERROR
+    assert json.loads(runner.invoke(app, run).output)["data"]["invoices"][0]["status"] == "complete"
+    assert client.send_count == 1

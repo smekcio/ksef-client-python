@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-def cycle(profile: str, options: list[str]) -> tuple[dict[str, Any], float | None]:
+def cycle(profile: str, options: list[str]) -> tuple[dict[str, Any], bool, float | None]:
     try:
         result = subprocess.run(
             ["ksef", "--profile", profile, "--json", *options],
@@ -30,7 +30,8 @@ def cycle(profile: str, options: list[str]) -> tuple[dict[str, Any], float | Non
         }
     print(json.dumps(report), flush=True)
     errors = report.get("errors") or []
-    return report, errors[0].get("retry_after_seconds") if errors else None
+    first = errors[0] if errors else {}
+    return report, first.get("code") == "RETRY_EXHAUSTED", first.get("retry_after_seconds")
 
 
 def main() -> None:
@@ -66,13 +67,17 @@ def main() -> None:
                 if cursor
                 else []
             )
-            report, retry_after = cycle(args.profile, offline + page)
+            report, limited, retry_after = cycle(args.profile, offline + page)
             if report.get("ok"):
                 cursor = report["data"]["next_cursor"]
             next_offline = time.monotonic() + max(args.interval, retry_after or 0)
+            if limited:
+                next_archive = max(next_archive, next_offline)
         if time.monotonic() >= next_archive:
-            _, retry_after = cycle(args.profile, archive)
+            _, limited, retry_after = cycle(args.profile, archive)
             next_archive = time.monotonic() + max(args.interval, retry_after or 0)
+            if limited:
+                next_offline = max(next_offline, next_archive)
         time.sleep(max(0, min(next_archive, next_offline) - time.monotonic()))
 
 

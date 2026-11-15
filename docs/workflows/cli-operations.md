@@ -69,7 +69,8 @@ python docs/examples/scheduled_ksef_operations.py --profile firma-a --state-dir 
 python docs/examples/scheduled_ksef_operations.py --profile firma-b --state-dir ./private --since 2026-10-01T00:00:00Z
 ```
 
-Czasy wznowienia są liczone osobno dla archiwum i kolejki. Restart może
+Odpowiedź HTTP 429 wstrzymuje oba zadania danego profilu do końca okresu
+oczekiwania. Restart może
 powtórzyć odczyt pierwszej strony kolejki. Stan faktury i znak wodny XML
 pozostają w SQLite. Wspólny limit wyjściowego adresu IP KSeF nadal dotyczy
 procesów korzystających z tego samego połączenia sieciowego.
