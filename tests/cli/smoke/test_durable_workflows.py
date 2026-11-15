@@ -3,6 +3,8 @@ import json
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
+
 from ksef_client import Ksef
 from ksef_client.cli import app
 from ksef_client.cli.commands import _workflow
@@ -94,6 +96,8 @@ def test_archive_status_preserves_watermark_across_cli_invocations(runner, tmp_p
     status = runner.invoke(app, ["--json", "archive", "status", *common])
     assert status.exit_code == 0, status.output
     assert json.loads(status.output)["data"]["committed_hwm"] is None
+    other_role = runner.invoke(app, ["--json", "archive", "status", *common, "--role", "Subject1"])
+    assert json.loads(other_role.output)["data"]["status"] == "uninitialized"
     second = runner.invoke(app, sync)
     assert second.exit_code == 0, second.output
     status = runner.invoke(app, ["--json", "archive", "status", *common])
@@ -101,7 +105,10 @@ def test_archive_status_preserves_watermark_across_cli_invocations(runner, tmp_p
     assert client.downloads == len(client.requests) == 1
 
 
-def test_offline_run_reconciles_lost_send_and_honors_429(runner, tmp_path, monkeypatch):
+@pytest.mark.parametrize("retry_after", [{"retry_after": 17}, {"retry_after_raw": "17"}])
+def test_offline_run_reconciles_lost_send_and_honors_429(
+    runner, tmp_path, monkeypatch, retry_after
+):
     from contextlib import nullcontext
 
     from tests.test_offline_invoice_store import DUE, XML
@@ -123,7 +130,7 @@ def test_offline_run_reconciles_lost_send_and_honors_429(runner, tmp_path, monke
         def online_session(self):
             if not self.failed_once:
                 self.failed_once = True
-                raise KsefRateLimitError(429, "rate limited", retry_after=17)
+                raise KsefRateLimitError(429, "rate limited", **retry_after)
             return super().online_session()
 
     monkeypatch.setenv("KSEF_OFFLINE_STATE_KEY", base64.b64encode(bytes(range(32))).decode())
@@ -153,7 +160,9 @@ def test_offline_run_reconciles_lost_send_and_honors_429(runner, tmp_path, monke
     status = runner.invoke(app, ["--json", "offline", "status", *common, "--invoice-hash", invoice])
     assert json.loads(status.output)["data"]["status"] == "submission_unknown"
 
-    assert json.loads(runner.invoke(app, run).output)["data"]["invoices"][0]["status"] == "accepted"
+    accepted = json.loads(runner.invoke(app, run).output)["data"]["invoices"][0]
+    assert accepted["status"] == "accepted"
+    assert not accepted["overdue"]
     assert runner.invoke(app, run).exit_code == ExitCode.IO_ERROR
     assert runner.invoke(app, run).exit_code == ExitCode.IO_ERROR
     assert json.loads(runner.invoke(app, run).output)["data"]["invoices"][0]["status"] == "complete"
@@ -166,3 +175,185 @@ def test_offline_run_reconciles_lost_send_and_honors_429(runner, tmp_path, monke
     out.write_bytes(b"existing")
     assert runner.invoke(app, export).exit_code == ExitCode.IO_ERROR
     assert out.read_bytes() == b"existing"
+
+
+@pytest.mark.parametrize("key", ["not/base64!", ""])
+def test_cli_rejects_missing_or_invalid_workflow_key(runner, tmp_path, monkeypatch, key):
+    monkeypatch.setenv("KSEF_OFFLINE_STATE_KEY", key)
+    result = runner.invoke(
+        app, ["--json", "offline", "status", "--state-dir", str(tmp_path / "private")]
+    )
+    assert result.exit_code == ExitCode.CONFIG_ERROR
+    assert json.loads(result.output)["errors"][0]["code"] == "CONFIG_ERROR"
+    assert "KSEF_OFFLINE_STATE_KEY" in result.output
+
+
+def test_offline_status_paginates_and_validates_input(runner, tmp_path, monkeypatch):
+    monkeypatch.setenv("KSEF_OFFLINE_STATE_KEY", base64.b64encode(bytes(range(32))).decode())
+    common = ["--state-dir", str(tmp_path / "private")]
+    statuses = ["--json", "offline", "status", *common]
+    invoices = []
+    for index in range(2):
+        xml = tmp_path / f"invoice-{index}.xml"
+        xml.write_bytes(f"<Invoice>{index}</Invoice>".encode())
+        args = [
+            "--json",
+            "offline",
+            "enqueue",
+            *common,
+            "--xml",
+            str(xml),
+            "--due-at",
+            f"2020-01-0{index + 1}T00:00:00Z",
+        ]
+        result = runner.invoke(app, args)
+        assert result.exit_code == 0
+        invoices.append(json.loads(result.output)["data"])
+    first = invoices[0]
+    result = runner.invoke(
+        app, [*statuses, "--after-due-at", first["due_at"], "--after-hash", first["invoice_hash"]]
+    )
+    assert json.loads(result.output)["data"]["invoices"] == invoices[1:]
+    assert runner.invoke(app, [*statuses, "--after-due-at", first["due_at"]]).exit_code == 2
+    assert (
+        runner.invoke(
+            app, [*statuses, "--invoice-hash", base64.b64encode(bytes(32)).decode()]
+        ).exit_code
+        == 2
+    )
+
+    invalid = runner.invoke(
+        app, ["--json", "offline", "enqueue", *common, "--xml", str(xml), "--due-at", "tomorrow"]
+    )
+    assert invalid.exit_code == ExitCode.VALIDATION_ERROR
+    assert "timestamp" in invalid.output
+
+    reschedule = [
+        "offline",
+        "reschedule",
+        *common,
+        "--invoice-hash",
+        first["invoice_hash"],
+        "--due-at",
+        "2030-01-01T00:00:00Z",
+        "--revision",
+        str(first["revision"]),
+    ]
+    result = runner.invoke(app, ["--json", *reschedule])
+    row = json.loads(result.output)["data"]
+    assert result.exit_code == 0 and row["revision"] > first["revision"] and not row["overdue"]
+    assert runner.invoke(app, ["--json", *reschedule]).exit_code != 0
+
+
+def test_durable_auth_refresh_is_bound_and_remembers_access_token(runner, monkeypatch):
+    from ksef_client import KsefClientOptions
+    from ksef_client import models as m
+    from ksef_client.cli.auth import manager
+    from ksef_client.cli.auth.scope import login_scope, token_pair_digest
+    from ksef_client.cli.auth.token_cache import get_cached_metadata, set_cached_metadata
+    from ksef_client.cli.errors import CliError
+    from ksef_client.clients.auth import AuthClient
+
+    options = KsefClientOptions(base_url="https://api-demo.ksef.mf.gov.pl")
+    profile = "demo"
+    tokens = ("old-access", "old-refresh")
+
+    def persist(_profile, access, refresh):
+        nonlocal tokens
+        tokens = (access, refresh)
+
+    def refreshed(self, refresh_token):
+        assert refresh_token == "old-refresh"
+        return m.AuthenticationTokenRefreshResponse(
+            m.TokenInfo("fresh-access", "2099-01-01T00:00:00Z")
+        )
+
+    monkeypatch.setattr(AuthClient, "refresh_access_token", refreshed)
+    monkeypatch.setattr(_workflow, "get_tokens", lambda _: tokens)
+    monkeypatch.setattr(manager, "get_tokens", lambda _: tokens)
+    monkeypatch.setattr(manager, "save_tokens", persist)
+    scope = login_scope(options.base_url, "Nip", "123")
+    set_cached_metadata(
+        profile,
+        {
+            "login_scope": scope,
+            "token_pair_digest": token_pair_digest(*tokens),
+            "access_valid_until": "2000-01-01T00:00:00Z",
+        },
+    )
+    with pytest.raises(CliError, match="does not match"):
+        manager.refresh_access_token(profile=profile, base_url="https://not-the-login.invalid")
+    with pytest.raises(CliError, match="HTTPS"):
+        _workflow.workflow_client(
+            profile, KsefClientOptions("http://example.invalid"), "Nip", "123"
+        )
+    with _workflow.workflow_client(profile, options, "Nip", "123") as client:
+        assert client.api.token_manager.get_access_token() == "fresh-access"
+    assert tokens == ("fresh-access", "old-refresh")
+    cached = get_cached_metadata(profile)
+    assert cached is not None and cached["token_pair_digest"] == token_pair_digest(*tokens)
+    assert not manager.save_refreshed_access(
+        profile,
+        ("old-access", "old-refresh"),
+        "must-not-save",
+        "",
+        expected_scope=scope,
+    )
+    assert not manager.save_refreshed_access(
+        profile, tokens, "must-not-save", "", expected_scope="other"
+    )
+    with _workflow.workflow_client(profile, options, "Nip", "123") as client:
+        assert client.api.token_manager.get_access_token() == "fresh-access"
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_offline_cli_retry_requires_authoritative_result(runner, tmp_path, monkeypatch, cancelled):
+    from contextlib import nullcontext
+
+    from tests.test_offline_invoice_state import remote_invoice
+    from tests.test_offline_invoice_store import DUE, XML
+    from tests.test_offline_invoices import TestClient
+
+    from ksef_client import models as m
+    from ksef_client.cli.commands import offline_cmd
+    from ksef_client.facade import Invoices
+    from ksef_client.operations import environment_key
+
+    class RetryClient(TestClient):
+        environment = environment_key("https://api-demo.ksef.mf.gov.pl/v2")
+        context_key = "Nip:123"
+
+        def __init__(self):
+            super().__init__()
+            self.invoices = Invoices(cast(Ksef, self))
+
+        def get_session_invoices(self, *args, **kwargs):
+            return m.SessionInvoicesResponse([remote_invoice(550)] if cancelled else [])
+
+        def get_session_status(self, reference_number):
+            return SimpleNamespace(status=m.StatusInfo(440, ""), invoice_count=0)
+
+    monkeypatch.setenv("KSEF_OFFLINE_STATE_KEY", base64.b64encode(bytes(range(32))).decode())
+    client = RetryClient()
+    monkeypatch.setattr(offline_cmd, "workflow_client", lambda *args: nullcontext(client))
+    xml = tmp_path / "invoice.xml"
+    xml.write_bytes(XML)
+    common = ["--state-dir", str(tmp_path / "private")]
+    staged = runner.invoke(
+        app, ["--json", "offline", "enqueue", *common, "--xml", str(xml), "--due-at", DUE]
+    )
+    assert staged.exit_code == 0
+    digest = ["--invoice-hash", json.loads(staged.output)["data"]["invoice_hash"]]
+    action = "retry-cancelled" if cancelled else "retry-unsubmitted"
+    recover = ["--json", "offline", action, *common, *digest]
+    assert runner.invoke(app, recover).exit_code != 0
+    run = ["--json", "offline", "run", *common, *digest]
+    assert runner.invoke(app, run).exit_code == 0
+    assert runner.invoke(app, run).exit_code == ExitCode.IO_ERROR
+    if cancelled:
+        observed = runner.invoke(app, run)
+        assert json.loads(observed.output)["data"]["invoices"][0]["status"] == "retryable"
+    result = runner.invoke(app, recover)
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["data"]["status"] == "queued"
+    assert client.send_count == 1

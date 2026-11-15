@@ -10,6 +10,8 @@ Jednorazowo zaloguj każdy profil pod jego właściwym adresem i kontekstem.
 Po zmianie profilu zaloguj się ponownie. Dla logowań sprzed wprowadzenia
 tych poleceń potrzebne jest ponowne logowanie w celu zapisania powiązania
 tokenów z kontekstem.
+Polecenia sieciowe używają adresu HTTPS zapisanego w profilu. W razie
+potrzeby odświeżają i zapisują token dostępowy dla następnego cyklu.
 
 Udostępnij procesowi dwa osobne, wygenerowane losowo klucze po 32 bajty
 zakodowane w standardowym Base64. `KSEF_EXPORT_STATE_KEY` chroni stan
@@ -54,6 +56,16 @@ kolejny cykl szuka istniejącej faktury w zapisanej sesji. Pozycja
 `submission_unknown` wymaga uzgodnienia z KSeF. Sam upływ czasu jej nie
 kwalifikuje do ponownej wysyłki. Szczegóły rozliczania stanów i odzyskiwania
 opisuje [workflow offline](online-session.md).
+
+- `offline reschedule --invoice-hash <hash> --revision <revision> --due-at <czas>` zmienia
+  termin tylko dla wskazanej wersji aktualnego rekordu. Odczytaj wersję z `offline status`.
+- `offline retry-cancelled --invoice-hash <hash>` wraca do kolejki po zapisanym potwierdzeniu
+  anulowania przez KSeF.
+- `offline retry-unsubmitted --invoice-hash <hash>` sprawdza niejednoznaczną wysyłkę.
+  Wznowienie dopuszcza dopiero zamknięta sesja, dla której KSeF potwierdził brak faktur.
+
+Do tych poleceń podaj ten sam profil i `--state-dir`.
+
 
 W automatyzacji po błędzie z kodem wyjścia 4 odczekaj co najmniej wskazane
 `errors[0].retry_after_seconds`, jeśli serwer podał taki czas. Uruchamiaj

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
@@ -15,6 +17,7 @@ from ksef_client.invoice_xml_storage import _safe_directory
 from ksef_client.offline_invoices import (
     OfflineInvoiceMode,
     OfflineInvoiceQueue,
+    OfflineInvoiceStatus,
     StoredOfflineInvoice,
 )
 
@@ -27,13 +30,28 @@ from ._workflow import offline_store, workflow_client, workflow_config, workflow
 app = typer.Typer(help="Manage a durable offline invoice queue.")
 
 
+@contextmanager
+def _local_queue(
+    ctx: typer.Context, root: Path, *, create: bool = False
+) -> Iterator[tuple[str, OfflineInvoiceQueue]]:
+    profile, options, kind, context, directory = workflow_config(ctx, root)
+    with offline_store(directory, create=create) as store:
+        yield (
+            profile,
+            OfflineInvoiceQueue(
+                store, options=options, context_type=kind, context_value=context, namespace=profile
+            ),
+        )
+
+
 def _summary(row: StoredOfflineInvoice, now: str) -> dict[str, Any]:
-    status = row.progress.status.value
+    status = row.progress.status
     return {
         "invoice_hash": row.progress.invoice_hash,
-        "status": status,
+        "status": status.value,
         "due_at": row.due_at,
-        "overdue": _date(row.due_at) <= _date(now) and status != "complete",
+        "overdue": _date(row.due_at) <= _date(now)
+        and status not in {OfflineInvoiceStatus.ACCEPTED, OfflineInvoiceStatus.COMPLETE},
         "revision": row.revision,
         "mode": row.mode.value,
         "ksef_status": row.progress.ksef_status,
@@ -62,11 +80,7 @@ def enqueue(
     ),
 ) -> None:
     with workflow_errors(ctx, "offline.enqueue"):
-        profile, options, kind, context, directory = workflow_config(ctx, state_dir)
-        with offline_store(directory, create=True) as store:
-            queue = OfflineInvoiceQueue(
-                store, options=options, context_type=kind, context_value=context, namespace=profile
-            )
+        with _local_queue(ctx, state_dir, create=True) as (profile, queue):
             with xml.open("rb") as source:
                 content = source.read(MAX_OFFLINE_XML_BYTES + 1)
             row = queue.enqueue(content, due_at=due_at, correction_of=correction_of, mode=mode)
@@ -87,12 +101,8 @@ def status(
 ) -> None:
     with workflow_errors(ctx, "offline.status"):
         after = _page_cursor(invoice_hash, after_due_at, after_hash)
-        profile, options, kind, context, directory = workflow_config(ctx, state_dir)
         now = utc_timestamp(datetime.now(timezone.utc).isoformat())
-        with offline_store(directory) as store:
-            queue = OfflineInvoiceQueue(
-                store, options=options, context_type=kind, context_value=context, namespace=profile
-            )
+        with _local_queue(ctx, state_dir) as (profile, queue):
             if invoice_hash is not None:
                 row = queue.status(invoice_hash)
                 if row is None:
@@ -152,11 +162,7 @@ def upo(
     out: Annotated[Path, typer.Option("--out", help="New private UPO file.")],
 ) -> None:
     with workflow_errors(ctx, "offline.upo"):
-        profile, options, kind, context, directory = workflow_config(ctx, state_dir)
-        with offline_store(directory) as store:
-            queue = OfflineInvoiceQueue(
-                store, options=options, context_type=kind, context_value=context, namespace=profile
-            )
+        with _local_queue(ctx, state_dir) as (profile, queue):
             receipt = queue.read_upo(invoice_hash)
         # Write and close before publishing the file. Linking fails if the
         # destination already exists, including an existing symbolic link.
@@ -174,4 +180,57 @@ def upo(
             temporary.unlink()
         get_renderer(require_context(ctx)).success(
             command="offline.upo", profile=profile, data={"saved": str(out)}
+        )
+
+
+@app.command("reschedule")
+def reschedule(
+    ctx: typer.Context,
+    state_dir: Annotated[Path, typer.Option("--state-dir", help="Private workflow directory.")],
+    invoice_hash: Annotated[str, typer.Option("--invoice-hash")],
+    due_at: Annotated[str, typer.Option("--due-at", help="New deadline in ISO 8601 with zone.")],
+    revision: Annotated[int, typer.Option("--revision", min=1)],
+) -> None:
+    with workflow_errors(ctx, "offline.reschedule"):
+        with _local_queue(ctx, state_dir) as (profile, queue):
+            row = queue.reschedule(invoice_hash, due_at=due_at, expected_revision=revision)
+        now = utc_timestamp(datetime.now(timezone.utc).isoformat())
+        get_renderer(require_context(ctx)).success(
+            command="offline.reschedule", profile=profile, data=_summary(row, now)
+        )
+
+
+@app.command("retry-cancelled")
+def retry_cancelled(
+    ctx: typer.Context,
+    state_dir: Annotated[Path, typer.Option("--state-dir", help="Private workflow directory.")],
+    invoice_hash: Annotated[str, typer.Option("--invoice-hash")],
+) -> None:
+    with workflow_errors(ctx, "offline.retry-cancelled"):
+        with _local_queue(ctx, state_dir) as (profile, queue):
+            row = queue.retry_cancelled(invoice_hash)
+        now = utc_timestamp(datetime.now(timezone.utc).isoformat())
+        get_renderer(require_context(ctx)).success(
+            command="offline.retry-cancelled", profile=profile, data=_summary(row, now)
+        )
+
+
+@app.command("retry-unsubmitted")
+def retry_unsubmitted(
+    ctx: typer.Context,
+    state_dir: Annotated[Path, typer.Option("--state-dir", help="Private workflow directory.")],
+    invoice_hash: Annotated[str, typer.Option("--invoice-hash")],
+    timeout: Annotated[float, typer.Option("--timeout", min=1, max=600)] = 60,
+) -> None:
+    with workflow_errors(ctx, "offline.retry-unsubmitted"):
+        profile, options, kind, context, directory = workflow_config(ctx, state_dir)
+        with (
+            offline_store(directory) as store,
+            workflow_client(profile, options, kind, context) as client,
+        ):
+            queue = client.invoices.offline(store, namespace=profile)
+            row = queue.retry_if_unsubmitted(invoice_hash, timeout=timeout)
+        now = utc_timestamp(datetime.now(timezone.utc).isoformat())
+        get_renderer(require_context(ctx)).success(
+            command="offline.retry-unsubmitted", profile=profile, data=_summary(row, now)
         )

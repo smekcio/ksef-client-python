@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
 import warnings
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import AbstractContextManager, contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -78,7 +79,7 @@ def _lock_owner_state(lock_path: Path) -> str:
 
 
 @contextmanager
-def _cache_lock() -> Iterator[None]:
+def _cache_lock(path: Path | None = None) -> Iterator[None]:
     """Blokada międzyprocesowa wokół odczytu i zapisu cache.
 
     Bez niej dwa równoległe uruchomienia CLI (każde pisze metadane swojego
@@ -90,7 +91,7 @@ def _cache_lock() -> Iterator[None]:
     przejmowana — inaczej jedno `Stop-Process -Force` trwale odbierało
     możliwość odczytu metadanych tokenów.
     """
-    lock_path = _cache_lock_file()
+    lock_path = path if path is not None else _cache_lock_file()
     try:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -146,6 +147,13 @@ def _cache_lock() -> Iterator[None]:
             lock_path.unlink()
 
 
+def auth_state_lock(profile: str) -> AbstractContextManager[None]:
+    """Serialize changes spanning the keyring and metadata for one profile."""
+    name = profile.casefold() if os.name == "nt" else profile
+    digest = hashlib.sha256(name.encode()).hexdigest()
+    return _cache_lock(cache_file().with_name(f"auth-{digest}.lock"))
+
+
 def _corrupt_backup_name(path: Path) -> Path:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return path.with_name(f"{path.stem}.corrupt-{timestamp}{path.suffix}")
@@ -197,9 +205,7 @@ def _save_cache(payload: dict[str, dict[str, dict[str, str]]]) -> None:
         # przy przerwanym procesie, a brak `os.replace` pozwalał czytelnikowi
         # zobaczyć połowę dokumentu.
         temp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        temp_path.write_text(
-            json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8"
-        )
+        temp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
         os.replace(temp_path, path)
     except OSError as exc:
         with suppress(OSError, UnboundLocalError):

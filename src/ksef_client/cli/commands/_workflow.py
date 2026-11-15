@@ -8,12 +8,14 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import typer
 
 from ksef_client import AuthenticatedClient, Ksef, KsefClientOptions
 from ksef_client.exceptions import KsefError, KsefRateLimitError
 from ksef_client.facade import connection_options
+from ksef_client.models import TokenInfo
 from ksef_client.offline_invoices import SQLiteOfflineInvoiceStore
 from ksef_client.operations import environment_key
 from ksef_client.profiles import ProfileStore
@@ -21,8 +23,9 @@ from ksef_client.retry import parse_retry_after_seconds
 from ksef_client.token_manager import TokenManager
 
 from ..auth.keyring_store import get_tokens
+from ..auth.manager import save_refreshed_access
 from ..auth.scope import login_scope, token_pair_digest
-from ..auth.token_cache import get_cached_metadata
+from ..auth.token_cache import auth_state_lock, get_cached_metadata
 from ..context import profile_label, require_context, require_profile
 from ..errors import CliError
 from ..exit_codes import ExitCode, exit_code_for_error
@@ -60,11 +63,22 @@ def workflow_key(variable: str) -> bytes:
 
 
 def workflow_client(profile: str, options: KsefClientOptions, kind: str, context: str) -> Ksef:
-    tokens = get_tokens(profile)
-    metadata = get_cached_metadata(profile) or {}
+    endpoint = urlsplit(options.normalized_base_url())
+    if (
+        endpoint.scheme != "https"
+        or not endpoint.hostname
+        or endpoint.username is not None
+        or endpoint.query
+        or endpoint.fragment
+    ):
+        raise CliError("A fixed HTTPS API endpoint is required.", ExitCode.CONFIG_ERROR)
+    scope = login_scope(options.base_url, kind, context)
+    with auth_state_lock(profile):
+        tokens = get_tokens(profile)
+        metadata = get_cached_metadata(profile) or {}
     if (
         not tokens
-        or metadata.get("login_scope") != login_scope(options.base_url, kind, context)
+        or metadata.get("login_scope") != scope
         or metadata.get("token_pair_digest") != token_pair_digest(*tokens)
     ):
         raise CliError(
@@ -72,8 +86,19 @@ def workflow_client(profile: str, options: KsefClientOptions, kind: str, context
             ExitCode.AUTH_ERROR,
             "Log in again with ksef auth login-xades or ksef auth login-token.",
         )
+    expected_tokens = tokens
+
+    def persist(info: TokenInfo) -> None:
+        nonlocal expected_tokens
+        if save_refreshed_access(
+            profile, expected_tokens, info.token, info.valid_until or "", expected_scope=scope
+        ):
+            expected_tokens = info.token, expected_tokens[1]
+
     manager = TokenManager(
-        *tokens, access_token_valid_until=metadata.get("access_valid_until") or None
+        *tokens,
+        access_token_valid_until=metadata.get("access_valid_until") or None,
+        on_refresh=persist,
     )
     return Ksef(
         AuthenticatedClient(options, manager), options, context_type=kind, context_value=context

@@ -17,7 +17,12 @@ from ..exit_codes import ExitCode
 from ..sdk.factory import create_client
 from .keyring_store import clear_tokens, get_tokens, save_tokens
 from .scope import login_scope, token_pair_digest
-from .token_cache import clear_cached_metadata, get_cached_metadata, set_cached_metadata
+from .token_cache import (
+    auth_state_lock,
+    clear_cached_metadata,
+    get_cached_metadata,
+    set_cached_metadata,
+)
 
 
 @dataclass(frozen=True)
@@ -267,26 +272,27 @@ def login_with_token(
         )
 
     if save:
-        token_reference_number = _extract_ksef_token_reference_number(safe_token) or ""
-        save_tokens(
-            profile,
-            result.tokens.access_token.token,
-            result.tokens.refresh_token.token,
-        )
-        set_cached_metadata(
-            profile,
-            {
-                "method": "token",
-                "login_scope": login_scope(base_url, safe_context_type, safe_context_value),
-                "token_pair_digest": token_pair_digest(
-                    result.tokens.access_token.token, result.tokens.refresh_token.token
-                ),
-                "access_valid_until": result.tokens.access_token.valid_until or "",
-                "refresh_valid_until": result.tokens.refresh_token.valid_until or "",
-                "auth_reference_number": result.reference_number,
-                "ksef_token_reference_number": token_reference_number,
-            },
-        )
+        with auth_state_lock(profile):
+            token_reference_number = _extract_ksef_token_reference_number(safe_token) or ""
+            save_tokens(
+                profile,
+                result.tokens.access_token.token,
+                result.tokens.refresh_token.token,
+            )
+            set_cached_metadata(
+                profile,
+                {
+                    "method": "token",
+                    "login_scope": login_scope(base_url, safe_context_type, safe_context_value),
+                    "token_pair_digest": token_pair_digest(
+                        result.tokens.access_token.token, result.tokens.refresh_token.token
+                    ),
+                    "access_valid_until": result.tokens.access_token.valid_until or "",
+                    "refresh_valid_until": result.tokens.refresh_token.valid_until or "",
+                    "auth_reference_number": result.reference_number,
+                    "ksef_token_reference_number": token_reference_number,
+                },
+            )
 
     return {
         "reference_number": result.reference_number,
@@ -405,24 +411,25 @@ def login_with_xades(
         )
 
     if save:
-        save_tokens(
-            profile,
-            result.tokens.access_token.token,
-            result.tokens.refresh_token.token,
-        )
-        set_cached_metadata(
-            profile,
-            {
-                "method": "xades",
-                "login_scope": login_scope(base_url, safe_context_type, safe_context_value),
-                "token_pair_digest": token_pair_digest(
-                    result.tokens.access_token.token, result.tokens.refresh_token.token
-                ),
-                "access_valid_until": result.tokens.access_token.valid_until or "",
-                "refresh_valid_until": result.tokens.refresh_token.valid_until or "",
-                "auth_reference_number": result.reference_number,
-            },
-        )
+        with auth_state_lock(profile):
+            save_tokens(
+                profile,
+                result.tokens.access_token.token,
+                result.tokens.refresh_token.token,
+            )
+            set_cached_metadata(
+                profile,
+                {
+                    "method": "xades",
+                    "login_scope": login_scope(base_url, safe_context_type, safe_context_value),
+                    "token_pair_digest": token_pair_digest(
+                        result.tokens.access_token.token, result.tokens.refresh_token.token
+                    ),
+                    "access_valid_until": result.tokens.access_token.valid_until or "",
+                    "refresh_valid_until": result.tokens.refresh_token.valid_until or "",
+                    "auth_reference_number": result.reference_number,
+                },
+            )
 
     return {
         "reference_number": result.reference_number,
@@ -455,6 +462,17 @@ def refresh_access_token(*, profile: str, base_url: str, save: bool = True) -> d
             "Run `ksef auth login-token` first.",
         )
     _, refresh_token = tokens
+    metadata = get_cached_metadata(profile) or {}
+    scope = metadata.get("login_scope")
+    if scope is not None:
+        _, kind, context = _profile_context(profile)
+        if (
+            not kind
+            or not context
+            or scope != login_scope(base_url, kind, context)
+            or metadata.get("token_pair_digest") != token_pair_digest(*tokens)
+        ):
+            raise CliError("Stored login does not match the selected context.", ExitCode.AUTH_ERROR)
     with create_client(base_url) as client:
         refreshed = client.auth.refresh_access_token(refresh_token)
 
@@ -478,33 +496,43 @@ def refresh_access_token(*, profile: str, base_url: str, save: bool = True) -> d
             ExitCode.API_ERROR,
             "Try login again with `ksef auth login-token`.",
         )
-    if save:
-        save_tokens(profile, new_access_token, refresh_token)
-        metadata = get_cached_metadata(profile) or {}
-        # NIE wymyślamy `method`: wcześniej brak wpisu w cache (np. uszkodzony
-        # albo skasowany plik) dawał `method="token"` nawet dla profilu XAdES,
-        # przez co `auth revoke-self-token` unieważniał firmowy token KSeF.
-        # Preserve durable workflow binding only when the refreshed pair and
-        # endpoint are the ones for which the scope was actually established.
-        _, kind, context = _profile_context(profile)
-        if (
-            kind
-            and context
-            and metadata.get("token_pair_digest") == token_pair_digest(*tokens)
-            and metadata.get("login_scope") == login_scope(base_url, kind, context)
-        ):
-            metadata["token_pair_digest"] = token_pair_digest(new_access_token, refresh_token)
-        else:
-            metadata.pop("login_scope", None)
-            metadata.pop("token_pair_digest", None)
-        metadata["access_valid_until"] = str(access_valid_until or "")
-        set_cached_metadata(profile, metadata)
-
+    saved = save and save_refreshed_access(
+        profile, tokens, new_access_token, str(access_valid_until or ""), expected_scope=scope
+    )
     return {
         "profile": profile,
         "access_valid_until": str(access_valid_until or ""),
-        "saved": save,
+        "saved": saved,
     }
+
+
+def save_refreshed_access(
+    profile: str,
+    expected_tokens: tuple[str, str],
+    access_token: str,
+    valid_until: str,
+    *,
+    expected_scope: str | None = None,
+) -> bool:
+    """Persist a refresh unless another process has changed the login meanwhile."""
+    with auth_state_lock(profile):
+        if get_tokens(profile) != expected_tokens:
+            return False
+        metadata = get_cached_metadata(profile) or {}
+        bound_to_pair = metadata.get("token_pair_digest") == token_pair_digest(*expected_tokens)
+        if expected_scope is not None and (
+            metadata.get("login_scope") != expected_scope or not bound_to_pair
+        ):
+            return False
+        if bound_to_pair:
+            metadata["token_pair_digest"] = token_pair_digest(access_token, expected_tokens[1])
+        else:
+            metadata.pop("login_scope", None)
+            metadata.pop("token_pair_digest", None)
+        metadata["access_valid_until"] = valid_until
+        save_tokens(profile, access_token, expected_tokens[1])
+        set_cached_metadata(profile, metadata)
+    return True
 
 
 def revoke_self_token(*, profile: str, base_url: str) -> dict[str, Any]:
@@ -552,13 +580,17 @@ def revoke_self_token(*, profile: str, base_url: str) -> dict[str, Any]:
             )
         client.tokens.revoke_token(reference_number, access_token=access_token)
 
-    clear_tokens(profile)
-    clear_cached_metadata(profile)
+    with auth_state_lock(profile):
+        current = get_tokens(profile)
+        logged_out = current is None or current[1] == tokens[1]
+        if logged_out:
+            clear_tokens(profile)
+            clear_cached_metadata(profile)
     return {
         "profile": profile,
         "reference_number": reference_number,
         "revoked": True,
-        "logged_out": True,
+        "logged_out": logged_out,
     }
 
 
@@ -568,10 +600,11 @@ def logout(profile: str) -> dict[str, Any]:
     Metadane czyścimy w `finally`: gdy magazyn tokenów odmówi usunięcia (np. brak
     praw do `tokens.json`), wpis w cache nie może zostać i udawać aktywnej sesji.
     """
-    try:
-        clear_tokens(profile)
-    finally:
-        clear_cached_metadata(profile)
+    with auth_state_lock(profile):
+        try:
+            clear_tokens(profile)
+        finally:
+            clear_cached_metadata(profile)
     return {
         "profile": profile,
         "logged_out": True,
