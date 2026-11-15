@@ -6,15 +6,22 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sqlite3
-from collections.abc import Callable
-from contextlib import closing
+from collections.abc import Callable, Iterator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .certificates import CertificateRecord, CertificateStoreError, FileCertificateStore
+from .certificates import (
+    CertificateRecord,
+    CertificateStoreError,
+    FileCertificateStore,
+    StoredCertificate,
+    _validate_name,
+)
 from .exceptions import KsefError
 from .facade import Ksef, XadesCredentials, connection_options
 from .invoice_xml_storage import _safe_directory
@@ -22,6 +29,7 @@ from .operations import environment_key
 from .profiles import Profile
 
 _logger = logging.getLogger(__name__)
+_SUBJECT_IDENTIFIER_TYPES = {"certificateSubject", "certificateFingerprint"}
 
 
 class CertificateRotationError(CertificateStoreError):
@@ -36,6 +44,22 @@ class CertificateSelection:
     fingerprint_sha256: str
     generation: int
     subject_identifier_type: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.name) is not str
+            or not isinstance(self.fingerprint_sha256, str)
+            or re.fullmatch("[0-9a-f]{64}", self.fingerprint_sha256) is None
+            or type(self.generation) is not int
+            or self.generation < 1
+            or self.subject_identifier_type not in _SUBJECT_IDENTIFIER_TYPES
+        ):
+            raise CertificateRotationError("Invalid stored certificate selection")
+        try:
+            if _validate_name(self.name) != self.name:
+                raise CertificateStoreError("Noncanonical name")
+        except CertificateStoreError:
+            raise CertificateRotationError("Invalid stored certificate name") from None
 
 
 @dataclass(frozen=True)
@@ -128,7 +152,7 @@ class ProfileCertificates:
         if selected is None:
             return CertificateHealth(None, "unconfigured")
         try:
-            record = self._store.record(selected.name)
+            record = self._store.record(selected.name, require_key=True)
         except CertificateStoreError:
             return CertificateHealth(selected, "unavailable")
         if record.fingerprint_sha256 != selected.fingerprint_sha256:
@@ -148,13 +172,14 @@ class ProfileCertificates:
             return "expired"
         return "valid"
 
-    def _credentials(
+    def _checked_certificate(
         self,
         name: str,
         password: str | bytes | None,
-        subject_identifier_type: str,
         fingerprint: str | None = None,
-    ) -> tuple[XadesCredentials, CertificateRecord]:
+    ) -> StoredCertificate:
+        if self._store.require_password and password is None:
+            raise CertificateRotationError("This certificate store requires a key password")
         stored = self._store.load(name, password=password)
         record = stored.record
         if fingerprint is not None and record.fingerprint_sha256 != fingerprint:
@@ -165,9 +190,14 @@ class ProfileCertificates:
         environment = self._profile.environment
         if record.environment and (environment is None or record.environment != environment.name):
             raise CertificateRotationError("Certificate environment does not match the profile")
-        return XadesCredentials.from_stored_certificate(
-            stored, subject_identifier_type=subject_identifier_type
-        ), record
+        return stored
+
+    @staticmethod
+    def _revoke_session(client: Ksef) -> None:
+        try:
+            client.api.auth.revoke_current_session()
+        except KsefError:
+            _logger.warning("Could not revoke the temporary XAdES session")
 
     def activate(
         self,
@@ -186,9 +216,13 @@ class ProfileCertificates:
             current = self._select(connection)
         if (current.generation if current else 0) != expected_generation:
             raise CertificateRotationError("Certificate selection changed")
-        if subject_identifier_type not in {"certificateSubject", "certificateFingerprint"}:
+        if subject_identifier_type not in _SUBJECT_IDENTIFIER_TYPES:
             raise ValueError("Invalid XAdES subject identifier type")
-        credentials, record = self._credentials(name, password, subject_identifier_type)
+        candidate = self._checked_certificate(name, password)
+        record = candidate.record
+        credentials = XadesCredentials.from_stored_certificate(
+            candidate, subject_identifier_type=subject_identifier_type
+        )
         with Ksef.connect(
             credentials=credentials, profile=self._profile, timeout=timeout
         ) as client:
@@ -196,12 +230,10 @@ class ProfileCertificates:
                 if verify is not None:
                     verify(client)
             finally:
-                try:
-                    client.api.auth.revoke_current_session()
-                except KsefError:
-                    _logger.warning("Could not revoke the temporary XAdES verification session")
-        if self._store.record(record.name).fingerprint_sha256 != record.fingerprint_sha256:
-            raise CertificateRotationError("Candidate certificate changed during verification")
+                self._revoke_session(client)
+        # Verify that the same usable pair is still available after the remote
+        # check, which may take longer than a concurrent store update.
+        self._checked_certificate(name, password, record.fingerprint_sha256)
         with closing(self._open()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             current = self._select(connection)
@@ -244,7 +276,23 @@ class ProfileCertificates:
             if password is not None:
                 raise ValueError("Pass a password or a version-specific password provider")
             password = password_for(selected.name)
-        credentials, _ = self._credentials(
-            selected.name, password, selected.subject_identifier_type, selected.fingerprint_sha256
+        stored = self._checked_certificate(selected.name, password, selected.fingerprint_sha256)
+        credentials = XadesCredentials.from_stored_certificate(
+            stored, subject_identifier_type=selected.subject_identifier_type
         )
         return Ksef.connect(credentials=credentials, profile=self._profile, timeout=timeout)
+
+    @contextmanager
+    def session(
+        self,
+        *,
+        password: str | bytes | None = None,
+        password_for: Callable[[str], str | bytes | None] | None = None,
+        timeout: float = 120,
+    ) -> Iterator[Ksef]:
+        """Open one worker cycle with the current credential, then revoke its auth session."""
+        with self.connect(password=password, password_for=password_for, timeout=timeout) as client:
+            try:
+                yield client
+            finally:
+                self._revoke_session(client)

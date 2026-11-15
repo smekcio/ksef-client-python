@@ -23,7 +23,7 @@ Certyfikat `Offline` jest przeznaczony do QR II.
    aktywacja zakończy się wcześniej, operacja z nieaktualną generacją zgłosi
    konflikt. Jeśli KSeF odrzuci logowanie lub sprawdzenie uprawnień,
    pozostanie poprzedni wybór.
-3. Worker wywołuje `connect()` na początku cyklu i kończy cykl na tym samym
+3. Worker otwiera `session()` na początku cyklu i kończy cykl na tym samym
    kliencie. Kolejne cykle odczytują nowy wybór. Przed wycofaniem starego
    certyfikatu doprowadź rozpoczęte zadania do stanu, który można wznowić
    w kolejnym cyklu z tymi samymi uprawnieniami.
@@ -49,7 +49,7 @@ selection = certificates.activate(
 )
 
 # Kod jednego cyklu workera. read_password pobiera hasło po nazwie wpisu.
-with certificates.connect(password_for=read_password) as client:
+with certificates.session(password_for=read_password) as client:
     process_pending_invoices(client)
 ```
 
@@ -67,3 +67,16 @@ Wystawca i KSeF nadal odpowiadają za status unieważnienia i uprawnienia.
 Baza wyboru i magazyn kluczy powinny być dostępne wyłącznie dla operatora
 i procesów KSeF. Zmieniony adres API, nazwa profilu albo kontekst tworzą
 osobne powiązanie.
+
+`session()` kończy sesję uwierzytelniania po zakończeniu cyklu, również
+przy błędzie. Granice cyklu ustal zgodnie z obciążeniem i limitami
+uwierzytelniania KSeF, np. przetwarzaj grupę pozycji w jednym cyklu.
+
+[Przykład workera z kolejką offline](examples/xades_offline_worker.py)
+udostępnia polecenia `status`, `activate` i `run`. Każde uruchomienie
+`run` wykonuje ograniczoną liczbę kroków na zaległych fakturach. Działa na
+istniejącym `SQLiteOfflineInvoiceStore`, do którego aplikacja zapisuje faktury
+z przestrzenią nazw równą nazwie profilu. W przykładzie proces otrzymuje hasła
+w `KSEF_XADES_KEY_PASSWORDS` jako obiekt JSON mapujący nazwy certyfikatów na
+ich hasła i osobny klucz kolejki w `KSEF_OFFLINE_STATE_KEY` jako Base64.
+Dostarczaj je przez konfigurację sekretów używaną przez nadzorcę procesu.
