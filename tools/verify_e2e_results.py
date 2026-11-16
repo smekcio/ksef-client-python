@@ -23,7 +23,18 @@ REQUIRED = [
     "tests/test_e2e_invoice_xml_sync.py::test_e2e_test_environment_invoice_xml_restart",
 ]
 TOKEN_REV2 = ["tests/test_e2e_rev2_tokens.py::test_e2e_test_environment_rev2_token_lifecycle"]
-LIVE_SUITES = {"required": REQUIRED, "token-rev2": TOKEN_REV2}
+OPERATIONS = [
+    "tests/test_e2e_certificate_rotation.py::"
+    "test_e2e_test_environment_certificate_rotation_between_cycles",
+    "tests/test_e2e_offline_queue.py::test_e2e_test_environment_offline_queue_restart_and_upo",
+    "tests/test_e2e_export_archive.py::test_e2e_test_environment_export_archive_restart",
+]
+LIVE_SUITES = {
+    "required": REQUIRED,
+    "token-rev2": TOKEN_REV2,
+    "operations": OPERATIONS,
+    "extended": [*TOKEN_REV2, *OPERATIONS],
+}
 
 
 def validate_live_install(required: list[str], *, suite: str = "required") -> None:

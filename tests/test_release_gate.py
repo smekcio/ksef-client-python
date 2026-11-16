@@ -91,15 +91,17 @@ def test_gate_cli_and_runner_fail_closed(tmp_path, monkeypatch):
     assert gate.main([str(report), "--run"]) == 5
 
 
-def test_extended_suite_cannot_satisfy_required_gate(tmp_path, monkeypatch):
+@pytest.mark.parametrize("suite", ["token-rev2", "operations", "extended"])
+def test_extended_suite_cannot_satisfy_required_gate(tmp_path, monkeypatch, suite):
     report = tmp_path / "junit.xml"
-    write_report(report, [(name, None) for name in gate.TOKEN_REV2])
-    assert gate.main([str(report), "--suite", "token-rev2"]) == 0
+    scenarios = gate.LIVE_SUITES[suite]
+    write_report(report, [(name, None) for name in scenarios])
+    assert gate.main([str(report), "--suite", suite]) == 0
     assert gate.main([str(report)]) == 1
     monkeypatch.setenv("KSEF_E2E", "1")
     monkeypatch.setenv("KSEF_TEST_INSTALLED", "1")
     with pytest.raises(ValueError, match="approved TEST manifest"):
-        gate.validate_live_install(gate.TOKEN_REV2)
+        gate.validate_live_install(scenarios)
 
 
 def fake_dist(tmp_path, version="0.20.0"):
