@@ -241,28 +241,33 @@ def test_coordinators_reject_streams_from_the_other_execution_mode():
         asyncio.run(async_http.aclose())
 
 
-def test_live_poll_waits_for_hwm_and_preserves_other_failures():
+def test_live_pair_discovery_spans_pages_and_preserves_pagination_failures():
     from ksef_client import KsefIncompletePaginationError
     from ksef_client.invoice_search import InvoiceMetadataObservationPage
-    from tests.invoice_sync_live_worker import find_at_hwm
-    from tests.test_invoice_sync import row
+    from tests.invoice_sync_live_worker import find_indexed_pair
+    from tests.test_invoice_sync import H2, row
+    from tests.test_invoice_xml_sync import NUMBER, NUMBER2
 
     class Scan:
-        def __init__(self, reason=None):
+        def __init__(self, reason=None, distinct=True):
             self.reason = reason
+            self.distinct = distinct
 
         def observation_page(self, cursor):
             if self.reason:
                 raise KsefIncompletePaginationError(self.reason, last_cursor="private")
+            if cursor is None:
+                return InvoiceMetadataObservationPage((row(), row(NUMBER, date=H1)), "next", H2)
             return InvoiceMetadataObservationPage(
-                (row(),) if cursor is None else (), "next" if cursor is None else None, H1
+                (row(NUMBER2, date=H2 if self.distinct else H1),), None, H2
             )
 
-    assert find_at_hwm(Scan("hwm_before_start"), "A") == (None, None)
-    invoice, hwm = find_at_hwm(Scan(), "A")
-    assert invoice.ksef_number == "A" and hwm == H1
-    with pytest.raises(KsefIncompletePaginationError):
-        find_at_hwm(Scan("repeated_page"), "A")
+    assert find_indexed_pair(Scan("hwm_before_start")) is None
+    assert find_indexed_pair(Scan(distinct=False)) is None
+    assert find_indexed_pair(Scan()) == ((NUMBER, H1), (NUMBER2, H2))
+    with pytest.raises(KsefIncompletePaginationError) as error:
+        find_indexed_pair(Scan("repeated_page"))
+    assert error.value.reason_code == "repeated_page"
 
 
 def test_live_wire_bounds_validate_windows_and_hwm_clipping():
