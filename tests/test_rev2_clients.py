@@ -103,6 +103,9 @@ def test_rev2_operations(is_async):
             "authorIdentifier": "identifier",
         }
         assert transport.last_request_kwargs["headers"] == {"x-continuation-token": "next"}
+        for single in ("Active", m.TokenStatusFilterRev2.ACTIVE):
+            await invoke(tokens(transport).list_tokens_rev2, statuses=single)
+            assert transport.last_request_kwargs["params"] == {"status": ["Active"]}
         await invoke(tokens(transport).list_tokens_rev2)
         assert transport.last_request_kwargs["params"] == {}
         assert transport.last_request_kwargs["headers"] is None
@@ -280,6 +283,14 @@ def test_rev2_wire_authorization_and_non_replay(is_async):
         with pytest.raises(KsefHttpError) as unavailable:
             await invoke(tokens(transport).approve_token, REFERENCE)
         assert unavailable.value.status_code == 503
+        with pytest.raises(KsefHttpError) as generation_failed:
+            await invoke(
+                tokens(transport).generate_token_rev2,
+                m.GenerateTokenRequestRev2(
+                    description="Test token", permissions=[m.TokenPermissionType.INVOICEREAD]
+                ),
+            )
+        assert generation_failed.value.status_code == 503
 
     async def run():
         options = replace(DEMO, retry=RetryConfig(max_retries=2))
@@ -296,10 +307,11 @@ def test_rev2_wire_authorization_and_non_replay(is_async):
                 await exercise(transport, AuthClient, TokensClient)
 
     asyncio.run(run())
-    assert len(requests) == 3
-    listed, status, approved = requests
+    assert len(requests) == 4
+    listed, status, approved, generated = requests
     assert listed.url.params.get_list("status") == ["Active", "AwaitingApproval"]
     assert listed.headers["x-continuation-token"] == "next-page"
     assert listed.headers["Authorization"] == "Bearer access-token"
     assert status.headers["Authorization"] == "Bearer operation-token"
     assert approved.headers["Authorization"] == "Bearer access-token"
+    assert generated.headers["Authorization"] == "Bearer access-token"

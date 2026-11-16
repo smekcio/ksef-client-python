@@ -157,7 +157,7 @@ def test_e2e_test_environment_rev2_token_lifecycle():
             _wait_for_status(owner.tokens, child.reference_number, Status.AWAITINGAPPROVAL)
 
         waiting = owner.tokens.list_tokens_rev2(
-            description=prefix, statuses=[m.TokenStatusFilterRev2.AWAITINGAPPROVAL]
+            description=prefix, statuses=m.TokenStatusFilterRev2.AWAITINGAPPROVAL
         )
         assert {token.reference_number for token in waiting.tokens} == {
             approval.reference_number,
