@@ -595,6 +595,18 @@
   enforces per pre-encryption part; `build_zip` sanitises entry names like `build_tar_gz`, and both
   readers reject duplicate entry names instead of silently dropping content
 
+## 0.25.0 (2026-11-16)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* feat: support KSeF API 2.10 token and authentication revisions by @smekcio in https://github.com/smekcio/ksef-client-python/pull/125
+* test: verify durable KSeF operations and certificate rotation on TEST by @smekcio in https://github.com/smekcio/ksef-client-python/pull/126
+
+
+**Full Changelog**: https://github.com/smekcio/ksef-client-python/compare/v0.24.0...v0.25.0
+
 ## 0.24.0 (2026-11-15)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
