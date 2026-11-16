@@ -121,6 +121,12 @@ class AuthenticationMethodCategory(OpenApiEnum):
     TOKEN = "Token"
     OTHER = "Other"
 
+class AuthenticationMethodCategoryRev2Code(OpenApiEnum):
+    XADESSIGNATURE = "XadesSignature"
+    NATIONALNODE = "NationalNode"
+    TOKEN = "Token"
+    FUTUREVALUE = "FutureValue"
+
 class AuthenticationTokenStatus(OpenApiEnum):
     PENDING = "Pending"
     ACTIVE = "Active"
@@ -426,6 +432,7 @@ class EuEntityPermissionSubjectDetailsType(OpenApiEnum):
 class EuEntityPermissionType(OpenApiEnum):
     INVOICEWRITE = "InvoiceWrite"
     INVOICEREAD = "InvoiceRead"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
 
 class EuEntityPermissionsAuthorIdentifierType(OpenApiEnum):
     NIP = "Nip"
@@ -437,6 +444,7 @@ class EuEntityPermissionsQueryPermissionType(OpenApiEnum):
     INVOICEWRITE = "InvoiceWrite"
     INVOICEREAD = "InvoiceRead"
     INTROSPECTION = "Introspection"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
 
 class EuEntityPermissionsSubjectIdentifierType(OpenApiEnum):
     FINGERPRINT = "Fingerprint"
@@ -707,11 +715,40 @@ class TokenAuthorIdentifierType(OpenApiEnum):
     PESEL = "Pesel"
     FINGERPRINT = "Fingerprint"
 
+class TokenAuthorIdentifierTypeCodeRev2(OpenApiEnum):
+    NIP = "Nip"
+    PESEL = "Pesel"
+    FINGERPRINT = "Fingerprint"
+    FUTUREVALUE = "FutureValue"
+
+class TokenAuthorIdentifierTypeFilterRev2(OpenApiEnum):
+    NIP = "Nip"
+    PESEL = "Pesel"
+    FINGERPRINT = "Fingerprint"
+
 class TokenContextIdentifierType(OpenApiEnum):
     NIP = "Nip"
     INTERNALID = "InternalId"
     NIPVATUE = "NipVatUe"
     PEPPOLID = "PeppolId"
+
+class TokenContextIdentifierTypeCodeRev2(OpenApiEnum):
+    NIP = "Nip"
+    INTERNALID = "InternalId"
+    NIPVATUE = "NipVatUe"
+    PEPPOLID = "PeppolId"
+    FUTUREVALUE = "FutureValue"
+
+class TokenPermissionCodeRev2(OpenApiEnum):
+    INVOICEREAD = "InvoiceRead"
+    INVOICEWRITE = "InvoiceWrite"
+    CREDENTIALSREAD = "CredentialsRead"
+    CREDENTIALSMANAGE = "CredentialsManage"
+    SUBUNITMANAGE = "SubunitManage"
+    ENFORCEMENTOPERATIONS = "EnforcementOperations"
+    INTROSPECTION = "Introspection"
+    COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
+    FUTUREVALUE = "FutureValue"
 
 class TokenPermissionType(OpenApiEnum):
     INVOICEREAD = "InvoiceRead"
@@ -722,6 +759,29 @@ class TokenPermissionType(OpenApiEnum):
     ENFORCEMENTOPERATIONS = "EnforcementOperations"
     INTROSPECTION = "Introspection"
     COLLECTIVEIDENTIFIERMANAGE = "CollectiveIdentifierManage"
+
+class TokenStatusFilterRev2(OpenApiEnum):
+    PENDING = "Pending"
+    ACTIVE = "Active"
+    REVOKING = "Revoking"
+    REVOKED = "Revoked"
+    FAILED = "Failed"
+    NOTYETACTIVE = "NotYetActive"
+    AWAITINGAPPROVAL = "AwaitingApproval"
+    APPROVALEXPIRED = "ApprovalExpired"
+    EXPIRED = "Expired"
+
+class TokenStatusRev2Code(OpenApiEnum):
+    PENDING = "Pending"
+    ACTIVE = "Active"
+    REVOKING = "Revoking"
+    REVOKED = "Revoked"
+    FAILED = "Failed"
+    NOTYETACTIVE = "NotYetActive"
+    AWAITINGAPPROVAL = "AwaitingApproval"
+    APPROVALEXPIRED = "ApprovalExpired"
+    EXPIRED = "Expired"
+    FUTUREVALUE = "FutureValue"
 
 Challenge: TypeAlias = str
 
@@ -820,9 +880,31 @@ class AuthenticationListItem(OpenApiModel):
     refresh_token_valid_until: Optional[str] = field(default=None, metadata={"json_key": "refreshTokenValidUntil"})
 
 @dataclass(frozen=True)
+class AuthenticationListItemRev2(OpenApiModel):
+    authentication_method_info: AuthenticationMethodInfoRev2 = field(metadata={"json_key": "authenticationMethodInfo"})
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
+    start_date: str = field(metadata={"json_key": "startDate"})
+    status: StatusInfo
+    is_current: Optional[bool] = field(default=None, metadata={"json_key": "isCurrent"})
+    is_token_redeemed: Optional[bool] = field(default=None, metadata={"json_key": "isTokenRedeemed"})
+    last_token_refresh_date: Optional[str] = field(default=None, metadata={"json_key": "lastTokenRefreshDate"})
+    refresh_token_valid_until: Optional[str] = field(default=None, metadata={"json_key": "refreshTokenValidUntil"})
+
+@dataclass(frozen=True)
 class AuthenticationListResponse(OpenApiModel):
     items: list[AuthenticationListItem]
     continuation_token: Optional[str] = field(default=None, metadata={"json_key": "continuationToken"})
+
+@dataclass(frozen=True)
+class AuthenticationListResponseRev2(OpenApiModel):
+    items: list[AuthenticationListItemRev2]
+    continuation_token: Optional[str] = field(default=None, metadata={"json_key": "continuationToken"})
+
+@dataclass(frozen=True)
+class AuthenticationMethodCategoryRev2(OpenApiModel):
+    code: AuthenticationMethodCategoryRev2Code
+    display_name: str = field(metadata={"json_key": "displayName"})
+    raw_code: str = field(metadata={"json_key": "rawCode"})
 
 @dataclass(frozen=True)
 class AuthenticationMethodInfo(OpenApiModel):
@@ -831,9 +913,24 @@ class AuthenticationMethodInfo(OpenApiModel):
     display_name: str = field(metadata={"json_key": "displayName"})
 
 @dataclass(frozen=True)
+class AuthenticationMethodInfoRev2(OpenApiModel):
+    category: AuthenticationMethodCategoryRev2
+    code: str
+    display_name: str = field(metadata={"json_key": "displayName"})
+
+@dataclass(frozen=True)
 class AuthenticationOperationStatusResponse(OpenApiModel):
     authentication_method: AuthenticationMethod = field(metadata={"json_key": "authenticationMethod"})
     authentication_method_info: AuthenticationMethodInfo = field(metadata={"json_key": "authenticationMethodInfo"})
+    start_date: str = field(metadata={"json_key": "startDate"})
+    status: StatusInfo
+    is_token_redeemed: Optional[bool] = field(default=None, metadata={"json_key": "isTokenRedeemed"})
+    last_token_refresh_date: Optional[str] = field(default=None, metadata={"json_key": "lastTokenRefreshDate"})
+    refresh_token_valid_until: Optional[str] = field(default=None, metadata={"json_key": "refreshTokenValidUntil"})
+
+@dataclass(frozen=True)
+class AuthenticationOperationStatusResponseRev2(OpenApiModel):
+    authentication_method_info: AuthenticationMethodInfoRev2 = field(metadata={"json_key": "authenticationMethodInfo"})
     start_date: str = field(metadata={"json_key": "startDate"})
     status: StatusInfo
     is_token_redeemed: Optional[bool] = field(default=None, metadata={"json_key": "isTokenRedeemed"})
@@ -1055,6 +1152,7 @@ class EffectiveContextLimits(OpenApiModel):
     batch_session: BatchSessionEffectiveContextLimits = field(metadata={"json_key": "batchSession"})
     collective_identifier: CollectiveIdentifierEffectiveContextLimits = field(metadata={"json_key": "collectiveIdentifier"})
     online_session: OnlineSessionEffectiveContextLimits = field(metadata={"json_key": "onlineSession"})
+    tokens: Optional[TokensEffectiveContextLimits] = None
 
 @dataclass(frozen=True)
 class EffectiveSubjectLimits(OpenApiModel):
@@ -1315,7 +1413,19 @@ class GenerateTokenRequest(OpenApiModel):
     permissions: list[TokenPermissionType]
 
 @dataclass(frozen=True)
+class GenerateTokenRequestRev2(OpenApiModel):
+    description: str
+    permissions: list[TokenPermissionType]
+    valid_from: Optional[str] = field(default=None, metadata={"json_key": "validFrom"})
+    valid_to: Optional[str] = field(default=None, metadata={"json_key": "validTo"})
+
+@dataclass(frozen=True)
 class GenerateTokenResponse(OpenApiModel):
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
+    token: str = field(repr=False)
+
+@dataclass(frozen=True)
+class GenerateTokenResponseRev2(OpenApiModel):
     reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
     token: str = field(repr=False)
 
@@ -1819,6 +1929,25 @@ class QueryTokensResponseItem(OpenApiModel):
     status_details: Optional[list[str]] = field(default=None, metadata={"json_key": "statusDetails"})
 
 @dataclass(frozen=True)
+class QueryTokensResponseItemRev2(OpenApiModel):
+    author_identifier: TokenAuthorIdentifierTypeCodeRev2Identifier = field(metadata={"json_key": "authorIdentifier"})
+    context_identifier: TokenContextIdentifierTypeCodeRev2Identifier = field(metadata={"json_key": "contextIdentifier"})
+    date_created: str = field(metadata={"json_key": "dateCreated"})
+    description: str
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
+    requested_permissions: list[TokenPermissionRev2] = field(metadata={"json_key": "requestedPermissions"})
+    status: TokenStatusRev2
+    valid_from: str = field(metadata={"json_key": "validFrom"})
+    valid_to: str = field(metadata={"json_key": "validTo"})
+    failure: Optional[TokenFailureRev2] = None
+    last_use_date: Optional[str] = field(default=None, metadata={"json_key": "lastUseDate"})
+
+@dataclass(frozen=True)
+class QueryTokensResponseRev2(OpenApiModel):
+    tokens: list[QueryTokensResponseItemRev2]
+    continuation_token: Optional[str] = field(default=None, metadata={"json_key": "continuationToken"})
+
+@dataclass(frozen=True)
 class RetrieveCertificatesListItem(OpenApiModel):
     certificate: str
     certificate_name: str = field(metadata={"json_key": "certificateName"})
@@ -2039,9 +2168,31 @@ class TestDataUpdateCertificateRequest(OpenApiModel):
     valid_to: str = field(metadata={"json_key": "validTo"})
 
 @dataclass(frozen=True)
+class TokenAuthorIdentifierTypeCodeRev2Identifier(OpenApiModel):
+    type: TokenAuthorIdentifierTypeCodeRev2IdentifierType
+    value: str
+
+@dataclass(frozen=True)
+class TokenAuthorIdentifierTypeCodeRev2IdentifierType(OpenApiModel):
+    code: TokenAuthorIdentifierTypeCodeRev2
+    display_name: str = field(metadata={"json_key": "displayName"})
+    raw_code: str = field(metadata={"json_key": "rawCode"})
+
+@dataclass(frozen=True)
 class TokenAuthorIdentifierTypeIdentifier(OpenApiModel):
     type: TokenAuthorIdentifierType
     value: str
+
+@dataclass(frozen=True)
+class TokenContextIdentifierTypeCodeRev2Identifier(OpenApiModel):
+    type: TokenContextIdentifierTypeCodeRev2IdentifierType
+    value: str
+
+@dataclass(frozen=True)
+class TokenContextIdentifierTypeCodeRev2IdentifierType(OpenApiModel):
+    code: TokenContextIdentifierTypeCodeRev2
+    display_name: str = field(metadata={"json_key": "displayName"})
+    raw_code: str = field(metadata={"json_key": "rawCode"})
 
 @dataclass(frozen=True)
 class TokenContextIdentifierTypeIdentifier(OpenApiModel):
@@ -2049,9 +2200,21 @@ class TokenContextIdentifierTypeIdentifier(OpenApiModel):
     value: str
 
 @dataclass(frozen=True)
+class TokenFailureRev2(OpenApiModel):
+    code: str
+    description: str
+    details: Optional[list[str]] = None
+
+@dataclass(frozen=True)
 class TokenInfo(OpenApiModel):
     token: str = field(repr=False)
     valid_until: str = field(metadata={"json_key": "validUntil"})
+
+@dataclass(frozen=True)
+class TokenPermissionRev2(OpenApiModel):
+    code: TokenPermissionCodeRev2
+    display_name: str = field(metadata={"json_key": "displayName"})
+    raw_code: str = field(metadata={"json_key": "rawCode"})
 
 @dataclass(frozen=True)
 class TokenStatusResponse(OpenApiModel):
@@ -2064,6 +2227,30 @@ class TokenStatusResponse(OpenApiModel):
     status: AuthenticationTokenStatus
     last_use_date: Optional[str] = field(default=None, metadata={"json_key": "lastUseDate"})
     status_details: Optional[list[str]] = field(default=None, metadata={"json_key": "statusDetails"})
+
+@dataclass(frozen=True)
+class TokenStatusResponseRev2(OpenApiModel):
+    author_identifier: TokenAuthorIdentifierTypeCodeRev2Identifier = field(metadata={"json_key": "authorIdentifier"})
+    context_identifier: TokenContextIdentifierTypeCodeRev2Identifier = field(metadata={"json_key": "contextIdentifier"})
+    date_created: str = field(metadata={"json_key": "dateCreated"})
+    description: str
+    reference_number: ReferenceNumber = field(metadata={"json_key": "referenceNumber"})
+    requested_permissions: list[TokenPermissionRev2] = field(metadata={"json_key": "requestedPermissions"})
+    status: TokenStatusRev2
+    valid_from: str = field(metadata={"json_key": "validFrom"})
+    valid_to: str = field(metadata={"json_key": "validTo"})
+    failure: Optional[TokenFailureRev2] = None
+    last_use_date: Optional[str] = field(default=None, metadata={"json_key": "lastUseDate"})
+
+@dataclass(frozen=True)
+class TokenStatusRev2(OpenApiModel):
+    code: TokenStatusRev2Code
+    display_name: str = field(metadata={"json_key": "displayName"})
+    raw_code: str = field(metadata={"json_key": "rawCode"})
+
+@dataclass(frozen=True)
+class TokensEffectiveContextLimits(OpenApiModel):
+    max_tokens: int = field(metadata={"json_key": "maxTokens"})
 
 @dataclass(frozen=True)
 class TooManyRequestsProblemDetails(OpenApiModel):

@@ -9,7 +9,9 @@ from ..models import (
     AuthenticationChallengeResponse,
     AuthenticationInitResponse,
     AuthenticationListResponse,
+    AuthenticationListResponseRev2,
     AuthenticationOperationStatusResponse,
+    AuthenticationOperationStatusResponseRev2,
     AuthenticationTokenRefreshResponse,
     AuthenticationTokensResponse,
     InitTokenAuthenticationRequest,
@@ -85,6 +87,22 @@ class AuthClient(BaseApiClient):
             response_model=AuthenticationListResponse,
             headers=headers or None,
             params=params or None,
+            access_token=access_token,
+        )
+
+    def get_active_sessions_rev2(
+        self,
+        *,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
+        access_token: str | None = None,
+    ) -> AuthenticationListResponseRev2:
+        return self._request_model(
+            "GET",
+            "/auth/sessions/rev2",
+            response_model=AuthenticationListResponseRev2,
+            headers={"x-continuation-token": continuation_token} if continuation_token else None,
+            params={"pageSize": page_size} if page_size is not None else None,
             access_token=access_token,
         )
 
@@ -166,6 +184,16 @@ class AuthClient(BaseApiClient):
             access_token=authentication_token,
         )
 
+    def get_auth_status_rev2(
+        self, reference_number: str, authentication_token: str
+    ) -> AuthenticationOperationStatusResponseRev2:
+        return self._request_model(
+            "GET",
+            f"/auth/rev2/{reference_number}",
+            response_model=AuthenticationOperationStatusResponseRev2,
+            access_token=authentication_token,
+        )
+
     def redeem_token(self, authentication_token: str) -> AuthenticationTokensResponse:
         return self._request_model(
             "POST",
@@ -216,6 +244,22 @@ class AsyncAuthClient(AsyncBaseApiClient):
             response_model=AuthenticationListResponse,
             headers=headers or None,
             params=params or None,
+            access_token=access_token,
+        )
+
+    async def get_active_sessions_rev2(
+        self,
+        *,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
+        access_token: str | None = None,
+    ) -> AuthenticationListResponseRev2:
+        return await self._request_model(
+            "GET",
+            "/auth/sessions/rev2",
+            response_model=AuthenticationListResponseRev2,
+            headers={"x-continuation-token": continuation_token} if continuation_token else None,
+            params={"pageSize": page_size} if page_size is not None else None,
             access_token=access_token,
         )
 
@@ -293,6 +337,16 @@ class AsyncAuthClient(AsyncBaseApiClient):
             "GET",
             f"/auth/{reference_number}",
             response_model=AuthenticationOperationStatusResponse,
+            access_token=authentication_token,
+        )
+
+    async def get_auth_status_rev2(
+        self, reference_number: str, authentication_token: str
+    ) -> AuthenticationOperationStatusResponseRev2:
+        return await self._request_model(
+            "GET",
+            f"/auth/rev2/{reference_number}",
+            response_model=AuthenticationOperationStatusResponseRev2,
             access_token=authentication_token,
         )
 

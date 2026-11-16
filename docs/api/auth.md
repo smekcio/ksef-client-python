@@ -84,3 +84,17 @@ Refresh token jest przekazywany w `Authorization: Bearer <refreshToken>`. Metoda
 
 Do automatycznego odświeżania użyj `TokenManager`/`AuthenticatedClient` — patrz
 [token-manager.md](../token-manager.md).
+
+
+## Rewizja 2 (KSeF API 2.10.0)
+
+- `get_active_sessions_rev2(...)` korzysta z `GET /auth/sessions/rev2`
+  i przyjmuje te same parametry paginacji co dotychczasowa metoda.
+- `get_auth_status_rev2(reference_number, authentication_token)` korzysta
+  z `GET /auth/rev2/{referenceNumber}` i używa tokenu operacji uwierzytelniania.
+- Odpowiedzi rev2 opisują metodę w `authentication_method_info`, gdzie
+  `category` ma pola `code`, `raw_code` i `display_name`.
+- W `Ksef` i `AsyncKsef` ustaw `KsefClientOptions(..., auth_status_rev2=True)`,
+  aby korzystać z rev2 także podczas oczekiwania na uwierzytelnienie.
+  Użyj tych samych opcji przy wznowieniu operacji. Domyślnie fasada używa
+  dotychczasowej ścieżki, zgodnej z KSeF 2.9.0.

@@ -147,3 +147,11 @@ Resetuje rate limits do wartości domyślnych dla środowiska testowego.
 Endpoint: `POST /testdata/rate-limits/production`
 
 Przywraca wartości rate limits zgodne z konfiguracją produkcyjną (w ramach środowiska testowego).
+
+
+## `expire_token_approval(reference_number, *, access_token=None)`
+
+`POST /testdata/tokens/{referenceNumber}/expire-approval` (204), dostępne na
+KSeF TEST od API 2.10.0. Symuluje upływ terminu zatwierdzenia konkretnego tokenu
+rev2 w aktualnym kontekście, zmieniając stan `AwaitingApproval` na `ApprovalExpired`.
+Metoda jest dostępna w klientach sync i async.

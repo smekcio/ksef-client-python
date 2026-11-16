@@ -1,0 +1,34 @@
+name: KSeF TEST scenarios
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ksef-test-scenarios.yml'
+      - '.github/workflows/required-test-e2e.yml'
+      - 'tests/test_e2e_rev2_tokens.py'
+      - 'src/ksef_client/clients/auth.py'
+      - 'src/ksef_client/clients/tokens.py'
+      - 'specs/ksef-openapi.snapshot.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  token-rev2:
+    name: Token rev2 lifecycle on TEST
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/required-test-e2e.yml
+    with:
+      ref: ${{ github.sha }}
+      test-suite: token-rev2
+    secrets:
+      KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
+      KSEF_TEST_CONTEXT_TYPE: ${{ secrets.KSEF_TEST_CONTEXT_TYPE }}
+      KSEF_TEST_CONTEXT_VALUE: ${{ secrets.KSEF_TEST_CONTEXT_VALUE }}
+      KSEF_TEST_XADES_CERT_CRT: ${{ secrets.KSEF_TEST_XADES_CERT_CRT }}
+      KSEF_TEST_XADES_CERT_CRT_B64: ${{ secrets.KSEF_TEST_XADES_CERT_CRT_B64 }}
+      KSEF_TEST_XADES_PRIVATE_KEY_PEM: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM }}
+      KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PEM_B64 }}
+      KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD: ${{ secrets.KSEF_TEST_XADES_PRIVATE_KEY_PASSWORD }}

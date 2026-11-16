@@ -1,6 +1,6 @@
 """Canonical KSeF API endpoint groups, independent of current quota values.
 
-Routes follow the checked-in API 2.9 OpenAPI snapshot. Protected ``other``
+Routes follow the checked-in API 2.10 OpenAPI snapshot. Protected ``other``
 endpoints have individual counters; their keys contain templates, never IDs,
 query strings, credentials or request bodies. Global/anonymous keys require
 IP-wide accounting in the budget, while protected counters additionally use
@@ -20,6 +20,7 @@ _ROUTE_GROUPS: tuple[tuple[str, str, str], ...] = (
     ("DELETE", "/testdata/limits/subject/certificate", "other"),
     ("DELETE", "/testdata/rate-limits", "other"),
     ("GET", "/auth/sessions", "other"),
+    ("GET", "/auth/sessions/rev2", "other"),
     ("GET", "/certificates/enrollments/data", "other"),
     ("GET", "/certificates/limits", "other"),
     ("GET", "/limits/context", "other"),
@@ -31,6 +32,7 @@ _ROUTE_GROUPS: tuple[tuple[str, str, str], ...] = (
     ("GET", "/security/public-key-certificates", "anonymous"),
     ("GET", "/sessions", "sessionList"),
     ("GET", "/tokens", "other"),
+    ("GET", "/tokens/rev2", "other"),
     ("POST", "/auth/challenge", "anonymous"),
     ("POST", "/auth/ksef-token", "anonymous"),
     ("POST", "/auth/token/redeem", "anonymous"),
@@ -75,11 +77,13 @@ _ROUTE_GROUPS: tuple[tuple[str, str, str], ...] = (
     ("POST", "/testdata/subject", "anonymous"),
     ("POST", "/testdata/subject/remove", "anonymous"),
     ("POST", "/tokens", "other"),
+    ("POST", "/tokens/rev2", "other"),
     ("DELETE", "/auth/sessions/{referenceNumber}", "other"),
     ("DELETE", "/permissions/authorizations/grants/{permissionId}", "other"),
     ("DELETE", "/permissions/common/grants/{permissionId}", "other"),
     ("DELETE", "/tokens/{referenceNumber}", "other"),
     ("GET", "/auth/{referenceNumber}", "anonymous"),
+    ("GET", "/auth/rev2/{referenceNumber}", "anonymous"),
     ("GET", "/certificates/enrollments/{referenceNumber}", "other"),
     ("GET", "/collective-identifiers/ksef/{ksefNumber}", "collectiveIdentifier"),
     ("GET", "/invoices/exports/{referenceNumber}", "invoiceExportStatus"),
@@ -89,6 +93,9 @@ _ROUTE_GROUPS: tuple[tuple[str, str, str], ...] = (
     ("GET", "/sessions/{referenceNumber}/invoices", "sessionInvoiceList"),
     ("GET", "/sessions/{referenceNumber}/invoices/failed", "sessionInvoiceList"),
     ("GET", "/tokens/{referenceNumber}", "other"),
+    ("GET", "/tokens/rev2/{referenceNumber}", "other"),
+    ("POST", "/tokens/{referenceNumber}/approve", "other"),
+    ("POST", "/testdata/tokens/{referenceNumber}/expire-approval", "other"),
     ("POST", "/certificates/{certificateSerialNumber}/revoke", "other"),
     ("POST", "/sessions/batch/{referenceNumber}/close", "batchSessionClose"),
     ("POST", "/sessions/online/{referenceNumber}/close", "onlineSessionClose"),

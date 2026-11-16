@@ -224,6 +224,16 @@ class TestDataClient(BaseApiClient):
             access_token=access_token,
         )
 
+    def expire_token_approval(
+        self, reference_number: str, *, access_token: str | None = None
+    ) -> None:
+        self._request_json(
+            "POST",
+            f"/testdata/tokens/{reference_number}/expire-approval",
+            access_token=access_token,
+            expected_status={204},
+        )
+
     def update_certificate(
         self,
         serial_number: str,
@@ -438,6 +448,16 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             "/testdata/rate-limits/production",
             response_model=EffectiveApiRateLimits,
             access_token=access_token,
+        )
+
+    async def expire_token_approval(
+        self, reference_number: str, *, access_token: str | None = None
+    ) -> None:
+        await self._request_json(
+            "POST",
+            f"/testdata/tokens/{reference_number}/expire-approval",
+            access_token=access_token,
+            expected_status={204},
         )
 
     async def update_certificate(

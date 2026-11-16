@@ -73,9 +73,10 @@ class AsyncAuthenticationOperation(AsyncOperation[AuthResult]):
         validate_auth_state(state)
         self.api, self.options = (api, options)
         token = state.payload["authentication_token"]
-        super().__init__(
-            state, lambda: api.auth.get_auth_status(state.reference_number, token), self._redeem
+        status = (
+            api.auth.get_auth_status_rev2 if options.auth_status_rev2 else api.auth.get_auth_status
         )
+        super().__init__(state, lambda: status(state.reference_number, token), self._redeem)
 
     async def _redeem(self, status: Any) -> AuthResult:
         if self._state.payload.get("redeem_started"):

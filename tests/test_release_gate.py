@@ -79,12 +79,23 @@ def test_gate_cli_and_runner_fail_closed(tmp_path, monkeypatch):
         write_report(report, [(name, None) for name in gate.required_tests()])
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(gate, "validate_live_install", lambda required: None)
+    monkeypatch.setattr(gate, "validate_live_install", lambda required, *, suite: None)
     monkeypatch.setattr(gate.subprocess, "run", run)
     assert gate.main([str(report), "--run"]) == 0
     assert "xfail_strict=true" in calls[0]
     monkeypatch.setattr(gate.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=5))
     assert gate.main([str(report), "--run"]) == 5
+
+
+def test_extended_suite_cannot_satisfy_required_gate(tmp_path, monkeypatch):
+    report = tmp_path / "junit.xml"
+    write_report(report, [(name, None) for name in gate.TOKEN_REV2])
+    assert gate.main([str(report), "--suite", "token-rev2"]) == 0
+    assert gate.main([str(report)]) == 1
+    monkeypatch.setenv("KSEF_E2E", "1")
+    monkeypatch.setenv("KSEF_TEST_INSTALLED", "1")
+    with pytest.raises(ValueError, match="approved TEST manifest"):
+        gate.validate_live_install(gate.TOKEN_REV2)
 
 
 def fake_dist(tmp_path, version="0.20.0"):

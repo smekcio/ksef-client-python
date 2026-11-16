@@ -22,13 +22,15 @@ REQUIRED = [
     "tests/test_e2e_invoice_sync.py::test_e2e_test_environment_invoice_sync_restart",
     "tests/test_e2e_invoice_xml_sync.py::test_e2e_test_environment_invoice_xml_restart",
 ]
+TOKEN_REV2 = ["tests/test_e2e_rev2_tokens.py::test_e2e_test_environment_rev2_token_lifecycle"]
+LIVE_SUITES = {"required": REQUIRED, "token-rev2": TOKEN_REV2}
 
 
-def validate_live_install(required: list[str]) -> None:
+def validate_live_install(required: list[str], *, suite: str = "required") -> None:
     from tools.release_artifacts import verify_installed_wheel
 
     if (
-        required != REQUIRED
+        required != LIVE_SUITES[suite]
         or os.environ.get("KSEF_TEST_INSTALLED") != "1"
         or os.environ.get("KSEF_E2E") != "1"
     ):
@@ -85,15 +87,19 @@ def verify(report: Path, required: list[str]) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("report", type=Path)
-    parser.add_argument("--manifest", type=Path, default=MANIFEST)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--suite", choices=LIVE_SUITES, default="required")
     parser.add_argument(
         "--run", action="store_true", help="Run required tests once before verification"
     )
     args = parser.parse_args(argv)
     try:
-        required = required_tests(args.manifest)
+        if args.manifest is not None or args.suite == "required":
+            required = required_tests(args.manifest or MANIFEST)
+        else:
+            required = LIVE_SUITES[args.suite]
         if args.run:
-            validate_live_install(required)
+            validate_live_install(required, suite=args.suite)
             args.report.parent.mkdir(parents=True, exist_ok=True)
             args.report.unlink(missing_ok=True)
             result = subprocess.run(
@@ -112,8 +118,7 @@ def main(argv: list[str] | None = None) -> int:
                     f"--junitxml={args.report}",
                     # Exercise durable XML before the other metadata-heavy flows.
                     # Verification still requires every approved scenario exactly once.
-                    required[-1],
-                    *required[:-1],
+                    *(required[-1:] + required[:-1] if args.suite == "required" else required),
                 ],
                 check=False,
             )

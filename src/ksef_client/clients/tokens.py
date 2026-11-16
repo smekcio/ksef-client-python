@@ -1,14 +1,48 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from ..models import (
     GenerateTokenRequest,
+    GenerateTokenRequestRev2,
     GenerateTokenResponse,
+    GenerateTokenResponseRev2,
     QueryTokensResponse,
+    QueryTokensResponseRev2,
+    TokenAuthorIdentifierTypeFilterRev2,
+    TokenStatusFilterRev2,
     TokenStatusResponse,
+    TokenStatusResponseRev2,
 )
 from .base import AsyncBaseApiClient, BaseApiClient
+
+
+def _rev2_filters(
+    statuses: Sequence[TokenStatusFilterRev2 | str] | None,
+    description: str | None,
+    author_identifier: str | None,
+    author_identifier_type: TokenAuthorIdentifierTypeFilterRev2 | str | None,
+    valid_from: str | None,
+    valid_to: str | None,
+    page_size: int | None,
+) -> dict[str, Any]:
+    values = {
+        "status": [TokenStatusFilterRev2(status).value for status in statuses]
+        if statuses
+        else None,
+        "description": description,
+        "authorIdentifier": author_identifier,
+        "authorIdentifierType": (
+            TokenAuthorIdentifierTypeFilterRev2(author_identifier_type).value
+            if author_identifier_type is not None
+            else None
+        ),
+        "validFrom": valid_from,
+        "validTo": valid_to,
+        "pageSize": page_size,
+    }
+    return {key: value for key, value in values.items() if value is not None}
 
 
 class TokensClient(BaseApiClient):
@@ -68,6 +102,66 @@ class TokensClient(BaseApiClient):
             f"/tokens/{reference_number}",
             response_model=TokenStatusResponse,
             access_token=access_token,
+        )
+
+    def generate_token_rev2(
+        self, request_payload: GenerateTokenRequestRev2, *, access_token: str | None = None
+    ) -> GenerateTokenResponseRev2:
+        return self._request_model(
+            "POST",
+            "/tokens/rev2",
+            response_model=GenerateTokenResponseRev2,
+            json=request_payload,
+            access_token=access_token,
+            expected_status={202},
+        )
+
+    def list_tokens_rev2(
+        self,
+        *,
+        statuses: Sequence[TokenStatusFilterRev2 | str] | None = None,
+        description: str | None = None,
+        author_identifier: str | None = None,
+        author_identifier_type: TokenAuthorIdentifierTypeFilterRev2 | str | None = None,
+        valid_from: str | None = None,
+        valid_to: str | None = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
+        access_token: str | None = None,
+    ) -> QueryTokensResponseRev2:
+        return self._request_model(
+            "GET",
+            "/tokens/rev2",
+            response_model=QueryTokensResponseRev2,
+            params=_rev2_filters(
+                statuses,
+                description,
+                author_identifier,
+                author_identifier_type,
+                valid_from,
+                valid_to,
+                page_size,
+            ),
+            headers={"x-continuation-token": continuation_token} if continuation_token else None,
+            access_token=access_token,
+        )
+
+    def get_token_status_rev2(
+        self, reference_number: str, *, access_token: str | None = None
+    ) -> TokenStatusResponseRev2:
+        return self._request_model(
+            "GET",
+            f"/tokens/rev2/{reference_number}",
+            response_model=TokenStatusResponseRev2,
+            access_token=access_token,
+        )
+
+    def approve_token(self, reference_number: str, *, access_token: str | None = None) -> None:
+        self._request_json(
+            "POST",
+            f"/tokens/{reference_number}/approve",
+            access_token=access_token,
+            expected_status={204},
         )
 
     def revoke_token(self, reference_number: str, *, access_token: str | None = None) -> None:
@@ -136,6 +230,68 @@ class AsyncTokensClient(AsyncBaseApiClient):
             f"/tokens/{reference_number}",
             response_model=TokenStatusResponse,
             access_token=access_token,
+        )
+
+    async def generate_token_rev2(
+        self, request_payload: GenerateTokenRequestRev2, *, access_token: str | None = None
+    ) -> GenerateTokenResponseRev2:
+        return await self._request_model(
+            "POST",
+            "/tokens/rev2",
+            response_model=GenerateTokenResponseRev2,
+            json=request_payload,
+            access_token=access_token,
+            expected_status={202},
+        )
+
+    async def list_tokens_rev2(
+        self,
+        *,
+        statuses: Sequence[TokenStatusFilterRev2 | str] | None = None,
+        description: str | None = None,
+        author_identifier: str | None = None,
+        author_identifier_type: TokenAuthorIdentifierTypeFilterRev2 | str | None = None,
+        valid_from: str | None = None,
+        valid_to: str | None = None,
+        page_size: int | None = None,
+        continuation_token: str | None = None,
+        access_token: str | None = None,
+    ) -> QueryTokensResponseRev2:
+        return await self._request_model(
+            "GET",
+            "/tokens/rev2",
+            response_model=QueryTokensResponseRev2,
+            params=_rev2_filters(
+                statuses,
+                description,
+                author_identifier,
+                author_identifier_type,
+                valid_from,
+                valid_to,
+                page_size,
+            ),
+            headers={"x-continuation-token": continuation_token} if continuation_token else None,
+            access_token=access_token,
+        )
+
+    async def get_token_status_rev2(
+        self, reference_number: str, *, access_token: str | None = None
+    ) -> TokenStatusResponseRev2:
+        return await self._request_model(
+            "GET",
+            f"/tokens/rev2/{reference_number}",
+            response_model=TokenStatusResponseRev2,
+            access_token=access_token,
+        )
+
+    async def approve_token(
+        self, reference_number: str, *, access_token: str | None = None
+    ) -> None:
+        await self._request_json(
+            "POST",
+            f"/tokens/{reference_number}/approve",
+            access_token=access_token,
+            expected_status={204},
         )
 
     async def revoke_token(self, reference_number: str, *, access_token: str | None = None) -> None:

@@ -4,7 +4,7 @@ Dokumentacja opisuje **publiczne API** biblioteki `ksef-client-python` (import: 
 
 Opis kontraktu API (OpenAPI) oraz dokumenty procesowe i ograniczenia systemu znajdują się w repozytorium [`CIRFMF/ksef-api`](https://github.com/CIRFMF/ksef-api).
 
-Kompatybilność SDK: **KSeF API `v2.9.0`**.
+Kompatybilność SDK: **KSeF API 2.10.0** na TEST i **2.9.0** na DEMO oraz PROD.
 
 **Zacznij od [`Ksef` / `AsyncKsef`](getting-started.md#zalecany-start-ksef)**:
 połącz się, wyślij XML i odbierz wynik przez `.wait()`.

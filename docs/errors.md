@@ -103,7 +103,7 @@ except KsefApiError as exc:                  # nadal łapie wszystkie podklasy
 
 ### `KsefExceptionCode` i `ForbiddenReason`
 
-`KsefExceptionCode` to `IntEnum` z 54 kodami `exceptionCode` z KSeF API 2.9.0
+`KsefExceptionCode` to `IntEnum` z 58 kodami `exceptionCode` z KSeF API 2.10.0
 (kody są przyjmowane jako `int` albo tekst liczbowy; `float` i `bool` są ignorowane,
 tak jak w CLI)
 (m.in. `INVALID_SIGNATURE = 9105`, `INPUT_VALIDATION_FAILED = 21405`, `INVALID_CSR = 25004`,
