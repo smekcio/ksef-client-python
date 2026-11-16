@@ -145,6 +145,11 @@ hasha po restarcie. Każdy scenariusz jest wykonywany raz. Brak raportu,
 brak testu, pominięcie, xfail lub błąd blokują publikację. Awaria TEST lub brak
 sekretów także blokują publikację; DEMO nie zastępuje tej kontroli.
 
+Test metadanych wybiera w KSeF TEST dwie widoczne faktury o różnych datach
+trwałego zapisu. Pierwszy proces kończy cykl na dacie wcześniejszej faktury
+i zapisuje HWM. Drugi wznawia od tego punktu, zapisuje późniejszą fakturę
+i potwierdza brak duplikatów.
+
 KSeF ma także godzinne limity API. Odpowiedź 429 może więc wydłużyć pełny
 przebieg; nie oznacza sama w sobie zawieszenia procesu. Scenariusze restartu metadanych i XML
 mają po 74 minuty na pracę i 75 minut twardego nadzoru procesów, a job —
