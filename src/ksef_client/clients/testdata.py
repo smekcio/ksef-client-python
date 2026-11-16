@@ -20,7 +20,7 @@ from ..models import (
     UnblockContextAuthenticationRequest,
 )
 from ..utils.certificate_serial import require_certificate_serial_number
-from .base import AsyncBaseApiClient, BaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient, _require_reference_number
 
 
 class TestDataClient(BaseApiClient):
@@ -222,6 +222,16 @@ class TestDataClient(BaseApiClient):
             "/testdata/rate-limits/production",
             response_model=EffectiveApiRateLimits,
             access_token=access_token,
+        )
+
+    def expire_token_approval(
+        self, reference_number: str, *, access_token: str | None = None
+    ) -> None:
+        self._request_json(
+            "POST",
+            f"/testdata/tokens/{_require_reference_number(reference_number)}/expire-approval",
+            access_token=access_token,
+            expected_status={204},
         )
 
     def update_certificate(
@@ -438,6 +448,16 @@ class AsyncTestDataClient(AsyncBaseApiClient):
             "/testdata/rate-limits/production",
             response_model=EffectiveApiRateLimits,
             access_token=access_token,
+        )
+
+    async def expire_token_approval(
+        self, reference_number: str, *, access_token: str | None = None
+    ) -> None:
+        await self._request_json(
+            "POST",
+            f"/testdata/tokens/{_require_reference_number(reference_number)}/expire-approval",
+            access_token=access_token,
+            expected_status={204},
         )
 
     async def update_certificate(

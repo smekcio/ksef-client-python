@@ -63,7 +63,7 @@ def test_every_snapshot_operation_uses_its_declared_group(method, template, grou
 def test_snapshot_operation_count_guards_accidental_table_omissions():
     from ksef_client.rate_limit_routing import _ROUTE_GROUPS
 
-    assert len(_snapshot_routes()) == len(_ROUTE_GROUPS) == 83
+    assert len(_snapshot_routes()) == len(_ROUTE_GROUPS) == 90
 
 
 @pytest.mark.parametrize(

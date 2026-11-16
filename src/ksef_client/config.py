@@ -77,8 +77,12 @@ class KsefClientOptions:
     rate_limit_context_key: str | None = field(default=None, repr=False)
     #: Label of the actual egress IP/proxy route; no IP discovery is performed.
     rate_limit_egress_key: str = field(default="default", repr=False)
+    #: Opt in to the KSeF 2.10 authentication status endpoint in Ksef/AsyncKsef.
+    auth_status_rev2: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.auth_status_rev2, bool):
+            raise TypeError("auth_status_rev2 must be a bool")
         if self.retry is not None and not isinstance(self.retry, RetryConfig):
             raise TypeError("retry must be a RetryConfig instance or None")
         if self.rate_limit_budget is not None:

@@ -85,9 +85,9 @@ class ErrorCode(str, Enum):
 
 
 class KsefExceptionCode(IntEnum):
-    """Kody ``exceptionCode`` z KSeF API 2.9.0 (snapshot OpenAPI).
+    """Kody ``exceptionCode`` z KSeF API 2.10.0 (snapshot OpenAPI).
 
-    Pełny zbiór 50 kodów jest wymuszany testem. Kody spoza enumy pozostają
+    Pełny zbiór kodów jest wymuszany testem. Kody spoza enumy pozostają
     dostępne jako ``int`` w :attr:`KsefApiError.exception_codes`.
     """
 
@@ -125,6 +125,7 @@ class KsefExceptionCode(IntEnum):
     INVALID_FILE_HASH = 21403
     INPUT_VALIDATION_FAILED = 21405
     SIGNATURE_AUTH_TYPE_CONFLICT = 21406
+    TOKEN_NOT_FOUND = 21409
     INVALID_CONTINUATION_TOKEN = 21418
     UNKNOWN_OR_REVOKED_KEY = 21470
     CSR_DATA_UNAVAILABLE = 25001
@@ -140,6 +141,9 @@ class KsefExceptionCode(IntEnum):
     INVALID_CSR_SIGNATURE_ALGORITHM = 25011
     TOKEN_PERMISSIONS_EXCEED_OWNER = 26001
     TOKEN_NOT_ALLOWED_FOR_CONTEXT = 26002
+    TOKEN_STATUS_BLOCKS_OPERATION = 26004
+    TOKEN_APPROVAL_AUTH_METHOD_NOT_ALLOWED = 26005
+    TOKEN_CONTEXT_LIMIT_EXCEEDED = 26006
     PERMISSION_ALREADY_EXISTS = 30001
     COLLECTIVE_INVOICE_NOT_FOUND = 71001
     COLLECTIVE_INVOICE_LIMIT_EXCEEDED = 71002
@@ -583,7 +587,7 @@ class KsefAuthorizationError(KsefApiError):
 
 
 class KsefPermissionError(KsefApiError):
-    """Błędy uprawnień i tokenów (26xxx, 30xxx)."""
+    """Błędy uprawnień i tokenów (21409, 26xxx, 30xxx)."""
 
     code: ClassVar[ErrorCode] = ErrorCode.PERMISSION_ERROR
 
@@ -746,7 +750,7 @@ _AUTHENTICATION_CODES = frozenset(
     {9101, 9102, 9103, 9105, 21111, 21115, 21117, 21304, 21308, 21406, 21470}
 )
 _AUTHORIZATION_CODES = frozenset({21301})
-_PERMISSION_CODES = frozenset({26001, 26002, 30001})
+_PERMISSION_CODES = frozenset({21409, 26001, 26002, 26004, 26005, 26006, 30001})
 _CERTIFICATE_CODES = frozenset(range(25001, 25012))
 _COLLECTIVE_IDENTIFIER_CODES = frozenset({71001, 71002, 71004, 71005})
 _EXPORT_CODES = frozenset({21175, 21181, 21182, 21183})

@@ -113,6 +113,11 @@ def _validate_identifier(
 #: jako opcjonalne).
 OPTIONAL_DESPITE_REQUIRED: dict[str, frozenset[str]] = {
     "CollectiveIdentifierInvoicesQueryResponseItem": frozenset({"collectiveIdentifierNumber"}),
+    # API 2.9 still runs on DEMO and PROD and omits the token limit.
+    "EffectiveContextLimits": frozenset({"tokens"}),
+    # Preserve the existing constructors across the API 2.10 rollout.
+    "CertificateSubjectLimitsOverride": frozenset({"maxCertificates"}),
+    "EnrollmentSubjectLimitsOverride": frozenset({"maxEnrollments"}),
 }
 
 

@@ -1,4 +1,4 @@
-"""One supervised phase. This helper comes from the trusted workflow checkout."""
+"""Verify metadata backfill and checkpoint restart against live indexed TEST data."""
 
 from __future__ import annotations
 
@@ -43,33 +43,72 @@ def verify() -> None:
     verify_installed_wheel(Path(os.environ["KSEF_TEST_WHEEL"]))
 
 
-def document_number(number):
-    try:
-        return canonical_ksef_number(number)
-    except ValueError:
-        return number
-
-
-def find_at_hwm(scan, number):
-    cursor, found = None, None
+def find_indexed_pair(scan) -> tuple[tuple[str, str], tuple[str, str]] | None:
+    first = second = None
+    cursor = None
     try:
         while True:
             page = scan.observation_page(cursor)
-            found = next(
-                (
-                    r
-                    for r in page.observations
-                    if document_number(r.ksef_number or "") == document_number(number)
-                ),
-                found,
-            )
+            for row in page.observations:
+                if not row.ksef_number or not row.permanent_storage_date:
+                    continue
+                try:
+                    number = canonical_ksef_number(row.ksef_number)
+                except ValueError:
+                    continue
+                candidate = (number, row.permanent_storage_date)
+                if first is None:
+                    first = candidate
+                elif number != first[0] and _date(candidate[1]) > _date(first[1]):
+                    second = candidate
             cursor = page.next_cursor
             if cursor is None:
-                return found, page.permanent_storage_hwm_date
+                return (first, second) if first and second else None
     except KsefIncompletePaginationError as error:
         if error.reason_code != "hwm_before_start":
             raise
-        return None, None
+        return None
+
+
+def fixture_pair(client, config, since, diagnostic_path):
+    query = m.InvoiceQueryFilters(
+        subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
+        date_range=m.InvoiceQueryDateRange(
+            date_type=m.InvoiceQueryDateType.PERMANENTSTORAGE,
+            from_=since,
+            restrict_to_permanent_storage_hwm_date=True,
+        ),
+    )
+    seeded = False
+    while True:
+        diagnostic(stage="observe", path=diagnostic_path)
+        scan = client.api.invoices.search_invoice_metadata_range(
+            replace(
+                query,
+                date_range=replace(query.date_range, to=datetime.now(timezone.utc).isoformat()),
+            ),
+            context_key=client.context_key,
+        )
+        pair = find_indexed_pair(scan)
+        if pair is not None:
+            return pair
+        if not seeded:
+            # Standalone runs may start with a quiet context. Seed only once and
+            # finalize both sessions before waiting for a usable indexed pair.
+            for _ in range(2):
+                diagnostic(stage="submit", path=diagnostic_path)
+                with client.online_session() as session:
+                    submitted = session.send_invoice(
+                        _build_invoice_xml(
+                            seller_nip=config.context_value, environment_name="invoice-sync"
+                        )
+                    ).wait(timeout=120)
+                session.wait(timeout=360)
+                upo = session.upo().wait(timeout=360)
+                assert upo.pages and submitted.ksef_number
+            seeded = True
+            continue
+        wait_seconds(60)
 
 
 def check_wire_bounds(scan, query, response) -> None:
@@ -122,54 +161,28 @@ def run(phase: str) -> None:
         connection = sqlite3.connect("sync.db", timeout=5)
         store = SQLiteInvoiceSyncStore(connection)
         try:
-            old = store.load(sync.streams[0].scope)
+            stream = sync.streams[0]
+            old = store.load(stream.scope)
             assert (old is None) == (phase == "bootstrap")
-            if old is not None:
-                assert old.committed_hwm == state["h1"] and old.phase == "idle"
-            diagnostic(stage="submit", path=Path("metadata-live-diagnostic.json"))
-            with client.online_session() as session:
-                submitted = session.send_invoice(
-                    _build_invoice_xml(
-                        seller_nip=config.context_value,
-                        environment_name="invoice-sync-" + phase,
-                    )
-                ).wait(timeout=120)
-            # Closing only starts finalization. Match the facade live flow before
-            # observing metadata, so acceptance is not mistaken for publication.
-            session.wait(timeout=360)
-            assert session.upo().wait(timeout=360).pages
-            assert submitted.ksef_number
-            submitted_number = canonical_ksef_number(submitted.ksef_number)
-            poll_end = state["soft_deadline"]
-            query = m.InvoiceQueryFilters(
-                subject_type=m.InvoiceQuerySubjectType.SUBJECT1,
-                date_range=m.InvoiceQueryDateRange(
-                    date_type=m.InvoiceQueryDateType.PERMANENTSTORAGE,
-                    from_=state["since"],
-                    restrict_to_permanent_storage_hwm_date=True,
-                ),
-            )
-            diagnostic(stage="observe", path=Path("metadata-live-diagnostic.json"))
-            with request_control(deadline=poll_end):
-                while True:
-                    scan = client.api.invoices.search_invoice_metadata_range(
-                        replace(
-                            query,
-                            date_range=replace(
-                                query.date_range, to=datetime.now(timezone.utc).isoformat()
-                            ),
-                        ),
-                        context_key=client.context_key,
-                    )
-                    found, observed_hwm = find_at_hwm(scan, submitted.ksef_number)
-                    if found is not None:
-                        assert observed_hwm
-                        if old is not None:
-                            assert _date(cast(str, found.permanent_storage_date)) > _date(
-                                cast(str, old.committed_hwm)
-                            )
-                        break
-                    wait_seconds(60)
+            if old is None:
+                (first, boundary), (second, _) = fixture_pair(
+                    client, config, state["since"], Path("metadata-live-diagnostic.json")
+                )
+                state.update(a=first, b=second, h1=boundary)
+                batch = stream.begin_cycle(None, until=boundary)
+                started = batch.confirm(store.commit(batch))
+                assert started.phase == "active"
+            else:
+                assert old.committed_hwm and _date(old.committed_hwm) == _date(state["h1"])
+                assert old.phase == "idle"
+            target = state["a"] if old is None else state["b"]
+
+            def count(number):
+                return connection.execute(
+                    "SELECT count(*) FROM invoices WHERE ksef_number=?", (number,)
+                ).fetchone()[0]
+
+            assert count(target) == 0
             original_factory = sync.streams[0]._search_factory
             original_wire = client.api.invoices._query_invoice_metadata_observation_page
             bounds: list[m.InvoiceQueryDateRange] = []
@@ -199,22 +212,13 @@ def run(phase: str) -> None:
                     break
                 assert report.streams[0].status == "partial" and checkpoint.phase == "active"
             assert bounds and checkpoint.phase == "idle" and checkpoint.committed_hwm
-            assert (
-                connection.execute(
-                    "SELECT count(*) FROM invoices WHERE ksef_number=?", (submitted_number,)
-                ).fetchone()[0]
-                == 1
-            )
+            assert count(target) == 1
             if old is None:
-                state.update(a=submitted_number, h1=checkpoint.committed_hwm)
+                assert _date(checkpoint.committed_hwm) == _date(state["h1"])
+                assert count(state["b"]) == 0
                 path.write_text(json.dumps(state), encoding="utf-8")
             else:
-                assert (
-                    connection.execute(
-                        "SELECT count(*) FROM invoices WHERE ksef_number=?", (state["a"],)
-                    ).fetchone()[0]
-                    == 1
-                )
+                assert count(state["a"]) == 1
                 assert _date(checkpoint.committed_hwm) > _date(state["h1"])
             diagnostic(stage="ready", path=Path("metadata-live-diagnostic.json"))
             Path(phase + "-evidence.json").write_text(

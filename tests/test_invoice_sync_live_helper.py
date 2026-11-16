@@ -18,10 +18,11 @@ from tests.test_invoice_sync import H1, H2, START, row
 from tests.test_invoice_xml_sync import HASH, NUMBER, NUMBER2, XML, XmlServer, environment
 
 
+@pytest.mark.parametrize("already_indexed", [False, True])
 @pytest.mark.parametrize("legacy_alias", [False, True])
 @pytest.mark.parametrize("cooldown_budget", [None, 1740, LIVE_SCENARIO_SOFT_TIMEOUT])
-def test_metadata_live_helper_finalizes_session_before_discovery_and_resumes(
-    tmp_path, monkeypatch, legacy_alias, cooldown_budget
+def test_metadata_live_helper_resumes_without_waiting_for_another_invoice(
+    tmp_path, monkeypatch, already_indexed, legacy_alias, cooldown_budget
 ):
     async def run():
         server = XmlServer([])
@@ -31,10 +32,18 @@ def test_metadata_live_helper_finalizes_session_before_discovery_and_resumes(
         def alias(number):
             return number[:26] + "-" + number[26:] if legacy_alias else number
 
+        fixtures = (
+            row(alias(NUMBER), date=H1, hash_=HASH),
+            row(alias(NUMBER2), date=H2, hash_=HASH),
+        )
+        if already_indexed:
+            server.rows.extend(fixtures)
+            server.hwm = H2
+
         @contextmanager
         def online_session():
-            number = NUMBER if current == "bootstrap" else NUMBER2
-            date = "2025-01-01T00:00:00Z" if current == "bootstrap" else H2
+            assert not already_indexed and current == "bootstrap"
+            fixture = fixtures[len(server.rows)]
 
             def session_wait(**kwargs):
                 assert events[-1] == "close"
@@ -42,14 +51,14 @@ def test_metadata_live_helper_finalizes_session_before_discovery_and_resumes(
 
             def upo_wait(**kwargs):
                 assert events[-1] == "session_wait"
-                server.rows.append(row(alias(number), date=date, hash_=HASH))
-                server.hwm = H1 if current == "bootstrap" else H2
+                server.rows.append(fixture)
+                server.hwm = fixture.permanent_storage_date
                 events.append("upo_wait")
                 return SimpleNamespace(pages=[object()])
 
             yield SimpleNamespace(
                 send_invoice=lambda content: SimpleNamespace(
-                    wait=lambda **kwargs: SimpleNamespace(ksef_number=number)
+                    wait=lambda **kwargs: SimpleNamespace(ksef_number=fixture.ksef_number)
                 ),
                 wait=session_wait,
                 upo=lambda: SimpleNamespace(wait=upo_wait),
@@ -79,8 +88,11 @@ def test_metadata_live_helper_finalizes_session_before_discovery_and_resumes(
                 ),
             )
 
+            observe = api._query_invoice_metadata_observation_page
+
             def connect(**kwargs):
-                # Apply the actual helper options, including real HTTP retry.
+                # Each live phase constructs a new client in its own process.
+                api._query_invoice_metadata_observation_page = observe
                 api._http._options = kwargs["options"]
                 return nullcontext(client)
 
@@ -159,13 +171,14 @@ def test_metadata_live_helper_finalizes_session_before_discovery_and_resumes(
                     assert cooldown_until is not None and clock() >= cooldown_until
                     assert len(limited) == 1
                     assert all(attempt >= cooldown_until for attempt in requests[1:])
-            assert events == ["close", "session_wait", "upo_wait"] * 2
+            assert events == ([] if already_indexed else ["close", "session_wait", "upo_wait"] * 2)
             assert server.downloads == 0
             for phase in ("bootstrap", "incremental"):
                 assert json.loads((tmp_path / (phase + "-evidence.json")).read_text())["complete"]
             safe = json.loads((tmp_path / "metadata-live-diagnostic.json").read_text())
             assert safe["phase"] == "incremental" and safe["stage"] == "ready"
             assert safe["metadata_streams"][0]["status"] == "completed"
-            assert json.loads((tmp_path / "state.json").read_text())["a"] == NUMBER
+            state = json.loads((tmp_path / "state.json").read_text())
+            assert (state["a"], state["b"], state["h1"]) == (NUMBER, NUMBER2, H1)
 
     asyncio.run(run())
