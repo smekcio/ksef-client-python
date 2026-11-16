@@ -194,3 +194,24 @@ przesunąć checkpoint do HWM i pominąć brakujące faktury.
 Minimalne wersje `cryptography` i istniejących zależności HTTP zostały podniesione
 po audycie podatności. Ograniczenia tranzytywne nie dodają nowych bibliotek do
 rzeczywistego grafu HTTP, ale mogą wymagać aktualizacji lockfile aplikacji.
+
+
+## Dodatkowe scenariusze KSeF TEST
+
+Workflow [KSeF TEST scenarios](../.github/workflows/ksef-test-scenarios.yml)
+działa na gałęzi `main` po zmianach w objętym nim kodzie. Można go także
+uruchomić ręcznie w GitHub Actions, wybierając zestaw:
+
+- `token-rev2` — utworzenie tokenu, logowanie, zatwierdzenie, symulacja
+  wygaśnięcia zatwierdzenia i unieważnienie.
+- `operations` — wznowienie importu paczki z SQLite i kontrola zapisanych XML,
+  wznowienie kolejki offline aż do UPO oraz zmiana certyfikatu pomiędzy
+  dwiema sesjami workera przy działającej poprzedniej sesji.
+- `extended` — oba zestawy, uruchamiane kolejno w jednym zadaniu.
+
+Workflow korzysta z chronionego środowiska `ksef-test` i tego samego mechanizmu
+weryfikacji wheela oraz raportu JUnit co obowiązkowe testy. Każdy wybrany
+scenariusz musi przejść dokładnie raz. Bramka wydania nadal wymaga zestawu
+`required`. W teście rotacji powstaje drugi, krótkotrwały certyfikat ze
+świeżym kluczem dla skonfigurowanego podmiotu TEST, zgodnie z
+[procedurą XAdES dla środowiska testowego](https://github.com/CIRFMF/ksef-api/blob/main/uwierzytelnianie.md#21-uwierzytelnianie-z-wykorzystaniem-podpisu-xades).

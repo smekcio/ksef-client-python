@@ -7,22 +7,35 @@ on:
       - '.github/workflows/ksef-test-scenarios.yml'
       - '.github/workflows/required-test-e2e.yml'
       - 'tests/test_e2e_rev2_tokens.py'
+      - 'tests/test_e2e_certificate_rotation.py'
+      - 'tests/test_e2e_offline_queue.py'
+      - 'tests/test_e2e_export_archive.py'
+      - 'tools/verify_e2e_results.py'
       - 'src/ksef_client/clients/auth.py'
       - 'src/ksef_client/clients/tokens.py'
+      - 'src/ksef_client/certificate_rotation.py'
+      - 'src/ksef_client/invoice_export_sync.py'
+      - 'src/ksef_client/offline_invoices.py'
       - 'specs/ksef-openapi.snapshot.json'
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Scenarios to run on the current main wheel
+        type: choice
+        options: [extended, operations, token-rev2]
+        default: extended
 
 permissions:
   contents: read
 
 jobs:
-  token-rev2:
-    name: Token rev2 lifecycle on TEST
+  scenarios:
+    name: Additional installed-wheel scenarios on TEST
     if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/required-test-e2e.yml
     with:
       ref: ${{ github.sha }}
-      test-suite: token-rev2
+      test-suite: ${{ inputs.suite || 'extended' }}
     secrets:
       KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
       KSEF_TEST_CONTEXT_TYPE: ${{ secrets.KSEF_TEST_CONTEXT_TYPE }}

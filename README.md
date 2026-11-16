@@ -560,9 +560,11 @@ Testy E2E wymagają osobnej konfiguracji środowiska KSeF i danych dostępowych.
 zmiennych środowiskowych są opisane w dokumentacji i testach.
 
 Publikację uruchamiaj z `main`, wskazując istniejący tag wersji. Brama wydawnicza wymaga
-siedmiu rzeczywistych scenariuszy KSeF TEST na dokładnie tym pliku wheel, który trafi na PyPI.
+ośmiu rzeczywistych scenariuszy KSeF TEST na dokładnie tym pliku wheel, który trafi na PyPI.
 Konfiguracja środowisk GitHub, sekretów i Trusted Publishera:
 [publikacja potwierdzona TEST](docs/reliable-pagination.md#publikacja-potwierdzona-rzeczywistym-test).
+[Oddzielny przebieg KSeF TEST](docs/reliable-pagination.md#dodatkowe-scenariusze-ksef-test)
+sprawdza także cykl tokenu rev2, wznawianie archiwizacji i kolejki offline oraz rotację XAdES.
 
 ## 🤝 Kontrybucja
 
