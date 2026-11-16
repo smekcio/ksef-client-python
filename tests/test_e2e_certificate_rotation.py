@@ -53,9 +53,12 @@ def test_e2e_test_environment_certificate_rotation_between_cycles(tmp_path):
     _ensure_e2e_enabled()
     config = _load_test_xades_config()
     options = KsefClientOptions(base_url=config.base_url)
-    assert options.normalized_base_url() == f"{KsefEnvironment.TEST.value}/v2"
-    assert config.subject_identifier_type == "certificateSubject"
-    assert config.certificate_pem and config.private_key_pem
+    if options.normalized_base_url() != f"{KsefEnvironment.TEST.value}/v2":
+        pytest.fail("Certificate rotation E2E requires the official KSeF TEST URL", pytrace=False)
+    if config.subject_identifier_type != "certificateSubject":
+        pytest.fail("Certificate rotation E2E requires certificateSubject", pytrace=False)
+    if not (config.certificate_pem and config.private_key_pem):
+        pytest.fail("Certificate rotation E2E requires complete XAdES credentials", pytrace=False)
     original_pem = config.certificate_pem.encode()
     original_key = serialization.load_pem_private_key(
         config.private_key_pem.encode(), password=None

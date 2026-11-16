@@ -211,7 +211,8 @@ uruchomić ręcznie w GitHub Actions, wybierając zestaw:
 
 Workflow korzysta z chronionego środowiska `ksef-test` i tego samego mechanizmu
 weryfikacji wheela oraz raportu JUnit co obowiązkowe testy. Każdy wybrany
-scenariusz musi przejść dokładnie raz. Bramka wydania nadal wymaga zestawu
+scenariusz musi przejść dokładnie raz. Zadania korzystające z KSeF TEST
+czekają we wspólnej kolejce i wykonują się pojedynczo. Bramka wydania nadal wymaga zestawu
 `required`. W teście rotacji powstaje drugi, krótkotrwały certyfikat ze
 świeżym kluczem dla skonfigurowanego podmiotu TEST, zgodnie z
 [procedurą XAdES dla środowiska testowego](https://github.com/CIRFMF/ksef-api/blob/main/uwierzytelnianie.md#21-uwierzytelnianie-z-wykorzystaniem-podpisu-xades).
