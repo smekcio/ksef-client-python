@@ -76,6 +76,7 @@ jobs:
     timeout-minutes: 160
     concurrency:
       group: ksef-test-live
+      queue: max
       cancel-in-progress: false
     env:
       KSEF_TEST_INSTALLED: "1"

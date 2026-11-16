@@ -15,7 +15,7 @@ from ..models import (
     TokenStatusResponse,
     TokenStatusResponseRev2,
 )
-from .base import AsyncBaseApiClient, BaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient, _require_reference_number
 
 
 def _rev2_filters(
@@ -151,7 +151,7 @@ class TokensClient(BaseApiClient):
     ) -> TokenStatusResponseRev2:
         return self._request_model(
             "GET",
-            f"/tokens/rev2/{reference_number}",
+            f"/tokens/rev2/{_require_reference_number(reference_number)}",
             response_model=TokenStatusResponseRev2,
             access_token=access_token,
         )
@@ -159,7 +159,7 @@ class TokensClient(BaseApiClient):
     def approve_token(self, reference_number: str, *, access_token: str | None = None) -> None:
         self._request_json(
             "POST",
-            f"/tokens/{reference_number}/approve",
+            f"/tokens/{_require_reference_number(reference_number)}/approve",
             access_token=access_token,
             expected_status={204},
         )
@@ -279,7 +279,7 @@ class AsyncTokensClient(AsyncBaseApiClient):
     ) -> TokenStatusResponseRev2:
         return await self._request_model(
             "GET",
-            f"/tokens/rev2/{reference_number}",
+            f"/tokens/rev2/{_require_reference_number(reference_number)}",
             response_model=TokenStatusResponseRev2,
             access_token=access_token,
         )
@@ -289,7 +289,7 @@ class AsyncTokensClient(AsyncBaseApiClient):
     ) -> None:
         await self._request_json(
             "POST",
-            f"/tokens/{reference_number}/approve",
+            f"/tokens/{_require_reference_number(reference_number)}/approve",
             access_token=access_token,
             expected_status={204},
         )

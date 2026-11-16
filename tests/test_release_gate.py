@@ -48,6 +48,10 @@ def test_gate_requires_exactly_one_occurrence_and_complete_manifest(tmp_path):
     write_report(path, [(name, None) for name in names] + [(names[0], None)])
     with pytest.raises(ValueError):
         gate.verify(path, names)
+    other = "tests/test_other.py::test_other"
+    write_report(path, [(name, None) for name in [*names, other]])
+    with pytest.raises(ValueError, match="each approved E2E test"):
+        gate.verify(path, names)
 
 
 @pytest.mark.parametrize("data", [[], {}, ["invalid"], ["tests/test_a.py::test_a"] * 2])
@@ -197,7 +201,7 @@ def test_workflow_gate_dependencies():
     assert "tools.release_artifacts verify" in publish
     assert "KSEF_TEST_INSTALLED:" in reusable
     assert "tools.verify_e2e_results output/required-test.xml --run" in reusable
-    assert "group: ksef-test-live" in reusable
+    assert "group: ksef-test-live\n      queue: max" in reusable
     assert "cancel-in-progress: false" in reusable
     assert "uses: ./.github/workflows/required-test-e2e.yml" in daily
     assert "for attempt in" not in reusable

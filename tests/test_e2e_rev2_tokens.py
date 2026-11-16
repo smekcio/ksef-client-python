@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
 
-from ksef_client import Ksef, KsefClientOptions, KsefEnvironment, TokenCredentials, XadesCredentials
+from ksef_client import (
+    AsyncKsef,
+    Ksef,
+    KsefClientOptions,
+    KsefEnvironment,
+    TokenCredentials,
+    XadesCredentials,
+)
 from ksef_client import models as m
 from ksef_client.exceptions import KsefApiError, KsefExceptionCode
 from ksef_client.request_control import request_control, wait_seconds
@@ -59,14 +67,38 @@ def _revoke(tokens, reference):
         assert token.status.code in {Status.APPROVALEXPIRED, Status.EXPIRED, Status.REVOKED}
 
 
+async def _check_async_session(options, config, token):
+    async with await AsyncKsef.connect(
+        options=options,
+        context_type=config.context_type,
+        context_value=config.context_value,
+        credentials=TokenCredentials(token.token),
+        timeout=180,
+    ) as client:
+        try:
+            sessions = await client.api.auth.get_active_sessions_rev2()
+            assert any(
+                item.is_current
+                and item.authentication_method_info.category.code
+                == m.AuthenticationMethodCategoryRev2Code.TOKEN
+                for item in sessions.items
+            )
+            status = await client.api.tokens.get_token_status_rev2(token.reference_number)
+            assert status.reference_number == token.reference_number
+            assert status.status.code is Status.ACTIVE
+        finally:
+            await client.api.auth.revoke_current_session()
+
+
 def test_e2e_test_environment_rev2_token_lifecycle():
     _ensure_e2e_enabled()
     config = _load_test_xades_config()
     options = KsefClientOptions(base_url=config.base_url, auth_status_rev2=True)
-    assert options.normalized_base_url() == f"{KsefEnvironment.TEST.value}/v2"
+    if options.normalized_base_url() != f"{KsefEnvironment.TEST.value}/v2":
+        pytest.fail("Token lifecycle E2E requires the official KSeF TEST URL", pytrace=False)
     assert config.context_type.casefold() == "nip"
-    assert config.certificate_pem and config.private_key_pem
-    assert config.subject_identifier_type
+    if not (config.certificate_pem and config.private_key_pem and config.subject_identifier_type):
+        pytest.fail("Token lifecycle E2E requires complete XAdES credentials", pytrace=False)
     credentials = XadesCredentials(
         XadesKeyPair(config.certificate_pem, config.private_key_pem),
         subject_identifier_type=config.subject_identifier_type,
@@ -110,6 +142,7 @@ def test_e2e_test_environment_rev2_token_lifecycle():
         )
         parent_status = _wait_for_status(owner.tokens, parent.reference_number, Status.ACTIVE)
         assert datetime.fromisoformat(parent_status.valid_to.replace("Z", "+00:00")) == parent_end
+        asyncio.run(_check_async_session(options, config, parent))
         child_permissions = [m.TokenPermissionType.INVOICEREAD]
         with _session(options, config, TokenCredentials(parent.token)) as delegated:
             approval = generate(

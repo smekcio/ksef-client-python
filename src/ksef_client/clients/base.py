@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Protocol, TypeVar
 
 from ..exceptions import KsefHttpError
@@ -25,6 +26,13 @@ ModelT_co = TypeVar("ModelT_co", covariant=True)
 class _ModelType(Protocol[ModelT_co]):
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ModelT_co: ...
+
+
+def _require_reference_number(value: str) -> str:
+    """Validate a KSeF reference before placing it in an authenticated URL path."""
+    if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9-]{36}", value) is None:
+        raise ValueError("Expected a 36-character KSeF reference number")
+    return value
 
 
 def _serialize_json_payload(payload: _SerializableModel | None) -> dict[str, Any] | None:

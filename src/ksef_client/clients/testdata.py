@@ -20,7 +20,7 @@ from ..models import (
     UnblockContextAuthenticationRequest,
 )
 from ..utils.certificate_serial import require_certificate_serial_number
-from .base import AsyncBaseApiClient, BaseApiClient
+from .base import AsyncBaseApiClient, BaseApiClient, _require_reference_number
 
 
 class TestDataClient(BaseApiClient):
@@ -229,7 +229,7 @@ class TestDataClient(BaseApiClient):
     ) -> None:
         self._request_json(
             "POST",
-            f"/testdata/tokens/{reference_number}/expire-approval",
+            f"/testdata/tokens/{_require_reference_number(reference_number)}/expire-approval",
             access_token=access_token,
             expected_status={204},
         )
@@ -455,7 +455,7 @@ class AsyncTestDataClient(AsyncBaseApiClient):
     ) -> None:
         await self._request_json(
             "POST",
-            f"/testdata/tokens/{reference_number}/expire-approval",
+            f"/testdata/tokens/{_require_reference_number(reference_number)}/expire-approval",
             access_token=access_token,
             expected_status={204},
         )
