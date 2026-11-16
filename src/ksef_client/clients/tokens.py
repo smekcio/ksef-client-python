@@ -27,16 +27,21 @@ def _rev2_filters(
     valid_to: str | None,
     page_size: int | None,
 ) -> dict[str, Any]:
+    if isinstance(statuses, str) and statuses:
+        statuses = (statuses,)
     values = {
-        "status": [TokenStatusFilterRev2(status).value for status in statuses]
+        "status": [
+            status.value if isinstance(status, TokenStatusFilterRev2) else status
+            for status in statuses
+        ]
         if statuses
         else None,
         "description": description,
         "authorIdentifier": author_identifier,
         "authorIdentifierType": (
-            TokenAuthorIdentifierTypeFilterRev2(author_identifier_type).value
-            if author_identifier_type is not None
-            else None
+            author_identifier_type.value
+            if isinstance(author_identifier_type, TokenAuthorIdentifierTypeFilterRev2)
+            else author_identifier_type
         ),
         "validFrom": valid_from,
         "validTo": valid_to,
