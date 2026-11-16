@@ -81,6 +81,8 @@ class KsefClientOptions:
     auth_status_rev2: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.auth_status_rev2, bool):
+            raise TypeError("auth_status_rev2 must be a bool")
         if self.retry is not None and not isinstance(self.retry, RetryConfig):
             raise TypeError("retry must be a RetryConfig instance or None")
         if self.rate_limit_budget is not None:

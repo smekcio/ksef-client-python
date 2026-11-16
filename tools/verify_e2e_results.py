@@ -79,9 +79,8 @@ def verify(report: Path, required: list[str]) -> None:
         for node in root.iter()
     ):
         raise ValueError("E2E scenarios must pass without scenario reruns")
-    failed = [name for name in required if outcomes.get(name) != [True]]
-    if failed:
-        raise ValueError("Required E2E tests missing, repeated or not passed: " + ", ".join(failed))
+    if outcomes != {name: [True] for name in required}:
+        raise ValueError("JUnit must contain exactly one success for each approved E2E test")
 
 
 def main(argv: list[str] | None = None) -> int:

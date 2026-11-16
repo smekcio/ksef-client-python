@@ -16,7 +16,7 @@ from ..models import (
     AuthenticationTokensResponse,
     InitTokenAuthenticationRequest,
 )
-from .base import AsyncBaseApiClient, BaseApiClient, _parse_json_response
+from .base import AsyncBaseApiClient, BaseApiClient, _parse_json_response, _require_reference_number
 
 _KSEF_FEATURE_HEADER = "X-KSeF-Feature"
 _ENFORCE_XADES_COMPLIANCE_FEATURE = "enforce-xades-compliance"
@@ -189,7 +189,7 @@ class AuthClient(BaseApiClient):
     ) -> AuthenticationOperationStatusResponseRev2:
         return self._request_model(
             "GET",
-            f"/auth/rev2/{reference_number}",
+            f"/auth/rev2/{_require_reference_number(reference_number)}",
             response_model=AuthenticationOperationStatusResponseRev2,
             access_token=authentication_token,
         )
@@ -345,7 +345,7 @@ class AsyncAuthClient(AsyncBaseApiClient):
     ) -> AuthenticationOperationStatusResponseRev2:
         return await self._request_model(
             "GET",
-            f"/auth/rev2/{reference_number}",
+            f"/auth/rev2/{_require_reference_number(reference_number)}",
             response_model=AuthenticationOperationStatusResponseRev2,
             access_token=authentication_token,
         )
