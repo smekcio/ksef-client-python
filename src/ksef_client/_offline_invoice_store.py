@@ -71,20 +71,26 @@ CREATE TABLE IF NOT EXISTS offline_attempts_v1 (
     PRIMARY KEY(scope, invoice_hash, revision),
     FOREIGN KEY(scope, invoice_hash) REFERENCES offline_invoices_v1(scope, invoice_hash)
 );
-CREATE TABLE IF NOT EXISTS online_archive_key_v1 (
-    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-    verifier BLOB NOT NULL
-);
-CREATE TABLE IF NOT EXISTS online_invoice_ids_v1 (
-    scope TEXT NOT NULL,
-    local_key TEXT NOT NULL,
-    invoice_hash TEXT NOT NULL,
-    binding BLOB NOT NULL,
-    PRIMARY KEY(scope, local_key),
-    UNIQUE(scope, invoice_hash),
-    FOREIGN KEY(scope, invoice_hash) REFERENCES offline_invoices_v1(scope, invoice_hash)
-);
 """
+_ONLINE_SCHEMA = (
+    """
+    CREATE TABLE online_archive_key_v1 (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        verifier BLOB NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE online_invoice_ids_v1 (
+        scope TEXT NOT NULL,
+        local_key TEXT NOT NULL,
+        invoice_hash TEXT NOT NULL,
+        binding BLOB NOT NULL,
+        PRIMARY KEY(scope, local_key),
+        UNIQUE(scope, invoice_hash),
+        FOREIGN KEY(scope, invoice_hash) REFERENCES offline_invoices_v1(scope, invoice_hash)
+    )
+    """,
+)
 MAX_OFFLINE_XML_BYTES = 16 * 1024 * 1024
 _TERMINAL = {
     OfflineInvoiceStatus.COMPLETE,
@@ -289,7 +295,19 @@ class SQLiteOfflineInvoiceStore:
         )
         return record
 
-    def _check_online_key(self, *, create: bool = False) -> None:
+    def _check_online_key(self, *, create: bool = False) -> bool:
+        schema_count = self._db.execute(
+            "SELECT count(*) FROM main.sqlite_master WHERE type='table' AND "
+            "name IN ('online_archive_key_v1', 'online_invoice_ids_v1')"
+        ).fetchone()[0]
+        if schema_count == 1:
+            raise KsefDocumentValidationError("Online archive schema is incomplete")
+        if schema_count == 0:
+            if not create:
+                return False
+            # First enqueue already holds the archive's write transaction.
+            for statement in _ONLINE_SCHEMA:
+                self._db.execute(statement)
         verifier = hmac.digest(self._online_key, b"ksef-online-archive/v1", "sha256")
         row = self._db.execute("SELECT verifier FROM online_archive_key_v1").fetchone()
         if row is None:
@@ -299,6 +317,7 @@ class SQLiteOfflineInvoiceStore:
                 self._db.execute("INSERT INTO online_archive_key_v1 VALUES (1,?)", (verifier,))
         elif type(row[0]) is not bytes or not hmac.compare_digest(verifier, row[0]):
             raise KsefDocumentValidationError("Online archive authentication failed")
+        return True
 
     def _local_key(self, identity: str, local_id: str) -> str:
         if type(local_id) is not str or not 1 <= len(local_id) <= 256 or not local_id.isprintable():
@@ -319,9 +338,11 @@ class SQLiteOfflineInvoiceStore:
         return invoice_hash
 
     def _load_online(self, scope: InvoiceSyncScope, local_id: str) -> StoredOfflineInvoice | None:
-        self._check_online_key()
         identity = self._scope(scope)
-        invoice_hash = self._mapped_hash(identity, self._local_key(identity, local_id))
+        local_key = self._local_key(identity, local_id)
+        if not self._check_online_key():
+            return None
+        invoice_hash = self._mapped_hash(identity, local_key)
         if invoice_hash is None:
             return None
         return self._require_mapped_document(scope, invoice_hash)

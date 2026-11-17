@@ -1,5 +1,6 @@
 import asyncio
 import sqlite3
+from contextlib import closing
 from dataclasses import replace
 
 import pytest
@@ -48,6 +49,51 @@ def test_archive_cas_survives_restart_and_preserves_encrypted_original_and_upo(t
         pytest.raises(KsefDocumentValidationError, match="authentication failed"),
     ):
         store.read_xml(SCOPE, pending.progress.invoice_hash)
+
+
+def test_legacy_offline_archive_stays_readable_and_upgrades_on_first_online_write(tmp_path):
+    path = tmp_path / "existing offline.db"
+    online_scope = replace(SCOPE, sync_key="online-invoices", stream_id="c" * 64)
+    with SQLiteOfflineInvoiceStore.open(path, key=KEY) as store:
+        original = store.enqueue(SCOPE, XML, due_at=DUE)
+    original_file = path.read_bytes()
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+        store = SQLiteOfflineInvoiceStore(connection, KEY)
+        assert {
+            row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        } == {"offline_invoices_v1", "offline_session_open_v1", "offline_attempts_v1"}
+        assert store.pending(SCOPE) == (original,)
+        assert store.read_xml(SCOPE, original.progress.invoice_hash) == XML
+        assert store._load_online(online_scope, "INV-1") is None
+        with pytest.raises(KsefDocumentValidationError, match="identifier"):
+            store._load_online(online_scope, "")
+    assert path.read_bytes() == original_file
+
+    with SQLiteOfflineInvoiceStore.open(path, key=KEY) as store:
+        registered = store._enqueue_online(online_scope, "INV-1", XML)
+        assert store.load(SCOPE, original.progress.invoice_hash) == original
+        assert store._enqueue_online(online_scope, "INV-1", XML) == registered
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+        store = SQLiteOfflineInvoiceStore(connection, KEY)
+        assert store._load_online(online_scope, "INV-1") == registered
+        assert store.load(SCOPE, original.progress.invoice_hash) == original
+
+
+def test_online_archive_refuses_incomplete_identity_schema(tmp_path):
+    path = tmp_path / "archive.db"
+    with closing(sqlite3.connect(path, isolation_level=None)) as connection:
+        store = SQLiteOfflineInvoiceStore(connection, KEY)
+        original = store.enqueue(SCOPE, XML, due_at=DUE)
+        online_scope = replace(SCOPE, sync_key="online-invoices", stream_id="c" * 64)
+        store._enqueue_online(online_scope, "INV-1", XML)
+        connection.execute("DROP TABLE online_archive_key_v1")
+        with pytest.raises(KsefDocumentValidationError, match="schema is incomplete"):
+            store._load_online(online_scope, "INV-1")
+        with pytest.raises(KsefDocumentValidationError, match="schema is incomplete"):
+            store._enqueue_online(online_scope, "INV-2", b"<different/>")
+        assert store.load(SCOPE, original.progress.invoice_hash) == original
 
 
 def test_technical_correction_requires_same_scope_and_a_terminal_rejection(tmp_path):
