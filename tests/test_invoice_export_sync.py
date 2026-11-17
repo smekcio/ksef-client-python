@@ -96,6 +96,16 @@ def test_resume_partial_import_without_transfer_or_early_hwm(tmp_path, monkeypat
                 )
                 assert row["status"] == "ready"
                 assert storage.read(key, HASH) == XML
+            for _ in range(2):
+                delivery = store.claim_invoice_delivery(
+                    sync.scope, storage, consumer="purchase-import"
+                )
+                assert delivery is not None and delivery.xml == XML
+                store.acknowledge_invoice_delivery(delivery)
+            assert (
+                store.claim_invoice_delivery(sync.scope, storage, consumer="purchase-import")
+                is None
+            )
             assert sync.run_once(store, storage, until=END).status == "idle"
     assert client.downloads == 1 and len(client.requests) == 1
     assert client.requests[0].subject_type.value == "Subject2"

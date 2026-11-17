@@ -6,6 +6,8 @@ Eksport obejmuje dwa kroki:
 
 Biblioteka udostępnia klasę `ExportWorkflow`, która realizuje krok (2): pobranie → odszyfrowanie → rozpakowanie.
 
+Dostarczanie gotowych faktur do własnych aplikacji opisuje [przewodnik odbiorcy](../incoming-invoice-delivery.md).
+
 ## Przykład (sync)
 
 ```python

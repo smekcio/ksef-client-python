@@ -12,6 +12,8 @@ pobierane ponownie.
 | Jednorazowe pobranie znanego numeru KSeF | `client.invoices.download(ksef_number)` |
 | Paczka eksportu na dysk | `client.exports.start(filters).download_to(...)` |
 
+Dostarczanie gotowych faktur do własnych aplikacji opisuje [przewodnik odbiorcy](incoming-invoice-delivery.md).
+
 ## Pierwsze uruchomienie
 
 Przykłady odpowiadają bieżącemu kodowi repozytorium. Zainstaluj checkout przez
