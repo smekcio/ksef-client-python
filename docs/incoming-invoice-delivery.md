@@ -38,7 +38,10 @@ Wybierz czas rezerwacji większy od typowego czasu przetwarzania dokumentu.
 Odbiornik nadal potrzebuje deduplikacji przy przekroczeniu tego czasu.
 
 Odczyt porównuje skrót oryginalnego XML z archiwum przed zwróceniem zdarzenia
-i sprawdza typy kwot oraz flag w zapisanych metadanych. Błąd
+i sprawdza typy pól zapisanych metadanych. Synchronizacja i import paczki
+sprawdzają te same typy przed zapisem. Jeśli poprzednia wersja SDK zapisała
+wartość po konwersji typu, ustalenie wartości źródłowej wymaga ponownego
+odczytu z KSeF. Błąd
 weryfikacji lub odczytu nie dostarcza dokumentu. Rezerwacja wygasa samodzielnie,
 a ponowna próba ustępuje starszym dostępnym dokumentom. Przy brakujących plikach
 uruchom `verify_ready`, aby kolejne pobranie XML mogło je uzupełnić.

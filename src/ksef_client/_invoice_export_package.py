@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ._invoice_metadata_validation import _validate_archive_metadata
 from ._json_bounds import check_json_structure
 from .exceptions import KsefDocumentValidationError
 from .invoice_search import _date, _json_object, _reject_constant
@@ -130,6 +131,7 @@ def validate_invoice_package(
             check_control()
             if type(row) is not dict:
                 raise ValueError
+            _validate_archive_metadata(row)
             number = canonical_ksef_number(row["ksefNumber"])
             hash_bytes(row["invoiceHash"])
             stored_at = _date(utc_timestamp(row["permanentStorageDate"]))

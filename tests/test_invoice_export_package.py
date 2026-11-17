@@ -125,6 +125,20 @@ def test_rejects_floating_point_overflow_before_import(tmp_path):
         validate_invoice_package(files, start=START, end=END, max_metadata_bytes=4096)
 
 
+def test_rejects_malformed_invoice_fields_before_package_import(tmp_path):
+    files = package(tmp_path)
+    assert files.metadata_path is not None
+    data = json.loads(files.metadata_path.read_bytes())
+    data["invoices"][0]["hasAttachment"] = "false"
+    files.metadata_path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(KsefDocumentValidationError, match="metadata"):
+        validate_invoice_package(files, start=START, end=END, max_metadata_bytes=4096)
+    data["invoices"][0]["hasAttachment"] = False
+    files.metadata_path.write_text(json.dumps(data), encoding="utf-8")
+    result = validate_invoice_package(files, start=START, end=END, max_metadata_bytes=4096)
+    assert result.invoices[0].metadata["hasAttachment"] is False
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

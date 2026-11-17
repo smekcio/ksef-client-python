@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, NoReturn
 
+from ._invoice_metadata_validation import _validate_archive_metadata
 from .exceptions import (
     KsefIncompletePaginationError,
     KsefInvalidPaginationCursorError,
@@ -82,7 +83,7 @@ class _InvalidMetadataResponse(ValueError):
     """Internal sentinel: preserve strict search semantics without changing legacy parsers."""
 
 
-def _parse_metadata_response(raw: Any) -> QueryInvoicesMetadataResponse:
+def _parse_metadata_response(raw: Any, *, archive: bool = False) -> QueryInvoicesMetadataResponse:
     if (
         type(raw) is not dict
         or type(raw.get("hasMore")) is not bool
@@ -107,6 +108,9 @@ def _parse_metadata_response(raw: Any) -> QueryInvoicesMetadataResponse:
     ):
         raise _InvalidMetadataResponse("Invalid metadata response")
     try:
+        if archive:
+            for item in raw["invoices"]:
+                _validate_archive_metadata(item)
         return QueryInvoicesMetadataResponse.from_dict(raw)
     except (ValueError, TypeError, KeyError, OverflowError):
         raise _InvalidMetadataResponse("Invalid metadata response") from None

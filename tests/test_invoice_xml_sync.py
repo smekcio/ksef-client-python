@@ -57,7 +57,9 @@ async def call(function, *args, **kwargs):
 
 
 @asynccontextmanager
-async def environment(tmp_path, asynchronous, server=None, **xml_options):
+async def environment(
+    tmp_path, asynchronous, server=None, *, subject_types=("Subject1",), **xml_options
+):
     server = server or XmlServer()
     metadata, http = make_sync(server, asynchronous=asynchronous)
     api = (AsyncInvoicesClient if asynchronous else InvoicesClient)(http)
@@ -66,7 +68,7 @@ async def environment(tmp_path, asynchronous, server=None, **xml_options):
         sync_key="job",
         context_key="Nip:test",
         since=START,
-        subject_types=("Subject1",),
+        subject_types=subject_types,
         page_size=10,
         xml_options=xml_options,
     )

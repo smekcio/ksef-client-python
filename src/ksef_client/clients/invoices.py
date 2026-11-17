@@ -366,7 +366,7 @@ class InvoicesClient(BaseApiClient):
                 or len(raw["invoices"]) > page_size
             ):
                 raise ValueError("Invalid metadata page")
-            return _parse_metadata_response(raw)
+            return _parse_metadata_response(raw, archive=True)
         except (ValueError, TypeError, RecursionError):
             raise _InvalidMetadataResponse("Invalid metadata response") from None
 
@@ -855,7 +855,7 @@ class AsyncInvoicesClient(AsyncBaseApiClient):
                 or len(raw["invoices"]) > page_size
             ):
                 raise ValueError("Invalid metadata page")
-            return _parse_metadata_response(raw)
+            return _parse_metadata_response(raw, archive=True)
         except (ValueError, TypeError, RecursionError):
             raise _InvalidMetadataResponse("Invalid metadata response") from None
 

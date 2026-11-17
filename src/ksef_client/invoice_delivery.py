@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from dataclasses import dataclass
 
 from . import models as m
+from ._invoice_metadata_validation import _validate_archive_metadata
 from .invoice_sync_state import _loads, utc_timestamp
 from .invoice_xml_types import InvoiceXmlKey, KsefXmlIntegrityError, KsefXmlSyncError, verify_hash
 from .utils.ksef_number import canonical_ksef_number
@@ -47,16 +47,7 @@ def _delivery_metadata(raw: str, key: InvoiceXmlKey, expected_hash: str) -> m.In
         ):
             raise ValueError
         utc_timestamp(payload["permanentStorageDate"])
-        for name in ("netAmount", "vatAmount", "grossAmount"):
-            amount = payload.get(name)
-            if amount is not None and (
-                type(amount) not in (int, float) or not math.isfinite(amount)
-            ):
-                raise ValueError
-        for name in ("hasAttachment", "isSelfInvoicing"):
-            flag = payload.get(name)
-            if flag is not None and type(flag) is not bool:
-                raise ValueError
+        _validate_archive_metadata(payload)
         return m.InvoiceMetadata.from_dict(payload)
     except (TypeError, ValueError, AttributeError, KeyError, OverflowError, RecursionError):
         raise KsefXmlIntegrityError("invalid_delivery_metadata") from None

@@ -19,9 +19,10 @@ from ksef_client import (
 )
 from ksef_client import sqlite_store as store_module
 from ksef_client.clients.invoices import AsyncInvoicesClient, InvoicesClient
+from ksef_client.exceptions import KsefIncompletePaginationError
 from ksef_client.invoice_delivery import KsefInvoiceDeliveryLeaseLostError
 from tests.test_invoice_sync import START, make_sync, row
-from tests.test_invoice_xml_sync import HASH, NUMBER, NUMBER2, XML, XmlServer, call
+from tests.test_invoice_xml_sync import HASH, NUMBER, NUMBER2, XML, XmlServer, call, environment
 
 
 def document_sync(api, sync_key="purchase", role="Subject2"):
@@ -358,3 +359,67 @@ def test_delivery_rejects_coerced_values_and_mismatching_archive_identity(tmp_pa
         assert delivery.metadata.has_attachment is False
         assert delivery.metadata.is_self_invoicing is True
     http.close()
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_archive_rejects_malformed_wire_metadata_before_checkpoint(tmp_path, asynchronous):
+    async def run():
+        template = row(NUMBER, hash_=HASH)
+        valid = {
+            **template.to_dict(),
+            "grossAmount": 123,
+            "vatAmount": 23.5,
+            "hasAttachment": False,
+            "isSelfInvoicing": True,
+            "formCode": {"systemCode": "FA (3)", "schemaVersion": "1-0E", "value": "FA"},
+            "seller": {"nip": "1111111111"},
+            "buyer": {"identifier": {"type": "Nip", "value": "2222222222"}},
+            "authorizedSubject": {"nip": "3333333333", "role": 1},
+            "thirdSubjects": [{"identifier": {"type": "None"}, "role": 1}],
+        }
+        payload = valid.copy()
+        server = XmlServer(
+            [
+                SimpleNamespace(
+                    permanent_storage_date=template.permanent_storage_date,
+                    to_dict=lambda: payload,
+                )
+            ]
+        )
+        async with environment(
+            tmp_path, asynchronous, server, subject_types=("Subject2",)
+        ) as (sync, archive, storage, _):
+            scope = sync.xml.scopes[0]
+            for name, value in [
+                ("grossAmount", True),
+                ("netAmount", "99.5"),
+                ("vatAmount", 10**400),
+                ("hasAttachment", "false"),
+                ("isSelfInvoicing", 0),
+                ("invoiceNumber", ["invalid"]),
+                ("buyer", {"identifier": "2222222222"}),
+                ("seller", {"nip": 1111111111}),
+                ("authorizedSubject", {"nip": "3333333333", "role": True}),
+                ("thirdSubjects", {"role": 1}),
+                ("thirdSubjects", [False]),
+                ("formCode", {"systemCode": "FA (3)", "schemaVersion": 100, "value": "FA"}),
+            ]:
+                payload = {**valid, name: value}
+                report = await call(sync.metadata.run_once, archive, raise_on_error=False)
+                assert isinstance(report.streams[0].original_error, KsefIncompletePaginationError)
+                checkpoint = await call(archive.load, scope)
+                assert checkpoint is not None and checkpoint.committed_hwm is None
+                assert (
+                    await call(archive.claim_invoice_delivery, scope, storage, consumer="job")
+                    is None
+                )
+            payload = valid
+            assert (await call(sync.metadata.run_once, archive)).complete
+            assert (await call(sync.xml.run_once, archive, storage)).ready == 1
+            delivery = await call(archive.claim_invoice_delivery, scope, storage, consumer="job")
+            assert delivery is not None and delivery.xml == XML
+            assert delivery.metadata.gross_amount == 123.0
+            assert delivery.metadata.has_attachment is False
+            assert delivery.metadata.buyer.identifier.value == "2222222222"
+
+    asyncio.run(run())
