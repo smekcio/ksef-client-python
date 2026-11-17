@@ -843,17 +843,20 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
         delivery = pending.verified(xml)
         with self._transaction(write=False):
             active = self._execute(
-                "SELECT 1 FROM incoming_invoice_delivery WHERE "
+                "SELECT 1 FROM incoming_invoice_delivery "
+                "JOIN invoice_xml_documents USING(namespace,environment,context_key,ksef_number,"
+                "variant) WHERE "
                 + DOC_KEY
                 + " AND consumer=? AND token=? AND epoch=? AND available_at>? "
-                "AND acknowledged=0 AND EXISTS(SELECT 1 FROM xml_store_meta "
-                "WHERE id=1 AND epoch=?)",
+                "AND acknowledged=0 AND status='ready' AND expected_hash=? "
+                "AND EXISTS(SELECT 1 FROM xml_store_meta WHERE id=1 AND epoch=?)",
                 (
                     *pending.key.values,
                     pending.consumer,
                     pending.token,
                     pending.epoch,
                     time.time(),
+                    pending.expected_hash,
                     pending.epoch,
                 ),
             ).fetchone()

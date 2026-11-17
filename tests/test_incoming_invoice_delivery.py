@@ -255,6 +255,70 @@ def test_long_unicode_scope_and_lease_expiration_during_read(tmp_path, monkeypat
     http.close()
 
 
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_delivery_rechecks_ready_state_after_read(tmp_path, monkeypatch, asynchronous):
+    clock = [1000.0]
+    monkeypatch.setattr(store_module, "time", SimpleNamespace(time=lambda: clock[0]))
+
+    async def run():
+        root = tmp_path / "xml"
+        storage = (
+            await AsyncFileInvoiceXmlStore.open(root) if asynchronous else FileInvoiceXmlStore(root)
+        )
+        store_cls = AsyncSQLiteInvoiceSyncStore if asynchronous else SQLiteInvoiceSyncStore
+        db = tmp_path / "archive.db"
+        options = {"enqueue_xml": True, "xml_storage_id": storage.storage_id}
+        archive = await call(store_cls.open, db, **options)
+        auditor = await call(store_cls.open, db, **options)
+        _, http = make_sync(XmlServer(), asynchronous=asynchronous)
+        client = (AsyncInvoicesClient if asynchronous else InvoicesClient)(http)
+        try:
+            sync = document_sync(client)
+            scope = sync.xml.scopes[0]
+            assert (await call(sync.run_once, archive, storage)).complete
+            read = storage.read
+
+            def read_then_remove(key, expected_hash, *, max_bytes):
+                content = read(key, expected_hash, max_bytes=max_bytes)
+                (root / key.object_key(expected_hash)).unlink()
+                auditor.verify_ready((scope,), storage)
+                return content
+
+            async def async_read_then_remove(key, expected_hash, *, max_bytes):
+                content = await read(key, expected_hash, max_bytes=max_bytes)
+                (root / key.object_key(expected_hash)).unlink()
+                await auditor.verify_ready((scope,), storage)
+                return content
+
+            with monkeypatch.context() as patch:
+                patch.setattr(
+                    storage, "read", async_read_then_remove if asynchronous else read_then_remove
+                )
+                with pytest.raises(KsefInvoiceDeliveryLeaseLostError):
+                    await call(
+                        archive.claim_invoice_delivery,
+                        scope,
+                        storage,
+                        consumer="job",
+                        lease_seconds=10,
+                    )
+            assert (await call(auditor.describe_xml, (scope,))).pending == 1
+            assert (
+                await call(archive.claim_invoice_delivery, scope, storage, consumer="job") is None
+            )
+            assert (await call(sync.xml.run_once, archive, storage)).ready == 1
+            clock[0] += 10
+            delivery = await call(archive.claim_invoice_delivery, scope, storage, consumer="job")
+            assert delivery is not None and delivery.xml == XML
+        finally:
+            await call(auditor.close)
+            await call(archive.close)
+            await call(storage.close)
+            await call(http.aclose if asynchronous else http.close)
+
+    asyncio.run(run())
+
+
 def test_corrupted_delivery_yields_to_later_ready_work_after_lease_expires(tmp_path, monkeypatch):
     _, http = make_sync(XmlServer([row(NUMBER2, hash_=HASH), row(NUMBER, hash_=HASH)]))
     sync = document_sync(InvoicesClient(http))
@@ -386,9 +450,12 @@ def test_archive_rejects_malformed_wire_metadata_before_checkpoint(tmp_path, asy
                 )
             ]
         )
-        async with environment(
-            tmp_path, asynchronous, server, subject_types=("Subject2",)
-        ) as (sync, archive, storage, _):
+        async with environment(tmp_path, asynchronous, server, subject_types=("Subject2",)) as (
+            sync,
+            archive,
+            storage,
+            _,
+        ):
             scope = sync.xml.scopes[0]
             for name, value in [
                 ("grossAmount", True),

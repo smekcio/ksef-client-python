@@ -14,7 +14,7 @@ from .utils.ksef_number import canonical_ksef_number
 
 
 class KsefInvoiceDeliveryLeaseLostError(KsefXmlSyncError):
-    """The delivery attempt has expired, been released or been superseded."""
+    """The attempt expired, was superseded or the archive entry stopped being ready."""
 
     def __init__(self) -> None:
         super().__init__("invoice_delivery_lease_lost")

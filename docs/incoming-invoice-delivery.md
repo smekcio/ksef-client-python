@@ -41,10 +41,10 @@ Odczyt porównuje skrót oryginalnego XML z archiwum przed zwróceniem zdarzenia
 i sprawdza typy pól zapisanych metadanych. Synchronizacja i import paczki
 sprawdzają te same typy przed zapisem. Jeśli poprzednia wersja SDK zapisała
 wartość po konwersji typu, ustalenie wartości źródłowej wymaga ponownego
-odczytu z KSeF. Błąd
-weryfikacji lub odczytu nie dostarcza dokumentu. Rezerwacja wygasa samodzielnie,
-a ponowna próba ustępuje starszym dostępnym dokumentom. Przy brakujących plikach
-uruchom `verify_ready`, aby kolejne pobranie XML mogło je uzupełnić.
+odczytu z KSeF. Błąd weryfikacji lub odczytu nie dostarcza dokumentu. Jeśli
+audyt zmieni stan dokumentu w trakcie odczytu, próba może zgłosić
+`KsefInvoiceDeliveryLeaseLostError`. Rezerwacja wygasa samodzielnie, a ponowna
+próba ustępuje starszym dostępnym dokumentom. Przy brakujących plikach uruchom `verify_ready`, aby kolejne pobranie XML mogło je uzupełnić.
 Uszkodzoną zawartość możesz odzyskać z kopii spójnej z bazą.
 `None` oznacza brak dostępnej faktury w tej chwili. Wersja async używa tych
 samych nazw z `await`. Worker odbiorcy może działać bez logowania do KSeF.
