@@ -269,9 +269,6 @@ def test_explicit_retry_requires_finalized_empty_session(tmp_path, use_async):
             )
             server.failed_invoice_count = 0
             server.next_page = m.SessionInvoicesResponse([], "")
-            with pytest.raises(KsefDocumentValidationError, match="listing did not complete"):
-                await call(worker.retry_if_unsubmitted, LOCAL_ID)
-            server.next_page = None
             assert (await call(worker.retry_if_unsubmitted, LOCAL_ID)).status is Status.QUEUED
             assert (await call(worker.enqueue, LOCAL_ID, XML)).status is Status.QUEUED
 

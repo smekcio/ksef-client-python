@@ -19,7 +19,7 @@ from .invoice_sync_state import InvoiceSyncScope
 from .offline_invoices import AsyncOfflineInvoices, OfflineInvoices
 from .operations import environment_key
 from .request_control import request_control
-from .token_manager import _disable_online_post_replay
+from .token_manager import _durable_online_requests
 from .utils.ksef_number import canonical_ksef_number
 
 if TYPE_CHECKING:
@@ -185,7 +185,7 @@ class OnlineInvoices:
         """Run one step, reconciling unknown sends through the persisted session."""
         with (
             request_control(timeout_seconds=timeout),
-            _disable_online_post_replay(self._client.api.http_client),
+            _durable_online_requests(self._client.api.http_client),
         ):
             row = _required(self._store._load_online(self._worker.scope, local_id))
             _validate_transport(self._client, self._worker.scope)
@@ -197,7 +197,7 @@ class OnlineInvoices:
         """Permit a new attempt only after KSeF proves that the old session was empty."""
         with (
             request_control(timeout_seconds=timeout),
-            _disable_online_post_replay(self._client.api.http_client),
+            _durable_online_requests(self._client.api.http_client),
         ):
             row = _required(self._store._load_online(self._worker.scope, local_id))
             _validate_transport(self._client, self._worker.scope)
@@ -240,7 +240,7 @@ class AsyncOnlineInvoices:
     async def advance(self, local_id: str, *, timeout: float = 60) -> OnlineInvoice:
         with (
             request_control(timeout_seconds=timeout),
-            _disable_online_post_replay(self._client.api.http_client),
+            _durable_online_requests(self._client.api.http_client),
         ):
             row = _required(await self._store._call("_load_online", self._worker.scope, local_id))
             _validate_transport(self._client, self._worker.scope)
@@ -250,7 +250,7 @@ class AsyncOnlineInvoices:
     async def retry_if_unsubmitted(self, local_id: str, *, timeout: float = 60) -> OnlineInvoice:
         with (
             request_control(timeout_seconds=timeout),
-            _disable_online_post_replay(self._client.api.http_client),
+            _durable_online_requests(self._client.api.http_client),
         ):
             row = _required(await self._store._call("_load_online", self._worker.scope, local_id))
             _validate_transport(self._client, self._worker.scope)

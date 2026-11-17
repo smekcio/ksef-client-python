@@ -30,7 +30,7 @@ from ksef_client.online_invoices import (
     OnlineInvoiceStatus,
     SQLiteOnlineInvoiceStore,
 )
-from ksef_client.token_manager import AsyncTokenManager, TokenManager
+from ksef_client.token_manager import AsyncTokenManager, TokenManager, TokenManagerError
 from tests.helpers import generate_rsa_cert
 from tests.test_offline_invoice_state import HASH, NUMBER, remote_invoice
 from tests.test_offline_invoice_store import KEY, XML
@@ -81,13 +81,14 @@ def test_real_session_checkpoint_recovers_individual_upo_after_disconnected_post
         if (method, path) == ("GET", "/v2/sessions/session-1/invoices"):
             return streamed_json(
                 {
+                    "continuationToken": "",
                     "invoices": [
                         {
                             **remote_invoice(200, number=NUMBER).to_dict(),
                             "ordinalNumber": 1,
                             "invoicingDate": "2026-11-01T00:00:00Z",
                         }
-                    ]
+                    ],
                 },
             )
         if (method, path) == ("GET", "/v2/sessions/session-1"):
@@ -147,6 +148,7 @@ def test_durable_online_post_refreshes_after_401_without_replaying(tmp_path, use
     }
     posts = []
     refreshes = []
+    finalized = False
 
     def refresh(token):
         refreshes.append(token)
@@ -176,6 +178,9 @@ def test_durable_online_post_refreshes_after_401_without_replaying(tmp_path, use
                     }
                 ],
             )
+        if (method, path) == ("GET", "/v2/sessions/session-1/invoices"):
+            assert finalized
+            return streamed_json({"invoices": [], "continuationToken": ""})
         assert (method, path) == ("GET", "/v2/sessions/session-1")
         if refreshes:
             assert request.headers["Authorization"] == "Bearer fresh-token"
@@ -183,7 +188,8 @@ def test_durable_online_post_refreshes_after_401_without_replaying(tmp_path, use
             {
                 "dateCreated": "2026-11-01T00:00:00Z",
                 "dateUpdated": "2026-11-01T00:01:00Z",
-                "status": {"code": 100, "description": "open"},
+                "status": {"code": 440 if finalized else 100, "description": "test"},
+                "invoiceCount": 0,
             },
         )
 
@@ -192,6 +198,7 @@ def test_durable_online_post_refreshes_after_401_without_replaying(tmp_path, use
         return await result if isawaitable(result) else result
 
     async def run():
+        nonlocal finalized
         async with AsyncExitStack() as stack:
             path = tmp_path / "online.db"
             api: AuthenticatedClient | AsyncAuthenticatedClient
@@ -238,5 +245,105 @@ def test_durable_online_post_refreshes_after_401_without_replaying(tmp_path, use
                 else OnlineInvoiceStatus.SUBMISSION_UNKNOWN
             )
             await call(api.sessions.get_session_status, "session-1")
+            if phase == "send":
+                finalized = True
+                retry = await call(online.retry_if_unsubmitted, "id")
+                assert retry.status is OnlineInvoiceStatus.QUEUED
+                assert posts.count(paths["send"]) == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("use_async", [False, True])
+@pytest.mark.parametrize("rebind_during_request", [False, True])
+def test_durable_online_refuses_rebound_default_auth_transport(
+    tmp_path, use_async, rebind_during_request
+):
+    options = KsefClientOptions(base_url="https://example.test/v2")
+    other_options = KsefClientOptions(base_url="https://other.example.test/v2")
+    certificate = generate_rsa_cert()
+    wire = []
+    other_wire = []
+
+    def other_response(request):
+        other_wire.append(request.url.path)
+        return httpx.Response(401)
+
+    async def run():
+        api: AuthenticatedClient | AsyncAuthenticatedClient
+        other_api: AuthenticatedClient | AsyncAuthenticatedClient
+        worker: OnlineInvoices | AsyncOnlineInvoices
+
+        def respond(request):
+            wire.append((request.method, request.url.path))
+            if request.url.path == "/v2/security/public-key-certificates":
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "certificate": certificate.certificate_der_b64,
+                            "usage": ["SymmetricKeyEncryption"],
+                            "validFrom": "2000-01-01T00:00:00Z",
+                            "validTo": "2100-01-01T00:00:00Z",
+                        }
+                    ],
+                )
+            assert request.url.path == "/v2/sessions/online"
+            api.token_manager.bind_auth_client(other_api.auth)
+            return httpx.Response(401)
+
+        async with AsyncExitStack() as stack:
+            path = tmp_path / "online.db"
+            valid_until = None if rebind_during_request else "2000-01-01T00:00:00Z"
+            if use_async:
+                manager = AsyncTokenManager(
+                    "access-a", "refresh-a", access_token_valid_until=valid_until
+                )
+                other_api = AsyncAuthenticatedClient(other_options, manager)
+                api = AsyncAuthenticatedClient(options, manager)
+                for instance, responder in ((other_api, other_response), (api, respond)):
+                    await stack.enter_async_context(instance)
+                    await instance.http_client._client.aclose()
+                    instance.http_client._client = httpx.AsyncClient(
+                        transport=httpx.MockTransport(responder)
+                    )
+                client = AsyncKsef(api, options, context_type="Nip", context_value="test")
+                store = await stack.enter_async_context(
+                    await AsyncSQLiteOnlineInvoiceStore.open(path, key=KEY)
+                )
+                worker = client.invoices.online(store, namespace="tenant")
+                await worker.enqueue("id", XML)
+            else:
+                sync_manager = TokenManager(
+                    "access-a", "refresh-a", access_token_valid_until=valid_until
+                )
+                other_api = AuthenticatedClient(other_options, sync_manager)
+                api = AuthenticatedClient(options, sync_manager)
+                for instance, responder in ((other_api, other_response), (api, respond)):
+                    stack.enter_context(instance)
+                    instance.http_client._client.close()
+                    instance.http_client._client = httpx.Client(
+                        transport=httpx.MockTransport(responder)
+                    )
+                sync_client = Ksef(api, options, context_type="Nip", context_value="test")
+                sync_store = stack.enter_context(SQLiteOnlineInvoiceStore.open(path, key=KEY))
+                worker = sync_client.invoices.online(sync_store, namespace="tenant")
+                worker.enqueue("id", XML)
+
+            if not rebind_during_request:
+                api.token_manager.bind_auth_client(other_api.auth)
+            with pytest.raises(TokenManagerError, match="authentication transport changed"):
+                result = worker.advance("id")
+                if isawaitable(result):
+                    await result
+            row = worker.status("id")
+            if isawaitable(row):
+                row = await row
+            assert row.status is OnlineInvoiceStatus.QUEUED
+        assert not other_wire
+        expected_wire = [("GET", "/v2/security/public-key-certificates")]
+        if rebind_during_request:
+            expected_wire.append(("POST", "/v2/sessions/online"))
+        assert wire == expected_wire
 
     asyncio.run(run())

@@ -345,9 +345,9 @@ class OfflineInvoices(OfflineInvoiceQueue):
             nonempty |= bool(page.invoices)
             match = _match_invoice(match, page, invoice_hash, strict=strict)
             token = page.continuation_token
-            if token is None or (not strict and not token):
+            if token is None or token == "":
                 return match, nonempty
-            if not token or len(token) > 16_384 or token in seen:
+            if len(token) > 16_384 or token in seen:
                 break
             seen.add(token)
         raise KsefDocumentValidationError("KSeF offline session listing did not complete")
@@ -580,9 +580,9 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
             nonempty |= bool(page.invoices)
             match = _match_invoice(match, page, invoice_hash, strict=strict)
             token = page.continuation_token
-            if token is None or (not strict and not token):
+            if token is None or token == "":
                 return match, nonempty
-            if not token or len(token) > 16_384 or token in seen:
+            if len(token) > 16_384 or token in seen:
                 break
             seen.add(token)
         raise KsefDocumentValidationError("KSeF offline session listing did not complete")
