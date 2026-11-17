@@ -37,6 +37,9 @@ Najważniejsze cechy:
 - **lokalne archiwum faktur i XML** — przyrostowe pobieranie, wznowienie po restarcie,
   kontrola SHA-256 i raport gotowości; gotowe SQLite i magazyn plikowy sync/async;
   [przykład synchronizacji](#synchronizacja-metadanych-i-xml),
+- **odbiór faktur zakupowych przez skrypt** — pobierz zweryfikowany XML z archiwum
+  i potwierdź przetworzenie. Po przerwaniu skrypt rozpozna fakturę po tym samym ID.
+  [Przykład odbiorcy](docs/incoming-invoice-delivery.md),
 - **archiwizacja z paczek KSeF** — metadane w SQLite, XML w magazynie plikowym,
   osobny punkt kontrolny HWM dla każdej roli i wznowienie po przerwaniu;
   [przewodnik](docs/workflows/export.md#wznawialny-import-do-lokalnego-archiwum),
