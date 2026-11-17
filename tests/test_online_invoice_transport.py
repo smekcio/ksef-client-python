@@ -70,7 +70,8 @@ def test_real_session_checkpoint_recovers_individual_upo_after_disconnected_post
 
     @contextmanager
     def reopen():
-        with AuthenticatedClient(options, TokenManager("test-token")) as api:
+        api = AuthenticatedClient(options, TokenManager("test-token"))
+        with api:
             http = api.http_client
             http._client.close()
             http._client = httpx.Client(transport=httpx.MockTransport(respond))
@@ -81,9 +82,8 @@ def test_real_session_checkpoint_recovers_individual_upo_after_disconnected_post
     with reopen() as online:
         online.enqueue("local-id", XML)
         assert online.advance("local-id").status is OnlineInvoiceStatus.SESSION_OPEN
-    with reopen() as online:
-        with pytest.raises(KsefTransportError):
-            online.advance("local-id")
+    with reopen() as online, pytest.raises(KsefTransportError):
+        online.advance("local-id")
     with reopen() as online:
         assert online.advance("local-id").ksef_number == NUMBER
         assert online.advance("local-id").status is OnlineInvoiceStatus.ACCEPTED
