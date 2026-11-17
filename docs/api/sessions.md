@@ -60,9 +60,10 @@ Endpoint: `GET /sessions/{referenceNumber}`
 
 Zwraca status sesji i (zależnie od typu) dodatkowe pola: m.in. informacje o UPO.
 
-W klientach sync i async metody `get_session_status`, `get_session_invoice_status`
-i `get_session_invoices` przyjmują `strict=True`. Użyj tej opcji, gdy od wyniku
-zależy ponowienie wysyłki. SDK sprawdza typy pól w oryginalnym JSON,
+W klientach sync i async `sessions.validated` udostępnia metody
+`get_session_status`, `get_session_invoice_status` i `get_session_invoices`
+z walidacją odpowiedzi. Użyj ich, gdy od wyniku zależy ponowienie wysyłki.
+SDK sprawdza typy pól w oryginalnym JSON,
 limity długości identyfikatorów oraz znaczniki czasu ze strefą. Odrzuca niepełną
 strukturę strony oraz powtórzone klucze. Odczyt statusu ma limit 1 MiB,
 a strony faktur 16 MiB. Możesz zmniejszyć `page_size`, gdy strona przekroczy limit.
