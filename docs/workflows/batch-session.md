@@ -133,7 +133,8 @@ To rozróżnienie jest celowe:
 Przygotuj archiwum wraz z manifestem. Manifest zapisuje nazwy plików i SHA-256
 oryginalnych dokumentów oraz rozmiar i SHA-256 archiwum. Można go odtworzyć z
 `manifest.to_dict()` przez `BatchInvoiceManifest.from_dict(...)`. Przechowuj go
-obok stanu sesji w magazynie aplikacji. Nazwy plików mogą zawierać dane firmowe.
+obok stanu sesji w magazynie aplikacji. Przy tworzeniu nowej paczki nazwy plików mają limit 128 znaków
+z kontraktu KSeF i mogą zawierać dane firmowe.
 
 ```python
 from ksef_client.batch_outcomes import BatchInvoiceManifest, prepare_invoice_batch

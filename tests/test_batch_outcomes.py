@@ -27,8 +27,8 @@ FILES = {"accepted.xml": b"<a/>", "bad.xml": b"<b/>", "cancelled.xml": b"<c/>"}
 def status(code=200, *, count=3, accepted=1, rejected=2):
     return m.SessionStatusResponse.from_dict(
         {
-            "dateCreated": "start",
-            "dateUpdated": "current",
+            "dateCreated": "2026-11-17T22:00:00Z",
+            "dateUpdated": "2026-11-17T22:05:00Z",
             "status": {"code": code, "description": "session"},
             "invoiceCount": count,
             "successfulInvoiceCount": accepted,
@@ -99,6 +99,7 @@ def test_manifest_bound_to_exact_archive(compression, unpack):
         {"nested/../doc.xml": b"abc"},
         {"dir\\doc.xml": b"a", "dir/doc.xml": b"b"},
         {"x" * 1025: b"x"},
+        {"x" * 125 + ".xml": b"x"},
         {42: b"x"},
     ],
 )
@@ -133,6 +134,15 @@ def test_compression_and_manifest_validation():
         BatchInvoice("folder\\one.xml", manifest.file_hash)
     with pytest.raises(KsefXmlIntegrityError):
         BatchInvoice("one.xml", "wrong hash")
+    maximum_name = "x" * 124 + ".xml"
+    assert (
+        prepare_invoice_batch({maximum_name: b"<a/>"}).manifest.invoices[0].file_name
+        == maximum_name
+    )
+    # New preparations follow the API limit. Older persisted manifests still deserialize.
+    old_name = "x" * 125 + ".xml"
+    serialized["invoices"][0]["file_name"] = old_name
+    assert BatchInvoiceManifest.from_dict(serialized).invoices[0].file_name == old_name
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
@@ -261,6 +271,7 @@ def test_no_retry_when_results_are_not_authoritative(asynchronous, case):
         ("no_reference", ["unresolved", "duplicate", "cancelled"]),
         ("unknown_status", ["unresolved", "duplicate", "cancelled"]),
         ("status_changed", ["accepted", "duplicate", "cancelled"]),
+        ("creation_changed", ["accepted", "duplicate", "cancelled"]),
         ("count_conflict", ["accepted", "duplicate", "cancelled"]),
     ],
 )
@@ -308,6 +319,8 @@ def test_inconsistent_api_results_are_never_resend_candidates(problem, expected)
         rows[0] = remote(first, 1, code=500)
     elif problem == "status_changed":
         current = status(150, count=None, accepted=None, rejected=None)
+    elif problem == "creation_changed":
+        current = replace(initial, date_created="2026-11-17T21:59:00Z")
     elif problem == "count_conflict":
         initial = current = status(accepted=0)
     remote_api.get_session_status.side_effect = [initial, current]
@@ -384,6 +397,29 @@ def test_identical_xml_requires_confirmed_filename_and_all_rejected_is_final():
     report = read(handle, manifest, False)
     assert outcome_values(report) == ["unresolved"] * 2
     assert not report.complete and report.retry_candidates == ()
+
+
+def test_ambiguous_rows_in_later_pages_invalidate_named_results_for_the_same_hash():
+    remote_api = Mock()
+    count = 1000
+    manifest = prepare_invoice_batch({f"{i}.xml": b"<same/>" for i in range(count)}).manifest
+    remote_api.get_session_status.return_value = status(
+        445, count=count, accepted=0, rejected=count
+    )
+    remote_api.get_session_invoices.side_effect = [
+        m.SessionInvoicesResponse(
+            [
+                remote(item, start + i + 1, code=550, name=item.file_name if start == 0 else None)
+                for i, item in enumerate(manifest.invoices[start : start + 100])
+            ],
+            str(start) if start + 100 < count else None,
+        )
+        for start in range(0, count, 100)
+    ]
+    report = read(setup_handle(manifest, remote_api, False), manifest, False)
+    assert outcome_values(report) == ["unresolved"] * count
+    assert not report.complete and report.retry_candidates == ()
+    assert remote_api.get_session_invoices.call_count == 10
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])

@@ -134,6 +134,8 @@ def prepare_invoice_batch(
     entries = []
     for raw_name, xml in invoices.items():
         name = _file_name(raw_name)
+        if len(name) > 128:
+            raise ValueError("Prepared batch invoice filenames must have at most 128 characters")
         if name in files:
             raise ValueError("Duplicate batch invoice filename after normalization")
         if type(xml) is not bytes or not xml:
@@ -229,6 +231,7 @@ class _BatchResults:
             self.by_hash[invoice.invoice_hash].add(invoice.file_name)
         self.rows: dict[str, BatchInvoiceOutcome] = {}
         self.conflicted: set[str] = set()
+        self.conflicted_hashes: set[str] = set()
         self.identifiers: dict[tuple[str, int | str], str | None] = {}
         self.tokens: set[str] = set()
         self.count = 0
@@ -261,7 +264,8 @@ class _BatchResults:
         return token
 
     def _record(self, row: m.SessionInvoiceStatusResponse) -> None:
-        candidates = self.by_hash.get(row.invoice_hash or "", set())
+        invoice_hash = row.invoice_hash or ""
+        candidates = self.by_hash.get(invoice_hash, set())
         name = row.invoice_file_name
         if name is None and len(candidates) == 1:
             name = next(iter(candidates))
@@ -284,7 +288,8 @@ class _BatchResults:
                 self.conflicted.update(item for item in (previous, matched) if item is not None)
         if matched is None:
             self.consistent = False
-            self.conflicted.update(candidates)
+            if candidates:
+                self.conflicted_hashes.add(invoice_hash)
             if name is not None and name in self.by_name:
                 self.conflicted.add(name)
             return
@@ -305,6 +310,7 @@ class _BatchResults:
         results = tuple(
             self.rows.get(invoice.file_name, BatchInvoiceOutcome(invoice, unresolved))
             if invoice.file_name not in self.conflicted
+            and invoice.invoice_hash not in self.conflicted_hashes
             else BatchInvoiceOutcome(invoice, unresolved)
             for invoice in self.manifest.invoices
         )
@@ -313,6 +319,7 @@ class _BatchResults:
         def counters(status: m.SessionStatusResponse) -> tuple[int | str | None, ...]:
             return (
                 status.status.code,
+                status.date_created,
                 status.date_updated,
                 status.invoice_count,
                 status.successful_invoice_count,
