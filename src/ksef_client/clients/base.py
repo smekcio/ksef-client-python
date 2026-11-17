@@ -217,6 +217,7 @@ class BaseApiClient:
         access_token: str | None = None,
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
+        max_bytes: int | None = None,
     ) -> bytes:
         response = self._http.request(
             method,
@@ -228,6 +229,7 @@ class BaseApiClient:
             access_token=access_token,
             skip_auth=skip_auth,
             expected_status=expected_status,
+            **({} if max_bytes is None else {"max_bytes": max_bytes}),
         )
         return response.content
 
@@ -387,6 +389,7 @@ class AsyncBaseApiClient:
         access_token: str | None = None,
         skip_auth: bool = False,
         expected_status: set[int] | None = None,
+        max_bytes: int | None = None,
     ) -> bytes:
         response = await self._http.request(
             method,
@@ -398,6 +401,7 @@ class AsyncBaseApiClient:
             access_token=access_token,
             skip_auth=skip_auth,
             expected_status=expected_status,
+            **({} if max_bytes is None else {"max_bytes": max_bytes}),
         )
         return response.content
 

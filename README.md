@@ -32,6 +32,10 @@ Duże eksporty pobierzesz na dysk ze wznowieniem od bajtu i weryfikacją hashy,
 bez ładowania całej paczki do pamięci.
 [Poznaj fasadę, wznowienie i eksport](docs/facade.md).
 
+Jeśli skrypt ma wznowić wysyłkę po utracie połączenia, może zapisać fakturę pod własnym
+identyfikatorem. Po restarcie odczyta pod nim numer KSeF i indywidualne UPO.
+[Przykład trwałej wysyłki online](docs/workflows/online-session.md#trwała-wysyłka-online).
+
 Najważniejsze cechy:
 
 - **lokalne archiwum faktur i XML** — przyrostowe pobieranie, wznowienie po restarcie,
@@ -67,6 +71,9 @@ Najważniejsze cechy:
   błędy dokumentów i `to_dict()` dla CLI/MCP,
 - **uwierzytelnianie tokenem KSeF i XAdES**, w tym obsługa PKCS#12 oraz PEM,
 - **sesje online i wsadowe**, eksport faktur, UPO, linki weryfikacyjne, QR i Latarnia KSeF,
+- **wynik dla każdego pliku w paczce** — po wznowieniu sesji sprawdź numery KSeF,
+  odrzucenia i pliki kwalifikujące się do ponowienia po anulowaniu.
+  [Przykład raportu wsadowego](docs/workflows/batch-session.md#wynik-każdej-faktury-w-paczce),
 - **faktury offline** — szyfrowana kolejka FA(3), linki do KOD I i KOD II
   oraz wznawialna wysyłka i pobieranie UPO;
   [przewodnik](docs/workflows/online-session.md#trwała-wysyłka-offline),

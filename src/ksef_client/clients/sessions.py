@@ -14,10 +14,16 @@ from ..models import (
     SessionsQueryResponse,
     SessionStatusResponse,
 )
+from . import _session_evidence
 from .base import AsyncBaseApiClient, BaseApiClient
 
 
 class SessionsClient(BaseApiClient):
+    @property
+    def validated(self) -> _session_evidence.ValidatedSessionReads:
+        """Access bounded, validated reads on the same session transport."""
+        return _session_evidence.ValidatedSessionReads(self._http)
+
     def get_sessions(
         self,
         *,
@@ -87,9 +93,7 @@ class SessionsClient(BaseApiClient):
             expected_status={201},
         )
 
-    def close_online_session(
-        self, reference_number: str, access_token: str | None = None
-    ) -> None:
+    def close_online_session(self, reference_number: str, access_token: str | None = None) -> None:
         self._request_json(
             "POST",
             f"/sessions/online/{reference_number}/close",
@@ -217,12 +221,14 @@ class SessionsClient(BaseApiClient):
         invoice_reference_number: str,
         *,
         access_token: str | None = None,
+        max_bytes: int | None = None,
     ) -> bytes:
         return self._request_bytes(
             "GET",
             f"/sessions/{reference_number}/invoices/{invoice_reference_number}/upo",
             headers={"Accept": "application/xml"},
             access_token=access_token,
+            max_bytes=max_bytes,
         )
 
     def get_session_invoice_upo_by_ksef(
@@ -255,6 +261,11 @@ class SessionsClient(BaseApiClient):
 
 
 class AsyncSessionsClient(AsyncBaseApiClient):
+    @property
+    def validated(self) -> _session_evidence.AsyncValidatedSessionReads:
+        """Access bounded, validated reads on the same session transport."""
+        return _session_evidence.AsyncValidatedSessionReads(self._http)
+
     async def get_sessions(
         self,
         *,
@@ -456,12 +467,14 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         invoice_reference_number: str,
         *,
         access_token: str | None = None,
+        max_bytes: int | None = None,
     ) -> bytes:
         return await self._request_bytes(
             "GET",
             f"/sessions/{reference_number}/invoices/{invoice_reference_number}/upo",
             headers={"Accept": "application/xml"},
             access_token=access_token,
+            max_bytes=max_bytes,
         )
 
     async def get_session_invoice_upo_by_ksef(

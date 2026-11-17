@@ -1,0 +1,278 @@
+"""Durable, application-identified online invoice submission."""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, cast
+from xml.etree import ElementTree as ET
+
+from ._offline_invoice_state import OfflineInvoiceProgress
+from ._offline_invoice_state import OfflineInvoiceStatus as OnlineInvoiceStatus
+from ._offline_invoice_store import (
+    AsyncSQLiteOfflineInvoiceStore as AsyncSQLiteOnlineInvoiceStore,
+)
+from ._offline_invoice_store import SQLiteOfflineInvoiceStore as SQLiteOnlineInvoiceStore
+from ._offline_invoice_store import StoredOfflineInvoice
+from .exceptions import KsefDocumentValidationError
+from .invoice_sync_state import InvoiceSyncScope
+from .offline_invoices import AsyncOfflineInvoices, OfflineInvoices
+from .operations import environment_key
+from .request_control import request_control
+from .token_manager import _durable_online_requests
+from .utils.ksef_number import canonical_ksef_number
+
+if TYPE_CHECKING:
+    from .async_facade import AsyncKsef
+    from .facade import Ksef
+
+_ONLINE_SUBMISSION_KIND = (
+    "online-invoices",
+    hashlib.sha256(b"ksef-online-submission/v1").hexdigest(),
+)
+_INDIVIDUAL_UPO_BYTES = 1024 * 1024
+_UPO_NAMESPACES = (
+    "{http://upo.schematy.mf.gov.pl/KSeF/v4-2}",
+    "{http://upo.schematy.mf.gov.pl/KSeF/v4-3}",
+)
+
+
+@dataclass(frozen=True)
+class OnlineInvoice:
+    """Durable result of one identified submission, with private values hidden from repr."""
+
+    local_id: str = field(repr=False)
+    status: OnlineInvoiceStatus
+    revision: int
+    session_reference: str | None = field(repr=False)
+    invoice_reference: str | None = field(repr=False)
+    ksef_number: str | None = field(repr=False)
+    ksef_status: int | None
+
+
+def _result(local_id: str, row: StoredOfflineInvoice) -> OnlineInvoice:
+    progress = row.progress
+    return OnlineInvoice(
+        local_id,
+        progress.status,
+        row.revision,
+        progress.session_reference,
+        progress.invoice_reference,
+        progress.ksef_number,
+        progress.ksef_status,
+    )
+
+
+def _required(row: StoredOfflineInvoice | None) -> StoredOfflineInvoice:
+    if row is None:
+        raise KsefDocumentValidationError("Online invoice is missing in this scope")
+    return row
+
+
+def _validate_transport(client: Ksef | AsyncKsef, scope: InvoiceSyncScope) -> None:
+    transport = client.api.http_client
+    if client.api.sessions._http is not transport or client.api.security._http is not transport:
+        raise ValueError("Durable online submission requires a shared KSeF API transport")
+    if (
+        environment_key(transport.api_base_url) != scope.environment
+        or environment_key(client.options.normalized_base_url()) != scope.environment
+        or client.environment != scope.environment
+        or client.context_key != scope.context_key
+    ):
+        raise ValueError("Durable online submission transport does not match the saved scope")
+    for options in (client.options, transport._options):
+        if any(name.lower() in {"authorization", "host"} for name in options.custom_headers or ()):
+            raise ValueError("Durable online submission requires managed authentication and host")
+        if options.follow_redirects or (
+            options.retry is not None
+            and any(
+                path == "/sessions/online" or path.startswith("/sessions/online/")
+                for path in options.retry.retryable_post_paths
+            )
+        ):
+            raise ValueError(
+                "Durable online submission requires a non-replaying HTTP configuration"
+            )
+
+
+class _UpoTreeBuilder(ET.TreeBuilder):
+    def doctype(self, name: str, pubid: str | None, system: str | None) -> None:
+        raise ET.ParseError("KSeF UPO must not declare a DTD")
+
+
+def _text(parent: ET.Element, name: str) -> str | None:
+    nodes = parent.findall(name)
+    if len(nodes) != 1 or len(nodes[0]) != 0:
+        return None
+    return (nodes[0].text or "").strip()
+
+
+def _matches_ksef_number(parent: ET.Element, name: str, expected: str | None) -> bool:
+    try:
+        return canonical_ksef_number(_text(parent, name) or "") == expected
+    except ValueError:
+        return False
+
+
+def _checked_upo(progress: OfflineInvoiceProgress, upo: bytes) -> bytes:
+    if not 0 < len(upo) <= _INDIVIDUAL_UPO_BYTES:
+        raise KsefDocumentValidationError("KSeF UPO exceeds the individual receipt size policy")
+    try:
+        root = ET.fromstring(upo, parser=ET.XMLParser(target=_UpoTreeBuilder()))
+    except (ET.ParseError, LookupError, ValueError):
+        raise KsefDocumentValidationError("KSeF UPO is not well-formed XML") from None
+    for namespace in _UPO_NAMESPACES:
+        if root.tag == namespace + "Potwierdzenie":
+            documents = root.findall(namespace + "Dokument")
+            if (
+                len(documents) == 1
+                and _text(root, namespace + "NumerReferencyjnySesji") == progress.session_reference
+                and _matches_ksef_number(
+                    documents[0], namespace + "NumerKSeFDokumentu", progress.ksef_number
+                )
+                and _text(documents[0], namespace + "SkrotDokumentu") == progress.invoice_hash
+            ):
+                return upo
+    raise KsefDocumentValidationError("KSeF UPO does not identify the submitted invoice")
+
+
+class _OnlineWorker(OfflineInvoices):
+    _submission_mode = False
+    _submission_kind = _ONLINE_SUBMISSION_KIND
+
+    def _download_upo(self, progress: OfflineInvoiceProgress) -> bytes:
+        upo = self._client.api.sessions.get_session_invoice_upo_by_ref(
+            cast(str, progress.session_reference),
+            cast(str, progress.invoice_reference),
+            max_bytes=_INDIVIDUAL_UPO_BYTES,
+        )
+        return _checked_upo(progress, upo)
+
+
+class _AsyncOnlineWorker(AsyncOfflineInvoices):
+    _submission_mode = False
+    _submission_kind = _ONLINE_SUBMISSION_KIND
+
+    async def _download_upo(self, progress: OfflineInvoiceProgress) -> bytes:
+        upo = await self._client.api.sessions.get_session_invoice_upo_by_ref(
+            cast(str, progress.session_reference),
+            cast(str, progress.invoice_reference),
+            max_bytes=_INDIVIDUAL_UPO_BYTES,
+        )
+        return _checked_upo(progress, upo)
+
+
+class OnlineInvoices:
+    """Register XML once and advance its online submission through the individual UPO."""
+
+    def __init__(self, client: Ksef, store: SQLiteOnlineInvoiceStore, *, namespace: str) -> None:
+        self._worker = _OnlineWorker(client, store, namespace=namespace)
+        self._client, self._store = client, store
+        _validate_transport(client, self._worker.scope)
+
+    def enqueue(self, local_id: str, xml: bytes) -> OnlineInvoice:
+        """Bind the application ID and original XML atomically in this scope."""
+        _validate_transport(self._client, self._worker.scope)
+        return _result(local_id, self._store._enqueue_online(self._worker.scope, local_id, xml))
+
+    def status(self, local_id: str) -> OnlineInvoice | None:
+        row = self._store._load_online(self._worker.scope, local_id)
+        return None if row is None else _result(local_id, row)
+
+    def advance(self, local_id: str, *, timeout: float = 60) -> OnlineInvoice:
+        """Run one step, reconciling unknown sends through the persisted session."""
+        with (
+            request_control(timeout_seconds=timeout),
+            _durable_online_requests(self._client.api.http_client),
+        ):
+            row = _required(self._store._load_online(self._worker.scope, local_id))
+            _validate_transport(self._client, self._worker.scope)
+            return _result(
+                local_id, self._worker.advance(row.progress.invoice_hash, timeout=timeout)
+            )
+
+    def retry_if_unsubmitted(self, local_id: str, *, timeout: float = 60) -> OnlineInvoice:
+        """Permit a new attempt only after KSeF proves that the old session was empty."""
+        with (
+            request_control(timeout_seconds=timeout),
+            _durable_online_requests(self._client.api.http_client),
+        ):
+            row = _required(self._store._load_online(self._worker.scope, local_id))
+            _validate_transport(self._client, self._worker.scope)
+            return _result(
+                local_id,
+                self._worker.retry_if_unsubmitted(row.progress.invoice_hash, timeout=timeout),
+            )
+
+    def retry_cancelled(self, local_id: str) -> OnlineInvoice:
+        """Requeue only a submission KSeF explicitly cancelled with status 550."""
+        _validate_transport(self._client, self._worker.scope)
+        row = _required(self._store._load_online(self._worker.scope, local_id))
+        return _result(local_id, self._worker.retry_cancelled(row.progress.invoice_hash))
+
+    def read_upo(self, local_id: str) -> bytes:
+        """Read the locally stored per-invoice UPO."""
+        row = _required(self._store._load_online(self._worker.scope, local_id))
+        return self._worker.read_upo(row.progress.invoice_hash)
+
+
+class AsyncOnlineInvoices:
+    """Async durable submission using native async KSeF requests."""
+
+    def __init__(
+        self, client: AsyncKsef, store: AsyncSQLiteOnlineInvoiceStore, *, namespace: str
+    ) -> None:
+        self._worker = _AsyncOnlineWorker(client, store, namespace=namespace)
+        self._client, self._store = client, store
+        _validate_transport(client, self._worker.scope)
+
+    async def enqueue(self, local_id: str, xml: bytes) -> OnlineInvoice:
+        _validate_transport(self._client, self._worker.scope)
+        row = await self._store._call("_enqueue_online", self._worker.scope, local_id, xml)
+        return _result(local_id, row)
+
+    async def status(self, local_id: str) -> OnlineInvoice | None:
+        row = await self._store._call("_load_online", self._worker.scope, local_id)
+        return None if row is None else _result(local_id, row)
+
+    async def advance(self, local_id: str, *, timeout: float = 60) -> OnlineInvoice:
+        with (
+            request_control(timeout_seconds=timeout),
+            _durable_online_requests(self._client.api.http_client),
+        ):
+            row = _required(await self._store._call("_load_online", self._worker.scope, local_id))
+            _validate_transport(self._client, self._worker.scope)
+            updated = await self._worker.advance(row.progress.invoice_hash, timeout=timeout)
+            return _result(local_id, updated)
+
+    async def retry_if_unsubmitted(self, local_id: str, *, timeout: float = 60) -> OnlineInvoice:
+        with (
+            request_control(timeout_seconds=timeout),
+            _durable_online_requests(self._client.api.http_client),
+        ):
+            row = _required(await self._store._call("_load_online", self._worker.scope, local_id))
+            _validate_transport(self._client, self._worker.scope)
+            updated = await self._worker.retry_if_unsubmitted(
+                row.progress.invoice_hash, timeout=timeout
+            )
+            return _result(local_id, updated)
+
+    async def retry_cancelled(self, local_id: str) -> OnlineInvoice:
+        _validate_transport(self._client, self._worker.scope)
+        row = _required(await self._store._call("_load_online", self._worker.scope, local_id))
+        updated = await self._worker.retry_cancelled(row.progress.invoice_hash)
+        return _result(local_id, updated)
+
+    async def read_upo(self, local_id: str) -> bytes:
+        row = _required(await self._store._call("_load_online", self._worker.scope, local_id))
+        return await self._worker.read_upo(row.progress.invoice_hash)
+
+
+__all__ = [
+    "AsyncOnlineInvoices",
+    "AsyncSQLiteOnlineInvoiceStore",
+    "OnlineInvoice",
+    "OnlineInvoiceStatus",
+    "OnlineInvoices",
+    "SQLiteOnlineInvoiceStore",
+]

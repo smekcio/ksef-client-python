@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from cryptography.hazmat.primitives import serialization
 
 from . import models as m
+from .batch_outcomes import BatchInvoiceManifest, BatchInvoiceReport
 from .certificates import CertificateStore, FileCertificateStore, StoredCertificate
 from .client import AuthenticatedClient, KsefClient
 from .config import KsefClientOptions
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
     from .invoice_sync import InvoiceSync
     from .invoice_xml_sync import InvoiceDocumentSync, InvoiceXmlSync
     from .offline_invoices import OfflineInvoices, SQLiteOfflineInvoiceStore
+    from .online_invoices import OnlineInvoices, SQLiteOnlineInvoiceStore
     from .streaming_export import ExportOperation
 
 
@@ -312,6 +314,18 @@ class Session(Operation[m.SessionStatusResponse]):
         self.handle.close()
         self.closed = True
 
+    def invoice_outcomes(
+        self,
+        manifest: BatchInvoiceManifest,
+        *,
+        page_size: int = 100,
+        max_pages: int = 100,
+    ) -> BatchInvoiceReport:
+        """Read per-invoice results from a batch opened with the supplied manifest."""
+        if not self.batch:
+            raise ValueError("Invoice outcomes require a batch session")
+        return self.handle.invoice_outcomes(manifest, page_size=page_size, max_pages=max_pages)
+
     def upo(self) -> Operation[m.UpoResponse]:
         state = self.owner._state("upo", self.handle.reference_number)
         return Operation(state, self.handle.get_status, lambda status: status.upo)
@@ -330,6 +344,12 @@ class Session(Operation[m.SessionStatusResponse]):
 class Invoices:
     def __init__(self, owner: Ksef) -> None:
         self.owner = owner
+
+    def online(self, store: SQLiteOnlineInvoiceStore, *, namespace: str) -> OnlineInvoices:
+        """Bind durable online submission to this authenticated context."""
+        from .online_invoices import OnlineInvoices
+
+        return OnlineInvoices(self.owner, store, namespace=namespace)
 
     def offline(self, store: SQLiteOfflineInvoiceStore, *, namespace: str) -> OfflineInvoices:
         """Bind the offline outbox to this authenticated context."""
