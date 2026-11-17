@@ -5,11 +5,15 @@ import binascii
 import json
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from .. import models as m
+from ..batch_outcomes import BatchInvoiceManifest, BatchInvoiceReport, _BatchResults
 from .batch import encrypt_batch_parts
 from .crypto import EncryptionData, build_send_invoice_request
+
+if TYPE_CHECKING:
+    from ..clients._session_evidence import AsyncValidatedSessionReads, ValidatedSessionReads
 
 _SESSION_STATE_SCHEMA_VERSION = 1
 
@@ -853,6 +857,42 @@ class BatchSessionHandle:
             access_token=_resolve_access_token(access_token, self._access_token),
         )
 
+    def invoice_outcomes(
+        self,
+        manifest: BatchInvoiceManifest,
+        *,
+        page_size: int = 100,
+        max_pages: int = 100,
+        access_token: str | None = None,
+    ) -> BatchInvoiceReport:
+        """Read a bounded per-invoice report for this exact prepared archive."""
+        manifest.bind(self.batch_file)
+        scan = _BatchResults(manifest, page_size, max_pages)
+        reader: ValidatedSessionReads | None = getattr(self._sessions, "validated", None)
+        if reader is None:
+            raise TypeError("Batch invoice outcomes require a session adapter with validated reads")
+        resolved_access_token = _resolve_access_token(access_token, self._access_token)
+        initial = reader.get_session_status(
+            self.reference_number, access_token=resolved_access_token
+        )
+        if not scan.is_final(initial):
+            return scan.report(self.reference_number, initial, initial)
+        token = None
+        for _ in range(scan.max_pages):
+            page = reader.get_session_invoices(
+                self.reference_number,
+                page_size=scan.page_size,
+                continuation_token=token,
+                access_token=resolved_access_token,
+            )
+            token = scan.accept(page)
+            if token is None:
+                break
+        current = reader.get_session_status(
+            self.reference_number, access_token=resolved_access_token
+        )
+        return scan.report(self.reference_number, initial, current)
+
     def list_failed_invoices(
         self,
         *,
@@ -999,6 +1039,42 @@ class AsyncBatchSessionHandle:
             continuation_token=continuation_token,
             access_token=_resolve_access_token(access_token, self._access_token),
         )
+
+    async def invoice_outcomes(
+        self,
+        manifest: BatchInvoiceManifest,
+        *,
+        page_size: int = 100,
+        max_pages: int = 100,
+        access_token: str | None = None,
+    ) -> BatchInvoiceReport:
+        """Read a bounded per-invoice report for this exact prepared archive."""
+        manifest.bind(self.batch_file)
+        scan = _BatchResults(manifest, page_size, max_pages)
+        reader: AsyncValidatedSessionReads | None = getattr(self._sessions, "validated", None)
+        if reader is None:
+            raise TypeError("Batch invoice outcomes require a session adapter with validated reads")
+        resolved_access_token = _resolve_access_token(access_token, self._access_token)
+        initial = await reader.get_session_status(
+            self.reference_number, access_token=resolved_access_token
+        )
+        if not scan.is_final(initial):
+            return scan.report(self.reference_number, initial, initial)
+        token = None
+        for _ in range(scan.max_pages):
+            page = await reader.get_session_invoices(
+                self.reference_number,
+                page_size=scan.page_size,
+                continuation_token=token,
+                access_token=resolved_access_token,
+            )
+            token = scan.accept(page)
+            if token is None:
+                break
+        current = await reader.get_session_status(
+            self.reference_number, access_token=resolved_access_token
+        )
+        return scan.report(self.reference_number, initial, current)
 
     async def list_failed_invoices(
         self,
