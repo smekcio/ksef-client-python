@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
+from . import models as m
+from .invoice_sync_state import _loads, utc_timestamp
 from .invoice_xml_types import InvoiceXmlKey, KsefXmlIntegrityError, KsefXmlSyncError, verify_hash
-
-if TYPE_CHECKING:
-    from .models import InvoiceMetadata
+from .utils.ksef_number import canonical_ksef_number
 
 
 class KsefInvoiceDeliveryLeaseLostError(KsefXmlSyncError):
@@ -26,7 +26,7 @@ class IncomingInvoiceDelivery:
 
     event_id: str
     key: InvoiceXmlKey
-    metadata: InvoiceMetadata
+    metadata: m.InvoiceMetadata
     xml: bytes
     consumer: str
     expires_at: float
@@ -34,10 +34,38 @@ class IncomingInvoiceDelivery:
     _epoch: str
 
 
+def _delivery_metadata(raw: str, key: InvoiceXmlKey, expected_hash: str) -> m.InvoiceMetadata:
+    try:
+        payload = _loads(raw)
+        if type(payload) is not dict:
+            raise ValueError
+        number = payload["ksefNumber"]
+        if (
+            type(number) is not str
+            or canonical_ksef_number(number) != key.ksef_number
+            or payload["invoiceHash"] != expected_hash
+        ):
+            raise ValueError
+        utc_timestamp(payload["permanentStorageDate"])
+        for name in ("netAmount", "vatAmount", "grossAmount"):
+            amount = payload.get(name)
+            if amount is not None and (
+                type(amount) not in (int, float) or not math.isfinite(amount)
+            ):
+                raise ValueError
+        for name in ("hasAttachment", "isSelfInvoicing"):
+            flag = payload.get(name)
+            if flag is not None and type(flag) is not bool:
+                raise ValueError
+        return m.InvoiceMetadata.from_dict(payload)
+    except (TypeError, ValueError, AttributeError, KeyError, OverflowError, RecursionError):
+        raise KsefXmlIntegrityError("invalid_delivery_metadata") from None
+
+
 @dataclass(frozen=True, repr=False)
 class _PendingDelivery:
     key: InvoiceXmlKey
-    metadata: InvoiceMetadata
+    metadata: m.InvoiceMetadata
     consumer: str
     expires_at: float
     token: str

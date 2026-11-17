@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
-import math
 import os
 import re
 import sqlite3
@@ -34,6 +33,7 @@ from .exceptions import (
 from .invoice_delivery import (
     IncomingInvoiceDelivery,
     KsefInvoiceDeliveryLeaseLostError,
+    _delivery_metadata,
     _PendingDelivery,
 )
 from .invoice_sync_state import (
@@ -791,9 +791,11 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             # Visit only the selected stream, then order eligible rows by
             # availability. An expired read failure follows older ready work.
             row = self._execute(
-                "SELECT o.ksef_number,d.variant,d.expected_hash,d.receipt_json,o.metadata_json "
+                "SELECT o.ksef_number,d.variant,d.expected_hash,d.receipt_json,o.metadata_json,"
+                "i.invoice_hash "
                 "FROM invoice_observations o CROSS JOIN invoice_xml_documents d "
                 "USING(namespace,environment,context_key,ksef_number) "
+                "LEFT JOIN invoices i USING(namespace,environment,context_key,ksef_number) "
                 "LEFT JOIN incoming_invoice_delivery r ON r.namespace=d.namespace "
                 "AND r.environment=d.environment AND r.context_key=d.context_key "
                 "AND r.ksef_number=d.ksef_number AND r.variant=d.variant AND r.consumer=? "
@@ -808,7 +810,7 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             ).fetchone()
             if row is None:
                 return None
-            number, variant, expected_hash, receipt_json, metadata_json = row
+            number, variant, expected_hash, receipt_json, metadata_json, invoice_hash = row
             identity = (scope.namespace, scope.environment, scope.context_key, number, variant)
             # Commit before validating the payload or reading the file.
             token = uuid.uuid4().hex
@@ -820,23 +822,15 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                 "epoch=excluded.epoch",
                 (*identity, consumer, expires_at, token, epoch),
             )
+        if expected_hash != invoice_hash:
+            raise KsefXmlIntegrityError("invoice_hash_mismatch")
         try:
             key = InvoiceXmlKey(*identity)
             receipt = InvoiceXmlReceipt(**_loads(receipt_json))
             receipt.validate(key, expected_hash, storage_id)
-            metadata = m.InvoiceMetadata.from_dict(_loads(metadata_json))
         except (TypeError, ValueError, AttributeError, KeyError, OverflowError, RecursionError):
-            raise KsefXmlIntegrityError("invalid_delivery_metadata") from None
-        if (
-            metadata.ksef_number is None
-            or self._document_number(metadata.ksef_number) != key.ksef_number
-            or metadata.invoice_hash != expected_hash
-            or any(
-                amount is not None and not math.isfinite(amount)
-                for amount in (metadata.net_amount, metadata.vat_amount, metadata.gross_amount)
-            )
-        ):
-            raise KsefXmlIntegrityError("invalid_delivery_metadata")
+            raise KsefXmlIntegrityError("invalid_delivery_receipt") from None
+        metadata = _delivery_metadata(metadata_json, key, expected_hash)
         if receipt.size > max_xml_bytes:
             raise KsefXmlStorageError("response_size_limit")
         return _PendingDelivery(

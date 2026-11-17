@@ -37,10 +37,12 @@ kolejny worker może podjąć dokument, a spóźnione potwierdzenie zgłosi
 Wybierz czas rezerwacji większy od typowego czasu przetwarzania dokumentu.
 Odbiornik nadal potrzebuje deduplikacji przy przekroczeniu tego czasu.
 
-Odczyt potwierdza skrót oryginalnego XML przed zwróceniem zdarzenia. Błąd
+Odczyt porównuje skrót oryginalnego XML z archiwum przed zwróceniem zdarzenia
+i sprawdza typy kwot oraz flag w zapisanych metadanych. Błąd
 weryfikacji lub odczytu nie dostarcza dokumentu. Rezerwacja wygasa samodzielnie,
-a ponowna próba ustępuje starszym dostępnym dokumentom. Napraw uszkodzone
-dane przez ponowną synchronizację albo odtworzenie spójnego archiwum.
+a ponowna próba ustępuje starszym dostępnym dokumentom. Przy brakujących plikach
+uruchom `verify_ready`, aby kolejne pobranie XML mogło je uzupełnić.
+Uszkodzoną zawartość możesz odzyskać z kopii spójnej z bazą.
 `None` oznacza brak dostępnej faktury w tej chwili. Wersja async używa tych
 samych nazw z `await`. Worker odbiorcy może działać bez logowania do KSeF.
 

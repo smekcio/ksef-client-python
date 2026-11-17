@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import sqlite3
 from types import SimpleNamespace
@@ -292,4 +293,68 @@ def test_corrupted_delivery_yields_to_later_ready_work_after_lease_expires(tmp_p
             repaired = archive.claim_invoice_delivery(scope, storage, consumer=consumer)
             assert repaired is not None and repaired.key.ksef_number == NUMBER2
             archive.acknowledge_invoice_delivery(repaired)
+    http.close()
+
+
+def test_delivery_rejects_coerced_values_and_mismatching_archive_identity(tmp_path):
+    _, http = make_sync(XmlServer())
+    sync = document_sync(InvoicesClient(http))
+    scope = sync.xml.scopes[0]
+    db = tmp_path / "archive.db"
+    with (
+        FileInvoiceXmlStore(tmp_path / "xml") as storage,
+        SQLiteInvoiceSyncStore.open(
+            db, enqueue_xml=True, xml_storage_id=storage.storage_id
+        ) as archive,
+    ):
+        sync.run_once(archive, storage)
+        metadata = {
+            **row(NUMBER, hash_=HASH).to_dict(),
+            "grossAmount": 123,
+            "netAmount": 100.0,
+            "hasAttachment": False,
+            "isSelfInvoicing": True,
+        }
+        invalid_fields = [
+            ("grossAmount", True),
+            ("grossAmount", "123"),
+            ("hasAttachment", "false"),
+            ("isSelfInvoicing", 0),
+            ("permanentStorageDate", "2026-11-01T11:00:00"),
+        ]
+        for index, (name, value) in enumerate(invalid_fields):
+            with sqlite3.connect(db) as writer:
+                writer.execute(
+                    "UPDATE invoice_observations SET metadata_json=?",
+                    (json.dumps({**metadata, name: value}),),
+                )
+            with pytest.raises(KsefXmlIntegrityError, match="invalid_delivery_metadata"):
+                archive.claim_invoice_delivery(scope, storage, consumer=f"job-{index}")
+
+        with sqlite3.connect(db) as writer:
+            writer.execute(
+                "UPDATE invoice_observations SET metadata_json=?", (json.dumps(metadata),)
+            )
+            writer.execute(
+                "UPDATE invoices SET invoice_hash=?", (base64.b64encode(b"x" * 32).decode(),)
+            )
+        with pytest.raises(KsefXmlIntegrityError, match="invoice_hash_mismatch"):
+            archive.claim_invoice_delivery(scope, storage, consumer="conflicting-hash")
+
+        with sqlite3.connect(db) as writer:
+            writer.execute("UPDATE invoices SET invoice_hash=?", (HASH,))
+            receipt_json = writer.execute(
+                "SELECT receipt_json FROM invoice_xml_documents"
+            ).fetchone()[0]
+            writer.execute("UPDATE invoice_xml_documents SET receipt_json='[]'")
+        with pytest.raises(KsefXmlIntegrityError, match="invalid_delivery_receipt"):
+            archive.claim_invoice_delivery(scope, storage, consumer="receipt")
+        with sqlite3.connect(db) as writer:
+            writer.execute("UPDATE invoice_xml_documents SET receipt_json=?", (receipt_json,))
+
+        delivery = archive.claim_invoice_delivery(scope, storage, consumer="valid")
+        assert delivery is not None and delivery.xml == XML
+        assert delivery.metadata.gross_amount == 123.0
+        assert delivery.metadata.has_attachment is False
+        assert delivery.metadata.is_self_invoicing is True
     http.close()
