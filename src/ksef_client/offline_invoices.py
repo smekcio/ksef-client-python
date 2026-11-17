@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
+from typing import TYPE_CHECKING, cast
 
 from . import models as m
 from ._offline_invoice_state import (
@@ -39,6 +39,8 @@ from .services.xades import XadesKeyPair
 
 if TYPE_CHECKING:
     from .async_facade import AsyncKsef
+    from .clients._session_evidence import AsyncValidatedSessionReads, ValidatedSessionReads
+    from .clients.sessions import AsyncSessionsClient, SessionsClient
     from .facade import Ksef
 
 _OFFLINE_STREAM = hashlib.sha256(b"ksef-offline-submission/v1").hexdigest()
@@ -48,10 +50,6 @@ _NON_ACCEPTED_OUTCOMES = {
     OfflineInvoiceStatus.REJECTED,
     OfflineInvoiceStatus.RETRYABLE,
 }
-
-
-class _SessionReadOptions(TypedDict, total=False):
-    strict: bool
 
 
 def _confirmed_empty_session(status: m.SessionStatusResponse, *, strict: bool = False) -> bool:
@@ -165,7 +163,11 @@ class OfflineInvoices(OfflineInvoiceQueue):
 
     _submission_mode = True
     _submission_kind = "offline-invoices", _OFFLINE_STREAM
-    _session_read_options: ClassVar[_SessionReadOptions] = {}
+
+    @property
+    def _session_reader(self) -> SessionsClient | ValidatedSessionReads:
+        sessions = self._client.api.sessions
+        return sessions if self._submission_mode else sessions.validated
 
     def __init__(self, client: Ksef, store: SQLiteOfflineInvoiceStore, *, namespace: str):
         self._client, self._store, self._options = client, store, client.options
@@ -235,13 +237,13 @@ class OfflineInvoices(OfflineInvoiceQueue):
         with request_control(timeout_seconds=timeout):
             row = _require_unknown(self.status(invoice_hash))
             reference = cast(str, row.progress.session_reference)
-            sessions = self._client.api.sessions
-            status = sessions.get_session_status(reference, **self._session_read_options)
+            sessions = self._session_reader
+            status = sessions.get_session_status(reference)
             if status.status.code == 100:
-                sessions.close_online_session(reference)
+                self._client.api.sessions.close_online_session(reference)
                 return row
             if (
-                _confirmed_empty_session(status, **self._session_read_options)
+                _confirmed_empty_session(status, strict=not self._submission_mode)
                 and not self._scan_submission(reference, invoice_hash)[1]
             ):
                 return self._store._advance(self.scope, row, OfflineInvoiceProgress(invoice_hash))
@@ -287,35 +289,29 @@ class OfflineInvoices(OfflineInvoiceQueue):
             )
         if status in {OfflineInvoiceStatus.SUBMISSION_UNKNOWN, OfflineInvoiceStatus.SUBMITTED}:
             reference = cast(str, progress.session_reference)
-            sessions = self._client.api.sessions
+            sessions = self._session_reader
             if progress.invoice_reference is None:
                 match, _ = self._scan_submission(reference, invoice_hash)
                 if match is None:
                     return row
             else:
-                match = sessions.get_session_invoice_status(
-                    reference, progress.invoice_reference, **self._session_read_options
-                )
+                match = sessions.get_session_invoice_status(reference, progress.invoice_reference)
             observed = progress.observe(match)
             if not self._submission_mode and observed.status in _NON_ACCEPTED_OUTCOMES:
                 # Commit the terminal outcome only after closing or confirming
                 # that KSeF is already closing/has closed the owned session.
-                remote_session = sessions.get_session_status(
-                    reference, **self._session_read_options
-                )
+                remote_session = sessions.get_session_status(reference)
                 if remote_session.status.code == 100:
-                    sessions.close_online_session(reference)
+                    self._client.api.sessions.close_online_session(reference)
             if observed == progress:
                 return row
             return self._store._advance(self.scope, row, observed)
         if status is OfflineInvoiceStatus.ACCEPTED:
             session_ref = cast(str, progress.session_reference)
-            sessions = self._client.api.sessions
-            session_status = sessions.get_session_status(
-                session_ref, **self._session_read_options
-            ).status.code
+            sessions = self._session_reader
+            session_status = sessions.get_session_status(session_ref).status.code
             if session_status == 100:
-                sessions.close_online_session(session_ref)
+                self._client.api.sessions.close_online_session(session_ref)
                 return row
             if session_status == 170:
                 return row
@@ -337,13 +333,11 @@ class OfflineInvoices(OfflineInvoiceQueue):
         nonempty = False
         seen: set[str] = set()
         token = None
-        strict = self._session_read_options.get("strict", False)
+        reader = self._session_reader
         for _ in range(_RECONCILIATION_PAGE_LIMIT):
-            page = self._client.api.sessions.get_session_invoices(
-                session, page_size=100, continuation_token=token, **self._session_read_options
-            )
+            page = reader.get_session_invoices(session, page_size=100, continuation_token=token)
             nonempty |= bool(page.invoices)
-            match = _match_invoice(match, page, invoice_hash, strict=strict)
+            match = _match_invoice(match, page, invoice_hash, strict=not self._submission_mode)
             token = page.continuation_token
             if token is None or token == "":
                 return match, nonempty
@@ -442,7 +436,11 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
 
     _submission_mode = True
     _submission_kind = "offline-invoices", _OFFLINE_STREAM
-    _session_read_options: ClassVar[_SessionReadOptions] = {}
+
+    @property
+    def _session_reader(self) -> AsyncSessionsClient | AsyncValidatedSessionReads:
+        sessions = self._client.api.sessions
+        return sessions if self._submission_mode else sessions.validated
 
     def __init__(self, client: AsyncKsef, store: AsyncSQLiteOfflineInvoiceStore, *, namespace: str):
         self._client, self._store, self._options = client, store, client.options
@@ -461,13 +459,13 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
         with request_control(timeout_seconds=timeout):
             row = _require_unknown(await self.status(invoice_hash))
             reference = cast(str, row.progress.session_reference)
-            sessions = self._client.api.sessions
-            status = await sessions.get_session_status(reference, **self._session_read_options)
+            sessions = self._session_reader
+            status = await sessions.get_session_status(reference)
             if status.status.code == 100:
-                await sessions.close_online_session(reference)
+                await self._client.api.sessions.close_online_session(reference)
                 return row
             if (
-                _confirmed_empty_session(status, **self._session_read_options)
+                _confirmed_empty_session(status, strict=not self._submission_mode)
                 and not (await self._scan_submission(reference, invoice_hash))[1]
             ):
                 return await self._store._call(
@@ -519,36 +517,32 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
             )
         if status in {OfflineInvoiceStatus.SUBMISSION_UNKNOWN, OfflineInvoiceStatus.SUBMITTED}:
             reference = cast(str, progress.session_reference)
-            sessions = self._client.api.sessions
+            sessions = self._session_reader
             if progress.invoice_reference is None:
                 match, _ = await self._scan_submission(reference, invoice_hash)
                 if match is None:
                     return row
             else:
                 match = await sessions.get_session_invoice_status(
-                    reference, progress.invoice_reference, **self._session_read_options
+                    reference, progress.invoice_reference
                 )
             observed = progress.observe(match)
             if not self._submission_mode and observed.status in _NON_ACCEPTED_OUTCOMES:
                 # Commit the terminal outcome only after closing or confirming
                 # that KSeF is already closing/has closed the owned session.
-                remote_session = await sessions.get_session_status(
-                    reference, **self._session_read_options
-                )
+                remote_session = await sessions.get_session_status(reference)
                 if remote_session.status.code == 100:
-                    await sessions.close_online_session(reference)
+                    await self._client.api.sessions.close_online_session(reference)
             if observed == progress:
                 return row
             return await self._store._call("_advance", self.scope, row, observed)
         if status is OfflineInvoiceStatus.ACCEPTED:
             session_ref = cast(str, progress.session_reference)
-            sessions = self._client.api.sessions
-            remote_session = await sessions.get_session_status(
-                session_ref, **self._session_read_options
-            )
+            sessions = self._session_reader
+            remote_session = await sessions.get_session_status(session_ref)
             session_status = remote_session.status.code
             if session_status == 100:
-                await sessions.close_online_session(session_ref)
+                await self._client.api.sessions.close_online_session(session_ref)
                 return row
             if session_status == 170:
                 return row
@@ -572,13 +566,13 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
         nonempty = False
         seen: set[str] = set()
         token = None
-        strict = self._session_read_options.get("strict", False)
+        reader = self._session_reader
         for _ in range(_RECONCILIATION_PAGE_LIMIT):
-            page = await self._client.api.sessions.get_session_invoices(
-                session, page_size=100, continuation_token=token, **self._session_read_options
+            page = await reader.get_session_invoices(
+                session, page_size=100, continuation_token=token
             )
             nonempty |= bool(page.invoices)
-            match = _match_invoice(match, page, invoice_hash, strict=strict)
+            match = _match_invoice(match, page, invoice_hash, strict=not self._submission_mode)
             token = page.continuation_token
             if token is None or token == "":
                 return match, nonempty

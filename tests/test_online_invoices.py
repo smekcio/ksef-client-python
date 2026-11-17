@@ -57,6 +57,7 @@ class Server(TestClient):
         self._http = SimpleNamespace(
             _options=self.options, api_base_url=self.options.normalized_base_url()
         )
+        self.validated = self
         self.api.http_client = self._http
         self.api.security = self
         self.result = None
@@ -84,10 +85,8 @@ class Server(TestClient):
             raise OSError("lost send")
         return SimpleNamespace(resume_state=lambda: SimpleNamespace(reference_number="invoice-1"))
 
-    def get_session_invoices(
-        self, reference_number, *, page_size, continuation_token, strict=False
-    ):
-        assert (reference_number, page_size, strict) == ("session-1", 100, True)
+    def get_session_invoices(self, reference_number, *, page_size, continuation_token):
+        assert (reference_number, page_size) == ("session-1", 100)
         if continuation_token is not None:
             assert continuation_token == "next" and self.result is not None
             return m.SessionInvoicesResponse([self.result])
@@ -95,12 +94,12 @@ class Server(TestClient):
             return self.next_page
         return m.SessionInvoicesResponse([self.result] if self.result is not None else [])
 
-    def get_session_invoice_status(self, reference_number, invoice_reference, *, strict):
-        assert (reference_number, invoice_reference, strict) == ("session-1", "invoice-1", True)
+    def get_session_invoice_status(self, reference_number, invoice_reference):
+        assert (reference_number, invoice_reference) == ("session-1", "invoice-1")
         return self.result
 
-    def get_session_status(self, reference_number, *, strict=False):
-        assert (reference_number, strict) == ("session-1", True)
+    def get_session_status(self, reference_number):
+        assert reference_number == "session-1"
         code = (
             self.session_code if self.session_code is not None else 200 if self.close_count else 100
         )
@@ -124,6 +123,7 @@ class AsyncServer:
         self.context_key = sync.context_key
         self.environment = sync.environment
         self._http = sync._http
+        self.validated = self
         self.api = SimpleNamespace(sessions=self, security=self, http_client=self._http)
 
     def resume_session(self, state):

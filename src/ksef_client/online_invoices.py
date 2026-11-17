@@ -139,7 +139,6 @@ def _checked_upo(progress: OfflineInvoiceProgress, upo: bytes) -> bytes:
 class _OnlineWorker(OfflineInvoices):
     _submission_mode = False
     _submission_kind = _ONLINE_SUBMISSION_KIND
-    _session_read_options = {"strict": True}
 
     def _download_upo(self, progress: OfflineInvoiceProgress) -> bytes:
         upo = self._client.api.sessions.get_session_invoice_upo_by_ref(
@@ -153,7 +152,6 @@ class _OnlineWorker(OfflineInvoices):
 class _AsyncOnlineWorker(AsyncOfflineInvoices):
     _submission_mode = False
     _submission_kind = _ONLINE_SUBMISSION_KIND
-    _session_read_options = {"strict": True}
 
     async def _download_upo(self, progress: OfflineInvoiceProgress) -> bytes:
         upo = await self._client.api.sessions.get_session_invoice_upo_by_ref(

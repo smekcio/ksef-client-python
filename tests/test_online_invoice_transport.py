@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from contextlib import AsyncExitStack, contextmanager
+from functools import partial
 from inspect import isawaitable
 
 import httpx
@@ -270,8 +272,7 @@ def test_durable_online_refuses_rebound_default_auth_transport(
         return httpx.Response(401)
 
     async def run():
-        api: AuthenticatedClient | AsyncAuthenticatedClient
-        other_api: AuthenticatedClient | AsyncAuthenticatedClient
+        rebind: Callable[[], None]
         worker: OnlineInvoices | AsyncOnlineInvoices
 
         def respond(request):
@@ -289,7 +290,7 @@ def test_durable_online_refuses_rebound_default_auth_transport(
                     ],
                 )
             assert request.url.path == "/v2/sessions/online"
-            api.token_manager.bind_auth_client(other_api.auth)
+            rebind()
             return httpx.Response(401)
 
         async with AsyncExitStack() as stack:
@@ -301,6 +302,7 @@ def test_durable_online_refuses_rebound_default_auth_transport(
                 )
                 other_api = AsyncAuthenticatedClient(other_options, manager)
                 api = AsyncAuthenticatedClient(options, manager)
+                rebind = partial(manager.bind_auth_client, other_api.auth)
                 for instance, responder in ((other_api, other_response), (api, respond)):
                     await stack.enter_async_context(instance)
                     await instance.http_client._client.aclose()
@@ -317,21 +319,25 @@ def test_durable_online_refuses_rebound_default_auth_transport(
                 sync_manager = TokenManager(
                     "access-a", "refresh-a", access_token_valid_until=valid_until
                 )
-                other_api = AuthenticatedClient(other_options, sync_manager)
-                api = AuthenticatedClient(options, sync_manager)
-                for instance, responder in ((other_api, other_response), (api, respond)):
-                    stack.enter_context(instance)
-                    instance.http_client._client.close()
-                    instance.http_client._client = httpx.Client(
+                other_sync_api = AuthenticatedClient(other_options, sync_manager)
+                sync_api = AuthenticatedClient(options, sync_manager)
+                rebind = partial(sync_manager.bind_auth_client, other_sync_api.auth)
+                for sync_instance, responder in (
+                    (other_sync_api, other_response),
+                    (sync_api, respond),
+                ):
+                    stack.enter_context(sync_instance)
+                    sync_instance.http_client._client.close()
+                    sync_instance.http_client._client = httpx.Client(
                         transport=httpx.MockTransport(responder)
                     )
-                sync_client = Ksef(api, options, context_type="Nip", context_value="test")
+                sync_client = Ksef(sync_api, options, context_type="Nip", context_value="test")
                 sync_store = stack.enter_context(SQLiteOnlineInvoiceStore.open(path, key=KEY))
                 worker = sync_client.invoices.online(sync_store, namespace="tenant")
                 worker.enqueue("id", XML)
 
             if not rebind_during_request:
-                api.token_manager.bind_auth_client(other_api.auth)
+                rebind()
             with pytest.raises(TokenManagerError, match="authentication transport changed"):
                 result = worker.advance("id")
                 if isawaitable(result):
@@ -339,7 +345,7 @@ def test_durable_online_refuses_rebound_default_auth_transport(
             row = worker.status("id")
             if isawaitable(row):
                 row = await row
-            assert row.status is OnlineInvoiceStatus.QUEUED
+            assert row is not None and row.status is OnlineInvoiceStatus.QUEUED
         assert not other_wire
         expected_wire = [("GET", "/v2/security/public-key-certificates")]
         if rebind_during_request:
