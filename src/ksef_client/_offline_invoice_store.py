@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import hmac
 import json
 import os
 import sqlite3
@@ -70,6 +71,19 @@ CREATE TABLE IF NOT EXISTS offline_attempts_v1 (
     PRIMARY KEY(scope, invoice_hash, revision),
     FOREIGN KEY(scope, invoice_hash) REFERENCES offline_invoices_v1(scope, invoice_hash)
 );
+CREATE TABLE IF NOT EXISTS online_archive_key_v1 (
+    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+    verifier BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS online_invoice_ids_v1 (
+    scope TEXT NOT NULL,
+    local_key TEXT NOT NULL,
+    invoice_hash TEXT NOT NULL,
+    binding BLOB NOT NULL,
+    PRIMARY KEY(scope, local_key),
+    UNIQUE(scope, invoice_hash),
+    FOREIGN KEY(scope, invoice_hash) REFERENCES offline_invoices_v1(scope, invoice_hash)
+);
 """
 MAX_OFFLINE_XML_BYTES = 16 * 1024 * 1024
 _TERMINAL = {
@@ -102,6 +116,7 @@ class SQLiteOfflineInvoiceStore:
         if connection.in_transaction or connection.row_factory not in (None, sqlite3.Row):
             raise ValueError("Offline archive requires an idle SQLite connection")
         self._db, self._cipher, self._owned = connection, AESGCM(key), owned
+        self._online_key = hmac.digest(key, b"ksef-online-local-id/v1", "sha256")
         connection.execute("PRAGMA foreign_keys=ON")
         connection.executescript(_SCHEMA)
 
@@ -223,45 +238,130 @@ class SQLiteOfflineInvoiceStore:
             raise ValueError("Offline invoice mode must be explicit")
         invoice_hash = offline_invoice_hash(xml)
         due_at = utc_timestamp(due_at)
-        identity = self._scope(scope)
-        progress = OfflineInvoiceProgress(invoice_hash)
-        record = StoredOfflineInvoice(progress, 1, due_at, correction_of, mode)
-        encrypted = self._encrypt(identity, invoice_hash, "xml", xml)
         with self._write():
-            previous = self.load(scope, invoice_hash)
-            if previous is not None:
-                if (
-                    previous.due_at != due_at
-                    or previous.correction_of != correction_of
-                    or previous.mode is not mode
-                ):
-                    raise KsefSyncConflictError("offline_invoice_identity_conflict")
-                return previous
-            if correction_of is not None:
-                original = self.load(scope, correction_of)
-                if (
-                    original is None
-                    or original.correction_of is not None
-                    or original.progress.status is not OfflineInvoiceStatus.REJECTED
-                    or original.progress.ksef_status not in {430, 450}
-                ):
-                    raise KsefDocumentValidationError("Technical correction requires a rejection")
-                self._ensure_no_live_correction(identity, correction_of, invoice_hash)
-            self._db.execute(
-                "INSERT INTO offline_invoices_v1 "
-                "(scope,invoice_hash,revision,due_at,due_sort,active,progress,correction_of,xml) "
-                "VALUES (?,?,1,?,?,1,?,?,?)",
-                (
-                    identity,
-                    invoice_hash,
-                    due_at,
-                    _due_sort(due_at),
-                    self._seal_progress(identity, record),
-                    correction_of,
-                    encrypted,
-                ),
-            )
+            return self._register(scope, xml, invoice_hash, due_at, correction_of, mode)
+
+    def _register(
+        self,
+        scope: InvoiceSyncScope,
+        xml: bytes,
+        invoice_hash: str,
+        due_at: str,
+        correction_of: str | None,
+        mode: OfflineInvoiceMode,
+    ) -> StoredOfflineInvoice:
+        identity = self._scope(scope)
+        previous = self.load(scope, invoice_hash)
+        if previous is not None:
+            if (
+                previous.due_at != due_at
+                or previous.correction_of != correction_of
+                or previous.mode is not mode
+            ):
+                raise KsefSyncConflictError("offline_invoice_identity_conflict")
+            return previous
+        record = StoredOfflineInvoice(
+            OfflineInvoiceProgress(invoice_hash), 1, due_at, correction_of, mode
+        )
+        if correction_of is not None:
+            original = self.load(scope, correction_of)
+            if (
+                original is None
+                or original.correction_of is not None
+                or original.progress.status is not OfflineInvoiceStatus.REJECTED
+                or original.progress.ksef_status not in {430, 450}
+            ):
+                raise KsefDocumentValidationError("Technical correction requires a rejection")
+            self._ensure_no_live_correction(identity, correction_of, invoice_hash)
+        self._db.execute(
+            "INSERT INTO offline_invoices_v1 "
+            "(scope,invoice_hash,revision,due_at,due_sort,active,progress,correction_of,xml) "
+            "VALUES (?,?,1,?,?,1,?,?,?)",
+            (
+                identity,
+                invoice_hash,
+                due_at,
+                _due_sort(due_at),
+                self._seal_progress(identity, record),
+                correction_of,
+                self._encrypt(identity, invoice_hash, "xml", xml),
+            ),
+        )
         return record
+
+    def _check_online_key(self, *, create: bool = False) -> None:
+        verifier = hmac.digest(self._online_key, b"ksef-online-archive/v1", "sha256")
+        row = self._db.execute("SELECT verifier FROM online_archive_key_v1").fetchone()
+        if row is None:
+            if self._db.execute("SELECT 1 FROM online_invoice_ids_v1 LIMIT 1").fetchone():
+                raise KsefDocumentValidationError("Online archive key verification is missing")
+            if create:
+                self._db.execute("INSERT INTO online_archive_key_v1 VALUES (1,?)", (verifier,))
+        elif type(row[0]) is not bytes or not hmac.compare_digest(verifier, row[0]):
+            raise KsefDocumentValidationError("Online archive authentication failed")
+
+    def _local_key(self, identity: str, local_id: str) -> str:
+        if type(local_id) is not str or not 1 <= len(local_id) <= 256 or not local_id.isprintable():
+            raise KsefDocumentValidationError("Invalid local invoice identifier")
+        return hmac.digest(self._online_key, f"{identity}:{local_id}".encode(), "sha256").hex()
+
+    def _mapped_hash(self, identity: str, local_key: str) -> str | None:
+        row = self._db.execute(
+            "SELECT invoice_hash,binding FROM online_invoice_ids_v1 WHERE scope=? AND local_key=?",
+            (identity, local_key),
+        ).fetchone()
+        if row is None:
+            return None
+        invoice_hash, binding = row
+        hash_bytes(invoice_hash)
+        if self._decrypt(identity, local_key, "online-binding", binding) != invoice_hash.encode():
+            raise KsefDocumentValidationError("Online invoice identity mismatch")
+        return invoice_hash
+
+    def _load_online(self, scope: InvoiceSyncScope, local_id: str) -> StoredOfflineInvoice | None:
+        self._check_online_key()
+        identity = self._scope(scope)
+        invoice_hash = self._mapped_hash(identity, self._local_key(identity, local_id))
+        if invoice_hash is None:
+            return None
+        return self._require_mapped_document(scope, invoice_hash)
+
+    def _require_mapped_document(
+        self, scope: InvoiceSyncScope, invoice_hash: str
+    ) -> StoredOfflineInvoice:
+        row = self.load(scope, invoice_hash)
+        if row is None:
+            raise KsefDocumentValidationError("Online invoice binding has no stored document")
+        return row
+
+    def _enqueue_online(
+        self, scope: InvoiceSyncScope, local_id: str, xml: bytes
+    ) -> StoredOfflineInvoice:
+        if type(xml) is not bytes or len(xml) > MAX_OFFLINE_XML_BYTES:
+            raise KsefDocumentValidationError("Online XML exceeds the storage policy")
+        invoice_hash = offline_invoice_hash(xml)
+        identity = self._scope(scope)
+        local_key = self._local_key(identity, local_id)
+        with self._write():
+            self._check_online_key(create=True)
+            existing = self._mapped_hash(identity, local_key)
+            if existing is not None:
+                if existing != invoice_hash:
+                    raise KsefSyncConflictError("online_invoice_identity_conflict")
+                return self._require_mapped_document(scope, existing)
+            if self.load(scope, invoice_hash) is not None:
+                raise KsefSyncConflictError("online_invoice_already_registered")
+            # The shared storage has required scheduling fields. The online
+            # facade does not expose them and submits in a separate scope.
+            row = self._register(
+                scope, xml, invoice_hash, "1970-01-01T00:00:00Z", None, OfflineInvoiceMode.OFFLINE24
+            )
+            binding = self._encrypt(identity, local_key, "online-binding", invoice_hash.encode())
+            self._db.execute(
+                "INSERT INTO online_invoice_ids_v1 VALUES (?,?,?,?)",
+                (identity, local_key, invoice_hash, binding),
+            )
+            return row
 
     def _ensure_no_live_correction(self, identity: str, original: str, current: str) -> None:
         attempts = self._db.execute(

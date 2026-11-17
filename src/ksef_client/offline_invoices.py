@@ -43,6 +43,11 @@ if TYPE_CHECKING:
 
 _OFFLINE_STREAM = hashlib.sha256(b"ksef-offline-submission/v1").hexdigest()
 _RECONCILIATION_PAGE_LIMIT = 10
+_NON_ACCEPTED_OUTCOMES = {
+    OfflineInvoiceStatus.DUPLICATE,
+    OfflineInvoiceStatus.REJECTED,
+    OfflineInvoiceStatus.RETRYABLE,
+}
 
 
 @dataclass(frozen=True)
@@ -139,10 +144,13 @@ class OfflineInvoices(OfflineInvoiceQueue):
     exact invoice hash. The worker never automatically resends that invoice.
     """
 
+    _submission_mode = True
+    _submission_kind = "offline-invoices", _OFFLINE_STREAM
+
     def __init__(self, client: Ksef, store: SQLiteOfflineInvoiceStore, *, namespace: str):
         self._client, self._store, self._options = client, store, client.options
         self.scope = InvoiceSyncScope(
-            namespace, client.environment, client.context_key, "offline-invoices", _OFFLINE_STREAM
+            namespace, client.environment, client.context_key, *self._submission_kind
         )
 
     def advance(self, invoice_hash: str, *, timeout: float = 60) -> StoredOfflineInvoice:
@@ -252,7 +260,7 @@ class OfflineInvoices(OfflineInvoiceQueue):
             # Persist before the POST. The revision check allows only one sender.
             pending = self._store._advance(self.scope, row, progress.begin_submission())
             sent = session_handle.send_invoice(
-                xml, offline_mode=True, hash_of_corrected_invoice=row.correction_of
+                xml, offline_mode=self._submission_mode, hash_of_corrected_invoice=row.correction_of
             )
             return self._store._advance(
                 self.scope,
@@ -269,6 +277,12 @@ class OfflineInvoices(OfflineInvoiceQueue):
             else:
                 match = sessions.get_session_invoice_status(reference, progress.invoice_reference)
             observed = progress.observe(match)
+            if not self._submission_mode and observed.status in _NON_ACCEPTED_OUTCOMES:
+                # Commit the terminal outcome only after closing or confirming
+                # that KSeF is already closing/has closed the owned session.
+                remote_session = sessions.get_session_status(reference)
+                if remote_session.status.code == 100:
+                    sessions.close_online_session(reference)
             if observed == progress:
                 return row
             return self._store._advance(self.scope, row, observed)
@@ -399,10 +413,13 @@ class AsyncOfflineInvoiceQueue:
 class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
     """Asynchronous variant of OfflineInvoices using native async KSeF requests."""
 
+    _submission_mode = True
+    _submission_kind = "offline-invoices", _OFFLINE_STREAM
+
     def __init__(self, client: AsyncKsef, store: AsyncSQLiteOfflineInvoiceStore, *, namespace: str):
         self._client, self._store, self._options = client, store, client.options
         self.scope = InvoiceSyncScope(
-            namespace, client.environment, client.context_key, "offline-invoices", _OFFLINE_STREAM
+            namespace, client.environment, client.context_key, *self._submission_kind
         )
 
     async def advance(self, invoice_hash: str, *, timeout: float = 60) -> StoredOfflineInvoice:
@@ -466,7 +483,7 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
                 "_advance", self.scope, row, progress.begin_submission()
             )
             sent = await session_handle.send_invoice(
-                xml, offline_mode=True, hash_of_corrected_invoice=row.correction_of
+                xml, offline_mode=self._submission_mode, hash_of_corrected_invoice=row.correction_of
             )
             return await self._store._call(
                 "_advance",
@@ -486,6 +503,12 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
                     reference, progress.invoice_reference
                 )
             observed = progress.observe(match)
+            if not self._submission_mode and observed.status in _NON_ACCEPTED_OUTCOMES:
+                # Commit the terminal outcome only after closing or confirming
+                # that KSeF is already closing/has closed the owned session.
+                remote_session = await sessions.get_session_status(reference)
+                if remote_session.status.code == 100:
+                    await sessions.close_online_session(reference)
             if observed == progress:
                 return row
             return await self._store._call("_advance", self.scope, row, observed)

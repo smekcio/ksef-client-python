@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from .invoice_sync import InvoiceSync
     from .invoice_xml_sync import InvoiceDocumentSync, InvoiceXmlSync
     from .offline_invoices import OfflineInvoices, SQLiteOfflineInvoiceStore
+    from .online_invoices import OnlineInvoices, SQLiteOnlineInvoiceStore
     from .streaming_export import ExportOperation
 
 
@@ -330,6 +331,12 @@ class Session(Operation[m.SessionStatusResponse]):
 class Invoices:
     def __init__(self, owner: Ksef) -> None:
         self.owner = owner
+
+    def online(self, store: SQLiteOnlineInvoiceStore, *, namespace: str) -> OnlineInvoices:
+        """Bind durable online submission to this authenticated context."""
+        from .online_invoices import OnlineInvoices
+
+        return OnlineInvoices(self.owner, store, namespace=namespace)
 
     def offline(self, store: SQLiteOfflineInvoiceStore, *, namespace: str) -> OfflineInvoices:
         """Bind the offline outbox to this authenticated context."""
