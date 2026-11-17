@@ -14,6 +14,7 @@ from ..models import (
     SessionsQueryResponse,
     SessionStatusResponse,
 )
+from . import _session_evidence
 from .base import AsyncBaseApiClient, BaseApiClient
 
 
@@ -140,8 +141,18 @@ class SessionsClient(BaseApiClient):
         )
 
     def get_session_status(
-        self, reference_number: str, access_token: str | None = None
+        self, reference_number: str, access_token: str | None = None, *, strict: bool = False
     ) -> SessionStatusResponse:
+        if strict:
+            _session_evidence.check_reference(reference_number)
+            response = self._http.request(
+                "GET",
+                f"/sessions/{reference_number}",
+                access_token=access_token,
+                expected_status={200},
+                max_bytes=_session_evidence.MAX_SESSION_STATUS_BYTES,
+            )
+            return _session_evidence.decode(response.content, SessionStatusResponse)
         return self._request_model(
             "GET",
             f"/sessions/{reference_number}",
@@ -156,6 +167,7 @@ class SessionsClient(BaseApiClient):
         page_size: int | None = None,
         continuation_token: str | None = None,
         access_token: str | None = None,
+        strict: bool = False,
     ) -> SessionInvoicesResponse:
         headers = {}
         if continuation_token:
@@ -163,6 +175,21 @@ class SessionsClient(BaseApiClient):
         params = {}
         if page_size is not None:
             params["pageSize"] = page_size
+        if strict:
+            _session_evidence.check_reference(reference_number)
+            _session_evidence.check_cursor(continuation_token)
+            response = self._http.request(
+                "GET",
+                f"/sessions/{reference_number}/invoices",
+                access_token=access_token,
+                params=params or None,
+                headers=headers or None,
+                expected_status={200},
+                max_bytes=_session_evidence.MAX_SESSION_PAGE_BYTES,
+            )
+            return _session_evidence.decode(
+                response.content, SessionInvoicesResponse, page_size=page_size
+            )
         return self._request_model(
             "GET",
             f"/sessions/{reference_number}/invoices",
@@ -201,7 +228,19 @@ class SessionsClient(BaseApiClient):
         invoice_reference_number: str,
         *,
         access_token: str | None = None,
+        strict: bool = False,
     ) -> SessionInvoiceStatusResponse:
+        if strict:
+            _session_evidence.check_reference(reference_number)
+            _session_evidence.check_reference(invoice_reference_number)
+            response = self._http.request(
+                "GET",
+                f"/sessions/{reference_number}/invoices/{invoice_reference_number}",
+                access_token=access_token,
+                expected_status={200},
+                max_bytes=_session_evidence.MAX_SESSION_STATUS_BYTES,
+            )
+            return _session_evidence.decode(response.content, SessionInvoiceStatusResponse)
         return self._request_model(
             "GET",
             f"/sessions/{reference_number}/invoices/{invoice_reference_number}",
@@ -381,8 +420,18 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         )
 
     async def get_session_status(
-        self, reference_number: str, access_token: str | None = None
+        self, reference_number: str, access_token: str | None = None, *, strict: bool = False
     ) -> SessionStatusResponse:
+        if strict:
+            _session_evidence.check_reference(reference_number)
+            response = await self._http.request(
+                "GET",
+                f"/sessions/{reference_number}",
+                access_token=access_token,
+                expected_status={200},
+                max_bytes=_session_evidence.MAX_SESSION_STATUS_BYTES,
+            )
+            return _session_evidence.decode(response.content, SessionStatusResponse)
         return await self._request_model(
             "GET",
             f"/sessions/{reference_number}",
@@ -397,6 +446,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         page_size: int | None = None,
         continuation_token: str | None = None,
         access_token: str | None = None,
+        strict: bool = False,
     ) -> SessionInvoicesResponse:
         headers = {}
         if continuation_token:
@@ -404,6 +454,21 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         params = {}
         if page_size is not None:
             params["pageSize"] = page_size
+        if strict:
+            _session_evidence.check_reference(reference_number)
+            _session_evidence.check_cursor(continuation_token)
+            response = await self._http.request(
+                "GET",
+                f"/sessions/{reference_number}/invoices",
+                access_token=access_token,
+                params=params or None,
+                headers=headers or None,
+                expected_status={200},
+                max_bytes=_session_evidence.MAX_SESSION_PAGE_BYTES,
+            )
+            return _session_evidence.decode(
+                response.content, SessionInvoicesResponse, page_size=page_size
+            )
         return await self._request_model(
             "GET",
             f"/sessions/{reference_number}/invoices",
@@ -442,7 +507,19 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         invoice_reference_number: str,
         *,
         access_token: str | None = None,
+        strict: bool = False,
     ) -> SessionInvoiceStatusResponse:
+        if strict:
+            _session_evidence.check_reference(reference_number)
+            _session_evidence.check_reference(invoice_reference_number)
+            response = await self._http.request(
+                "GET",
+                f"/sessions/{reference_number}/invoices/{invoice_reference_number}",
+                access_token=access_token,
+                expected_status={200},
+                max_bytes=_session_evidence.MAX_SESSION_STATUS_BYTES,
+            )
+            return _session_evidence.decode(response.content, SessionInvoiceStatusResponse)
         return await self._request_model(
             "GET",
             f"/sessions/{reference_number}/invoices/{invoice_reference_number}",
