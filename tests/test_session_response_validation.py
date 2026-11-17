@@ -12,6 +12,7 @@ import pytest
 from ksef_client.clients.sessions import AsyncSessionsClient, SessionsClient
 from ksef_client.exceptions import KsefDocumentValidationError
 from ksef_client.http import HttpResponse
+from ksef_client.models import SessionStatusResponse
 from tests.test_clients import DummyAsyncHttp, DummyHttp
 
 SESSION = {
@@ -24,7 +25,7 @@ INVOICE = {"status": {"code": 550}, "referenceNumber": "invoice-1", "ordinalNumb
 
 
 def call(method, *args, **kwargs):
-    result = method(*args, strict=True, **kwargs)
+    result = method(*args, **kwargs)
     return asyncio.run(result) if inspect.iscoroutine(result) else result
 
 
@@ -32,9 +33,9 @@ def client(body, asynchronous):
     response = HttpResponse(200, httpx.Headers(), body)
     if asynchronous:
         async_http = DummyAsyncHttp(response)
-        return async_http, AsyncSessionsClient(async_http)
+        return async_http, AsyncSessionsClient(async_http).validated
     http = DummyHttp(response)
-    return http, SessionsClient(http)
+    return http, SessionsClient(http).validated
 
 
 @pytest.mark.parametrize("asynchronous", [True, False])
@@ -54,6 +55,23 @@ def test_typed_session_reads_bound_transport_and_preserve_evidence(asynchronous)
     assert http.last_request_kwargs["max_bytes"] == 16 * 1024 * 1024
     assert http.last_request_kwargs["params"] == {"pageSize": 10}
     assert http.last_request_kwargs["headers"] == {"x-continuation-token": "next"}
+
+
+def test_validated_reader_coexists_with_existing_subclass_method():
+    class CustomSessions(SessionsClient):
+        def get_session_status(
+            self, reference_number: str, access_token: str | None = None
+        ) -> SessionStatusResponse:
+            result = super().get_session_status(reference_number, access_token)
+            assert result.invoice_count == 1
+            return result
+
+    http = DummyHttp(HttpResponse(200, httpx.Headers(), json.dumps(SESSION).encode()))
+    sessions = CustomSessions(http)
+    assert sessions.get_session_status("session-1").invoice_count == 1
+    assert "max_bytes" not in http.last_request_kwargs
+    assert sessions.validated.get_session_status("session-1").invoice_count == 1
+    assert http.last_request_kwargs["max_bytes"] == 1024 * 1024
 
 
 @pytest.mark.parametrize(
