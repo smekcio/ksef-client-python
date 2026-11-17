@@ -19,6 +19,7 @@ from .invoice_sync_state import InvoiceSyncScope
 from .offline_invoices import AsyncOfflineInvoices, OfflineInvoices
 from .operations import environment_key
 from .request_control import request_control
+from .utils.ksef_number import canonical_ksef_number
 
 if TYPE_CHECKING:
     from .async_facade import AsyncKsef
@@ -96,9 +97,18 @@ class _UpoTreeBuilder(ET.TreeBuilder):
         raise ET.ParseError("KSeF UPO must not declare a DTD")
 
 
-def _matches_text(parent: ET.Element, name: str, value: str | None) -> bool:
+def _text(parent: ET.Element, name: str) -> str | None:
     nodes = parent.findall(name)
-    return len(nodes) == 1 and len(nodes[0]) == 0 and (nodes[0].text or "").strip() == value
+    if len(nodes) != 1 or len(nodes[0]) != 0:
+        return None
+    return (nodes[0].text or "").strip()
+
+
+def _matches_ksef_number(parent: ET.Element, name: str, expected: str | None) -> bool:
+    try:
+        return canonical_ksef_number(_text(parent, name) or "") == expected
+    except ValueError:
+        return False
 
 
 def _checked_upo(progress: OfflineInvoiceProgress, upo: bytes) -> bytes:
@@ -113,13 +123,11 @@ def _checked_upo(progress: OfflineInvoiceProgress, upo: bytes) -> bytes:
             documents = root.findall(namespace + "Dokument")
             if (
                 len(documents) == 1
-                and _matches_text(
-                    root, namespace + "NumerReferencyjnySesji", progress.session_reference
-                )
-                and _matches_text(
+                and _text(root, namespace + "NumerReferencyjnySesji") == progress.session_reference
+                and _matches_ksef_number(
                     documents[0], namespace + "NumerKSeFDokumentu", progress.ksef_number
                 )
-                and _matches_text(documents[0], namespace + "SkrotDokumentu", progress.invoice_hash)
+                and _text(documents[0], namespace + "SkrotDokumentu") == progress.invoice_hash
             ):
                 return upo
     raise KsefDocumentValidationError("KSeF UPO does not identify the submitted invoice")

@@ -352,6 +352,12 @@ def test_invalid_receipts_do_not_complete_the_invoice(tmp_path, use_async, versi
                 (individual_upo(session="wrong"), "does not identify"),
                 (individual_upo(number="wrong"), "does not identify"),
                 (individual_upo(digest="wrong"), "does not identify"),
+                (
+                    individual_upo()
+                    .replace(b"<SkrotDokumentu>", b"<Ignorowany><SkrotDokumentu>")
+                    .replace(b"</SkrotDokumentu>", b"</SkrotDokumentu></Ignorowany>"),
+                    "does not identify",
+                ),
                 (individual_upo(version="0-0"), "does not identify"),
             ]:
                 server.upo = invalid
@@ -359,7 +365,9 @@ def test_invalid_receipts_do_not_complete_the_invoice(tmp_path, use_async, versi
                     await call(worker.advance, LOCAL_ID)
                 assert await call(worker.status, LOCAL_ID) == accepted
 
-            server.upo = individual_upo(version=version)
+            nip, date, technical, checksum = NUMBER.split("-")
+            number = f"{nip}-{date}-{technical[:6]}-{technical[6:]}-{checksum}"
+            server.upo = individual_upo(version=version, number=number)
             assert (await call(worker.advance, LOCAL_ID)).status is Status.COMPLETE
             assert await call(worker.read_upo, LOCAL_ID) == server.upo
 
