@@ -18,7 +18,8 @@ from .utils.zip_utils import _sanitize_archive_entry_name, build_tar_gz, build_z
 
 _MAX_INVOICES = 10_000
 _FINAL_SESSION = {200, 445}
-_CORRECTABLE = {405, 410, 415, 430, 435, 450}
+_XML_CORRECTION = {430, 450}
+_REJECTED = _XML_CORRECTION | {405, 410, 415, 435}
 
 
 class BatchInvoiceDisposition(str, Enum):
@@ -162,27 +163,32 @@ class BatchInvoiceReport:
     @property
     def retry_candidates(self) -> tuple[BatchInvoice, ...]:
         """Original XML candidates confirmed cancelled in a complete final report."""
-        return self._candidates(BatchInvoiceDisposition.CANCELLED)
+        return self._candidates(BatchInvoiceDisposition.CANCELLED, {550})
 
     @property
     def correction_candidates(self) -> tuple[BatchInvoice, ...]:
-        """Rejected entries eligible for review and correction before another batch."""
-        return self._candidates(BatchInvoiceDisposition.REJECTED)
+        """Entries rejected for invoice file or semantic checks (430 or 450)."""
+        return self._candidates(BatchInvoiceDisposition.REJECTED, _XML_CORRECTION)
 
-    def _candidates(self, disposition: BatchInvoiceDisposition) -> tuple[BatchInvoice, ...]:
+    def _candidates(
+        self, disposition: BatchInvoiceDisposition, status_codes: set[int]
+    ) -> tuple[BatchInvoice, ...]:
         if not self.complete:
             return ()
         counts = Counter(row.invoice.invoice_hash for row in self.invoices)
         return tuple(
             row.invoice
             for row in self.invoices
-            if row.disposition is disposition and counts[row.invoice.invoice_hash] == 1
+            if row.disposition is disposition
+            and row.status_code in status_codes
+            and counts[row.invoice.invoice_hash] == 1
         )
 
 
 def _outcome(
     invoice: BatchInvoice,
     row: m.SessionInvoiceStatusResponse,
+    invoice_count: int,
 ) -> BatchInvoiceOutcome:
     disposition = BatchInvoiceDisposition
     code = row.status.code
@@ -190,10 +196,8 @@ def _outcome(
     number = row.ksef_number
     result = disposition.UNRESOLVED
     valid_ref = reference is not None and re.fullmatch(r"[A-Za-z0-9_-]{1,256}", reference)
-    if not valid_ref or (
-        row.ordinal_number is not None
-        and (type(row.ordinal_number) is not int or row.ordinal_number <= 0)
-    ):
+    ordinal = row.ordinal_number
+    if not valid_ref or type(ordinal) is not int or not 1 <= ordinal <= invoice_count:
         return BatchInvoiceOutcome(invoice, result, code)
     if code == 200 and number:
         try:
@@ -203,7 +207,7 @@ def _outcome(
         else:
             result = disposition.ACCEPTED
     elif not number:
-        if code in _CORRECTABLE:
+        if code in _REJECTED:
             result = disposition.REJECTED
         elif code == 440:
             result = disposition.DUPLICATE
@@ -283,7 +287,7 @@ class _BatchResults:
             previous_ordinal = self.ordinals.setdefault(row.ordinal_number, name)
             if previous_ordinal != name:
                 previous.add(previous_ordinal)
-        result = _outcome(self.by_name[name], row)
+        result = _outcome(self.by_name[name], row, len(self.manifest.invoices))
         if result.disposition is BatchInvoiceDisposition.ACCEPTED and result.ksef_number:
             previous_number = self.ksef_numbers.setdefault(result.ksef_number, name)
             if previous_number != name:

@@ -172,6 +172,31 @@ def test_mixed_outcomes_pagination_readonly_and_retry_selection(asynchronous):
     ]
 
 
+def test_only_invoice_content_failures_are_correction_candidates():
+    codes = (405, 410, 415, 430, 435, 450)
+    manifest = prepare_invoice_batch({f"{code}.xml": str(code).encode() for code in codes}).manifest
+    remote_api = Mock()
+    remote_api.get_session_status.return_value = status(
+        445, count=len(codes), accepted=0, rejected=len(codes)
+    )
+    remote_api.get_session_invoices.return_value = m.SessionInvoicesResponse(
+        [
+            remote(invoice, ordinal, code=code)
+            for ordinal, (invoice, code) in enumerate(zip(manifest.invoices, codes, strict=True), 1)
+        ]
+    )
+    handle = setup_handle(manifest, remote_api, False)
+    report = read(handle, manifest, False)
+    assert report.complete
+    assert outcome_values(report) == ["rejected"] * len(codes)
+    assert [outcome.status_code for outcome in report.invoices] == list(codes)
+    assert [invoice.file_name for invoice in report.correction_candidates] == [
+        "430.xml",
+        "450.xml",
+    ]
+    assert report.retry_candidates == ()
+
+
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize(
     "case", ["pending", "failed", "manifest", "size", "large_page", "page_count", "many_pages"]
@@ -223,6 +248,8 @@ def test_no_retry_when_results_are_not_authoritative(asynchronous, case):
         ("duplicate_row", ["unresolved", "unresolved", "cancelled"]),
         ("duplicate_ksef_number", ["unresolved", "unresolved", "cancelled"]),
         ("bad_ordinal", ["unresolved", "duplicate", "cancelled"]),
+        ("out_of_range_ordinal", ["accepted", "duplicate", "unresolved"]),
+        ("missing_ordinal", ["unresolved", "duplicate", "cancelled"]),
         ("oversized", ["unresolved", "unresolved", "unresolved"]),
         ("bad_token", ["accepted", "duplicate", "cancelled"]),
         ("token_with_space", ["accepted", "duplicate", "cancelled"]),
@@ -259,6 +286,10 @@ def test_inconsistent_api_results_are_never_resend_candidates(problem, expected)
         rows[1] = replace(b, status=a.status, ksef_number=A)
     elif problem == "bad_ordinal":
         rows[0] = replace(a, ordinal_number=0)
+    elif problem == "out_of_range_ordinal":
+        rows[2] = replace(c, ordinal_number=len(manifest.invoices) + 1)
+    elif problem == "missing_ordinal":
+        rows[0] = replace(a, ordinal_number=None)
     elif problem == "oversized":
         rows += [b]
     elif problem == "bad_token":

@@ -175,12 +175,15 @@ zgłosi odrzucenie części faktur.
 SDK wiąże odpowiedzi z dokumentami po SHA-256 XML. Jeżeli KSeF podaje nazwę pliku,
 musi ona wskazywać ten sam dokument. Wynik bez nazwy wymaga jednego dopasowania
 skrótu w manifeście. Niekompletny raport, niespójność liczników, konflikt
-identyfikatorów albo przerwana paginacja wyłączają obie listy kandydatów.
+identyfikatorów, numer porządkowy spoza zakresu paczki albo przerwana
+paginacja wyłączają obie listy kandydatów.
 Błędy HTTP są przekazywane do wywołującego. `page_size` i `max_pages`
 ograniczają liczbę odczytów jednego raportu.
 
-- `report.correction_candidates` udostępnia jednoznacznie odrzucone pozycje do
-  sprawdzenia i poprawy.
+- `report.correction_candidates` udostępnia pozycje do sprawdzenia i poprawy
+  po błędzie weryfikacji pliku (430) lub semantyki faktury (450). Błędy sesji,
+  uprawnień, obsługi załączników i odszyfrowania pozostają widoczne jako
+  `rejected` z kodem błędu i wymagają wyjaśnienia przyczyny przed ponowieniem.
 - `report.retry_candidates` udostępnia pozycje, których anulowanie KSeF
   potwierdził kodem 550. Listy pomijają dokumenty o skrócie współdzielonym
   z innym dokumentem tej paczki.
