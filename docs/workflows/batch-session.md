@@ -125,7 +125,73 @@ To rozróżnienie jest celowe:
 - `list_invoices()`
 - `list_failed_invoices()`
 - `get_upo()`
+- `invoice_outcomes(manifest)`
 - `close()`
+
+## Wynik każdej faktury w paczce
+
+Przygotuj archiwum wraz z manifestem. Manifest zapisuje nazwy plików i SHA-256
+oryginalnych dokumentów oraz rozmiar i SHA-256 archiwum. Można go odtworzyć z
+`manifest.to_dict()` przez `BatchInvoiceManifest.from_dict(...)`. Przechowuj go
+obok stanu sesji w magazynie aplikacji. Nazwy plików mogą zawierać dane firmowe.
+
+```python
+from ksef_client.batch_outcomes import BatchInvoiceManifest, prepare_invoice_batch
+
+prepared = prepare_invoice_batch({"first.xml": first_xml, "second.xml": second_xml})
+manifest_data = prepared.manifest.to_dict()
+
+with client.batch_session(
+    prepared.archive_bytes, compression_type=prepared.compression_type
+) as session:
+    session.upload_parts(parallelism=4)
+    # Zapisuj też checkpoint uploadu zgodnie z opisem wyżej.
+    session.close()
+    state = session.resume_state()
+
+# Po restarcie użyj uwierzytelnionego klienta dla tego samego kontekstu.
+resumed = client.resume_session(state)
+manifest = BatchInvoiceManifest.from_dict(manifest_data)
+report = resumed.invoice_outcomes(manifest)
+
+for entry in report.invoices:
+    print(entry.invoice.file_name, entry.disposition.value, entry.status_code, entry.ksef_number)
+```
+
+Raport działa na uchwytach `BatchSessionHandle` i `AsyncBatchSessionHandle` oraz
+na sesji wsadowej z fasady `Ksef` lub `AsyncKsef`. Dla fasady asynchronicznej
+użyj `await session.invoice_outcomes(manifest)`. Po wznowieniu odczyt raportu
+wymaga stanu sesji i manifestu, bez załączania archiwum do klienta. Zachowane
+archiwum nadal jest potrzebne do wznowienia transferu.
+
+Wyniki są zwracane w kolejności manifestu.
+`accepted` oznacza status 200 i prawidłowy numer KSeF, `rejected` potwierdzone
+odrzucenie, `duplicate` duplikat, `cancelled` potwierdzone anulowanie faktury
+przez KSeF (550), a `unresolved` brak jednoznacznego wyniku. Dla sesji w toku
+wywołaj metodę ponownie po uzyskaniu statusu 200 lub 445. W przypadku
+mieszanych wyników możesz odczytać raport także wtedy, gdy `Session.wait()`
+zgłosi odrzucenie części faktur.
+
+SDK wiąże odpowiedzi z dokumentami po SHA-256 XML. Jeżeli KSeF podaje nazwę pliku,
+musi ona wskazywać ten sam dokument. Wynik bez nazwy wymaga jednego dopasowania
+skrótu w manifeście. Niekompletny raport, niespójność liczników, konflikt
+identyfikatorów albo przerwana paginacja wyłączają obie listy kandydatów.
+Błędy HTTP są przekazywane do wywołującego. `page_size` i `max_pages`
+ograniczają liczbę odczytów jednego raportu.
+
+- `report.correction_candidates` udostępnia jednoznacznie odrzucone pozycje do
+  sprawdzenia i poprawy.
+- `report.retry_candidates` udostępnia pozycje, których anulowanie KSeF
+  potwierdził kodem 550. Listy pomijają dokumenty o skrócie współdzielonym
+  z innym dokumentem tej paczki.
+
+Raport niczego nie wysyła. Jeżeli zdecydujesz się ponowić wysyłkę, przygotuj
+nową paczkę z wybranych dokumentów. Zachowaj wyniki poprzedniej sesji, razem
+z jej referencją i numerami KSeF.
+
+[Korelacja wyników w dokumentacji KSeF](https://github.com/CIRFMF/ksef-api/blob/main/sesja-wsadowa.md)
+
+
 
 ## Resume i walidacja źródła batch
 
