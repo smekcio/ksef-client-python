@@ -178,6 +178,7 @@ class SessionsClient(BaseApiClient):
         if strict:
             _session_evidence.check_reference(reference_number)
             _session_evidence.check_cursor(continuation_token)
+            _session_evidence.check_page_size(page_size)
             response = self._http.request(
                 "GET",
                 f"/sessions/{reference_number}/invoices",
@@ -457,6 +458,7 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         if strict:
             _session_evidence.check_reference(reference_number)
             _session_evidence.check_cursor(continuation_token)
+            _session_evidence.check_page_size(page_size)
             response = await self._http.request(
                 "GET",
                 f"/sessions/{reference_number}/invoices",
