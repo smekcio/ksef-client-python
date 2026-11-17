@@ -285,7 +285,7 @@ def test_delivery_rechecks_ready_state_after_read(tmp_path, monkeypatch, asynchr
                 return content
 
             async def async_read_then_remove(key, expected_hash, *, max_bytes):
-                content = await read(key, expected_hash, max_bytes=max_bytes)
+                content = await call(read, key, expected_hash, max_bytes=max_bytes)
                 (root / key.object_key(expected_hash)).unlink()
                 await auditor.verify_ready((scope,), storage)
                 return content
