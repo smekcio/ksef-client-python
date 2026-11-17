@@ -168,13 +168,19 @@ nie upoważnia do wysłania faktury ponownie. Jawne retry_if_unsubmitted wymaga
 zamkniętej sesji z potwierdzoną liczbą zero faktur i pełnego, pustego odczytu listy.
 Po potwierdzonym anulowaniu przetwarzania przez KSeF (kod 550) użyj retry_cancelled,
 aby ponownie zakolejkować oryginalny dokument. Odrzucenie i duplikat mają odrębne
-stany. Dla zaakceptowanej faktury SDK zamyka sesję i pobiera indywidualne UPO.
+stany. Dla zaakceptowanej faktury SDK zamyka sesję i pobiera indywidualne UPO 4.2
+lub 4.3 z limitem 1 MiB. Przed zapisaniem potwierdzenia sprawdza numer sesji, numer
+KSeF i skrót oryginalnego XML. Weryfikację podpisu XAdES ministerstwa wykonaj osobno,
+jeśli jest potrzebna w Twoim procesie.
 
 Jeśli po otwarciu sesji zabraknie odpowiedzi, rezerwacja otwarcia musi wygasnąć.
 Sesja bez zapisanego numeru nie zostanie użyta do wysyłki. KSeF może zachować
 taką pustą sesję do jej wygaśnięcia. Procesy synchronizują się przy użyciu tej
 samej bazy, a timeout pojedynczego kroku nie cofa żądania już przekazanego
 do KSeF. Ustawiaj harmonogram zgodnie z Retry-After.
+
+Transport używany przez klienta musi odpowiadać środowisku kolejki oraz mieć
+wyłączone automatyczne przekierowania i powtórzenia żądań POST sesji online.
 
 Po odtworzeniu kopii sprzed próby wysłania najpierw uzgodnij stan z KSeF.
 Starsza kopia może nie zawierać informacji o fakturach zapisanych już w KSeF.

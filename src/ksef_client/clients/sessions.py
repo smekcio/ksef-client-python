@@ -87,9 +87,7 @@ class SessionsClient(BaseApiClient):
             expected_status={201},
         )
 
-    def close_online_session(
-        self, reference_number: str, access_token: str | None = None
-    ) -> None:
+    def close_online_session(self, reference_number: str, access_token: str | None = None) -> None:
         self._request_json(
             "POST",
             f"/sessions/online/{reference_number}/close",
@@ -217,12 +215,14 @@ class SessionsClient(BaseApiClient):
         invoice_reference_number: str,
         *,
         access_token: str | None = None,
+        max_bytes: int | None = None,
     ) -> bytes:
         return self._request_bytes(
             "GET",
             f"/sessions/{reference_number}/invoices/{invoice_reference_number}/upo",
             headers={"Accept": "application/xml"},
             access_token=access_token,
+            max_bytes=max_bytes,
         )
 
     def get_session_invoice_upo_by_ksef(
@@ -456,12 +456,14 @@ class AsyncSessionsClient(AsyncBaseApiClient):
         invoice_reference_number: str,
         *,
         access_token: str | None = None,
+        max_bytes: int | None = None,
     ) -> bytes:
         return await self._request_bytes(
             "GET",
             f"/sessions/{reference_number}/invoices/{invoice_reference_number}/upo",
             headers={"Accept": "application/xml"},
             access_token=access_token,
+            max_bytes=max_bytes,
         )
 
     async def get_session_invoice_upo_by_ksef(

@@ -287,10 +287,7 @@ class OfflineInvoices(OfflineInvoiceQueue):
                 return row
             return self._store._advance(self.scope, row, observed)
         if status is OfflineInvoiceStatus.ACCEPTED:
-            session_ref, invoice_ref = (
-                cast(str, progress.session_reference),
-                cast(str, progress.invoice_reference),
-            )
+            session_ref = cast(str, progress.session_reference)
             sessions = self._client.api.sessions
             session_status = sessions.get_session_status(session_ref).status.code
             if session_status == 100:
@@ -300,9 +297,14 @@ class OfflineInvoices(OfflineInvoiceQueue):
                 return row
             if session_status != 200:
                 raise KsefDocumentValidationError("KSeF session cannot provide the offline UPO")
-            upo = sessions.get_session_invoice_upo_by_ref(session_ref, invoice_ref)
+            upo = self._download_upo(progress)
             return self._store._advance(self.scope, row, progress.confirm_upo(), upo=upo)
         return row
+
+    def _download_upo(self, progress: OfflineInvoiceProgress) -> bytes:
+        return self._client.api.sessions.get_session_invoice_upo_by_ref(
+            cast(str, progress.session_reference), cast(str, progress.invoice_reference)
+        )
 
     def _scan_submission(
         self, session: str, invoice_hash: str
@@ -513,10 +515,7 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
                 return row
             return await self._store._call("_advance", self.scope, row, observed)
         if status is OfflineInvoiceStatus.ACCEPTED:
-            session_ref, invoice_ref = (
-                cast(str, progress.session_reference),
-                cast(str, progress.invoice_reference),
-            )
+            session_ref = cast(str, progress.session_reference)
             sessions = self._client.api.sessions
             session_status = (await sessions.get_session_status(session_ref)).status.code
             if session_status == 100:
@@ -526,11 +525,16 @@ class AsyncOfflineInvoices(AsyncOfflineInvoiceQueue):
                 return row
             if session_status != 200:
                 raise KsefDocumentValidationError("KSeF session cannot provide the offline UPO")
-            upo = await sessions.get_session_invoice_upo_by_ref(session_ref, invoice_ref)
+            upo = await self._download_upo(progress)
             return await self._store._call(
                 "_advance", self.scope, row, progress.confirm_upo(), upo=upo
             )
         return row
+
+    async def _download_upo(self, progress: OfflineInvoiceProgress) -> bytes:
+        return await self._client.api.sessions.get_session_invoice_upo_by_ref(
+            cast(str, progress.session_reference), cast(str, progress.invoice_reference)
+        )
 
     async def _scan_submission(
         self, session: str, invoice_hash: str

@@ -9,12 +9,13 @@ import httpx
 import pytest
 
 from ksef_client import AuthenticatedClient, Ksef, KsefClientOptions
-from ksef_client.exceptions import KsefTransportError
+from ksef_client.exceptions import KsefResponseLimitError, KsefTransportError
 from ksef_client.online_invoices import OnlineInvoiceStatus, SQLiteOnlineInvoiceStore
 from ksef_client.token_manager import TokenManager
 from tests.helpers import generate_rsa_cert
 from tests.test_offline_invoice_state import HASH, NUMBER, remote_invoice
 from tests.test_offline_invoice_store import KEY, XML
+from tests.test_online_invoices import individual_upo
 
 
 def test_real_session_checkpoint_recovers_individual_upo_after_disconnected_post(tmp_path):
@@ -22,6 +23,8 @@ def test_real_session_checkpoint_recovers_individual_upo_after_disconnected_post
     certificate = generate_rsa_cert()
     sent = 0
     closed = False
+    oversized_upo = True
+    upo = individual_upo()
 
     def respond(request):
         nonlocal sent, closed
@@ -66,7 +69,10 @@ def test_real_session_checkpoint_recovers_individual_upo_after_disconnected_post
             return httpx.Response(204)
         assert (method, path) == ("GET", "/v2/sessions/session-1/invoices/invoice-1/upo")
         assert closed
-        return httpx.Response(200, content=b"<UPO/>", headers={"Content-Type": "application/xml"})
+        content = b" " * (1024 * 1024 + 1) if oversized_upo else upo
+        return httpx.Response(
+            200, content=iter([content]), headers={"Content-Type": "application/xml"}
+        )
 
     @contextmanager
     def reopen():
@@ -87,6 +93,9 @@ def test_real_session_checkpoint_recovers_individual_upo_after_disconnected_post
     with reopen() as online:
         assert online.advance("local-id").ksef_number == NUMBER
         assert online.advance("local-id").status is OnlineInvoiceStatus.ACCEPTED
+        with pytest.raises(KsefResponseLimitError):
+            online.advance("local-id")
+        oversized_upo = False
         assert online.advance("local-id").status is OnlineInvoiceStatus.COMPLETE
-        assert online.read_upo("local-id") == b"<UPO/>"
+        assert online.read_upo("local-id") == upo
     assert sent == 1

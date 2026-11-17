@@ -1,14 +1,22 @@
 import asyncio
 import base64
 import sqlite3
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import replace
 from inspect import isawaitable
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
-from ksef_client import AsyncKsef, Ksef, KsefClientOptions, RetryConfig
+from ksef_client import (
+    AsyncAuthenticatedClient,
+    AsyncKsef,
+    AuthenticatedClient,
+    Ksef,
+    KsefClientOptions,
+    RetryConfig,
+)
 from ksef_client import models as m
 from ksef_client.async_facade import AsyncInvoices
 from ksef_client.exceptions import KsefDocumentValidationError, KsefSyncConflictError
@@ -20,11 +28,22 @@ from ksef_client.online_invoices import (
 from ksef_client.online_invoices import (
     OnlineInvoiceStatus as Status,
 )
-from tests.test_offline_invoice_state import NUMBER, remote_invoice
+from ksef_client.operations import environment_key
+from ksef_client.token_manager import AsyncTokenManager, TokenManager
+from tests.test_offline_invoice_state import HASH, NUMBER, remote_invoice
 from tests.test_offline_invoice_store import DUE, KEY, XML
 from tests.test_offline_invoices import TestClient
 
 LOCAL_ID = "FV-ą/private-123"
+
+
+def individual_upo(*, version="4-3", session="session-1", number=NUMBER, digest=HASH):
+    return (
+        f'<Potwierdzenie xmlns="http://upo.schematy.mf.gov.pl/KSeF/v{version}">'
+        f"<NumerReferencyjnySesji>{session}</NumerReferencyjnySesji><Dokument>"
+        f"<NumerKSeFDokumentu>{number}</NumerKSeFDokumentu><SkrotDokumentu>{digest}</SkrotDokumentu>"
+        f"</Dokument></Potwierdzenie>"
+    ).encode()
 
 
 class Server(TestClient):
@@ -34,11 +53,18 @@ class Server(TestClient):
 
     def __init__(self):
         super().__init__()
+        self.environment = environment_key(self.options.normalized_base_url())
+        self._http = SimpleNamespace(
+            _options=self.options, api_base_url=self.options.normalized_base_url()
+        )
+        self.api.http_client = self._http
+        self.api.security = self
         self.result = None
         self.session_code = None
         self.lose_send = True
         self.lose_open = False
         self.after_open = None
+        self.upo = individual_upo()
 
     def online_session(self):
         result = super().online_session()
@@ -70,9 +96,10 @@ class Server(TestClient):
         )
         return SimpleNamespace(status=m.StatusInfo(code, ""), invoice_count=0)
 
-    def get_session_invoice_upo_by_ref(self, reference, invoice_reference):
+    def get_session_invoice_upo_by_ref(self, reference, invoice_reference, *, max_bytes=None):
         assert (reference, invoice_reference) == ("session-1", "invoice-1")
-        return b"<UPO/>"
+        assert max_bytes == 1024 * 1024
+        return self.upo
 
 
 class AsyncServer:
@@ -81,7 +108,8 @@ class AsyncServer:
         self.options = sync.options
         self.context_key = sync.context_key
         self.environment = sync.environment
-        self.api = SimpleNamespace(sessions=self)
+        self._http = sync._http
+        self.api = SimpleNamespace(sessions=self, security=self, http_client=self._http)
 
     def resume_session(self, state):
         self.sync.resume_session(state)
@@ -156,7 +184,7 @@ def test_reopens_database_and_recovers_send_and_upo(tmp_path, use_async):
         async with online(server, path, use_async) as worker:
             assert (await call(worker.advance, LOCAL_ID)).status is Status.COMPLETE
             assert (await call(worker.status, LOCAL_ID)).status is Status.COMPLETE
-            assert await call(worker.read_upo, LOCAL_ID) == b"<UPO/>"
+            assert await call(worker.read_upo, LOCAL_ID) == server.upo
 
         assert server.open_count == server.send_count == server.close_count == 1
         assert LOCAL_ID.encode() not in path.read_bytes()
@@ -226,9 +254,9 @@ def test_explicit_retry_requires_finalized_empty_session(tmp_path, use_async):
 @pytest.mark.parametrize(
     "options",
     [
-        KsefClientOptions(base_url="https://example.test", follow_redirects=True),
-        KsefClientOptions(
-            base_url="https://example.test",
+        replace(Server.options, follow_redirects=True),
+        replace(
+            Server.options,
             retry=RetryConfig(retryable_post_paths=frozenset({"/sessions/online"})),
         ),
     ],
@@ -241,6 +269,101 @@ def test_replaying_configuration_is_rejected(tmp_path, options):
         pytest.raises(ValueError, match="non-replaying"),
     ):
         Invoices(cast(Ksef, server)).online(store, namespace="company")
+
+
+@pytest.mark.parametrize("use_async", [False, True])
+def test_live_transport_configuration_is_bound_to_the_queue(tmp_path, monkeypatch, use_async):
+    async def run():
+        declared = KsefClientOptions(base_url="https://example.test")
+        replaying = replace(
+            declared,
+            retry=RetryConfig(
+                retryable_post_paths=frozenset({"/sessions/online/session-1/invoices"})
+            ),
+        )
+        other = replace(declared, base_url="https://other.example.test")
+        async with AsyncExitStack() as stack:
+            path = tmp_path / "online.db"
+            store: SQLiteOnlineInvoiceStore | AsyncSQLiteOnlineInvoiceStore
+            if use_async:
+                store = await stack.enter_async_context(
+                    await AsyncSQLiteOnlineInvoiceStore.open(path, key=KEY)
+                )
+
+                async def make(options):
+                    api = AsyncAuthenticatedClient(options, AsyncTokenManager("token"))
+                    await stack.enter_async_context(api)
+                    return AsyncKsef(api, declared, context_type="Nip", context_value="test")
+            else:
+                store = stack.enter_context(SQLiteOnlineInvoiceStore.open(path, key=KEY))
+
+                async def make(options):
+                    api = AuthenticatedClient(options, TokenManager("token"))
+                    stack.enter_context(api)
+                    return Ksef(api, declared, context_type="Nip", context_value="test")
+
+            for options, error in [
+                (other, "saved scope"),
+                (replaying, "non-replaying"),
+                (replace(declared, follow_redirects=True), "non-replaying"),
+            ]:
+                client = await make(options)
+                with pytest.raises(ValueError, match=error):
+                    client.invoices.online(store, namespace="company")
+
+            client = await make(declared)
+            worker = client.invoices.online(store, namespace="company")
+            before = await call(worker.enqueue, LOCAL_ID, XML)
+            for options, error in [(other, "saved scope"), (replaying, "non-replaying")]:
+                monkeypatch.setattr(client.api.http_client, "_options", options)
+                with pytest.raises(ValueError, match=error):
+                    await call(worker.enqueue, "new-id", b"<new/>")
+                with pytest.raises(ValueError, match=error):
+                    await call(worker.advance, LOCAL_ID)
+                assert await call(worker.status, "new-id") is None
+                assert await call(worker.status, LOCAL_ID) == before
+
+            monkeypatch.setattr(client.api.sessions, "_http", object())
+            with pytest.raises(ValueError, match="shared KSeF API transport"):
+                await call(worker.advance, LOCAL_ID)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("use_async", [False, True])
+@pytest.mark.parametrize("version", ["4-2", "4-3"])
+def test_invalid_receipts_do_not_complete_the_invoice(tmp_path, use_async, version):
+    async def run():
+        server = Server()
+        server.lose_send = False
+        async with online(server, tmp_path / "online.db", use_async) as worker:
+            await call(worker.enqueue, LOCAL_ID, XML)
+            await call(worker.advance, LOCAL_ID)
+            await call(worker.advance, LOCAL_ID)
+            server.result = remote_invoice(200, number=NUMBER)
+            accepted = await call(worker.advance, LOCAL_ID)
+            server.session_code = 200
+            for invalid, error in [
+                (b"", "size policy"),
+                (b" " * (1024 * 1024 + 1), "size policy"),
+                (b"<html>", "well-formed XML"),
+                (b"<html/>", "does not identify"),
+                ("<!DOCTYPE UPO><UPO/>".encode("utf-16"), "well-formed XML"),
+                (individual_upo(session="wrong"), "does not identify"),
+                (individual_upo(number="wrong"), "does not identify"),
+                (individual_upo(digest="wrong"), "does not identify"),
+                (individual_upo(version="0-0"), "does not identify"),
+            ]:
+                server.upo = invalid
+                with pytest.raises(KsefDocumentValidationError, match=error):
+                    await call(worker.advance, LOCAL_ID)
+                assert await call(worker.status, LOCAL_ID) == accepted
+
+            server.upo = individual_upo(version=version)
+            assert (await call(worker.advance, LOCAL_ID)).status is Status.COMPLETE
+            assert await call(worker.read_upo, LOCAL_ID) == server.upo
+
+    asyncio.run(run())
 
 
 def test_scope_separation_and_wrong_key_rejected(tmp_path):
