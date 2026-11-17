@@ -94,7 +94,11 @@ class _SessionsClient(Protocol):
     ) -> None: ...
 
     def get_session_status(
-        self, reference_number: str, access_token: str | None = None
+        self,
+        reference_number: str,
+        access_token: str | None = None,
+        *,
+        strict: bool = False,
     ) -> m.SessionStatusResponse: ...
 
     def get_session_invoices(
@@ -104,6 +108,7 @@ class _SessionsClient(Protocol):
         page_size: int | None = None,
         continuation_token: str | None = None,
         access_token: str | None = None,
+        strict: bool = False,
     ) -> m.SessionInvoicesResponse: ...
 
     def get_session_failed_invoices(
@@ -166,7 +171,11 @@ class _AsyncSessionsClient(Protocol):
     ) -> None: ...
 
     async def get_session_status(
-        self, reference_number: str, access_token: str | None = None
+        self,
+        reference_number: str,
+        access_token: str | None = None,
+        *,
+        strict: bool = False,
     ) -> m.SessionStatusResponse: ...
 
     async def get_session_invoices(
@@ -176,6 +185,7 @@ class _AsyncSessionsClient(Protocol):
         page_size: int | None = None,
         continuation_token: str | None = None,
         access_token: str | None = None,
+        strict: bool = False,
     ) -> m.SessionInvoicesResponse: ...
 
     async def get_session_failed_invoices(
@@ -865,18 +875,27 @@ class BatchSessionHandle:
         """Read a bounded per-invoice report for this exact prepared archive."""
         manifest.bind(self.batch_file)
         scan = _BatchResults(manifest, page_size, max_pages)
-        initial = self.get_status(access_token=access_token)
+        resolved_access_token = _resolve_access_token(access_token, self._access_token)
+        initial = self._sessions.get_session_status(
+            self.reference_number, access_token=resolved_access_token, strict=True
+        )
         if not scan.is_final(initial):
             return scan.report(self.reference_number, initial, initial)
         token = None
         for _ in range(scan.max_pages):
-            page = self.list_invoices(
-                page_size=scan.page_size, continuation_token=token, access_token=access_token
+            page = self._sessions.get_session_invoices(
+                self.reference_number,
+                page_size=scan.page_size,
+                continuation_token=token,
+                access_token=resolved_access_token,
+                strict=True,
             )
             token = scan.accept(page)
             if token is None:
                 break
-        current = self.get_status(access_token=access_token)
+        current = self._sessions.get_session_status(
+            self.reference_number, access_token=resolved_access_token, strict=True
+        )
         return scan.report(self.reference_number, initial, current)
 
     def list_failed_invoices(
@@ -1037,18 +1056,27 @@ class AsyncBatchSessionHandle:
         """Read a bounded per-invoice report for this exact prepared archive."""
         manifest.bind(self.batch_file)
         scan = _BatchResults(manifest, page_size, max_pages)
-        initial = await self.get_status(access_token=access_token)
+        resolved_access_token = _resolve_access_token(access_token, self._access_token)
+        initial = await self._sessions.get_session_status(
+            self.reference_number, access_token=resolved_access_token, strict=True
+        )
         if not scan.is_final(initial):
             return scan.report(self.reference_number, initial, initial)
         token = None
         for _ in range(scan.max_pages):
-            page = await self.list_invoices(
-                page_size=scan.page_size, continuation_token=token, access_token=access_token
+            page = await self._sessions.get_session_invoices(
+                self.reference_number,
+                page_size=scan.page_size,
+                continuation_token=token,
+                access_token=resolved_access_token,
+                strict=True,
             )
             token = scan.accept(page)
             if token is None:
                 break
-        current = await self.get_status(access_token=access_token)
+        current = await self._sessions.get_session_status(
+            self.reference_number, access_token=resolved_access_token, strict=True
+        )
         return scan.report(self.reference_number, initial, current)
 
     async def list_failed_invoices(

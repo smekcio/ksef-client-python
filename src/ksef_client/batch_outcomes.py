@@ -199,21 +199,21 @@ def _outcome(
     ordinal = row.ordinal_number
     if not valid_ref or type(ordinal) is not int or not 1 <= ordinal <= invoice_count:
         return BatchInvoiceOutcome(invoice, result, code)
-    if code == 200 and number:
+    if code == 200 and number is not None:
         try:
             number = canonical_ksef_number(number)
         except ValueError:
-            number = None
+            pass
         else:
-            result = disposition.ACCEPTED
-    elif not number:
+            return BatchInvoiceOutcome(invoice, disposition.ACCEPTED, code, reference, number)
+    elif number is None:
         if code in _REJECTED:
             result = disposition.REJECTED
         elif code == 440:
             result = disposition.DUPLICATE
         elif code == 550:
             result = disposition.CANCELLED
-    return BatchInvoiceOutcome(invoice, result, code, reference, number)
+    return BatchInvoiceOutcome(invoice, result, code, reference)
 
 
 class _BatchResults:
@@ -253,17 +253,17 @@ class _BatchResults:
         for row in page.invoices:
             self._record(row)
         token = page.continuation_token
-        if token is None:
+        if token is None or token == "":
             self.exhausted = True
-        elif (
+            return None
+        if (
             token in self.tokens
             or not 1 <= len(token) <= 8192
             or re.fullmatch(r"[!-~]+", token) is None
         ):
             self.consistent = False
             return None
-        else:
-            self.tokens.add(token)
+        self.tokens.add(token)
         return token
 
     def _record(self, row: m.SessionInvoiceStatusResponse) -> None:

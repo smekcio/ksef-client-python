@@ -176,7 +176,7 @@ SDK wiąże odpowiedzi z dokumentami po SHA-256 XML. Jeżeli KSeF podaje nazwę 
 musi ona wskazywać ten sam dokument. Wynik bez nazwy wymaga jednego dopasowania
 skrótu w manifeście. Niekompletny raport, niespójność liczników, konflikt
 identyfikatorów, numer porządkowy spoza zakresu paczki albo przerwana
-paginacja wyłączają obie listy kandydatów.
+paginacja wyłączają obie listy kandydatów. Pusty token kończy paginację.
 Błędy HTTP są przekazywane do wywołującego. `page_size` i `max_pages`
 ograniczają liczbę odczytów jednego raportu.
 
@@ -193,8 +193,6 @@ nową paczkę z wybranych dokumentów. Zachowaj wyniki poprzedniej sesji, razem
 z jej referencją i numerami KSeF.
 
 [Korelacja wyników w dokumentacji KSeF](https://github.com/CIRFMF/ksef-api/blob/main/sesja-wsadowa.md)
-
-
 
 ## Resume i walidacja źródła batch
 

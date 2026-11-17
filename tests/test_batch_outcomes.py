@@ -148,7 +148,8 @@ def test_mixed_outcomes_pagination_readonly_and_retry_selection(asynchronous):
             [
                 remote(first, 1, ksef_number=A),
                 remote(second, 2, code=450, name=second.file_name),
-            ]
+            ],
+            "",
         ),
     ]
     handle = setup_handle(manifest, remote_api, asynchronous)
@@ -159,10 +160,13 @@ def test_mixed_outcomes_pagination_readonly_and_retry_selection(asynchronous):
     assert report.retry_candidates == (third,)
     assert report.correction_candidates == (second,)
     assert all(secret not in repr(report) for secret in (A, "storage.example", "accepted.xml"))
-    assert remote_api.get_session_status.call_count == 2
+    assert [call.kwargs for call in remote_api.get_session_status.call_args_list] == [
+        {"access_token": "override", "strict": True},
+        {"access_token": "override", "strict": True},
+    ]
     assert [call.kwargs for call in remote_api.get_session_invoices.call_args_list] == [
-        {"continuation_token": None, "page_size": 10, "access_token": "override"},
-        {"continuation_token": "next", "page_size": 10, "access_token": "override"},
+        {"continuation_token": None, "page_size": 10, "access_token": "override", "strict": True},
+        {"continuation_token": "next", "page_size": 10, "access_token": "override", "strict": True},
     ]
     assert [call[0] for call in remote_api.method_calls] == [
         "get_session_status",
@@ -317,6 +321,20 @@ def test_inconsistent_api_results_are_never_resend_candidates(problem, expected)
     if problem in {"bad_token", "token_with_space"}:
         assert remote_api.get_session_invoices.call_count == 1
     assert report.retry_candidates == report.correction_candidates == ()
+
+
+@pytest.mark.parametrize("number", ["", "invalid-number", A])
+def test_claimed_cancellation_with_ksef_number_is_not_a_retry_candidate(number):
+    remote_api = Mock()
+    manifest = prepare_invoice_batch({"one.xml": b"<a/>"}).manifest
+    remote_api.get_session_status.return_value = status(445, count=1, accepted=0, rejected=1)
+    remote_api.get_session_invoices.return_value = m.SessionInvoicesResponse(
+        [remote(manifest.invoices[0], 1, code=550, ksef_number=number)]
+    )
+    report = read(setup_handle(manifest, remote_api, False), manifest, False)
+    assert not report.complete and report.retry_candidates == ()
+    assert outcome_values(report) == ["unresolved"]
+    assert report.invoices[0].ksef_number is None
 
 
 def test_identical_xml_requires_confirmed_filename_and_all_rejected_is_final():
