@@ -49,4 +49,3 @@ XML i zatrzymaj workery przed przywracaniem kopii. Po odzyskaniu bazy istniejąc
 `fence_workers()` wycofuje rezerwacje pochodzące ze starego stanu.
 Identyfikator dostarczenia służy do deduplikacji. Dokumenty i metadane chroń jak
 pozostałą zawartość archiwum.
-
