@@ -35,6 +35,7 @@ def test_restored_batch_checks_the_wire_before_reporting_cancellation():
         assert request.method == "GET"
         assert request.headers["Authorization"] == "Bearer test-token"
         paths.append(request.url.path)
+        payload: dict[str, object]
         if request.url.path == "/v2/sessions/batch-1/invoices":
             payload = {
                 "invoices": [
