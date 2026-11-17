@@ -7,6 +7,7 @@ import hashlib
 import re
 from collections import Counter, defaultdict
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -189,24 +190,19 @@ def _outcome(
     invoice: BatchInvoice,
     row: m.SessionInvoiceStatusResponse,
     invoice_count: int,
+    number: str | None,
 ) -> BatchInvoiceOutcome:
     disposition = BatchInvoiceDisposition
     code = row.status.code
     reference = row.reference_number
-    number = row.ksef_number
     result = disposition.UNRESOLVED
     valid_ref = reference is not None and re.fullmatch(r"[A-Za-z0-9_-]{1,256}", reference)
     ordinal = row.ordinal_number
     if not valid_ref or type(ordinal) is not int or not 1 <= ordinal <= invoice_count:
         return BatchInvoiceOutcome(invoice, result, code)
     if code == 200 and number is not None:
-        try:
-            number = canonical_ksef_number(number)
-        except ValueError:
-            pass
-        else:
-            return BatchInvoiceOutcome(invoice, disposition.ACCEPTED, code, reference, number)
-    elif number is None:
+        return BatchInvoiceOutcome(invoice, disposition.ACCEPTED, code, reference, number)
+    if row.ksef_number is None:
         if code in _REJECTED:
             result = disposition.REJECTED
         elif code == 440:
@@ -233,9 +229,7 @@ class _BatchResults:
             self.by_hash[invoice.invoice_hash].add(invoice.file_name)
         self.rows: dict[str, BatchInvoiceOutcome] = {}
         self.conflicted: set[str] = set()
-        self.references: dict[str, str] = {}
-        self.ordinals: dict[int, str] = {}
-        self.ksef_numbers: dict[str, str] = {}
+        self.identifiers: dict[tuple[str, int | str], str | None] = {}
         self.tokens: set[str] = set()
         self.count = 0
         self.consistent = True
@@ -271,31 +265,35 @@ class _BatchResults:
         name = row.invoice_file_name
         if name is None and len(candidates) == 1:
             name = next(iter(candidates))
-        if name not in candidates:
+        matched = name if name in candidates else None
+        number = None
+        if row.ksef_number is not None:
+            with suppress(ValueError):
+                number = canonical_ksef_number(row.ksef_number)
+        # Unmatched rows can still contradict the identity of a matched row.
+        for kind, value in (
+            ("reference", row.reference_number),
+            ("ordinal", row.ordinal_number),
+            ("ksef_number", number),
+        ):
+            if value is None:
+                continue
+            previous = self.identifiers.setdefault((kind, value), matched)
+            if previous != matched:
+                self.consistent = False
+                self.conflicted.update(item for item in (previous, matched) if item is not None)
+        if matched is None:
             self.consistent = False
             self.conflicted.update(candidates)
             if name is not None and name in self.by_name:
                 self.conflicted.add(name)
             return
-        assert name is not None
-        previous = {name} if name in self.rows else set()
-        if row.reference_number:
-            previous_reference = self.references.setdefault(row.reference_number, name)
-            if previous_reference != name:
-                previous.add(previous_reference)
-        if row.ordinal_number is not None:
-            previous_ordinal = self.ordinals.setdefault(row.ordinal_number, name)
-            if previous_ordinal != name:
-                previous.add(previous_ordinal)
-        result = _outcome(self.by_name[name], row, len(self.manifest.invoices))
-        if result.disposition is BatchInvoiceDisposition.ACCEPTED and result.ksef_number:
-            previous_number = self.ksef_numbers.setdefault(result.ksef_number, name)
-            if previous_number != name:
-                previous.add(previous_number)
-        if previous:
+        if matched in self.rows:
             self.consistent = False
-            self.conflicted.update(previous | {name})
-        self.rows[name] = result
+            self.conflicted.add(matched)
+        self.rows[matched] = _outcome(
+            self.by_name[matched], row, len(self.manifest.invoices), number
+        )
 
     def report(
         self,

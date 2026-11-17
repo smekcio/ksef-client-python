@@ -323,6 +323,31 @@ def test_inconsistent_api_results_are_never_resend_candidates(problem, expected)
     assert report.retry_candidates == report.correction_candidates == ()
 
 
+@pytest.mark.parametrize("first_unmatched", [False, True])
+@pytest.mark.parametrize("shared", ["reference", "ordinal", "ksef_number"])
+def test_unmatched_row_conflicts_with_an_identified_invoice(shared, first_unmatched):
+    manifest = prepare_invoice_batch(FILES).manifest
+    first, second, third = manifest.invoices
+    accepted = remote(first, 1, ksef_number=A)
+    foreign_hash = prepare_invoice_batch({"foreign.xml": b"<other/>"}).manifest.invoices[0]
+    foreign = replace(remote(second, 2, code=440), invoice_hash=foreign_hash.invoice_hash)
+    if shared == "reference":
+        foreign = replace(foreign, reference_number=accepted.reference_number)
+    elif shared == "ordinal":
+        foreign = replace(foreign, ordinal_number=accepted.ordinal_number)
+    else:
+        foreign = replace(foreign, status=accepted.status, ksef_number=accepted.ksef_number)
+    rows = [foreign, accepted] if first_unmatched else [accepted, foreign]
+    remote_api = Mock()
+    remote_api.get_session_status.return_value = status()
+    remote_api.get_session_invoices.return_value = m.SessionInvoicesResponse(
+        [*rows, remote(third, 3, code=550)]
+    )
+    report = read(setup_handle(manifest, remote_api, False), manifest, False)
+    assert not report.complete and report.retry_candidates == ()
+    assert outcome_values(report) == ["unresolved", "unresolved", "cancelled"]
+
+
 @pytest.mark.parametrize("number", ["", "invalid-number", A])
 def test_claimed_cancellation_with_ksef_number_is_not_a_retry_candidate(number):
     remote_api = Mock()
