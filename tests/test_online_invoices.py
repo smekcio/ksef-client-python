@@ -61,6 +61,9 @@ class Server(TestClient):
         self.api.security = self
         self.result = None
         self.session_code = None
+        self.successful_invoice_count = None
+        self.failed_invoice_count = None
+        self.next_page = None
         self.lose_send = True
         self.lose_open = False
         self.after_open = None
@@ -81,20 +84,32 @@ class Server(TestClient):
             raise OSError("lost send")
         return SimpleNamespace(resume_state=lambda: SimpleNamespace(reference_number="invoice-1"))
 
-    def get_session_invoices(self, reference_number, *, page_size, continuation_token):
-        assert (reference_number, page_size, continuation_token) == ("session-1", 100, None)
+    def get_session_invoices(
+        self, reference_number, *, page_size, continuation_token, strict=False
+    ):
+        assert (reference_number, page_size, strict) == ("session-1", 100, True)
+        if continuation_token is not None:
+            assert continuation_token == "next" and self.result is not None
+            return m.SessionInvoicesResponse([self.result])
+        if self.next_page is not None:
+            return self.next_page
         return m.SessionInvoicesResponse([self.result] if self.result is not None else [])
 
-    def get_session_invoice_status(self, reference_number, invoice_reference):
-        assert (reference_number, invoice_reference) == ("session-1", "invoice-1")
+    def get_session_invoice_status(self, reference_number, invoice_reference, *, strict):
+        assert (reference_number, invoice_reference, strict) == ("session-1", "invoice-1", True)
         return self.result
 
-    def get_session_status(self, reference_number):
-        assert reference_number == "session-1"
+    def get_session_status(self, reference_number, *, strict=False):
+        assert (reference_number, strict) == ("session-1", True)
         code = (
             self.session_code if self.session_code is not None else 200 if self.close_count else 100
         )
-        return SimpleNamespace(status=m.StatusInfo(code, ""), invoice_count=0)
+        return SimpleNamespace(
+            status=m.StatusInfo(code, ""),
+            invoice_count=0,
+            successful_invoice_count=self.successful_invoice_count,
+            failed_invoice_count=self.failed_invoice_count,
+        )
 
     def get_session_invoice_upo_by_ref(self, reference, invoice_reference, *, max_bytes=None):
         assert (reference, invoice_reference) == ("session-1", "invoice-1")
@@ -243,10 +258,45 @@ def test_explicit_retry_requires_finalized_empty_session(tmp_path, use_async):
                 Status.SUBMISSION_UNKNOWN
             )
             server.result = None
+            server.successful_invoice_count = 1
+            assert (await call(worker.retry_if_unsubmitted, LOCAL_ID)).status is (
+                Status.SUBMISSION_UNKNOWN
+            )
+            server.successful_invoice_count = 0
+            server.failed_invoice_count = 1
+            assert (await call(worker.retry_if_unsubmitted, LOCAL_ID)).status is (
+                Status.SUBMISSION_UNKNOWN
+            )
+            server.failed_invoice_count = 0
+            server.next_page = m.SessionInvoicesResponse([], "")
+            with pytest.raises(KsefDocumentValidationError, match="listing did not complete"):
+                await call(worker.retry_if_unsubmitted, LOCAL_ID)
+            server.next_page = None
             assert (await call(worker.retry_if_unsubmitted, LOCAL_ID)).status is Status.QUEUED
             assert (await call(worker.enqueue, LOCAL_ID, XML)).status is Status.QUEUED
 
         assert server.send_count == server.close_count == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("use_async", [False, True])
+def test_reconciliation_blocks_repeated_invoice_reference(tmp_path, use_async):
+    async def run():
+        server = Server()
+        async with online(server, tmp_path / "online.db", use_async) as worker:
+            await call(worker.enqueue, LOCAL_ID, XML)
+            await call(worker.advance, LOCAL_ID)
+            with pytest.raises(OSError, match="lost send"):
+                await call(worker.advance, LOCAL_ID)
+            server.next_page = m.SessionInvoicesResponse(
+                [remote_invoice(200, number=NUMBER)], "next"
+            )
+            server.result = remote_invoice(550)
+            with pytest.raises(KsefDocumentValidationError, match="ambiguous"):
+                await call(worker.advance, LOCAL_ID)
+            assert (await call(worker.status, LOCAL_ID)).status is Status.SUBMISSION_UNKNOWN
+            assert server.close_count == 0
 
     asyncio.run(run())
 
@@ -306,12 +356,20 @@ def test_live_transport_configuration_is_bound_to_the_queue(tmp_path, monkeypatc
                 (other, "saved scope"),
                 (replaying, "non-replaying"),
                 (replace(declared, follow_redirects=True), "non-replaying"),
+                (
+                    replace(declared, custom_headers={"aUtHoRiZaTiOn": "Bearer other-context"}),
+                    "managed authentication",
+                ),
+                (
+                    replace(declared, custom_headers={"HOST": "other.example.test"}),
+                    "managed authentication",
+                ),
             ]:
                 client = await make(options)
                 with pytest.raises(ValueError, match=error):
                     client.invoices.online(store, namespace="company")
 
-            client = await make(declared)
+            client = await make(replace(declared, custom_headers={"X-Application": "example"}))
             worker = client.invoices.online(store, namespace="company")
             before = await call(worker.enqueue, LOCAL_ID, XML)
             for options, error in [(other, "saved scope"), (replaying, "non-replaying")]:

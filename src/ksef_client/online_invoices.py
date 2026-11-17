@@ -19,6 +19,7 @@ from .invoice_sync_state import InvoiceSyncScope
 from .offline_invoices import AsyncOfflineInvoices, OfflineInvoices
 from .operations import environment_key
 from .request_control import request_control
+from .token_manager import _disable_online_post_replay
 from .utils.ksef_number import canonical_ksef_number
 
 if TYPE_CHECKING:
@@ -80,6 +81,8 @@ def _validate_transport(client: Ksef | AsyncKsef, scope: InvoiceSyncScope) -> No
     ):
         raise ValueError("Durable online submission transport does not match the saved scope")
     for options in (client.options, transport._options):
+        if any(name.lower() in {"authorization", "host"} for name in options.custom_headers or ()):
+            raise ValueError("Durable online submission requires managed authentication and host")
         if options.follow_redirects or (
             options.retry is not None
             and any(
@@ -136,6 +139,7 @@ def _checked_upo(progress: OfflineInvoiceProgress, upo: bytes) -> bytes:
 class _OnlineWorker(OfflineInvoices):
     _submission_mode = False
     _submission_kind = _ONLINE_SUBMISSION_KIND
+    _session_read_options = {"strict": True}
 
     def _download_upo(self, progress: OfflineInvoiceProgress) -> bytes:
         upo = self._client.api.sessions.get_session_invoice_upo_by_ref(
@@ -149,6 +153,7 @@ class _OnlineWorker(OfflineInvoices):
 class _AsyncOnlineWorker(AsyncOfflineInvoices):
     _submission_mode = False
     _submission_kind = _ONLINE_SUBMISSION_KIND
+    _session_read_options = {"strict": True}
 
     async def _download_upo(self, progress: OfflineInvoiceProgress) -> bytes:
         upo = await self._client.api.sessions.get_session_invoice_upo_by_ref(
@@ -178,7 +183,10 @@ class OnlineInvoices:
 
     def advance(self, local_id: str, *, timeout: float = 60) -> OnlineInvoice:
         """Run one step, reconciling unknown sends through the persisted session."""
-        with request_control(timeout_seconds=timeout):
+        with (
+            request_control(timeout_seconds=timeout),
+            _disable_online_post_replay(self._client.api.http_client),
+        ):
             row = _required(self._store._load_online(self._worker.scope, local_id))
             _validate_transport(self._client, self._worker.scope)
             return _result(
@@ -187,7 +195,10 @@ class OnlineInvoices:
 
     def retry_if_unsubmitted(self, local_id: str, *, timeout: float = 60) -> OnlineInvoice:
         """Permit a new attempt only after KSeF proves that the old session was empty."""
-        with request_control(timeout_seconds=timeout):
+        with (
+            request_control(timeout_seconds=timeout),
+            _disable_online_post_replay(self._client.api.http_client),
+        ):
             row = _required(self._store._load_online(self._worker.scope, local_id))
             _validate_transport(self._client, self._worker.scope)
             return _result(
@@ -227,14 +238,20 @@ class AsyncOnlineInvoices:
         return None if row is None else _result(local_id, row)
 
     async def advance(self, local_id: str, *, timeout: float = 60) -> OnlineInvoice:
-        with request_control(timeout_seconds=timeout):
+        with (
+            request_control(timeout_seconds=timeout),
+            _disable_online_post_replay(self._client.api.http_client),
+        ):
             row = _required(await self._store._call("_load_online", self._worker.scope, local_id))
             _validate_transport(self._client, self._worker.scope)
             updated = await self._worker.advance(row.progress.invoice_hash, timeout=timeout)
             return _result(local_id, updated)
 
     async def retry_if_unsubmitted(self, local_id: str, *, timeout: float = 60) -> OnlineInvoice:
-        with request_control(timeout_seconds=timeout):
+        with (
+            request_control(timeout_seconds=timeout),
+            _disable_online_post_replay(self._client.api.http_client),
+        ):
             row = _required(await self._store._call("_load_online", self._worker.scope, local_id))
             _validate_transport(self._client, self._worker.scope)
             updated = await self._worker.retry_if_unsubmitted(

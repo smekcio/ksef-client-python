@@ -181,6 +181,9 @@ do KSeF. Ustawiaj harmonogram zgodnie z Retry-After.
 
 Transport używany przez klienta musi odpowiadać środowisku kolejki oraz mieć
 wyłączone automatyczne przekierowania i powtórzenia żądań POST sesji online.
+Kolejka używa zarządzanej autoryzacji i hosta z adresu API. Gdy POST sesji
+zwróci 401, klient może odświeżyć token i zwraca błąd tego żądania.
+Kolejny krok korzysta z odświeżonego tokena.
 
 Po odtworzeniu kopii sprzed próby wysłania najpierw uzgodnij stan z KSeF.
 Starsza kopia może nie zawierać informacji o fakturach zapisanych już w KSeF.

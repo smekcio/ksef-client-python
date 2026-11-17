@@ -33,7 +33,8 @@ import inspect
 import logging
 import math
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
@@ -48,6 +49,29 @@ if TYPE_CHECKING:
     from .config import KsefClientOptions
 
 logger = logging.getLogger(__name__)
+
+_ONLINE_POST_NO_REPLAY: contextvars.ContextVar[object | None] = contextvars.ContextVar(
+    "ksef_online_post_no_replay", default=None
+)
+
+
+@contextmanager
+def _disable_online_post_replay(transport: BaseHttpClient | AsyncBaseHttpClient) -> Iterator[None]:
+    marker = _ONLINE_POST_NO_REPLAY.set(transport)
+    try:
+        yield
+    finally:
+        _ONLINE_POST_NO_REPLAY.reset(marker)
+
+
+def _online_post_replay_disabled(
+    transport: BaseHttpClient | AsyncBaseHttpClient, method: str, path: str
+) -> bool:
+    return (
+        _ONLINE_POST_NO_REPLAY.get() is transport
+        and method.upper() == "POST"
+        and (path == "/sessions/online" or path.startswith("/sessions/online/"))
+    )
 
 
 class _SyncNotificationState(threading.local):
@@ -658,6 +682,8 @@ class TokenRefreshingHttpClient(BaseHttpClient):
                 ):
                     raise
                 self._token_manager.force_refresh(stale_token=self._request_token.get())
+                if _online_post_replay_disabled(self, method, path):
+                    raise
                 # The second admission may wait too. Sample the current token
                 # after that wait instead of holding the just-refreshed value.
                 return super()._request_once(
@@ -774,6 +800,8 @@ class AsyncTokenRefreshingHttpClient(AsyncBaseHttpClient):
                 ):
                     raise
                 await self._token_manager.force_refresh(stale_token=self._request_token.get())
+                if _online_post_replay_disabled(self, method, path):
+                    raise
                 # The second admission may wait too. Sample the current token
                 # after that wait instead of holding the just-refreshed value.
                 return await super()._request_once(
