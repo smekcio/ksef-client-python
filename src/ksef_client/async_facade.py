@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from . import models as m
+from .batch_outcomes import BatchInvoiceManifest, BatchInvoiceReport
 from .client import AsyncAuthenticatedClient, AsyncKsefClient
 from .config import KsefClientOptions
 from .facade import (
@@ -193,6 +194,20 @@ class AsyncSession(AsyncOperation[m.SessionStatusResponse]):
         self._close_started = True
         await self.handle.close()
         self.closed = True
+
+    async def invoice_outcomes(
+        self,
+        manifest: BatchInvoiceManifest,
+        *,
+        page_size: int = 100,
+        max_pages: int = 100,
+    ) -> BatchInvoiceReport:
+        """Read per-invoice results from a batch opened with the supplied manifest."""
+        if not self.batch:
+            raise ValueError("Invoice outcomes require a batch session")
+        return await self.handle.invoice_outcomes(
+            manifest, page_size=page_size, max_pages=max_pages
+        )
 
     def upo(self) -> AsyncOperation[m.UpoResponse]:
         state = self.owner._state("upo", self.handle.reference_number)

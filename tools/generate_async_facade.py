@@ -40,6 +40,7 @@ ASYNC = {
     "__exit__",
     "send_invoice",
     "upload_parts",
+    "invoice_outcomes",
     "download",
     "start",
     "begin_auth",
@@ -156,6 +157,7 @@ class Convert(ast.NodeTransformer):
             in {
                 "self.handle.send_invoice",
                 "self.handle.upload_parts",
+                "self.handle.invoice_outcomes",
                 "self.handle.close",
                 "self.owner._certificate",
                 "self._certificate",
@@ -220,6 +222,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from . import models as m
+from .batch_outcomes import BatchInvoiceManifest, BatchInvoiceReport
 from .client import AsyncAuthenticatedClient, AsyncKsefClient
 from .config import KsefClientOptions
 from .facade import (

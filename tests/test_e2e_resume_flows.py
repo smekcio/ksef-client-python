@@ -7,9 +7,9 @@ import pytest
 
 from ksef_client import KsefClient, KsefClientOptions
 from ksef_client import models as m
+from ksef_client.batch_outcomes import prepare_invoice_batch
 from ksef_client.services import BatchSessionWorkflow, OnlineSessionWorkflow
 from ksef_client.services.sessions import BatchSessionState, OnlineSessionState
-from ksef_client.utils.zip_utils import build_zip
 from tests.test_e2e_token_flows import (
     FORM_CODE,
     E2EConfig,
@@ -66,11 +66,6 @@ def _extract_upo_reference(status: m.SessionStatusResponse) -> str | None:
     if isinstance(reference_number, str) and reference_number:
         return reference_number
     return None
-
-
-def _build_batch_zip(*, seller_nip: str, environment_name: str) -> bytes:
-    invoice_xml = _build_invoice_xml(seller_nip=seller_nip, environment_name=environment_name)
-    return build_zip({"invoice-1.xml": invoice_xml})
 
 
 def _run_online_resume_flow(config: E2EConfig) -> None:
@@ -165,10 +160,11 @@ def _run_batch_resume_flow(config: E2EConfig) -> None:
     options = KsefClientOptions(base_url=config.base_url)
     access_token: str | None = None
     session_state: BatchSessionState | None = None
-    batch_zip = _build_batch_zip(
+    xml = _build_invoice_xml(
         seller_nip=config.context_value,
         environment_name=f"{config.name}-batch-resume",
     )
+    batch = prepare_invoice_batch({"invoice-1.xml": xml})
 
     with KsefClient(options) as open_client:
         certs = _with_rate_limit_retry(lambda: open_client.security.get_public_key_certificates())
@@ -186,7 +182,8 @@ def _run_batch_resume_flow(config: E2EConfig) -> None:
                 open_client.http_client,
             ).open_session(
                 form_code=FORM_CODE,
-                zip_bytes=batch_zip,
+                archive_bytes=batch.archive_bytes,
+                compression_type=batch.compression_type,
                 public_certificate=symmetric_cert,
                 access_token=access_token,
             )
@@ -203,7 +200,8 @@ def _run_batch_resume_flow(config: E2EConfig) -> None:
             resumed_client.http_client,
         ).resume_session(
             session_state,
-            zip_bytes=batch_zip,
+            archive_bytes=batch.archive_bytes,
+            compression_type=batch.compression_type,
             access_token=access_token,
         )
         uploaded_ordinals: list[int] = []
@@ -236,15 +234,15 @@ def _run_batch_resume_flow(config: E2EConfig) -> None:
             )
             assert upo_bytes, "Received empty batch UPO after resumed batch session."
 
-            session_invoices = _with_rate_limit_retry(
-                lambda: resumed.list_invoices(page_size=20, access_token=access_token)
-            )
+            report = _with_rate_limit_retry(lambda: resumed.invoice_outcomes(batch.manifest))
+            assert report.complete
+            (outcome,) = report.invoices
+            assert outcome.disposition.value == "accepted"
+            assert outcome.ksef_number
             failed_invoices = _with_rate_limit_retry(
                 lambda: resumed.list_failed_invoices(page_size=20, access_token=access_token)
             )
-            assert session_invoices.invoices or failed_invoices.invoices, (
-                "Resumed batch session did not report any processed invoices."
-            )
+            assert not failed_invoices.invoices
         finally:
             with suppress(Exception):
                 _with_rate_limit_retry(lambda: resumed.close(access_token=access_token))
