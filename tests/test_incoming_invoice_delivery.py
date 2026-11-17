@@ -148,7 +148,7 @@ def test_expired_and_fenced_attempts_cannot_ack_or_retry(tmp_path, monkeypatch):
 
 
 def test_claim_rejects_ineligible_and_unverifiable_documents(tmp_path, monkeypatch):
-    server = XmlServer([row(NUMBER, hash_=HASH), row(NUMBER2, hash_=HASH)])
+    server = XmlServer([row(NUMBER2, hash_=HASH), row(NUMBER, hash_=HASH)])
     _, http = make_sync(server)
     api = InvoicesClient(http)
     db = tmp_path / "archive.db"
@@ -191,6 +191,10 @@ def test_claim_rejects_ineligible_and_unverifiable_documents(tmp_path, monkeypat
                 archive.claim_invoice_delivery(scope, storage, consumer="corrupt")
 
         with sqlite3.connect(db) as writer:
+            writer.execute(
+                "UPDATE invoice_xml_documents SET verified_at=0 WHERE ksef_number=?",
+                (NUMBER2,),
+            )
             writer.execute(
                 "UPDATE invoice_observations SET metadata_json=? WHERE ksef_number=?",
                 ('"tampered"', NUMBER2),
@@ -246,4 +250,46 @@ def test_long_unicode_scope_and_lease_expiration_during_read(tmp_path, monkeypat
         archive.retry_invoice_delivery(event)
         replay = archive.claim_invoice_delivery(scope, storage, consumer="job")
         assert replay is not None and replay.event_id == event.event_id
+    http.close()
+
+
+def test_corrupted_delivery_yields_to_later_ready_work_after_lease_expires(tmp_path, monkeypatch):
+    _, http = make_sync(XmlServer([row(NUMBER2, hash_=HASH), row(NUMBER, hash_=HASH)]))
+    sync = document_sync(InvoicesClient(http))
+    scope = sync.xml.scopes[0]
+    clock = [1000.0]
+    monkeypatch.setattr(store_module, "time", SimpleNamespace(time=lambda: clock[0]))
+    db = tmp_path / "archive.db"
+    with (
+        FileInvoiceXmlStore(tmp_path / "xml") as storage,
+        SQLiteInvoiceSyncStore.open(
+            db, enqueue_xml=True, xml_storage_id=storage.storage_id
+        ) as archive,
+    ):
+        sync.run_once(archive, storage)
+
+        def write(metadata):
+            with sqlite3.connect(db) as writer:
+                writer.execute(
+                    "UPDATE invoice_observations SET metadata_json=? WHERE ksef_number=?",
+                    (metadata, NUMBER2),
+                )
+
+        metadata = row(NUMBER2, hash_=HASH).to_dict()
+        for i, invalid in enumerate((float("nan"), "Infinity", 10**400)):
+            write(json.dumps({**metadata, "grossAmount": invalid}))
+            consumer = f"job-{i}"
+            with pytest.raises(KsefXmlIntegrityError, match="invalid_delivery_metadata"):
+                archive.claim_invoice_delivery(scope, storage, consumer=consumer, lease_seconds=10)
+            clock[0] += 60
+            healthy = archive.claim_invoice_delivery(scope, storage, consumer=consumer)
+            assert healthy is not None and healthy.key.ksef_number == NUMBER
+            archive.acknowledge_invoice_delivery(healthy)
+            with pytest.raises(KsefXmlIntegrityError, match="invalid_delivery_metadata"):
+                archive.claim_invoice_delivery(scope, storage, consumer=consumer, lease_seconds=10)
+            clock[0] += 60
+            write(json.dumps(metadata))
+            repaired = archive.claim_invoice_delivery(scope, storage, consumer=consumer)
+            assert repaired is not None and repaired.key.ksef_number == NUMBER2
+            archive.acknowledge_invoice_delivery(repaired)
     http.close()

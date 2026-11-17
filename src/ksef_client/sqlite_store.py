@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import math
 import os
 import re
 import sqlite3
@@ -40,6 +41,7 @@ from .invoice_sync_state import (
     InvoiceSyncCheckpoint,
     InvoiceSyncCommitReceipt,
     InvoiceSyncScope,
+    _loads,
     canonical_json,
 )
 from .invoice_xml_storage import _safe_directory
@@ -786,22 +788,23 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             self._execute(DELIVERY_SCHEMA)
             now = time.time()
             epoch = self._execute("SELECT epoch FROM xml_store_meta WHERE id=1").fetchone()[0]
-            # SQLite preserves the left-to-right loop order for CROSS JOIN.
-            # Start with the selected stream's index to avoid scanning other
-            # streams or sorting the archive's ready documents under the writer lock.
+            # Visit only the selected stream, then order eligible rows by
+            # availability. An expired read failure follows older ready work.
             row = self._execute(
                 "SELECT o.ksef_number,d.variant,d.expected_hash,d.receipt_json,o.metadata_json "
                 "FROM invoice_observations o CROSS JOIN invoice_xml_documents d "
                 "USING(namespace,environment,context_key,ksef_number) "
-                "WHERE " + _selection((scope,))[0]
-                + " AND d.status='ready' AND d.variant='invoice-xml/v1' AND NOT EXISTS ("
-                "SELECT 1 FROM incoming_invoice_delivery r "
-                "WHERE r.namespace=d.namespace AND r.environment=d.environment "
-                "AND r.context_key=d.context_key AND r.ksef_number=d.ksef_number "
-                "AND r.variant=d.variant AND r.consumer=? AND (r.acknowledged=1 OR "
-                "(r.available_at>? AND (r.token IS NULL OR r.epoch=?)))) "
-                "ORDER BY o.ksef_number LIMIT 1",
-                (*_scope_values(scope), consumer, now, epoch),
+                "LEFT JOIN incoming_invoice_delivery r ON r.namespace=d.namespace "
+                "AND r.environment=d.environment AND r.context_key=d.context_key "
+                "AND r.ksef_number=d.ksef_number AND r.variant=d.variant AND r.consumer=? "
+                "WHERE "
+                + _selection((scope,))[0]
+                + " AND d.status='ready' AND d.variant='invoice-xml/v1' "
+                "AND (r.consumer IS NULL OR (r.acknowledged=0 AND "
+                "(r.available_at<=? OR (r.token IS NOT NULL AND r.epoch<>?)))) "
+                "ORDER BY COALESCE(r.available_at,d.verified_at,d.created_at),"
+                "o.ksef_number LIMIT 1",
+                (consumer, *_scope_values(scope), now, epoch),
             ).fetchone()
             if row is None:
                 return None
@@ -819,15 +822,19 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             )
         try:
             key = InvoiceXmlKey(*identity)
-            receipt = InvoiceXmlReceipt(**json.loads(receipt_json))
+            receipt = InvoiceXmlReceipt(**_loads(receipt_json))
             receipt.validate(key, expected_hash, storage_id)
-            metadata = m.InvoiceMetadata.from_dict(json.loads(metadata_json))
-        except (TypeError, ValueError, AttributeError, KeyError, RecursionError):
+            metadata = m.InvoiceMetadata.from_dict(_loads(metadata_json))
+        except (TypeError, ValueError, AttributeError, KeyError, OverflowError, RecursionError):
             raise KsefXmlIntegrityError("invalid_delivery_metadata") from None
         if (
             metadata.ksef_number is None
             or self._document_number(metadata.ksef_number) != key.ksef_number
             or metadata.invoice_hash != expected_hash
+            or any(
+                amount is not None and not math.isfinite(amount)
+                for amount in (metadata.net_amount, metadata.vat_amount, metadata.gross_amount)
+            )
         ):
             raise KsefXmlIntegrityError("invalid_delivery_metadata")
         if receipt.size > max_xml_bytes:
@@ -842,12 +849,19 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
         delivery = pending.verified(xml)
         with self._transaction(write=False):
             active = self._execute(
-                "SELECT 1 FROM incoming_invoice_delivery WHERE " + DOC_KEY
+                "SELECT 1 FROM incoming_invoice_delivery WHERE "
+                + DOC_KEY
                 + " AND consumer=? AND token=? AND epoch=? AND available_at>? "
                 "AND acknowledged=0 AND EXISTS(SELECT 1 FROM xml_store_meta "
                 "WHERE id=1 AND epoch=?)",
-                (*pending.key.values, pending.consumer, pending.token,
-                 pending.epoch, time.time(), pending.epoch),
+                (
+                    *pending.key.values,
+                    pending.consumer,
+                    pending.token,
+                    pending.epoch,
+                    time.time(),
+                    pending.epoch,
+                ),
             ).fetchone()
         if active is None:
             raise KsefInvoiceDeliveryLeaseLostError()
@@ -864,7 +878,10 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
     ) -> IncomingInvoiceDelivery | None:
         """Lease one Subject2 invoice and return verified original XML and metadata."""
         pending = self._claim_invoice_delivery(
-            scope, storage.storage_id, consumer=consumer, lease_seconds=lease_seconds,
+            scope,
+            storage.storage_id,
+            consumer=consumer,
+            lease_seconds=lease_seconds,
             max_xml_bytes=max_xml_bytes,
         )
         if pending is None:
@@ -887,11 +904,22 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                 eligibility = "(available_at>? AND acknowledged=0)"
                 parameters = (now + delay_seconds,)
             updated = self._execute(
-                "UPDATE incoming_invoice_delivery SET " + assignment + " WHERE " + DOC_KEY
-                + " AND consumer=? AND token=? AND epoch=? AND " + eligibility
+                "UPDATE incoming_invoice_delivery SET "
+                + assignment
+                + " WHERE "
+                + DOC_KEY
+                + " AND consumer=? AND token=? AND epoch=? AND "
+                + eligibility
                 + " AND EXISTS(SELECT 1 FROM xml_store_meta WHERE id=1 AND epoch=?)",
-                (*parameters, *delivery.key.values, delivery.consumer, delivery._token,
-                 delivery._epoch, now, delivery._epoch),
+                (
+                    *parameters,
+                    *delivery.key.values,
+                    delivery.consumer,
+                    delivery._token,
+                    delivery._epoch,
+                    now,
+                    delivery._epoch,
+                ),
             )
             if updated.rowcount != 1:
                 raise KsefInvoiceDeliveryLeaseLostError()
@@ -904,10 +932,7 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
         self, delivery: IncomingInvoiceDelivery, *, delay_seconds: float = 0
     ) -> None:
         """Release the active attempt and make it available again after an optional delay."""
-        if (
-            type(delay_seconds) not in (int, float)
-            or not 0 <= delay_seconds <= 86_400
-        ):
+        if type(delay_seconds) not in (int, float) or not 0 <= delay_seconds <= 86_400:
             raise ValueError("delay_seconds must be between 0 and 86400")
         self._update_invoice_delivery(delivery, delay_seconds=delay_seconds)
 
@@ -1224,8 +1249,12 @@ class AsyncSQLiteInvoiceSyncStore:
     ) -> IncomingInvoiceDelivery | None:
         """Lease one Subject2 invoice and return verified original XML and metadata."""
         pending: _PendingDelivery | None = await self._call(
-            "_claim_invoice_delivery", scope, storage.storage_id, consumer=consumer,
-            lease_seconds=lease_seconds, max_xml_bytes=max_xml_bytes,
+            "_claim_invoice_delivery",
+            scope,
+            storage.storage_id,
+            consumer=consumer,
+            lease_seconds=lease_seconds,
+            max_xml_bytes=max_xml_bytes,
         )
         if pending is None:
             return None
