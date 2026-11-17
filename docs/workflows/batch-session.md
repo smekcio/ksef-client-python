@@ -164,6 +164,8 @@ na sesji wsadowej z fasady `Ksef` lub `AsyncKsef`. Dla fasady asynchronicznej
 użyj `await session.invoice_outcomes(manifest)`. Po wznowieniu odczyt raportu
 wymaga stanu sesji i manifestu, bez załączania archiwum do klienta. Zachowane
 archiwum nadal jest potrzebne do wznowienia transferu.
+Własny adapter sesji musi udostępniać `validated` z metodami
+`get_session_status` i `get_session_invoices`, które sprawdzają odpowiedzi KSeF.
 
 Wyniki są zwracane w kolejności manifestu.
 `accepted` oznacza status 200 i prawidłowy numer KSeF, `rejected` potwierdzone

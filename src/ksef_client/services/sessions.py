@@ -5,12 +5,15 @@ import binascii
 import json
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from .. import models as m
 from ..batch_outcomes import BatchInvoiceManifest, BatchInvoiceReport, _BatchResults
 from .batch import encrypt_batch_parts
 from .crypto import EncryptionData, build_send_invoice_request
+
+if TYPE_CHECKING:
+    from ..clients._session_evidence import AsyncValidatedSessionReads, ValidatedSessionReads
 
 _SESSION_STATE_SCHEMA_VERSION = 1
 
@@ -94,11 +97,7 @@ class _SessionsClient(Protocol):
     ) -> None: ...
 
     def get_session_status(
-        self,
-        reference_number: str,
-        access_token: str | None = None,
-        *,
-        strict: bool = False,
+        self, reference_number: str, access_token: str | None = None
     ) -> m.SessionStatusResponse: ...
 
     def get_session_invoices(
@@ -108,7 +107,6 @@ class _SessionsClient(Protocol):
         page_size: int | None = None,
         continuation_token: str | None = None,
         access_token: str | None = None,
-        strict: bool = False,
     ) -> m.SessionInvoicesResponse: ...
 
     def get_session_failed_invoices(
@@ -171,11 +169,7 @@ class _AsyncSessionsClient(Protocol):
     ) -> None: ...
 
     async def get_session_status(
-        self,
-        reference_number: str,
-        access_token: str | None = None,
-        *,
-        strict: bool = False,
+        self, reference_number: str, access_token: str | None = None
     ) -> m.SessionStatusResponse: ...
 
     async def get_session_invoices(
@@ -185,7 +179,6 @@ class _AsyncSessionsClient(Protocol):
         page_size: int | None = None,
         continuation_token: str | None = None,
         access_token: str | None = None,
-        strict: bool = False,
     ) -> m.SessionInvoicesResponse: ...
 
     async def get_session_failed_invoices(
@@ -875,26 +868,28 @@ class BatchSessionHandle:
         """Read a bounded per-invoice report for this exact prepared archive."""
         manifest.bind(self.batch_file)
         scan = _BatchResults(manifest, page_size, max_pages)
+        reader: ValidatedSessionReads | None = getattr(self._sessions, "validated", None)
+        if reader is None:
+            raise TypeError("Batch invoice outcomes require a session adapter with validated reads")
         resolved_access_token = _resolve_access_token(access_token, self._access_token)
-        initial = self._sessions.get_session_status(
-            self.reference_number, access_token=resolved_access_token, strict=True
+        initial = reader.get_session_status(
+            self.reference_number, access_token=resolved_access_token
         )
         if not scan.is_final(initial):
             return scan.report(self.reference_number, initial, initial)
         token = None
         for _ in range(scan.max_pages):
-            page = self._sessions.get_session_invoices(
+            page = reader.get_session_invoices(
                 self.reference_number,
                 page_size=scan.page_size,
                 continuation_token=token,
                 access_token=resolved_access_token,
-                strict=True,
             )
             token = scan.accept(page)
             if token is None:
                 break
-        current = self._sessions.get_session_status(
-            self.reference_number, access_token=resolved_access_token, strict=True
+        current = reader.get_session_status(
+            self.reference_number, access_token=resolved_access_token
         )
         return scan.report(self.reference_number, initial, current)
 
@@ -1056,26 +1051,28 @@ class AsyncBatchSessionHandle:
         """Read a bounded per-invoice report for this exact prepared archive."""
         manifest.bind(self.batch_file)
         scan = _BatchResults(manifest, page_size, max_pages)
+        reader: AsyncValidatedSessionReads | None = getattr(self._sessions, "validated", None)
+        if reader is None:
+            raise TypeError("Batch invoice outcomes require a session adapter with validated reads")
         resolved_access_token = _resolve_access_token(access_token, self._access_token)
-        initial = await self._sessions.get_session_status(
-            self.reference_number, access_token=resolved_access_token, strict=True
+        initial = await reader.get_session_status(
+            self.reference_number, access_token=resolved_access_token
         )
         if not scan.is_final(initial):
             return scan.report(self.reference_number, initial, initial)
         token = None
         for _ in range(scan.max_pages):
-            page = await self._sessions.get_session_invoices(
+            page = await reader.get_session_invoices(
                 self.reference_number,
                 page_size=scan.page_size,
                 continuation_token=token,
                 access_token=resolved_access_token,
-                strict=True,
             )
             token = scan.accept(page)
             if token is None:
                 break
-        current = await self._sessions.get_session_status(
-            self.reference_number, access_token=resolved_access_token, strict=True
+        current = await reader.get_session_status(
+            self.reference_number, access_token=resolved_access_token
         )
         return scan.report(self.reference_number, initial, current)
 

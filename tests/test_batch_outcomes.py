@@ -55,7 +55,7 @@ def outcome_values(report):
 
 def setup_handle(manifest, remote_api, asynchronous):
     return (AsyncBatchSessionHandle if asynchronous else BatchSessionHandle)(
-        _sessions=remote_api,
+        _sessions=cast(Any, SimpleNamespace(validated=remote_api)),
         _uploader=Mock(),
         reference_number="session",
         form_code=Mock(),
@@ -71,6 +71,23 @@ def setup_handle(manifest, remote_api, asynchronous):
 def read(handle, manifest, asynchronous, **kwargs):
     result = handle.invoice_outcomes(manifest, **kwargs)
     return asyncio.run(result) if asynchronous else result
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_existing_adapters_keep_ordinary_status_reads_without_validated_capability(asynchronous):
+    old_adapter = Mock(spec=["get_session_status"])
+    old_adapter.get_session_status = (AsyncMock if asynchronous else Mock)(return_value=status())
+    manifest = prepare_invoice_batch(FILES).manifest
+    handle = replace(setup_handle(manifest, old_adapter, asynchronous), _sessions=old_adapter)
+
+    result = handle.get_status()
+    observed = asyncio.run(result) if asynchronous else result
+    assert observed == status()
+    old_adapter.get_session_status.assert_called_once_with("session", access_token="default")
+
+    with pytest.raises(TypeError, match="session adapter with validated reads"):
+        read(handle, manifest, asynchronous)
+    assert old_adapter.get_session_status.call_count == 1
 
 
 @pytest.mark.parametrize(
@@ -171,12 +188,12 @@ def test_mixed_outcomes_pagination_readonly_and_retry_selection(asynchronous):
     assert report.correction_candidates == (second,)
     assert all(secret not in repr(report) for secret in (A, "storage.example", "accepted.xml"))
     assert [call.kwargs for call in remote_api.get_session_status.call_args_list] == [
-        {"access_token": "override", "strict": True},
-        {"access_token": "override", "strict": True},
+        {"access_token": "override"},
+        {"access_token": "override"},
     ]
     assert [call.kwargs for call in remote_api.get_session_invoices.call_args_list] == [
-        {"continuation_token": None, "page_size": 10, "access_token": "override", "strict": True},
-        {"continuation_token": "next", "page_size": 10, "access_token": "override", "strict": True},
+        {"continuation_token": None, "page_size": 10, "access_token": "override"},
+        {"continuation_token": "next", "page_size": 10, "access_token": "override"},
     ]
     assert [call[0] for call in remote_api.method_calls] == [
         "get_session_status",
