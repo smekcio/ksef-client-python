@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import json
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -18,6 +19,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from . import models as m
 from ._async_cleanup import shield_and_drain
 from ._sqlite_metadata import KEY as METADATA_KEY
 from ._sqlite_metadata import SCHEMA as METADATA_SCHEMA
@@ -28,15 +30,23 @@ from .exceptions import (
     KsefSyncDataConflictError,
     KsefSyncStoreError,
 )
+from .invoice_delivery import (
+    IncomingInvoiceDelivery,
+    KsefInvoiceDeliveryLeaseLostError,
+    _delivery_metadata,
+    _PendingDelivery,
+)
 from .invoice_sync_state import (
     InvoiceSyncBatch,
     InvoiceSyncCheckpoint,
     InvoiceSyncCommitReceipt,
     InvoiceSyncScope,
+    _loads,
     canonical_json,
 )
 from .invoice_xml_storage import _safe_directory
 from .invoice_xml_types import (
+    AsyncInvoiceXmlStorage,
     InvoiceXmlBackfillReport,
     InvoiceXmlClaim,
     InvoiceXmlKey,
@@ -82,6 +92,17 @@ CREATE TABLE xml_backfill (
 );
 """
 DOC_KEY = "namespace=? AND environment=? AND context_key=? AND ksef_number=? AND variant=?"
+DELIVERY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS incoming_invoice_delivery (
+    namespace TEXT NOT NULL, environment TEXT NOT NULL, context_key TEXT NOT NULL,
+    ksef_number TEXT NOT NULL, variant TEXT NOT NULL, consumer TEXT NOT NULL,
+    available_at REAL NOT NULL, token TEXT, epoch TEXT, acknowledged INTEGER NOT NULL DEFAULT 0
+        CHECK(acknowledged IN (0, 1)),
+    PRIMARY KEY(namespace, environment, context_key, ksef_number, variant, consumer),
+    FOREIGN KEY(namespace, environment, context_key, ksef_number, variant)
+        REFERENCES invoice_xml_documents(namespace, environment, context_key, ksef_number, variant)
+);
+"""
 EXPORT_STATE_LIMIT = 4 * 1024 * 1024
 SAFE_REASONS = frozenset(
     {
@@ -735,6 +756,183 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                 (json.dumps(asdict(receipt)), time.time()),
             )
 
+    def _validate_incoming_scope(self, scope: InvoiceSyncScope, storage_id: str) -> None:
+        self.validate_xml((scope,), storage_id)
+        # The export adapter imports this store. Resolve the scope helper lazily.
+        from .invoice_export_sync import _archive_scope
+
+        buyer = m.InvoiceQuerySubjectType.SUBJECT2
+        if scope == _archive_scope(
+            scope.namespace, scope.environment, scope.context_key, scope.sync_key, buyer
+        ):
+            return
+        checkpoint = self.load(scope)
+        if checkpoint is None or checkpoint.spec["query"]["subjectType"] != buyer.value:
+            raise ValueError("Incoming delivery requires an initialized Subject2 scope")
+
+    def _claim_invoice_delivery(
+        self,
+        scope: InvoiceSyncScope,
+        storage_id: str,
+        *,
+        consumer: str,
+        lease_seconds: float,
+        max_xml_bytes: int,
+    ) -> _PendingDelivery | None:
+        if not isinstance(consumer, str) or re.fullmatch(r"[A-Za-z0-9._-]{1,64}", consumer) is None:
+            raise ValueError("Invalid delivery consumer")
+        lease_seconds = positive(lease_seconds, "lease_seconds")
+        positive_int(max_xml_bytes, "max_xml_bytes")
+        self._validate_incoming_scope(scope, storage_id)
+        with self._transaction():
+            self._execute(DELIVERY_SCHEMA)
+            now = time.time()
+            epoch = self._execute("SELECT epoch FROM xml_store_meta WHERE id=1").fetchone()[0]
+            # Visit only the selected stream, then order eligible rows by
+            # availability. An expired read failure follows older ready work.
+            row = self._execute(
+                "SELECT o.ksef_number,d.variant,d.expected_hash,d.receipt_json,o.metadata_json,"
+                "i.invoice_hash "
+                "FROM invoice_observations o CROSS JOIN invoice_xml_documents d "
+                "USING(namespace,environment,context_key,ksef_number) "
+                "LEFT JOIN invoices i USING(namespace,environment,context_key,ksef_number) "
+                "LEFT JOIN incoming_invoice_delivery r ON r.namespace=d.namespace "
+                "AND r.environment=d.environment AND r.context_key=d.context_key "
+                "AND r.ksef_number=d.ksef_number AND r.variant=d.variant AND r.consumer=? "
+                "WHERE "
+                + _selection((scope,))[0]
+                + " AND d.status='ready' AND d.variant='invoice-xml/v1' "
+                "AND (r.consumer IS NULL OR (r.acknowledged=0 AND "
+                "(r.available_at<=? OR (r.token IS NOT NULL AND r.epoch<>?)))) "
+                "ORDER BY COALESCE(r.available_at,d.verified_at,d.created_at),"
+                "o.ksef_number LIMIT 1",
+                (consumer, *_scope_values(scope), now, epoch),
+            ).fetchone()
+            if row is None:
+                return None
+            number, variant, expected_hash, receipt_json, metadata_json, invoice_hash = row
+            identity = (scope.namespace, scope.environment, scope.context_key, number, variant)
+            # Commit before validating the payload or reading the file.
+            token = uuid.uuid4().hex
+            expires_at = now + lease_seconds
+            self._execute(
+                "INSERT INTO incoming_invoice_delivery VALUES (?,?,?,?,?,?,?,?,?,0) "
+                "ON CONFLICT(namespace, environment, context_key, ksef_number, variant, consumer) "
+                "DO UPDATE SET available_at=excluded.available_at, token=excluded.token,"
+                "epoch=excluded.epoch",
+                (*identity, consumer, expires_at, token, epoch),
+            )
+        if expected_hash != invoice_hash:
+            raise KsefXmlIntegrityError("invoice_hash_mismatch")
+        try:
+            key = InvoiceXmlKey(*identity)
+            receipt = InvoiceXmlReceipt(**_loads(receipt_json))
+            receipt.validate(key, expected_hash, storage_id)
+        except (TypeError, ValueError, AttributeError, KeyError, OverflowError, RecursionError):
+            raise KsefXmlIntegrityError("invalid_delivery_receipt") from None
+        metadata = _delivery_metadata(metadata_json, key, expected_hash)
+        if receipt.size > max_xml_bytes:
+            raise KsefXmlStorageError("response_size_limit")
+        return _PendingDelivery(
+            key, metadata, consumer, expires_at, token, epoch, expected_hash, receipt.size
+        )
+
+    def _verified_invoice_delivery(
+        self, pending: _PendingDelivery, xml: bytes
+    ) -> IncomingInvoiceDelivery:
+        delivery = pending.verified(xml)
+        with self._transaction(write=False):
+            active = self._execute(
+                "SELECT 1 FROM incoming_invoice_delivery "
+                "JOIN invoice_xml_documents USING(namespace,environment,context_key,ksef_number,"
+                "variant) WHERE "
+                + DOC_KEY
+                + " AND consumer=? AND token=? AND epoch=? AND available_at>? "
+                "AND acknowledged=0 AND status='ready' AND expected_hash=? "
+                "AND EXISTS(SELECT 1 FROM xml_store_meta WHERE id=1 AND epoch=?)",
+                (
+                    *pending.key.values,
+                    pending.consumer,
+                    pending.token,
+                    pending.epoch,
+                    time.time(),
+                    pending.expected_hash,
+                    pending.epoch,
+                ),
+            ).fetchone()
+        if active is None:
+            raise KsefInvoiceDeliveryLeaseLostError()
+        return delivery
+
+    def claim_invoice_delivery(
+        self,
+        scope: InvoiceSyncScope,
+        storage: InvoiceXmlStorage,
+        *,
+        consumer: str,
+        lease_seconds: float = 120,
+        max_xml_bytes: int = 16 * 1024 * 1024,
+    ) -> IncomingInvoiceDelivery | None:
+        """Lease one Subject2 invoice and return verified original XML and metadata."""
+        pending = self._claim_invoice_delivery(
+            scope,
+            storage.storage_id,
+            consumer=consumer,
+            lease_seconds=lease_seconds,
+            max_xml_bytes=max_xml_bytes,
+        )
+        if pending is None:
+            return None
+        xml = storage.read(pending.key, pending.expected_hash, max_bytes=max_xml_bytes)
+        return self._verified_invoice_delivery(pending, xml)
+
+    def _update_invoice_delivery(
+        self, delivery: IncomingInvoiceDelivery, *, delay_seconds: float | None
+    ) -> None:
+        with self._transaction():
+            self._execute(DELIVERY_SCHEMA)
+            now = time.time()
+            if delay_seconds is None:
+                assignment = "acknowledged=1"
+                eligibility = "(available_at>? OR acknowledged=1)"
+                parameters: tuple[Any, ...] = ()
+            else:
+                assignment = "token=NULL,epoch=NULL,available_at=?"
+                eligibility = "(available_at>? AND acknowledged=0)"
+                parameters = (now + delay_seconds,)
+            updated = self._execute(
+                "UPDATE incoming_invoice_delivery SET "
+                + assignment
+                + " WHERE "
+                + DOC_KEY
+                + " AND consumer=? AND token=? AND epoch=? AND "
+                + eligibility
+                + " AND EXISTS(SELECT 1 FROM xml_store_meta WHERE id=1 AND epoch=?)",
+                (
+                    *parameters,
+                    *delivery.key.values,
+                    delivery.consumer,
+                    delivery._token,
+                    delivery._epoch,
+                    now,
+                    delivery._epoch,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise KsefInvoiceDeliveryLeaseLostError()
+
+    def acknowledge_invoice_delivery(self, delivery: IncomingInvoiceDelivery) -> None:
+        """Acknowledge after processing. Repeating a successful acknowledgement is safe."""
+        self._update_invoice_delivery(delivery, delay_seconds=None)
+
+    def retry_invoice_delivery(
+        self, delivery: IncomingInvoiceDelivery, *, delay_seconds: float = 0
+    ) -> None:
+        """Release the active attempt and make it available again after an optional delay."""
+        if type(delay_seconds) not in (int, float) or not 0 <= delay_seconds <= 86_400:
+            raise ValueError("delay_seconds must be between 0 and 86400")
+        self._update_invoice_delivery(delivery, delay_seconds=delay_seconds)
+
     def defer_xml(
         self,
         claim: InvoiceXmlClaim,
@@ -1036,6 +1234,37 @@ class AsyncSQLiteInvoiceSyncStore:
 
     async def finish_xml(self, claim: InvoiceXmlClaim, receipt: InvoiceXmlReceipt) -> None:
         await self._call("finish_xml", claim, receipt)
+
+    async def claim_invoice_delivery(
+        self,
+        scope: InvoiceSyncScope,
+        storage: AsyncInvoiceXmlStorage,
+        *,
+        consumer: str,
+        lease_seconds: float = 120,
+        max_xml_bytes: int = 16 * 1024 * 1024,
+    ) -> IncomingInvoiceDelivery | None:
+        """Lease one Subject2 invoice and return verified original XML and metadata."""
+        pending: _PendingDelivery | None = await self._call(
+            "_claim_invoice_delivery",
+            scope,
+            storage.storage_id,
+            consumer=consumer,
+            lease_seconds=lease_seconds,
+            max_xml_bytes=max_xml_bytes,
+        )
+        if pending is None:
+            return None
+        xml = await storage.read(pending.key, pending.expected_hash, max_bytes=max_xml_bytes)
+        return await self._call("_verified_invoice_delivery", pending, xml)
+
+    async def acknowledge_invoice_delivery(self, delivery: IncomingInvoiceDelivery) -> None:
+        await self._call("acknowledge_invoice_delivery", delivery)
+
+    async def retry_invoice_delivery(
+        self, delivery: IncomingInvoiceDelivery, *, delay_seconds: float = 0
+    ) -> None:
+        await self._call("retry_invoice_delivery", delivery, delay_seconds=delay_seconds)
 
     async def defer_xml(self, claim: InvoiceXmlClaim, **kwargs: Any) -> None:
         await self._call("defer_xml", claim, **kwargs)
