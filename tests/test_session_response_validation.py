@@ -16,8 +16,8 @@ from tests.test_clients import DummyAsyncHttp, DummyHttp
 
 SESSION = {
     "status": {"code": 200, "description": "processed"},
-    "dateCreated": "start",
-    "dateUpdated": "end",
+    "dateCreated": "2026-11-17T21:00:00Z",
+    "dateUpdated": "2026-11-17T22:00:00.0000001+00:00",
     "invoiceCount": 1,
 }
 INVOICE = {"status": {"code": 550}, "referenceNumber": "invoice-1", "ordinalNumber": 1}
@@ -65,10 +65,15 @@ def test_typed_session_reads_bound_transport_and_preserve_evidence(asynchronous)
         ("get_session_invoices", {"invoices": [{"status": {"code": 550.9}}]}),
         ("get_session_invoices", {"invoices": [{**INVOICE, "ordinalNumber": True}]}),
         ("get_session_invoices", {"invoices": [{**INVOICE, "referenceNumber": 10}]}),
+        ("get_session_invoices", {"invoices": [{**INVOICE, "referenceNumber": "X" * 37}]}),
+        ("get_session_invoices", {"invoices": [{**INVOICE, "invoiceFileName": "x" * 129}]}),
+        ("get_session_invoices", {"invoices": [{**INVOICE, "invoiceHash": "x" * 45}]}),
         ("get_session_invoices", {"invoices": [], "continuationToken": False}),
         ("get_session_status", {**SESSION, "successfulInvoiceCount": False}),
         ("get_session_status", {**SESSION, "invoiceCount": 0.5}),
         ("get_session_status", {**SESSION, "dateUpdated": None}),
+        ("get_session_status", {**SESSION, "dateUpdated": "unchanged but invalid"}),
+        ("get_session_status", {**SESSION, "dateCreated": "2026-11-17T22:00:00"}),
         ("get_session_status", {**SESSION, "status": {"code": "440"}}),
         ("get_session_status", []),
         ("get_session_status", {"status": []}),
@@ -84,9 +89,10 @@ def test_duplicate_json_key_and_page_row_limit_are_checked_before_conversion():
     _, sessions = client(b'{"invoices":[],"invoices":[]}', False)
     with pytest.raises(KsefDocumentValidationError):
         call(sessions.get_session_invoices, "session-1")
-    _, sessions = client(json.dumps({"invoices": [INVOICE, INVOICE]}).encode(), False)
-    with pytest.raises(KsefDocumentValidationError):
-        call(sessions.get_session_invoices, "session-1", page_size=1)
+    _, sessions = client(json.dumps({"invoices": [INVOICE] * 11}).encode(), False)
+    for size in (None, 10):
+        with pytest.raises(KsefDocumentValidationError):
+            call(sessions.get_session_invoices, "session-1", page_size=size)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
@@ -96,4 +102,7 @@ def test_strict_reads_validate_route_and_cursor_before_transport(asynchronous):
         call(sessions.get_session_invoice_status, "session-1", "invalid invoice")
     with pytest.raises(ValueError, match="token"):
         call(sessions.get_session_invoices, "session-1", continuation_token="invalid token")
+    for size in (9, 1001):
+        with pytest.raises(ValueError, match="page_size"):
+            call(sessions.get_session_invoices, "session-1", page_size=size)
     assert http.last_request_args is None
