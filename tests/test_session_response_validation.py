@@ -69,9 +69,11 @@ def test_validated_reader_coexists_with_existing_subclass_method():
     http = DummyHttp(HttpResponse(200, httpx.Headers(), json.dumps(SESSION).encode()))
     sessions = CustomSessions(http)
     assert sessions.get_session_status("session-1").invoice_count == 1
-    assert "max_bytes" not in http.last_request_kwargs
+    legacy_request = http.last_request_kwargs
+    assert legacy_request is not None and "max_bytes" not in legacy_request
     assert sessions.validated.get_session_status("session-1").invoice_count == 1
-    assert http.last_request_kwargs["max_bytes"] == 1024 * 1024
+    bounded_request = http.last_request_kwargs
+    assert bounded_request is not None and bounded_request["max_bytes"] == 1024 * 1024
 
 
 @pytest.mark.parametrize(
