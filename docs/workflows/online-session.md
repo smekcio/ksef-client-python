@@ -133,6 +133,66 @@ Zgodność wsteczna:
 - `upo_v43=True` dodaje nagłówek `X-KSeF-Feature: upo-v4-3` przy otwieraniu sesji.
 - `AsyncOnlineSessionWorkflow` i `AsyncOnlineSessionHandle` oferują lustrzane API asynchroniczne.
 
+## Trwała wysyłka online
+
+Do automatycznej wysyłki z możliwością wznowienia zapisz oryginalny XML
+pod stałym identyfikatorem swojej aplikacji. Wybierz prywatny katalog dla
+SQLite i przechowuj losowy klucz 32-bajtowy oddzielnie, w magazynie sekretów.
+
+```python
+from ksef_client.online_invoices import OnlineInvoiceStatus, SQLiteOnlineInvoiceStore
+
+# client to uwierzytelniony klient Ksef. Klucz i identyfikator pochodzą z aplikacji.
+with SQLiteOnlineInvoiceStore.open("private/online.db", key=archive_key) as store:
+    invoices = client.invoices.online(store, namespace="company")
+    current = invoices.enqueue("FV-123", invoice_xml_bytes)
+
+    # Jeden krok. Kolejny cykl harmonogramu wykonuje advance na tym samym ID.
+    current = invoices.advance("FV-123", timeout=60)
+    if current.status is OnlineInvoiceStatus.COMPLETE:
+        upo_xml = invoices.read_upo("FV-123")
+        print(current.ksef_number)
+```
+
+Ta sama kombinacja bazy, klucza, środowiska, kontekstu i namespace po restarcie
+odczytuje zapisany stan. Ponowne zgłoszenie tego samego ID z tymi samymi bajtami
+zwraca bieżący stan. Ten sam identyfikator z innym XML lub zgłoszenie identycznego
+XML pod innym ID w tym samym zakresie powoduje konflikt. Próby, XML, klucze sesji
+i UPO są zapisywane w lokalnym szyfrowanym archiwum. ID jest indeksowane przez
+HMAC, w bazie widoczne są skróty XML i metadane potrzebne do transakcji.
+
+Po timeoutcie wysyłki odczytaj status przed kolejnym krokiem. Stan
+SUBMISSION_UNKNOWN oznacza, że SDK sprawdzi zapisaną sesję i dokładny skrót XML,
+dopóki wynik nie będzie znany. Sam brak pozycji w chwilowej odpowiedzi z KSeF
+nie upoważnia do wysłania faktury ponownie. Jawne retry_if_unsubmitted wymaga
+zamkniętej sesji z potwierdzoną liczbą zero faktur i pełnego, pustego odczytu listy.
+Po potwierdzonym anulowaniu przetwarzania przez KSeF (kod 550) użyj retry_cancelled,
+aby ponownie zakolejkować oryginalny dokument. Odrzucenie i duplikat mają odrębne
+stany. Dla zaakceptowanej faktury SDK zamyka sesję i pobiera indywidualne UPO 4.2
+lub 4.3 z limitem 1 MiB. Przed zapisaniem potwierdzenia sprawdza numer sesji, numer
+KSeF i skrót oryginalnego XML. Weryfikację podpisu XAdES ministerstwa wykonaj osobno,
+jeśli jest potrzebna w Twoim procesie.
+
+Jeśli po otwarciu sesji zabraknie odpowiedzi, rezerwacja otwarcia musi wygasnąć.
+Sesja bez zapisanego numeru nie zostanie użyta do wysyłki. KSeF może zachować
+taką pustą sesję do jej wygaśnięcia. Procesy synchronizują się przy użyciu tej
+samej bazy, a timeout pojedynczego kroku nie cofa żądania już przekazanego
+do KSeF. Ustawiaj harmonogram zgodnie z Retry-After.
+
+Transport używany przez klienta musi odpowiadać środowisku kolejki oraz mieć
+wyłączone automatyczne przekierowania i powtórzenia żądań POST sesji online.
+Kolejka używa zarządzanej autoryzacji i hosta z adresu API. Gdy POST sesji
+zwróci 401, klient może odświeżyć token i zwraca błąd tego żądania.
+Kolejny krok korzysta z odświeżonego tokena. Domyślny mechanizm odświeżania
+wymaga tego samego transportu, którego używa kolejka. Przy zmianie klienta
+wznów pracę kolejki z klientem, do którego jest dołączony menedżer tokenów.
+
+Po odtworzeniu kopii sprzed próby wysłania najpierw uzgodnij stan z KSeF.
+Starsza kopia może nie zawierać informacji o fakturach zapisanych już w KSeF.
+W AsyncKsef użyj AsyncSQLiteOnlineInvoiceStore i await dla metod kolejki.
+
+[Oficjalna dokumentacja statusu faktury i UPO](https://github.com/CIRFMF/ksef-api/blob/main/faktury/sesje/sesja-sprawdzenie-stanu-i-pobranie-upo.md)
+
 ## Trwała wysyłka offline
 
 `client.invoices.offline(...)` wiąże lokalną kolejkę z uwierzytelnionym

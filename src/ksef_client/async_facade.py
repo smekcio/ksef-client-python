@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from .invoice_sync import AsyncInvoiceSync
     from .invoice_xml_sync import AsyncInvoiceDocumentSync, AsyncInvoiceXmlSync
     from .offline_invoices import AsyncOfflineInvoices, AsyncSQLiteOfflineInvoiceStore
+    from .online_invoices import AsyncOnlineInvoices, AsyncSQLiteOnlineInvoiceStore
     from .streaming_export import AsyncExportOperation
 
 
@@ -226,6 +227,14 @@ class AsyncSession(AsyncOperation[m.SessionStatusResponse]):
 class AsyncInvoices:
     def __init__(self, owner: AsyncKsef) -> None:
         self.owner = owner
+
+    def online(
+        self, store: AsyncSQLiteOnlineInvoiceStore, *, namespace: str
+    ) -> AsyncOnlineInvoices:
+        """Bind durable online submission to this authenticated context."""
+        from .online_invoices import AsyncOnlineInvoices
+
+        return AsyncOnlineInvoices(self.owner, store, namespace=namespace)
 
     def offline(
         self, store: AsyncSQLiteOfflineInvoiceStore, *, namespace: str

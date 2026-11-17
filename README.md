@@ -32,6 +32,10 @@ Duże eksporty pobierzesz na dysk ze wznowieniem od bajtu i weryfikacją hashy,
 bez ładowania całej paczki do pamięci.
 [Poznaj fasadę, wznowienie i eksport](docs/facade.md).
 
+Jeśli skrypt ma wznowić wysyłkę po utracie połączenia, może zapisać fakturę pod własnym
+identyfikatorem. Po restarcie odczyta pod nim numer KSeF i indywidualne UPO.
+[Przykład trwałej wysyłki online](docs/workflows/online-session.md#trwała-wysyłka-online).
+
 Najważniejsze cechy:
 
 - **lokalne archiwum faktur i XML** — przyrostowe pobieranie, wznowienie po restarcie,
