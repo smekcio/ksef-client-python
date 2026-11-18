@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import Any, TypeGuard
 
+from .._json_bounds import check_json_structure
 from ..exceptions import KsefPaginationError
+from ..invoice_sync_state import _loads
 from ..models import (
     CheckAttachmentPermissionStatusResponse,
     EntityAuthorizationPermissionsGrantRequest,
@@ -30,7 +33,15 @@ from ..models import (
     SubunitPermissionsGrantRequest,
     SubunitPermissionsQueryRequest,
 )
+from ..pagination import validate_page_size
 from .base import AsyncBaseApiClient, BaseApiClient
+
+_PERSONAL_PAGE_BYTES = 4 * 1024 * 1024
+_IDENTIFIER_FORMATS = {
+    "Nip": re.compile(r"[0-9]{10}"),
+    "Pesel": re.compile(r"[0-9]{11}"),
+    "InternalId": re.compile(r"[0-9]{10}-[0-9]{5}"),
+}
 
 
 def _page_params(page_offset: int | None, page_size: int | None) -> dict[str, Any]:
@@ -42,47 +53,90 @@ def _page_params(page_offset: int | None, page_size: int | None) -> dict[str, An
     return params
 
 
-def _parse_personal_grants(data: Any) -> QueryPersonalPermissionsResponse:
-    # The generated decoder accepts arbitrary iterables for JSON arrays. An
-    # empty object, for example, would silently become an empty list of grants.
-    message = "KSeF returned an invalid personal permissions page."
-    if not isinstance(data, dict) or not isinstance(data.get("hasMore"), bool):
-        raise KsefPaginationError(message)
-    grants = data.get("permissions")
-    owners = data.get("ownerPermissions")
-    if not isinstance(grants, list) or not all(_valid_personal_grant(grant) for grant in grants):
-        raise KsefPaginationError(message)
-    if owners is not None and not (
-        isinstance(owners, list) and all(_nonempty_string(scope) for scope in owners)
-    ):
-        raise KsefPaginationError(message)
+def _personal_page_params(page_offset: int | None, page_size: int | None) -> dict[str, Any]:
+    if page_size is not None:
+        validate_page_size(page_size, maximum=100)
+    return _page_params(page_offset, page_size)
+
+
+def _parse_personal_grants(body: bytes, page_size: int | None) -> QueryPersonalPermissionsResponse:
     try:
+        check_json_structure(body, max_nodes=100_000, max_depth=32)
+        data = _loads(body)
+        if not isinstance(data, dict) or not isinstance(data.get("hasMore"), bool):
+            raise ValueError
+        grants = data.get("permissions")
+        if (
+            not isinstance(grants, list)
+            or len(grants) > (10 if page_size is None else page_size)
+            or not all(_valid_personal_grant(grant) for grant in grants)
+        ):
+            raise ValueError
+        owners = data.get("ownerPermissions")
+        if owners is not None and not (
+            isinstance(owners, list) and all(_nonempty_string(scope) for scope in owners)
+        ):
+            raise ValueError
         return QueryPersonalPermissionsResponse.from_dict(data)
     except (TypeError, ValueError):
-        raise KsefPaginationError(message) from None
+        raise KsefPaginationError("KSeF returned an invalid personal permissions page.") from None
 
 
-def _nonempty_string(value: Any) -> bool:
+def _nonempty_string(value: object) -> TypeGuard[str]:
     return isinstance(value, str) and bool(value.strip())
 
 
-def _valid_personal_grant(grant: Any) -> bool:
-    if not isinstance(grant, dict) or not all(
-        _nonempty_string(grant.get(key)) for key in ("id", "permissionScope", "permissionState")
-    ):
+def _string_fields(value: Any, *required: str) -> bool:
+    return isinstance(value, dict) and all(isinstance(value.get(key), str) for key in required)
+
+
+def _valid_subject_details(grant: dict[str, Any]) -> bool:
+    person = grant.get("subjectPersonDetails")
+    if person is not None:
+        if not _string_fields(person, "subjectDetailsType", "firstName", "lastName"):
+            return False
+        if person.get("birthDate") is not None and not isinstance(person["birthDate"], str):
+            return False
+        for key, fields in (
+            ("personIdentifier", ("type", "value")),
+            ("idDocument", ("type", "number", "country")),
+        ):
+            if person.get(key) is not None and not _string_fields(person[key], *fields):
+                return False
+    entity = grant.get("subjectEntityDetails")
+    return entity is None or (
+        _string_fields(entity, "subjectDetailsType", "fullName")
+        and (entity.get("address") is None or isinstance(entity["address"], str))
+    )
+
+
+def _valid_grant_identifier(key: str, identifier: Any) -> bool:
+    if identifier is None:
+        return True
+    if not isinstance(identifier, dict) or not _nonempty_string(identifier.get("type")):
         return False
-    for key in ("contextIdentifier", "authorizedIdentifier", "targetIdentifier"):
-        identifier = grant.get(key)
-        if identifier is None:
-            continue
-        if not isinstance(identifier, dict) or not _nonempty_string(identifier.get("type")):
-            return False
-        value = identifier.get("value")
-        if key == "targetIdentifier" and value is None:
-            continue
-        if not _nonempty_string(value):
-            return False
-    return isinstance(grant.get("canDelegate"), bool)
+    kind, value = identifier["type"], identifier.get("value")
+    if kind == "AllPartners":
+        return key == "targetIdentifier" and value is None
+    max_length = 64 if key == "authorizedIdentifier" else 16
+    if not _nonempty_string(value) or not 10 <= len(value) <= max_length:
+        return False
+    pattern = _IDENTIFIER_FORMATS.get(kind)
+    return pattern is None or pattern.fullmatch(value) is not None
+
+
+def _valid_personal_grant(grant: Any) -> bool:
+    return (
+        _string_fields(grant, "id", "description", "startDate")
+        and len(grant["id"]) == 36
+        and all(_nonempty_string(grant.get(key)) for key in ("permissionScope", "permissionState"))
+        and isinstance(grant.get("canDelegate"), bool)
+        and all(
+            _valid_grant_identifier(key, grant.get(key))
+            for key in ("contextIdentifier", "authorizedIdentifier", "targetIdentifier")
+        )
+        and _valid_subject_details(grant)
+    )
 
 
 class PermissionsClient(BaseApiClient):
@@ -296,15 +350,17 @@ class PermissionsClient(BaseApiClient):
         page_size: int | None = None,
         access_token: str | None = None,
     ) -> QueryPersonalPermissionsResponse:
-        params = _page_params(page_offset, page_size)
-        payload = self._request_json(
+        params = _personal_page_params(page_offset, page_size)
+        payload = self._request_bytes(
             "POST",
             "/permissions/query/personal/grants",
             params=params or None,
             json=request_payload,
             access_token=access_token,
+            expected_status={200},
+            max_bytes=_PERSONAL_PAGE_BYTES,
         )
-        return _parse_personal_grants(payload)
+        return _parse_personal_grants(payload, page_size)
 
     def query_persons_grants(
         self,
@@ -572,15 +628,17 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         page_size: int | None = None,
         access_token: str | None = None,
     ) -> QueryPersonalPermissionsResponse:
-        params = _page_params(page_offset, page_size)
-        payload = await self._request_json(
+        params = _personal_page_params(page_offset, page_size)
+        payload = await self._request_bytes(
             "POST",
             "/permissions/query/personal/grants",
             params=params or None,
             json=request_payload,
             access_token=access_token,
+            expected_status={200},
+            max_bytes=_PERSONAL_PAGE_BYTES,
         )
-        return _parse_personal_grants(payload)
+        return _parse_personal_grants(payload, page_size)
 
     async def query_persons_grants(
         self,

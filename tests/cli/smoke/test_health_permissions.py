@@ -34,7 +34,10 @@ def endpoint(monkeypatch):
             assert json.loads(request.content) == {}
             assert dict(request.url.params) == {"pageOffset": str(len(offsets)), "pageSize": "100"}
             offsets.append(len(offsets))
-            return responses[offsets[-1]]
+            reply = responses[offsets[-1]]
+            return httpx.Response(
+                reply.status_code, headers=reply.headers, stream=httpx.ByteStream(reply.content)
+            )
 
         monkeypatch.setattr(httpx.HTTPTransport, "handle_request", respond)
         return offsets
@@ -192,3 +195,12 @@ def test_requires_authentication_bound_to_current_context(runner, endpoint, monk
     assert result.exit_code == ExitCode.AUTH_ERROR, result.output
     assert calls == []
     assert json.loads(result.output)["errors"][0]["code"] == "AUTH_ERROR"
+
+
+def test_targeted_grant_without_a_target_value_returns_no_report(runner, endpoint):
+    row = {**sample_grant(), "targetIdentifier": {"type": "Nip"}}
+    endpoint(httpx.Response(200, json={"permissions": [row], "hasMore": False}))
+    result = runner.invoke(app, ["--json", "health", "permissions"])
+    assert result.exit_code == ExitCode.API_ERROR
+    assert json.loads(result.output)["data"] is None
+    assert row["id"] not in result.output

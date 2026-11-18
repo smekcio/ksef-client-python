@@ -389,7 +389,9 @@ stan (`Active` lub `Inactive`), możliwość delegowania i identyfikatory zwróc
 Wynik opisuje nadania. KSeF rozstrzyga dostęp do konkretnej faktury przy wykonywaniu operacji.
 
 Uprawnienia właścicielskie są pokazane osobno. W JSON-ie `data.ownerPermissions`
-zawiera unikalne kody ze wszystkich pobranych stron. Wartość `[]` oznacza, że KSeF zwrócił
+zawiera unikalne kody w kolejności pierwszej zgłoszonej listy. Jeżeli kolejne strony
+podają sprzeczne listy uprawnień właścicielskich, CLI zwraca błąd i można ponowić
+całe zapytanie. Wartość `[]` oznacza, że KSeF zwrócił
 pustą listę, a `null`, że na żadnej stronie nie podał tej informacji.
 `data.permissions` zawiera nadania z ich technicznymi identyfikatorami.
 

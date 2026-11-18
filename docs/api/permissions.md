@@ -95,10 +95,15 @@ if report.owner_permissions is not None:
 
 Metoda zwraca `QueryPersonalPermissionsResponse` z `has_more=False`. Osobne nadania
 tego samego uprawnienia zachowują własne identyfikatory, stan i zakres. Kody
-właścicielskie są agregowane w kolejności wystąpienia. `owner_permissions=None`
+właścicielskie zachowują kolejność pierwszej zgłoszonej listy. Jeśli dwie strony
+podają różne zbiory kodów właścicielskich, metoda zgłasza `KsefPaginationError`
+i można ponowić cały odczyt. `owner_permissions=None`
 oznacza brak informacji na wszystkich stronach, a `[]` oznacza zgłoszoną pustą listę.
 
 Parametr `max_pages` domyślnie wynosi 100 przy rozmiarze strony 100 nadań.
+Klient ogranicza odpowiedź do 4 MiB na stronę i sprawdza liczbę zwróconych nadań.
+Dla selektywnego uprawnienia wymagany jest identyfikator podmiotu docelowego.
+Typ `AllPartners` oznacza wszystkich partnerów i ma pustą wartość.
 Przekroczenie limitu, powtórzenie identyfikatora nadania lub pusta strona zapowiadająca
 kolejne wyniki zgłasza `KsefPaginationError`. Błędy HTTP przechodzą do wywołującego.
 KSeF zwraca strony kolejno, więc nadanie lub cofnięcie uprawnienia w trakcie odczytu

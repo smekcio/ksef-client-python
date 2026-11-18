@@ -202,7 +202,7 @@ def health_permissions(
                 raise CliError(
                     exc.message,
                     ExitCode.API_ERROR,
-                    "Retry the query. Use --max-pages to change the page limit.",
+                    "Repeat the query. If it reached the page limit, increase --max-pages.",
                 ) from exc
             except KsefHttpError as exc:
                 if exc.status_code in (401, 403):

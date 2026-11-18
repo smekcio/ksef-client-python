@@ -668,9 +668,13 @@ class AsyncPermissions:
                     raise KsefPaginationError("KSeF repeated a personal grant ID. Retry the query.")
                 grants[grant.id] = grant
             if page.owner_permissions is not None:
+                reported = dict.fromkeys(page.owner_permissions)
                 if owner_scopes is None:
-                    owner_scopes = {}
-                owner_scopes.update(dict.fromkeys(page.owner_permissions))
+                    owner_scopes = reported
+                elif reported != owner_scopes:
+                    raise KsefPaginationError(
+                        "KSeF reported inconsistent owner permissions. Retry the query."
+                    )
             if not page.has_more:
                 return m.QueryPersonalPermissionsResponse(
                     has_more=False,
