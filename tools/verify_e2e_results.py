@@ -24,6 +24,7 @@ REQUIRED = [
 ]
 TOKEN_REV2 = ["tests/test_e2e_rev2_tokens.py::test_e2e_test_environment_rev2_token_lifecycle"]
 OPERATIONS = [
+    "tests/test_e2e_personal_grants.py::test_e2e_test_environment_personal_grants",
     "tests/test_e2e_certificate_rotation.py::"
     "test_e2e_test_environment_certificate_rotation_between_cycles",
     "tests/test_e2e_offline_queue.py::test_e2e_test_environment_offline_queue_restart_and_upo",

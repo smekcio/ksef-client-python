@@ -16,6 +16,7 @@ from .batch_outcomes import BatchInvoiceManifest, BatchInvoiceReport
 from .certificates import CertificateStore, FileCertificateStore, StoredCertificate
 from .client import AuthenticatedClient, KsefClient
 from .config import KsefClientOptions
+from .exceptions import KsefPaginationError
 from .operations import (
     KsefOperationError,
     Operation,
@@ -23,6 +24,7 @@ from .operations import (
     environment_key,
     validate_wait,
 )
+from .pagination import iter_page_offsets
 from .profiles import Profile, ProfileStore
 from .request_control import request_control
 from .services.auth import (
@@ -110,7 +112,7 @@ def safe_options(options: KsefClientOptions) -> KsefClientOptions:
         retryable_methods=options.retry.retryable_methods
         & frozenset({"GET", "HEAD", "OPTIONS", "PUT"}),
         retryable_post_paths=options.retry.retryable_post_paths
-        & frozenset({"/invoices/query/metadata"}),
+        & frozenset({"/invoices/query/metadata", "/permissions/query/personal/grants"}),
     )
     return replace(options, retry=retry)
 
@@ -754,6 +756,43 @@ class Ksef:
 class Permissions:
     def __init__(self, owner: Ksef) -> None:
         self.owner = owner
+
+    def list_personal_grants(
+        self, *, max_pages: int | None = 100
+    ) -> m.QueryPersonalPermissionsResponse:
+        """Read all personal grants and reported owner scopes in this authentication context."""
+        request = m.PersonalPermissionsQueryRequest()
+        grants: dict[str, m.PersonalPermission] = {}
+        owner_scopes: dict[m.OwnerPermissionScope, None] | None = None
+        for offset in iter_page_offsets(max_pages=max_pages):
+            page = self.owner.api.permissions.query_personal_grants(
+                request, page_offset=offset, page_size=100
+            )
+            for grant in page.permissions:
+                if grant.id in grants:
+                    raise KsefPaginationError("KSeF repeated a personal grant ID. Retry the query.")
+                grants[grant.id] = grant
+            if page.owner_permissions is not None:
+                reported = dict.fromkeys(page.owner_permissions)
+                if owner_scopes is None:
+                    owner_scopes = reported
+                elif reported != owner_scopes:
+                    raise KsefPaginationError(
+                        "KSeF reported inconsistent owner permissions. Retry the query."
+                    )
+            if not page.has_more:
+                return m.QueryPersonalPermissionsResponse(
+                    has_more=False,
+                    permissions=list(grants.values()),
+                    owner_permissions=None if owner_scopes is None else list(owner_scopes),
+                )
+            if not page.permissions:
+                raise KsefPaginationError(
+                    "KSeF returned an empty page with hasMore=true. Retry the query."
+                )
+        raise KsefPaginationError(
+            "Personal permissions exceed the page limit. Increase max_pages and retry."
+        )
 
     def _operation(
         self, response: m.PermissionsOperationResponse

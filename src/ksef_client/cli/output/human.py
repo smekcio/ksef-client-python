@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from .invoice_workflows import render_invoice_workflow
 
@@ -28,6 +29,9 @@ class HumanRenderer:
             return
         if command == "invoice.list":
             self._render_invoice_list(data or {})
+            return
+        if command == "health.permissions" and data is not None:
+            self._render_personal_permissions(data)
             return
         if data:
             for key, value in data.items():
@@ -76,3 +80,45 @@ class HumanRenderer:
         for key in ("count", "from", "to", "continuation_token"):
             if key in data:
                 self._console.print(f"- {key}: {data[key]}")
+
+    def _render_personal_permissions(self, data: dict) -> None:
+        grants = data["permissions"]
+        if grants:
+            table = Table(title="Personal grants")
+            for column in ("Permission", "State", "Can delegate", "Identifiers"):
+                table.add_column(column, overflow="fold")
+            for grant in grants:
+                identifiers = []
+                for key, label in (
+                    ("contextIdentifier", "Grantor"),
+                    ("authorizedIdentifier", "Authorized"),
+                    ("targetIdentifier", "Target"),
+                ):
+                    if key in grant:
+                        identifier = grant[key]
+                        value = _terminal_value(identifier["type"])
+                        if "value" in identifier:
+                            value += " " + _terminal_value(identifier["value"])
+                        identifiers.append(f"{label}: {value}")
+                table.add_row(
+                    Text(_terminal_value(grant["permissionScope"])),
+                    Text(_terminal_value(grant["permissionState"])),
+                    "Yes" if grant["canDelegate"] else "No",
+                    Text("\n".join(identifiers) or "—"),
+                )
+            self._console.print(table)
+        else:
+            self._console.print("Personal grants: none.")
+        owners = data["ownerPermissions"]
+        if owners is None:
+            self._console.print("Owner permissions: not reported by KSeF.")
+        elif not owners:
+            self._console.print("Owner permissions: none.")
+        else:
+            self._console.print("Owner permissions:")
+            for scope in owners:
+                self._console.print(Text("  " + _terminal_value(scope)))
+
+
+def _terminal_value(value: str) -> str:
+    return "".join(char if char.isprintable() else "?" for char in value)
