@@ -240,7 +240,9 @@ def test_filtered_page_preserves_personal_details_and_explicit_credentials(use_a
     )
     raw = {"permissions": [original, person], "hasMore": False}
     http = Mock()
-    response = HttpResponse(status_code=200, headers={}, content=json.dumps(raw).encode())
+    response = HttpResponse(
+        status_code=200, headers=httpx.Headers(), content=json.dumps(raw).encode()
+    )
     filters = PersonalPermissionsQueryRequest(permission_state=PermissionState.ACTIVE)
     if use_async:
         http.request = AsyncMock(return_value=response)
