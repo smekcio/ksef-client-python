@@ -54,6 +54,7 @@ ASYNC = {
     "query_certificates",
     "retrieve_certificate",
     "revoke_certificate",
+    "list_personal_grants",
     "grant_authorization",
     "grant_entity",
     "grant_eu_entity",
@@ -225,6 +226,7 @@ from . import models as m
 from .batch_outcomes import BatchInvoiceManifest, BatchInvoiceReport
 from .client import AsyncAuthenticatedClient, AsyncKsefClient
 from .config import KsefClientOptions
+from .exceptions import KsefPaginationError
 from .facade import (
     FA3,
     Credentials,
@@ -242,6 +244,7 @@ from .operations import (
     environment_key,
     validate_wait,
 )
+from .pagination import iter_page_offsets
 from .profiles import Profile, ProfileStore
 from .request_control import request_control
 from .services.crypto import build_encryption_data

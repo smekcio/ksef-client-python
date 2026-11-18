@@ -296,7 +296,13 @@ def test_facade_cannot_inherit_mutation_retries_from_sdk_options():
         retry=RetryConfig(
             retryable_methods=frozenset({"GET", "PUT", "DELETE"}),
             retryable_post_paths=frozenset(
-                {"/invoices/query/metadata", "/auth/token/redeem", "/sessions/online"}
+                {
+                    "/invoices/query/metadata",
+                    "/permissions/query/personal/grants",
+                    "/permissions/persons/grants",
+                    "/auth/token/redeem",
+                    "/sessions/online",
+                }
             ),
         ),
     )
@@ -305,7 +311,9 @@ def test_facade_cannot_inherit_mutation_retries_from_sdk_options():
     )
     assert guarded.retry is not None and configured.retry is not None
     assert guarded.retry.retryable_methods == frozenset({"GET", "PUT"})
-    assert guarded.retry.retryable_post_paths == frozenset({"/invoices/query/metadata"})
+    assert guarded.retry.retryable_post_paths == frozenset(
+        {"/invoices/query/metadata", "/permissions/query/personal/grants"}
+    )
     assert "DELETE" in configured.retry.retryable_methods
 
 

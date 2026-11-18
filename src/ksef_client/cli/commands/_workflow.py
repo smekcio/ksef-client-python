@@ -167,7 +167,12 @@ def offline_store(directory: Path, *, create: bool = False) -> Iterator[SQLiteOf
 
 
 @contextmanager
-def workflow_errors(ctx: typer.Context, command: str) -> Iterator[None]:
+def workflow_errors(
+    ctx: typer.Context,
+    command: str,
+    *,
+    failure_message: str = "The KSeF workflow failed. Inspect the saved state before retrying.",
+) -> Iterator[None]:
     try:
         yield
     except (CliError, KsefError, ValueError, OSError, sqlite3.Error) as exc:
@@ -187,7 +192,7 @@ def workflow_errors(ctx: typer.Context, command: str) -> Iterator[None]:
             )
         elif isinstance(exc, KsefError):
             code = exit_code_for_error(exc) or ExitCode.API_ERROR
-            message = "The KSeF workflow failed. Inspect the saved state before retrying."
+            message = failure_message
         elif isinstance(exc, (OSError, sqlite3.Error)):
             code, message = ExitCode.IO_ERROR, "Could not read or write the workflow files."
         else:
