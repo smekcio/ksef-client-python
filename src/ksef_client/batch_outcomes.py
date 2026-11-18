@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import re
 from collections import Counter, defaultdict
-from collections.abc import Mapping
-from contextlib import suppress
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -104,6 +105,24 @@ class BatchInvoiceManifest:
     def bind(self, batch_file: m.BatchFileInfo) -> None:
         if self.file_size != batch_file.file_size or self.file_hash != batch_file.file_hash:
             raise ValueError("Manifest does not belong to this batch archive")
+
+    @classmethod
+    def from_archive(cls, archive: bytes, compression: m.CompressionType) -> BatchInvoiceManifest:
+        """Index the original ZIP/TarGz without repacking or extracting invoice files to disk."""
+        from .streaming_export import visit_archive
+
+        entries: list[BatchInvoice] = []
+
+        @contextmanager
+        def invoice(name: str) -> Iterator[Callable[[bytes], object]]:
+            name = _file_name(name)
+            digest = hashlib.sha256()
+            yield digest.update
+            entries.append(BatchInvoice(name, base64.b64encode(digest.digest()).decode("ascii")))
+
+        with io.BytesIO(archive) as source:
+            visit_archive(source, len(archive), compression, invoice)
+        return cls(len(archive), _sha256(archive), tuple(entries))
 
 
 @dataclass(frozen=True)

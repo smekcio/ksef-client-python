@@ -5,6 +5,8 @@ import os
 import typer
 
 from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
+from ksef_client.facade import connection_options
+from ksef_client.services.workflows import BatchSessionWorkflow
 
 from ..auth.manager import resolve_base_url
 from ..context import profile_label, require_context, require_profile
@@ -12,6 +14,9 @@ from ..errors import CliError
 from ..exit_codes import ExitCode
 from ..output import get_renderer
 from ..sdk.session_ops import (
+    _batch_source_compression_type,
+    _load_batch_source_bytes,
+    _require_batch_checkpoint,
     close_batch_session,
     close_online_session,
     drop_saved_session,
@@ -25,7 +30,9 @@ from ..sdk.session_ops import (
     show_saved_session,
     upload_batch_session,
 )
+from ..session_store import batch_manifest, require_matching_base_url
 from ._error_utils import build_api_error_hint, build_rate_limit_hint
+from ._workflow import workflow_client, workflow_errors
 
 app = typer.Typer(help="Manage resumable online and batch sessions.")
 online_app = typer.Typer(help="Manage resumable online sessions.")
@@ -102,7 +109,7 @@ def session_show(
     show_secrets: bool = typer.Option(
         False,
         "--show-secrets",
-        help="Print the session key and IV instead of redacting them.",
+        help="Show the session key, IV, invoice manifest and signed upload instructions.",
     ),
 ) -> None:
     cli_ctx = require_context(ctx)
@@ -362,6 +369,71 @@ def session_batch_open(
     except Exception as exc:
         _render_error(ctx, "session.batch.open", exc)
     renderer.success(command="session.batch.open", profile=profile, data=result)
+
+
+@batch_app.command("report")
+def session_batch_report(
+    ctx: typer.Context,
+    session_id: str = typer.Option(
+        ..., "--id", help="ID from send batch --save-session or session batch open."
+    ),
+    page_size: int = typer.Option(100, "--page-size", min=10, max=1000),
+    max_pages: int = typer.Option(100, "--max-pages", min=1, max=1000),
+) -> None:
+    """Show the KSeF outcome and possible next action for each original invoice file."""
+    cli_ctx = require_context(ctx)
+    with workflow_errors(ctx, "session.batch.report"):
+        profile = require_profile(cli_ctx)
+        options, kind, context = connection_options(profile=profile)
+        checkpoint = _require_batch_checkpoint(profile, session_id)
+        if checkpoint.profile != profile or checkpoint.id != session_id:
+            raise CliError(
+                "Checkpoint does not belong to this profile and session ID.",
+                ExitCode.VALIDATION_ERROR,
+            )
+        require_matching_base_url(checkpoint, options.base_url)
+        state = checkpoint.session_state
+        compression = _batch_source_compression_type(
+            checkpoint.payload_source, state_batch_file=state.batch_file
+        )
+        manifest = checkpoint.invoice_manifest
+        if manifest is None:
+            archive = _load_batch_source_bytes(
+                checkpoint.payload_source, compression_type=compression
+            )
+            manifest = batch_manifest(archive, compression)
+            if manifest is None:
+                raise CliError(
+                    "The saved batch source cannot be indexed as an XML invoice archive.",
+                    ExitCode.VALIDATION_ERROR,
+                )
+        manifest.bind(state.batch_file)
+        with workflow_client(profile, options, kind, context) as client:
+            session = BatchSessionWorkflow(
+                client.api.sessions, client.api.http_client
+            ).resume_session(state, compression_type=compression)
+            report = session.invoice_outcomes(manifest, page_size=page_size, max_pages=max_pages)
+        get_renderer(cli_ctx).success(
+            command="session.batch.report",
+            profile=profile,
+            data={
+                "session_ref": report.session_reference,
+                "session_status": report.session_status,
+                "complete": report.complete,
+                "invoices": [
+                    {
+                        "file_name": entry.invoice.file_name,
+                        "disposition": entry.disposition.value,
+                        "status_code": entry.status_code,
+                        "invoice_ref": entry.invoice_reference,
+                        "ksef_number": entry.ksef_number,
+                    }
+                    for entry in report.invoices
+                ],
+                "retry_candidates": [item.file_name for item in report.retry_candidates],
+                "correction_candidates": [item.file_name for item in report.correction_candidates],
+            },
+        )
 
 
 @batch_app.command("upload")

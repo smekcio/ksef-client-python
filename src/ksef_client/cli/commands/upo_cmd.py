@@ -67,7 +67,10 @@ def _render_error(ctx: typer.Context, command: str, exc: Exception) -> None:
     raise typer.Exit(int(ExitCode.CONFIG_ERROR))
 
 
-@app.command("get")
+@app.command(
+    "get",
+    help="Download UPO by KSeF reference. For your own invoice ID use ksef online upo.",
+)
 def upo_get(
     ctx: typer.Context,
     session_ref: str = typer.Option(..., "--session-ref", help="Session reference number."),

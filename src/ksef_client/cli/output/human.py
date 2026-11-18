@@ -4,6 +4,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
+from .invoice_workflows import render_invoice_workflow
+
 
 class HumanRenderer:
     def __init__(self, *, no_color: bool = False) -> None:
@@ -23,6 +25,8 @@ class HumanRenderer:
     ) -> None:
         title = message or "OK"
         self._console.print(f"[green]{title}[/green] ({command}, profile={profile})")
+        if data and render_invoice_workflow(self._console, command, data):
+            return
         if command == "invoice.list":
             self._render_invoice_list(data or {})
             return

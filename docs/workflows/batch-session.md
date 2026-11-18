@@ -130,6 +130,8 @@ To rozróżnienie jest celowe:
 
 ## Wynik każdej faktury w paczce
 
+W terminalu wynik dla każdego pliku wyświetla `ksef session batch report --id ID`. [Raport paczki w CLI](cli-operations.md#raport-faktur-z-paczki)
+
 Przygotuj archiwum wraz z manifestem. Manifest zapisuje nazwy plików i SHA-256
 oryginalnych dokumentów oraz rozmiar i SHA-256 archiwum. Można go odtworzyć z
 `manifest.to_dict()` przez `BatchInvoiceManifest.from_dict(...)`. Przechowuj go

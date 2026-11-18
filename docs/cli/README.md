@@ -34,8 +34,11 @@ sa renderowane z bogatszymi hintami, jesli KSeF zwroci `application/problem+json
   - `send online`, `send batch`, `send status`
   - `session list/show/status/export/import/drop`
   - `session online open/send/close`
-  - `session batch open/upload/close`
+  - `session batch open/upload/close/report`
   - `upo get`, `upo wait`
+  - [wysyłka po własnym ID](../workflows/cli-operations.md#wysyłka-online-po-własnym-id) przez `send online --local-id` i `online enqueue/run/status/upo/retry-unsubmitted/retry-cancelled`
+- archiwum faktur zakupowych:
+  - [`archive sync/status/next/ack/retry`](../workflows/cli-operations.md#odbiór-faktur-zakupowych)
 - eksport:
   - `export run`, `export status`
 - output:
@@ -557,6 +560,8 @@ Options:
   --save-session TEXT
   --save-upo-overwrite
   --base-url TEXT
+  --local-id TEXT
+  --state-dir PATH
 ```
 
 Uwagi:
@@ -566,6 +571,7 @@ Uwagi:
 - Przy udanym zakonczeniu komenda nadal zamyka sesje; checkpoint sluzy glownie do inspekcji
   oraz odzyskania flow po przerwaniu lub bledzie po zapisaniu checkpointu.
 - `--save-upo-overwrite` pozwala nadpisac istniejacy plik UPO wskazany przez `--save-upo`.
+- `--local-id FV-123 --state-dir ./private` wiąże XML z własnym ID. Po restarcie odczytasz wynik przez `ksef online status`, wznowisz operację przez `ksef online run` i zapiszesz indywidualne UPO przez `ksef online upo`. [Przykłady i konfiguracja klucza](../workflows/cli-operations.md#wysyłka-online-po-własnym-id)
 - Dla `FA_RR (1)` z `--schema-version 1-1E` uzyj `--form-value FA_RR`.
 
 ## `ksef send batch`
@@ -648,6 +654,8 @@ Pokazuje skrot i pelny JSON checkpointu. Material klucza sesji
 redagowany do `<redacted>` — te wartosci nie musza trafiac do terminala, logow CI ani zrzutow
 ekranu. `--show-secrets` oddaje pelny zapis (klucz i IV sa tez w pliku checkpointu, patrz
 `session export`).
+
+W sesji paczki `session show` ukrywa nazwy plików i ich skróty w polu `invoice_manifest`, a także podpisane adresy i nagłówki wysyłki części. Numery części i metody HTTP pozostają widoczne. Opcja `--show-secrets` pokazuje pełny zapis. Wynik poszczególnych faktur odczytasz przez `session batch report`.
 
 ## `ksef session status`
 
@@ -806,6 +814,14 @@ Uwagi:
 - komenda zamyka sesje batch bez potrzeby ponownego ladowania ZIP-a,
 - `--wait-status` i `--wait-upo` dzialaja analogicznie do `send batch`,
 - po odczycie statusu CLI zapisuje `last_upo_ref` w checkpointcie.
+
+## `ksef session batch report`
+
+```sh
+ksef --json session batch report --id batch-demo
+```
+
+Użyj ID z `send batch --save-session` lub `session batch open`. Pole `complete` wskazuje, czy KSeF rozstrzygnął los wszystkich faktur. Parametry `--page-size` i `--max-pages` ograniczają stronicowanie jednego odczytu. [Opis wyników i możliwych działań](../workflows/cli-operations.md#raport-faktur-z-paczki)
 
 ## Przyklady resume flow
 
