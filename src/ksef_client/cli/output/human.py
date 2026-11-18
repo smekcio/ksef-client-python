@@ -86,7 +86,7 @@ class HumanRenderer:
         if grants:
             table = Table(title="Personal grants")
             for column in ("Permission", "State", "Can delegate", "Identifiers"):
-                table.add_column(column)
+                table.add_column(column, overflow="fold")
             for grant in grants:
                 identifiers = []
                 for key, label in (

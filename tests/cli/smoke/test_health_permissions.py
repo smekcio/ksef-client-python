@@ -1,4 +1,5 @@
 import json
+import re
 
 import httpx
 import pytest
@@ -126,6 +127,26 @@ def test_future_scope_is_literal_terminal_text(runner, endpoint):
     assert "[red]New?Scope" in result.output
     assert "Yes" in result.output
     assert "\x1b" not in result.output
+
+
+def test_narrow_terminal_preserves_the_full_permission_code(runner, endpoint, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "60")
+    scope = "CollectiveIdentifierManage"
+    endpoint(
+        httpx.Response(
+            200,
+            json={"permissions": [{**sample_grant(), "permissionScope": scope}], "hasMore": False},
+        )
+    )
+    result = runner.invoke(app, ["health", "permissions"])
+    assert result.exit_code == 0, result.output
+    first_column = [
+        re.split(r"[│|]", row)[1].strip()
+        for row in result.output.splitlines()
+        if row.startswith(("│", "|"))
+    ]
+    assert scope in "".join(first_column)
+    assert "…" not in result.output
 
 
 @pytest.mark.parametrize(
