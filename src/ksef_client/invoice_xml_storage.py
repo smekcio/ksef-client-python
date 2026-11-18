@@ -110,7 +110,7 @@ def _windows_handle(path: Path, *, directory: bool = False, create: bool = False
 class FileInvoiceXmlStore:
     """An application-owned private directory. Do not share it with untrusted writers."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, create: bool = True) -> None:
         self._lock = threading.RLock()
         if str(path) == "":
             raise ValueError("Storage path must not be empty")
@@ -118,8 +118,9 @@ class FileInvoiceXmlStore:
         self._handles: list[int] = []
         self._dir_fd: int | None = None
         self._closed = False
-        _safe_directory(self.root, allow_missing=True)
-        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if create:
+            _safe_directory(self.root, allow_missing=True)
+            self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         try:
             _safe_directory(self.root)
             if os.name == "nt":
@@ -135,6 +136,8 @@ class FileInvoiceXmlStore:
                 with self._open(".storage-id") as stream:
                     identifier = stream.read(65).decode("ascii")
             except FileNotFoundError:
+                if not create:
+                    raise
                 identifier = uuid.uuid4().hex
                 temp = ".tmp-" + uuid.uuid4().hex
                 try:

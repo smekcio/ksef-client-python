@@ -626,7 +626,7 @@ redagowany do `<redacted>` — te wartosci nie musza trafiac do terminala, logow
 ekranu. `--show-secrets` oddaje pelny zapis (klucz i IV sa tez w pliku checkpointu, patrz
 `session export`).
 
-Dla paczki zapisanej z listą faktur CLI ukrywa również nazwy plików i ich skróty w polu `invoice_manifest`. Opcja `--show-secrets` pokazuje pełny zapis. Wynik poszczególnych faktur odczytasz przez `session batch report`.
+W sesji paczki `session show` ukrywa nazwy plików i ich skróty w polu `invoice_manifest`, a także podpisane adresy i nagłówki wysyłki części. Numery części i metody HTTP pozostają widoczne. Opcja `--show-secrets` pokazuje pełny zapis. Wynik poszczególnych faktur odczytasz przez `session batch report`.
 
 ## `ksef session status`
 

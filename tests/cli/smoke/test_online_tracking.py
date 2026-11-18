@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 from contextlib import nullcontext
 from typing import cast
 
@@ -125,6 +126,34 @@ def test_wait_polling_timeout_rejection_and_explicit_requeue(online):
     assert invoke("online", "status", *item)["status"] == "retryable"
     assert invoke("online", "retry-cancelled", *item)["status"] == "queued"
     assert server.send_count == 1
+
+
+@pytest.mark.parametrize(
+    ("status_code", "state"), [(450, "rejected"), (440, "duplicate"), (550, "retryable")]
+)
+def test_wait_status_signals_remote_failure_including_cached_results(
+    online, monkeypatch, status_code, state
+):
+    server, invoke, root, xml = online
+    server.lose_send = False
+    server.result = remote_invoice(status_code)
+    monkeypatch.setattr(server, "close_online_session", lambda ref: None)
+    send = ["send", "online", "--local-id", "A", "--state-dir", root, "--invoice", xml]
+    failed = invoke(*send, "--wait-status", code=ExitCode.API_ERROR)
+    assert str(status_code) in failed["message"] and state in failed["message"]
+    monkeypatch.setattr(
+        online_cmd, "workflow_client", lambda *args: pytest.fail("unexpected login")
+    )
+    assert invoke(*send, "--wait-status", code=ExitCode.API_ERROR) == failed
+    assert invoke("online", "status", "--id", "A", "--state-dir", root)["status"] == state
+    assert server.send_count == 1
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+def test_new_online_queue_database_has_owner_only_access(online, tmp_path):
+    _, invoke, root, xml = online
+    invoke("online", "enqueue", "--id", "A", "--state-dir", root, "--xml", xml)
+    assert next(tmp_path.rglob("online.db")).stat().st_mode & 0o077 == 0
 
 
 def test_repeat_send_uses_local_result_and_wait_upo_saves_verified_document(

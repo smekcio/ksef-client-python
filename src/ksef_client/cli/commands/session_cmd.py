@@ -109,7 +109,7 @@ def session_show(
     show_secrets: bool = typer.Option(
         False,
         "--show-secrets",
-        help="Show the session key, IV and any saved invoice manifest.",
+        help="Show the session key, IV, invoice manifest and signed upload instructions.",
     ),
 ) -> None:
     cli_ctx = require_context(ctx)

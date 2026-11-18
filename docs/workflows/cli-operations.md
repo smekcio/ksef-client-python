@@ -94,7 +94,7 @@ ksef --profile firma-a online upo --id FV-123 --state-dir ./private --out ./FV-1
 - Do pracy w tle użyj `online enqueue --id FV-123 --xml faktura.xml --state-dir ./private`, a następnie `online run`. Rejestracja i odczyt zapisanego statusu działają lokalnie.
 - Ponowne `send online` z tym samym ID i XML kontynuuje tę samą fakturę. Próba użycia ID dla innego XML lub tego samego XML pod innym ID kończy się błędem.
 - W stanie `submission_unknown` wykonaj `online run`, aby uzgodnić wynik z KSeF. `online retry-unsubmitted` może dopuścić nową wysyłkę po potwierdzeniu pustej, zamkniętej sesji. `online retry-cancelled` przywraca do kolejki dokument po potwierdzonym anulowaniu z kodem 550. Oba polecenia przyjmują `--id` i `--state-dir`.
-- Tryb śledzony obsługuje FA (3), adres wybranego profilu i indywidualne UPO z ustawień sesji SDK. `--wait-status` czeka na rozstrzygnięcie, a `--wait-upo` także na UPO. Po przekroczeniu `--max-attempts` CLI zwraca kod 4 i zachowuje postęp. `online upo` zapisuje do nowego pliku.
+- Tryb śledzony obsługuje FA (3), adres wybranego profilu i indywidualne UPO z ustawień sesji SDK. `--wait-status` czeka na rozstrzygnięcie, a `--wait-upo` także na UPO. Po odrzuceniu faktury, wykryciu duplikatu lub anulowaniu przez KSeF obie opcje zwracają kod wyjścia 5, również przy odczycie zapisanego wyniku. Po przekroczeniu `--max-attempts` CLI zwraca kod 4 i zachowuje postęp. `online upo` zapisuje do nowego pliku.
 
 ## Raport faktur z paczki
 
@@ -127,6 +127,10 @@ ksef --profile firma-a archive retry --state-dir ./private --receipt ./odbior/in
 ```
 
 Plik `receipt.json` należy do jednej próby i pozwala ją potwierdzić. Przechowuj go razem z dokumentem w prywatnym katalogu. Powtórzenie zakończonego `ack` jest bezpieczne. Po wygaśnięciu aktywnej rezerwacji pobierz dokument ponownie i użyj nowego potwierdzenia. `--lease-seconds` domyślnie wynosi 300. `available: false` i kod wyjścia 0 oznaczają, że dla tego odbiorcy nie ma teraz dokumentu gotowego do pobrania. Różni odbiorcy mają niezależne potwierdzenia. [Dostarczanie dokumentów w SDK](../incoming-invoice-delivery.md)
+
+Jeżeli podczas zapisu plików rezerwacja wygaśnie lub archiwum wycofa próbę,
+`archive next` kończy się kodem 4. Ponów pobranie. Katalog z XML i potwierdzeniem
+jest udostępniany odbiorcy dopiero po sprawdzeniu aktualności rezerwacji.
 
 ## Uruchamianie cykliczne
 

@@ -144,6 +144,13 @@ class SQLiteOfflineInvoiceStore:
                 )
             ):
                 raise ValueError("Unsafe offline archive file")
+        # SQLite derives journal permissions from the database file.
+        try:
+            fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(fd)
         connection = sqlite3.connect(target, timeout=timeout, isolation_level=None)
         try:
             return cls(connection, key, owned=True)

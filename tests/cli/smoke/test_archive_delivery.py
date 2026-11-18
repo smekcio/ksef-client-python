@@ -16,6 +16,7 @@ from ksef_client.cli import app
 from ksef_client.cli.commands import archive_cmd, archive_delivery
 from ksef_client.cli.exit_codes import ExitCode
 from ksef_client.facade import Exports
+from ksef_client.invoice_xml_types import KsefXmlStorageError
 from ksef_client.operations import environment_key
 
 
@@ -111,7 +112,7 @@ def test_failed_publication_releases_claim_and_preserves_existing_output(
     sentinel.write_bytes(b"existing")
     common = ["--consumer", "imports", "--out", str(target)]
 
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise OSError("disk full")
 
     with monkeypatch.context() as patch:
@@ -137,6 +138,7 @@ def test_rejects_damaged_and_foreign_receipts(archive, tmp_path):
         b"{",
         b" " * 65537,
         b'{"version":true}',
+        b'{"version":1,' + json.dumps(data).encode()[1:],
         json.dumps({**data, "token": "invalid"}).encode(),
         json.dumps({**data, "key": []}).encode(),
     ):
@@ -171,3 +173,72 @@ def test_expired_receipt_cannot_finish_a_new_delivery(archive, tmp_path, monkeyp
     assert second["event_id"] == first["event_id"] and second["receipt"] != first["receipt"]
     invoke("retry", "--receipt", first["receipt"], code=ExitCode.VALIDATION_ERROR)
     assert invoke("ack", "--receipt", second["receipt"])["acknowledged"]
+
+
+@pytest.mark.parametrize("change", ["during_read", "expired", "fenced", "rename_retry"])
+def test_lease_is_rechecked_at_publication(archive, tmp_path, monkeypatch, change):
+    invoke, root = archive
+    now = 1000
+    monkeypatch.setattr("ksef_client.sqlite_store.time", SimpleNamespace(time=lambda: now))
+    out = tmp_path / "worker-output"
+    args = ["--consumer", "worker", "--out", str(out), "--lease-seconds", "2"]
+    write_file = archive_delivery.write_private_file
+    rename = Path.rename
+    read_xml = archive_delivery.FileInvoiceXmlStore.read
+
+    def read(storage, *args, **kwargs):
+        nonlocal now
+        xml = read_xml(storage, *args, **kwargs)
+        if change == "during_read":
+            now += 2
+        return xml
+
+    def stage(path, content, **options):
+        nonlocal now
+        write_file(path, content, **options)
+        if path.name == "receipt.json":
+            if change == "expired":
+                now += 2
+            elif change == "fenced":
+                with archive_delivery.SQLiteInvoiceSyncStore.open(
+                    next(root.rglob("invoices.db"))
+                ) as store:
+                    store.fence_workers()
+
+    def retry_rename(path, target):
+        nonlocal now
+        if change == "rename_retry" and path.name.startswith(".ksef-delivery-"):
+            now += 2
+            raise PermissionError("busy")
+        return rename(path, target)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(archive_delivery, "write_private_file", stage)
+        patch.setattr(archive_delivery.FileInvoiceXmlStore, "read", read)
+        patch.setattr(Path, "rename", retry_rename)
+        err = invoke("next", *args, code=ExitCode.RETRY_EXHAUSTED)
+    assert "reservation" in err["message"]
+    assert not out.exists() or list(out.iterdir()) == []
+    current = invoke("next", *args)
+    assert invoke("ack", "--receipt", current["receipt"])["acknowledged"]
+
+
+def test_missing_store_identity_is_not_replaced_by_a_read(archive, tmp_path):
+    invoke, root = archive
+    marker = next(root.rglob("invoices.db")).parent / "xml" / ".storage-id"
+    original = marker.with_name("saved-id")
+    marker.rename(original)
+    args = ["--consumer", "imports", "--out", str(tmp_path)]
+    invoke("next", *args, code=ExitCode.IO_ERROR)
+    assert not marker.exists()
+    original.rename(marker)
+    assert invoke("next", *args)["available"]
+
+
+def test_archive_database_must_have_a_single_journal_location(archive, tmp_path):
+    _, root = archive
+    database = next(root.rglob("invoices.db"))
+    alias = tmp_path / "second.db"
+    os.link(database, alias)
+    with pytest.raises(KsefXmlStorageError):
+        archive_delivery.SQLiteInvoiceSyncStore.open(alias)

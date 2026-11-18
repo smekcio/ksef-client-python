@@ -17,7 +17,7 @@ import tarfile
 import tempfile
 import zipfile
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, contextmanager, suppress
+from contextlib import AbstractContextManager, contextmanager, nullcontext, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -605,14 +605,17 @@ def validate_export_files(
         )
 
 
-def publish_directory(stage: Path, target: Path) -> None:
+def publish_directory(
+    stage: Path, target: Path, *, guard: Callable[[], AbstractContextManager[None]] = nullcontext
+) -> None:
     # Windows scanners can briefly hold a just-written file open without delete
     # sharing. Retry only that failure, while continuing to refuse replacement.
     for attempt in range(3):
-        if target.exists():
-            raise KsefExportTransferError("Destination already exists")
         try:
-            stage.rename(target)
+            with guard():
+                if target.exists():
+                    raise KsefExportTransferError("Destination already exists")
+                stage.rename(target)
             return
         except PermissionError:
             if attempt == 2:

@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sqlite3
+import stat
 import time
 import uuid
 from collections.abc import Iterator, Sequence
@@ -350,8 +351,14 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             Path(str(target) + "-shm"),
             Path(str(target) + "-journal"),
         ):
-            if candidate.is_symlink() or (
-                candidate.exists() and getattr(candidate.lstat(), "st_file_attributes", 0) & 0x400
+            try:
+                info = candidate.lstat()
+            except FileNotFoundError:
+                continue
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or getattr(info, "st_file_attributes", 0) & 0x400
             ):
                 raise KsefXmlStorageError("unsafe_database_path")
         try:
@@ -842,7 +849,16 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
         self, pending: _PendingDelivery, xml: bytes
     ) -> IncomingInvoiceDelivery:
         delivery = pending.verified(xml)
-        with self._transaction(write=False):
+        with self._current_invoice_delivery(delivery):
+            return delivery
+
+    @contextmanager
+    def _current_invoice_delivery(
+        self, delivery: IncomingInvoiceDelivery, *, publishing: bool = False
+    ) -> Iterator[None]:
+        # A publisher takes the write reservation only for its final rename.
+        # A concurrent reclaim, archive audit or fence must not pass this check.
+        with self._transaction(write=publishing):
             active = self._execute(
                 "SELECT 1 FROM incoming_invoice_delivery "
                 "JOIN invoice_xml_documents USING(namespace,environment,context_key,ksef_number,"
@@ -852,18 +868,18 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
                 "AND acknowledged=0 AND status='ready' AND expected_hash=? "
                 "AND EXISTS(SELECT 1 FROM xml_store_meta WHERE id=1 AND epoch=?)",
                 (
-                    *pending.key.values,
-                    pending.consumer,
-                    pending.token,
-                    pending.epoch,
+                    *delivery.key.values,
+                    delivery.consumer,
+                    delivery._token,
+                    delivery._epoch,
                     time.time(),
-                    pending.expected_hash,
-                    pending.epoch,
+                    delivery.metadata.invoice_hash,
+                    delivery._epoch,
                 ),
             ).fetchone()
-        if active is None:
-            raise KsefInvoiceDeliveryLeaseLostError()
-        return delivery
+            if active is None:
+                raise KsefInvoiceDeliveryLeaseLostError()
+            yield
 
     def claim_invoice_delivery(
         self,

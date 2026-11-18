@@ -204,11 +204,14 @@ def tracked_send(
                             ExitCode.RETRY_EXHAUSTED,
                             "Continue with ksef online run using the same ID.",
                         )
-        if wait_upo and row.status is not OnlineInvoiceStatus.COMPLETE:
+        if (wait_status or wait_upo) and row.status not in {
+            OnlineInvoiceStatus.ACCEPTED,
+            OnlineInvoiceStatus.COMPLETE,
+        }:
             raise CliError(
-                f"No individual UPO for invoice status {row.status.value}.",
+                f"KSeF did not accept this invoice (status {row.ksef_status}, {row.status.value}).",
                 ExitCode.API_ERROR,
-                "Inspect the KSeF status with ksef online status.",
+                "Inspect the saved result with ksef online status.",
             )
         if save_upo:
             saved = _resolve_output_path(

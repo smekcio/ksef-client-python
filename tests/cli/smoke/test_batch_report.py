@@ -40,7 +40,14 @@ def state(archive, compression):
             file_parts=[],
             compression_type=compression,
         ),
-        part_upload_requests=[],
+        part_upload_requests=[
+            m.PartUploadRequest(
+                headers={"X-Upload-Token": "test-upload-header"},
+                method="PUT",
+                ordinal_number=1,
+                url="https://storage.example/part?signature=test-signed-url",
+            )
+        ],
         symmetric_key_base64=base64.b64encode(bytes(32)).decode(),
         iv_base64=base64.b64encode(bytes(16)).decode(),
     )
@@ -121,6 +128,17 @@ def test_report_from_normal_send_and_open_after_source_removed(
     manifest = saved.invoice_manifest
     visible = reports("session", "show", "--id", "test-batch")["checkpoint"]
     assert visible["invoice_manifest"] == "<redacted>"
+    parts = visible["session_state"]["part_upload_requests"]
+    assert parts == [
+        {"headers": "<redacted>", "method": "PUT", "ordinalNumber": 1, "url": "<redacted>"}
+    ]
+    assert "test-upload-header" not in json.dumps(visible) and "test-signed-url" not in json.dumps(
+        visible
+    )
+    revealed = reports("session", "show", "--id", "test-batch", "--show-secrets")["checkpoint"]
+    assert revealed["session_state"]["part_upload_requests"] == [
+        saved.session_state.part_upload_requests[0].to_dict()
+    ]
     assert not any(entry.file_name in json.dumps(visible) for entry in manifest.invoices)
     original.rename(tmp_path / "moved")
     calls = []

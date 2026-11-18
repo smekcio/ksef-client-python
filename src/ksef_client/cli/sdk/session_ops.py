@@ -189,8 +189,10 @@ def list_saved_sessions(*, profile: str) -> dict[str, Any]:
 
 
 #: Pola stanu sesji, które nie mogą trafić na stdout bez wyraźnej prośby
-#: (`session show --show-secrets`): materiał klucza AES i wektor inicjalizujący.
-_SESSION_SECRET_KEYS = frozenset({"symmetric_key_base64", "iv_base64", "invoice_manifest"})
+#: (`session show --show-secrets`): materiał klucza, spis faktur oraz podpisane dane wysyłki.
+_SESSION_SECRET_KEYS = frozenset(
+    {"symmetric_key_base64", "iv_base64", "invoice_manifest", "url", "headers"}
+)
 _SESSION_SECRET_PLACEHOLDER = "<redacted>"
 
 

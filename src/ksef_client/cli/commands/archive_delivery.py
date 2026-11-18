@@ -17,7 +17,7 @@ from ksef_client.invoice_delivery import (
     KsefInvoiceDeliveryLeaseLostError,
 )
 from ksef_client.invoice_export_sync import _archive_scope
-from ksef_client.invoice_sync_state import InvoiceSyncScope
+from ksef_client.invoice_sync_state import InvoiceSyncScope, _loads
 from ksef_client.models import InvoiceQuerySubjectType
 from ksef_client.operations import environment_key
 from ksef_client.streaming_export import publish_directory, safe_file
@@ -56,7 +56,7 @@ def _archive(ctx: typer.Context, root: Path) -> tuple[str, InvoiceSyncScope, Pat
     return profile, scope, directory
 
 
-def _publish(delivery: IncomingInvoiceDelivery, out: Path) -> Path:
+def _publish(store: SQLiteInvoiceSyncStore, delivery: IncomingInvoiceDelivery, out: Path) -> Path:
     parent = out.absolute()
     private_directory(parent)
     destination = parent / f"invoice-{uuid.uuid4().hex}"
@@ -68,7 +68,11 @@ def _publish(delivery: IncomingInvoiceDelivery, out: Path) -> Path:
             ("receipt.json", delivery.receipt.to_dict()),
         ):
             write_private_file(stage / name, json.dumps(data).encode("utf-8"), overwrite=True)
-        publish_directory(stage, destination)
+        publish_directory(
+            stage,
+            destination,
+            guard=lambda: store._current_invoice_delivery(delivery, publishing=True),
+        )
     return destination
 
 
@@ -103,23 +107,32 @@ def next_invoice(
                 "Restore the XML directory from the same archive.",
             )
         with (
-            FileInvoiceXmlStore(xml_directory) as storage,
+            FileInvoiceXmlStore(xml_directory, create=False) as storage,
             SQLiteInvoiceSyncStore.open(
                 directory / "invoices.db", enqueue_xml=True, xml_storage_id=storage.storage_id
             ) as store,
         ):
-            delivery = store.claim_invoice_delivery(
-                scope, storage, consumer=consumer, lease_seconds=lease_seconds
-            )
-            if delivery is None:
-                renderer.success(command="archive.next", profile=profile, data={"available": False})
-                return
+            delivery = None
             try:
-                target = _publish(delivery, out)
-            except Exception:
-                # A failed hand-off can be picked up without waiting for lease expiry.
-                with suppress(KsefInvoiceDeliveryLeaseLostError):
-                    store.retry_invoice_delivery(delivery)
+                delivery = store.claim_invoice_delivery(
+                    scope, storage, consumer=consumer, lease_seconds=lease_seconds
+                )
+                if delivery is None:
+                    renderer.success(
+                        command="archive.next", profile=profile, data={"available": False}
+                    )
+                    return
+                target = _publish(store, delivery, out)
+            except Exception as exc:
+                if delivery is not None:
+                    with suppress(KsefInvoiceDeliveryLeaseLostError):
+                        store.retry_invoice_delivery(delivery)
+                if isinstance(exc, KsefInvoiceDeliveryLeaseLostError):
+                    raise CliError(
+                        "The delivery reservation expired or changed before publication.",
+                        ExitCode.RETRY_EXHAUSTED,
+                        "Use archive next again. Allow enough time with --lease-seconds.",
+                    ) from None
                 raise
         renderer.success(
             command="archive.next",
@@ -146,7 +159,7 @@ def _finish(ctx: typer.Context, state_dir: Path, receipt_path: Path, delay: int 
         try:
             if len(raw) > 64 * 1024:
                 raise ValueError
-            receipt = InvoiceDeliveryReceipt.from_dict(json.loads(raw))
+            receipt = InvoiceDeliveryReceipt.from_dict(_loads(raw))
         except (ValueError, RecursionError):
             raise CliError(
                 "Invalid delivery receipt.",
