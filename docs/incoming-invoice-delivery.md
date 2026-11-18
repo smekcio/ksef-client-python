@@ -1,5 +1,7 @@
 # Dostarczanie faktur zakupowych ze zweryfikowanego archiwum
 
+W terminalu dokument pobierzesz przez `ksef archive next`, a przetworzenie potwierdzisz przez `ksef archive ack`. [Odbiór faktur zakupowych w CLI](workflows/cli-operations.md#odbiór-faktur-zakupowych)
+
 `SQLiteInvoiceSyncStore` i `AsyncSQLiteInvoiceSyncStore` dostarczają dokumenty
 do skryptu lub aplikacji w kolejnych próbach. Użyj tej samej bazy SQLite oraz
 tego samego magazynu XML, które obsługują archiwum. Wybierz zakres `Subject2`

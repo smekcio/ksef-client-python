@@ -13,9 +13,13 @@ from ksef_client.operations import environment_key
 
 from ..context import require_context
 from ..output import get_renderer
+from . import archive_delivery
 from ._workflow import workflow_client, workflow_config, workflow_errors, workflow_key
 
 app = typer.Typer(help="Synchronize verified KSeF exports into a local archive.")
+app.command("next")(archive_delivery.next_invoice)
+app.command("ack")(archive_delivery.acknowledge)
+app.command("retry")(archive_delivery.retry)
 
 
 @app.command("sync")

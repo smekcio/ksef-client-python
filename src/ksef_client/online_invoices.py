@@ -162,22 +162,53 @@ class _AsyncOnlineWorker(AsyncOfflineInvoices):
         return _checked_upo(progress, upo)
 
 
-class OnlineInvoices:
+class OnlineInvoiceQueue:
+    """Local operations by application ID, including access to an already verified UPO."""
+
+    def __init__(
+        self, store: SQLiteOnlineInvoiceStore, *, namespace: str, environment: str, context_key: str
+    ) -> None:
+        self._store = store
+        self._scope = InvoiceSyncScope(
+            namespace, environment, context_key, *_ONLINE_SUBMISSION_KIND
+        )
+
+    def enqueue(self, local_id: str, xml: bytes) -> OnlineInvoice:
+        return _result(local_id, self._store._enqueue_online(self._scope, local_id, xml))
+
+    def status(self, local_id: str) -> OnlineInvoice | None:
+        row = self._store._load_online(self._scope, local_id)
+        return None if row is None else _result(local_id, row)
+
+    def retry_cancelled(self, local_id: str) -> OnlineInvoice:
+        row = _required(self._store._load_online(self._scope, local_id))
+        return _result(
+            local_id, self._store.retry_cancelled(self._scope, row.progress.invoice_hash)
+        )
+
+    def read_upo(self, local_id: str) -> bytes:
+        row = _required(self._store._load_online(self._scope, local_id))
+        return self._store.read_upo(self._scope, row.progress.invoice_hash)
+
+
+class OnlineInvoices(OnlineInvoiceQueue):
     """Register XML once and advance its online submission through the individual UPO."""
 
     def __init__(self, client: Ksef, store: SQLiteOnlineInvoiceStore, *, namespace: str) -> None:
+        super().__init__(
+            store,
+            namespace=namespace,
+            environment=client.environment,
+            context_key=client.context_key,
+        )
         self._worker = _OnlineWorker(client, store, namespace=namespace)
-        self._client, self._store = client, store
+        self._client = client
         _validate_transport(client, self._worker.scope)
 
     def enqueue(self, local_id: str, xml: bytes) -> OnlineInvoice:
         """Bind the application ID and original XML atomically in this scope."""
         _validate_transport(self._client, self._worker.scope)
-        return _result(local_id, self._store._enqueue_online(self._worker.scope, local_id, xml))
-
-    def status(self, local_id: str) -> OnlineInvoice | None:
-        row = self._store._load_online(self._worker.scope, local_id)
-        return None if row is None else _result(local_id, row)
+        return super().enqueue(local_id, xml)
 
     def advance(self, local_id: str, *, timeout: float = 60) -> OnlineInvoice:
         """Run one step, reconciling unknown sends through the persisted session."""
@@ -207,13 +238,7 @@ class OnlineInvoices:
     def retry_cancelled(self, local_id: str) -> OnlineInvoice:
         """Requeue only a submission KSeF explicitly cancelled with status 550."""
         _validate_transport(self._client, self._worker.scope)
-        row = _required(self._store._load_online(self._worker.scope, local_id))
-        return _result(local_id, self._worker.retry_cancelled(row.progress.invoice_hash))
-
-    def read_upo(self, local_id: str) -> bytes:
-        """Read the locally stored per-invoice UPO."""
-        row = _required(self._store._load_online(self._worker.scope, local_id))
-        return self._worker.read_upo(row.progress.invoice_hash)
+        return super().retry_cancelled(local_id)
 
 
 class AsyncOnlineInvoices:
@@ -272,6 +297,7 @@ __all__ = [
     "AsyncOnlineInvoices",
     "AsyncSQLiteOnlineInvoiceStore",
     "OnlineInvoice",
+    "OnlineInvoiceQueue",
     "OnlineInvoiceStatus",
     "OnlineInvoices",
     "SQLiteOnlineInvoiceStore",

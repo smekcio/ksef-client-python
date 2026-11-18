@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import tarfile
 import uuid
+import zipfile
+import zlib
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -11,7 +14,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from ksef_client.batch_outcomes import BatchInvoiceManifest
+from ksef_client.models import CompressionType
 from ksef_client.services.sessions import BatchSessionState, OnlineSessionState
+from ksef_client.streaming_export import KsefExportTransferError
 
 from .config.paths import cache_dir
 from .errors import CliError
@@ -266,6 +272,23 @@ class OnlineSessionCheckpoint:
         )
 
 
+def batch_manifest(archive: bytes, compression: CompressionType) -> BatchInvoiceManifest | None:
+    """Existing send commands also accept opaque archives. Only index supported XML batches."""
+    try:
+        return BatchInvoiceManifest.from_archive(archive, compression)
+    except (
+        ValueError,
+        OSError,
+        EOFError,
+        RuntimeError,
+        tarfile.TarError,
+        zipfile.BadZipFile,
+        zlib.error,
+        KsefExportTransferError,
+    ):
+        return None
+
+
 @dataclass(frozen=True)
 class BatchSessionCheckpoint:
     id: str
@@ -280,6 +303,7 @@ class BatchSessionCheckpoint:
     last_upo_ref: str | None = None
     schema_version: int = _CHECKPOINT_SCHEMA_VERSION
     kind: str = "batch"
+    invoice_manifest: BatchInvoiceManifest | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         _ = _validate_session_id(self.id)
@@ -308,6 +332,11 @@ class BatchSessionCheckpoint:
             "stage": self.stage,
             "session_state": self.session_state.to_dict(),
             "payload_source": self.payload_source.to_dict(),
+            **(
+                {"invoice_manifest": self.invoice_manifest.to_dict()}
+                if self.invoice_manifest
+                else {}
+            ),
             "uploaded_ordinals": list(self.uploaded_ordinals),
             "last_upo_ref": self.last_upo_ref,
         }
@@ -337,6 +366,11 @@ class BatchSessionCheckpoint:
             stage=_required_string(payload.get("stage"), field_name="stage"),
             session_state=BatchSessionState.from_dict(session_payload),
             payload_source=BatchPayloadSource.from_dict(source_payload),
+            invoice_manifest=(
+                BatchInvoiceManifest.from_dict(payload["invoice_manifest"])
+                if "invoice_manifest" in payload
+                else None
+            ),
             uploaded_ordinals=_required_int_list(
                 payload.get("uploaded_ordinals", []),
                 field_name="uploaded_ordinals",

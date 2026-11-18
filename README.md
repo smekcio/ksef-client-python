@@ -181,6 +181,10 @@ ksef send online --invoice ./fa.xml --wait-upo --save-upo ./out/upo-online.xml
 ksef invoice download --ksef-number <KSEF_NUMBER> --out ./out/
 ```
 
+Polecenie `send online --local-id` pozwala wrócić po indywidualne UPO pod własnym ID faktury.
+Wynik każdego pliku sprawdzisz przez `session batch report`, a fakturę zakupową odbierzesz
+i potwierdzisz przez `archive next` i `archive ack`. [Przykłady użycia CLI](docs/workflows/cli-operations.md)
+
 Najczęściej używane grupy komend:
 
 - konfiguracja profili: `init`, `profile ...`,

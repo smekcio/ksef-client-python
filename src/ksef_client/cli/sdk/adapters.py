@@ -32,6 +32,7 @@ from ..session_store import (
     BatchPayloadSource,
     BatchSessionCheckpoint,
     OnlineSessionCheckpoint,
+    batch_manifest,
     save_checkpoint,
     update_checkpoint,
 )
@@ -1750,6 +1751,7 @@ def send_batch_invoices(
     if tar_gz_path is not None:
         payload_source_kwargs["tar_gz_path"] = tar_gz_path
     payload_source = _build_batch_payload_source(**payload_source_kwargs)
+    manifest = batch_manifest(archive_bytes, compression_type) if save_session is not None else None
 
     with _create_client_collecting_system_warnings(
         base_url,
@@ -1793,6 +1795,7 @@ def send_batch_invoices(
                 stage="opened",
                 session_state=session.get_state(),
                 payload_source=payload_source,
+                invoice_manifest=manifest,
             )
             try:
                 save_checkpoint(checkpoint, overwrite=False)

@@ -1,4 +1,4 @@
-# Archiwum XML i kolejka offline w CLI
+# Faktury online, paczki, archiwum XML i kolejka offline w CLI
 
 Polecenia korzystają z tego samego trwałego archiwum i maszyny stanów, co SDK.
 Każdy cykl można uruchomić w osobnym procesie. Stan trafia do osobnego
@@ -13,9 +13,9 @@ tokenów z kontekstem.
 Polecenia sieciowe używają adresu HTTPS zapisanego w profilu. W razie
 potrzeby odświeżają i zapisują token dostępowy dla następnego cyklu.
 
-Udostępnij procesowi dwa osobne, wygenerowane losowo klucze po 32 bajty
-zakodowane w standardowym Base64. `KSEF_EXPORT_STATE_KEY` chroni stan
-operacji eksportu, a `KSEF_OFFLINE_STATE_KEY` chroni kolejkę XML i UPO.
+Każda kolejka używa własnego losowego klucza o długości 32 bajtów zakodowanego w Base64.
+Udostępnij procesowi klucze używanych operacji. `KSEF_EXPORT_STATE_KEY` chroni stan eksportu,
+`KSEF_OFFLINE_STATE_KEY` chroni kolejkę offline, a `KSEF_ONLINE_STATE_KEY` chroni kolejkę online.
 Przechowuj klucze w magazynie sekretów i dołącz je do procedury odtwarzania kopii.
 Cykl korzysta z kluczy przekazanych procesowi i nigdy nie wypisuje ich w wyniku.
 
@@ -73,6 +73,61 @@ cykle pozostałych profili niezależnie. W dużej kolejce zachowuj
 `next_cursor` i przekaż jego pola jako `--after-due-at` i `--after-hash`,
 a po ostatniej stronie rozpocznij następny cykl od początku.
 
+## Wysyłka online po własnym ID
+
+Jeśli zapisujesz fakturę u siebie jako `FV-123`, możesz tym samym ID posługiwać się aż do odebrania jej indywidualnego UPO.
+Ustaw `KSEF_ONLINE_STATE_KEY` na zakodowany w Base64 losowy klucz o długości 32 bajtów.
+Wygeneruj go raz, zapisz w magazynie sekretów i udostępniaj kolejnym procesom. Chroni on XML, UPO i powiązanie z lokalnym ID w pliku `online.db`.
+
+```sh
+ksef --profile firma-a send online --invoice faktura.xml --local-id FV-123 --state-dir ./private --wait-upo --save-upo ./out/FV-123-upo.xml
+ksef --profile firma-a online status --id FV-123 --state-dir ./private
+```
+
+Po przerwaniu procesu sprawdź `online status`. Polecenie `online run` wykonuje jeden kolejny krok dla zapisanego XML. Możesz ponawiać je dla tego samego ID. Przy stanie `complete` odbierzesz UPO także po wylogowaniu.
+
+```sh
+ksef --profile firma-a --json online run --id FV-123 --state-dir ./private
+ksef --profile firma-a online upo --id FV-123 --state-dir ./private --out ./FV-123-upo.xml
+```
+
+- Do pracy w tle użyj `online enqueue --id FV-123 --xml faktura.xml --state-dir ./private`, a następnie `online run`. Rejestracja i odczyt zapisanego statusu działają lokalnie.
+- Ponowne `send online` z tym samym ID i XML kontynuuje tę samą fakturę. Próba użycia ID dla innego XML lub tego samego XML pod innym ID kończy się błędem.
+- W stanie `submission_unknown` wykonaj `online run`, aby uzgodnić wynik z KSeF. `online retry-unsubmitted` może dopuścić nową wysyłkę po potwierdzeniu pustej, zamkniętej sesji. `online retry-cancelled` przywraca do kolejki dokument po potwierdzonym anulowaniu z kodem 550. Oba polecenia przyjmują `--id` i `--state-dir`.
+- Tryb śledzony obsługuje FA (3), adres wybranego profilu i indywidualne UPO z ustawień sesji SDK. `--wait-status` czeka na rozstrzygnięcie, a `--wait-upo` także na UPO. Po przekroczeniu `--max-attempts` CLI zwraca kod 4 i zachowuje postęp. `online upo` zapisuje do nowego pliku.
+
+## Raport faktur z paczki
+
+Zapisz sesję przy wysyłce paczki. Później sprawdzisz, jaki wynik KSeF przypisał każdemu plikowi.
+
+```sh
+ksef --profile firma-a send batch --dir ./faktury --save-session listopad
+ksef --profile firma-a session batch report --id listopad
+ksef --profile firma-a --json session batch report --id listopad
+```
+
+Raport działa także dla `session batch open --id`. Zapisana sesja przechowuje manifest nazw i skrótów z faktycznych bajtów ZIP lub TarGz. Obsługuje również paczki zbudowane przez `--dir`. Dzięki temu po wysłaniu prawidłowo zindeksowanej paczki można przenieść pliki źródłowe. Przy starszym zapisie CLI odtwarza manifest z zachowanego źródła i sprawdza, czy rozmiar i SHA-256 pasują do zapisanej sesji. Archiwum spoza obsługiwanego formatu faktur XML może być wysłane dotychczasową ścieżką, lecz nie da się z niego utworzyć raportu.
+
+Wynik zawiera nazwę pliku, rozstrzygnięcie (`accepted`, `rejected`, `duplicate`, `cancelled`, `unresolved`), kod statusu i dostępne numery KSeF. `complete: false` oznacza, że części wyników nie udało się jeszcze rozstrzygnąć. Odczytaj raport ponownie. Granice odczytu ustalają `--page-size` i `--max-pages`, domyślnie po 100. Dopiero pełny raport wskazuje pliki do sprawdzenia w `correction_candidates` i anulowane pliki do rozważenia ponownej wysyłki w `retry_candidates`. Samo odczytanie raportu nie wysyła faktur. [Zasady interpretacji w SDK](batch-session.md#wynik-każdej-faktury-w-paczce)
+
+## Odbiór faktur zakupowych
+
+Po `archive sync` dla roli `Subject2` możesz przekazywać dokumenty z tego samego archiwum do skryptu lub aplikacji. Nadaj odbiorcy stałą nazwę i wskaż katalog wyjściowy z prywatnymi uprawnieniami. Odbiór, potwierdzenie i zwolnienie rezerwacji działają lokalnie.
+
+```sh
+ksef --profile firma-a --json archive next --consumer zakupy --state-dir ./private --out ./odbior
+```
+
+Wynik `available: true` zawiera stabilne `event_id`, termin wygaśnięcia rezerwacji oraz ścieżki `xml`, `metadata` i `receipt` w nowym katalogu próby. Skrypt może użyć `event_id` do deduplikacji. Po trwałym zapisaniu dokumentu przekaż ścieżkę z pola `receipt` do `ack`. Po przejściowym błędzie użyj `retry`.
+
+```sh
+ksef --profile firma-a archive ack --state-dir ./private --receipt ./odbior/invoice-PRZYKLAD/receipt.json
+# Alternatywnie, po błędzie odbiorcy
+ksef --profile firma-a archive retry --state-dir ./private --receipt ./odbior/invoice-PRZYKLAD/receipt.json --delay-seconds 60
+```
+
+Plik `receipt.json` należy do jednej próby i pozwala ją potwierdzić. Przechowuj go razem z dokumentem w prywatnym katalogu. Powtórzenie zakończonego `ack` jest bezpieczne. Po wygaśnięciu aktywnej rezerwacji pobierz dokument ponownie i użyj nowego potwierdzenia. `--lease-seconds` domyślnie wynosi 300. `available: false` i kod wyjścia 0 oznaczają, że dla tego odbiorcy nie ma teraz dokumentu gotowego do pobrania. Różni odbiorcy mają niezależne potwierdzenia. [Dostarczanie dokumentów w SDK](../incoming-invoice-delivery.md)
+
 ## Uruchamianie cykliczne
 
 [Przykładowy worker](../examples/scheduled_ksef_operations.py) wywołuje oba
@@ -101,7 +156,7 @@ uwierzytelnienia przerywa bieżący cykl profilu.
 
 `KSEF_XADES_SELECTOR` wskazuje bazę wyboru certyfikatów utworzoną przez
 [rotację XAdES](../certificate-rotation.md). Przy takim ustawieniu każde
-sieciowe polecenie `archive` i `offline` otwiera sesję dla aktualnego
+sieciowe polecenie trwałej wysyłki online, raportu paczki, `archive` i `offline` otwiera sesję dla aktualnego
 certyfikatu i kończy ją po cyklu. Wybór korzysta z nazwy, adresu API
 i kontekstu profilu CLI. Żeby zmienić certyfikat kolejnego cyklu,
 aktywuj nowy wpis w tej samej bazie.

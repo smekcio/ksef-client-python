@@ -17,6 +17,7 @@ from ..session_store import (
     BatchSessionCheckpoint,
     OnlineSessionCheckpoint,
     SessionCheckpoint,
+    batch_manifest,
     delete_checkpoint,
     export_checkpoint,
     import_checkpoint,
@@ -189,7 +190,7 @@ def list_saved_sessions(*, profile: str) -> dict[str, Any]:
 
 #: Pola stanu sesji, które nie mogą trafić na stdout bez wyraźnej prośby
 #: (`session show --show-secrets`): materiał klucza AES i wektor inicjalizujący.
-_SESSION_SECRET_KEYS = frozenset({"symmetric_key_base64", "iv_base64"})
+_SESSION_SECRET_KEYS = frozenset({"symmetric_key_base64", "iv_base64", "invoice_manifest"})
 _SESSION_SECRET_PLACEHOLDER = "<redacted>"
 
 
@@ -478,6 +479,7 @@ def open_batch_session(
     access_token = adapters._require_access_token(profile)
     form_code = adapters._build_form_code(system_code, schema_version, form_value)
     zip_bytes, payload_source = _build_batch_payload_source(zip_path=zip_path, directory=directory)
+    manifest = batch_manifest(zip_bytes, m.CompressionType.ZIP)
 
     with adapters.create_client(base_url, access_token=access_token) as client:
         certs = client.security.get_public_key_certificates()
@@ -498,6 +500,7 @@ def open_batch_session(
             stage="opened",
             session_state=session.get_state(),
             payload_source=payload_source,
+            invoice_manifest=manifest,
         )
         try:
             save_checkpoint(checkpoint, overwrite=False)

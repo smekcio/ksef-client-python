@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -14,7 +12,6 @@ import typer
 from ksef_client._offline_invoice_store import MAX_OFFLINE_XML_BYTES
 from ksef_client.invoice_search import _date
 from ksef_client.invoice_sync_state import utc_timestamp
-from ksef_client.invoice_xml_storage import _safe_directory
 from ksef_client.offline_invoices import (
     OfflineBatchFailure,
     OfflineInvoiceMode,
@@ -26,6 +23,7 @@ from ksef_client.offline_invoices import (
 from ..context import require_context
 from ..errors import CliError
 from ..exit_codes import ExitCode
+from ..files import write_private_file
 from ..output import get_renderer
 from ._workflow import offline_store, workflow_client, workflow_config, workflow_errors
 
@@ -181,20 +179,7 @@ def upo(
     with workflow_errors(ctx, "offline.upo"):
         with _local_queue(ctx, state_dir) as (profile, queue):
             receipt = queue.read_upo(invoice_hash)
-        # Write and close before publishing the file. Linking fails if the
-        # destination already exists, including an existing symbolic link.
-        destination = out.absolute()
-        _safe_directory(destination.parent)
-        fd, filename = tempfile.mkstemp(dir=destination.parent, prefix=".ksef-upo-")
-        temporary = Path(filename)
-        try:
-            with os.fdopen(fd, "wb") as file:
-                file.write(receipt)
-                file.flush()
-                os.fsync(file.fileno())
-            os.link(temporary, destination)
-        finally:
-            temporary.unlink()
+        write_private_file(out, receipt)
         get_renderer(require_context(ctx)).success(
             command="offline.upo", profile=profile, data={"saved": str(out)}
         )

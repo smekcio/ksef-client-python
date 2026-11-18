@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -13,6 +15,8 @@ from ..exit_codes import ExitCode
 from ..output import get_renderer
 from ..sdk.adapters import get_send_status, send_batch_invoices, send_online_invoice
 from ._error_utils import build_api_error_hint, build_rate_limit_hint
+from ._workflow import workflow_errors
+from .online_cmd import tracked_send
 
 app = typer.Typer(help="Send invoices in online and batch modes.")
 
@@ -67,7 +71,10 @@ def _render_error(ctx: typer.Context, command: str, exc: Exception) -> None:
     raise typer.Exit(int(ExitCode.CONFIG_ERROR))
 
 
-@app.command("online")
+@app.command(
+    "online",
+    help="Send an invoice online. Track it across restarts with --local-id and --state-dir.",
+)
 def send_online(
     ctx: typer.Context,
     invoice: str = typer.Option(..., "--invoice", help="Path to invoice XML file."),
@@ -105,7 +112,44 @@ def send_online(
     base_url: str | None = typer.Option(
         None, "--base-url", help="Override KSeF base URL for this command."
     ),
+    local_id: Annotated[
+        str | None, typer.Option("--local-id", help="Track the invoice by your own stable ID.")
+    ] = None,
+    state_dir: Annotated[
+        Path | None,
+        typer.Option("--state-dir", help="Private directory for tracked online submissions."),
+    ] = None,
 ) -> None:
+    if local_id is not None or state_dir is not None:
+        with workflow_errors(ctx, "send.online"):
+            if not local_id or state_dir is None:
+                raise CliError(
+                    "Use --local-id and --state-dir together.", ExitCode.VALIDATION_ERROR
+                )
+            if (
+                (system_code, schema_version, form_value) != ("FA (3)", "1-0E", "FA")
+                or upo_v43
+                or save_session
+                or base_url
+            ):
+                raise CliError(
+                    "Tracked submissions use FA (3), the profile endpoint and a saved session.",
+                    ExitCode.VALIDATION_ERROR,
+                    "Use the default form and omit --upo-v43, --save-session and --base-url.",
+                )
+            tracked_send(
+                ctx,
+                state_dir,
+                local_id,
+                Path(invoice),
+                wait_status=wait_status,
+                wait_upo=wait_upo,
+                poll_interval=poll_interval,
+                max_attempts=max_attempts,
+                save_upo=save_upo,
+                overwrite=save_upo_overwrite,
+            )
+        return
     cli_ctx = require_context(ctx)
     renderer = get_renderer(cli_ctx)
     profile = profile_label(cli_ctx)
@@ -132,7 +176,10 @@ def send_online(
     renderer.success(command="send.online", profile=profile, data=result)
 
 
-@app.command("batch")
+@app.command(
+    "batch",
+    help="Use --save-session ID to see each file's result with ksef session batch report.",
+)
 def send_batch(
     ctx: typer.Context,
     zip_path: str | None = typer.Option(None, "--zip", help="Path to input ZIP with invoices."),

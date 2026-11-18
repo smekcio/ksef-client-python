@@ -16,8 +16,8 @@ import struct
 import tarfile
 import tempfile
 import zipfile
-from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -835,10 +835,28 @@ def validate_zip_directory(source: BinaryIO) -> None:
 
 
 def extract_archive(archive: Path, target: Path, compression: m.CompressionType) -> tuple[str, ...]:
+    @contextmanager
+    def output(name: str) -> Iterator[Callable[[bytes], object]]:
+        path = safe_path(target / name)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with path.open("xb") as destination:
+            yield destination.write
+
+    with archive.open("rb") as source:
+        return visit_archive(source, archive.stat().st_size, compression, output)
+
+
+def visit_archive(
+    archive: BinaryIO,
+    archive_size: int,
+    compression: m.CompressionType,
+    open_entry: Callable[[str], AbstractContextManager[Callable[[bytes], object]]],
+) -> tuple[str, ...]:
+    """Pass bounded, validated entry contents to a file writer or digest, in archive order."""
     files: list[str] = []
     names: set[str] = set()
     total = 0
-    compressed_size = max(1, archive.stat().st_size)
+    compressed_size = max(1, archive_size)
 
     def extract(name: str, declared: int, source: IO[bytes]) -> None:
         nonlocal total
@@ -861,24 +879,21 @@ def extract_archive(archive: Path, target: Path, compression: m.CompressionType)
         ):
             raise KsefExportTransferError("Unsafe or oversized archive entry")
         names.add(collision)
-        path = safe_path(target / normalized)
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         size = 0
-        with path.open("xb") as output:
+        with open_entry(normalized) as write:
             while chunk := source.read(BUFFER_SIZE):
                 check_control()
                 size += len(chunk)
                 total += len(chunk)
                 if size > 500_000_000 or total > 2_000_000_000 or total / compressed_size > 200:
                     raise KsefExportTransferError("Archive expansion exceeds safety limits")
-                output.write(chunk)
+                write(chunk)
         if size != declared:
             raise KsefExportTransferError("Archive entry has inconsistent size")
         files.append(normalized)
 
     if compression == m.CompressionType.ZIP:
-        with archive.open("rb") as source:
-            validate_zip_directory(source)
+        validate_zip_directory(archive)
         with zipfile.ZipFile(archive) as zipped:
             for entry in zipped.infolist():
                 if entry.filename.endswith("/"):

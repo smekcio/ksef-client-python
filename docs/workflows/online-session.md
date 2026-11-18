@@ -135,6 +135,8 @@ Zgodność wsteczna:
 
 ## Trwała wysyłka online
 
+W terminalu `ksef send online --local-id ID --state-dir KATALOG --invoice PLIK` zapisuje wysyłkę pod własnym ID. [Wznowienie i indywidualne UPO w CLI](cli-operations.md#wysyłka-online-po-własnym-id)
+
 Do automatycznej wysyłki z możliwością wznowienia zapisz oryginalny XML
 pod stałym identyfikatorem swojej aplikacji. Wybierz prywatny katalog dla
 SQLite i przechowuj losowy klucz 32-bajtowy oddzielnie, w magazynie sekretów.

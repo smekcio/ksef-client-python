@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+import re
+from dataclasses import asdict, dataclass
+from typing import Any
 
 from . import models as m
 from ._invoice_metadata_validation import _validate_archive_metadata
@@ -21,6 +23,44 @@ class KsefInvoiceDeliveryLeaseLostError(KsefXmlSyncError):
 
 
 @dataclass(frozen=True, repr=False)
+class InvoiceDeliveryReceipt:
+    """Private proof of a particular delivery attempt, usable across process restarts."""
+
+    key: InvoiceXmlKey
+    consumer: str
+    _token: str
+    _epoch: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "key": asdict(self.key),
+            "consumer": self.consumer,
+            "token": self._token,
+            "epoch": self._epoch,
+        }
+
+    @classmethod
+    def from_dict(cls, data: object) -> InvoiceDeliveryReceipt:
+        try:
+            if (
+                not isinstance(data, dict)
+                or type(data.get("version")) is not int
+                or data["version"] != 1
+            ):
+                raise ValueError
+            key = InvoiceXmlKey(**data["key"])
+            consumer, token, epoch = data["consumer"], data["token"], data["epoch"]
+            if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", consumer) or not all(
+                re.fullmatch(r"[0-9a-f]{32}", value) for value in (token, epoch)
+            ):
+                raise ValueError
+            return cls(key, consumer, token, epoch)
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("Invalid invoice delivery receipt") from None
+
+
+@dataclass(frozen=True, repr=False)
 class IncomingInvoiceDelivery:
     """One verified delivery attempt. The XML and metadata may contain sensitive data."""
 
@@ -32,6 +72,10 @@ class IncomingInvoiceDelivery:
     expires_at: float
     _token: str
     _epoch: str
+
+    @property
+    def receipt(self) -> InvoiceDeliveryReceipt:
+        return InvoiceDeliveryReceipt(self.key, self.consumer, self._token, self._epoch)
 
 
 def _delivery_metadata(raw: str, key: InvoiceXmlKey, expected_hash: str) -> m.InvoiceMetadata:

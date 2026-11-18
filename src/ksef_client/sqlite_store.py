@@ -32,6 +32,7 @@ from .exceptions import (
 )
 from .invoice_delivery import (
     IncomingInvoiceDelivery,
+    InvoiceDeliveryReceipt,
     KsefInvoiceDeliveryLeaseLostError,
     _delivery_metadata,
     _PendingDelivery,
@@ -887,7 +888,10 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
         return self._verified_invoice_delivery(pending, xml)
 
     def _update_invoice_delivery(
-        self, delivery: IncomingInvoiceDelivery, *, delay_seconds: float | None
+        self,
+        delivery: IncomingInvoiceDelivery | InvoiceDeliveryReceipt,
+        *,
+        delay_seconds: float | None,
     ) -> None:
         with self._transaction():
             self._execute(DELIVERY_SCHEMA)
@@ -921,12 +925,17 @@ class SQLiteInvoiceSyncStore(MetadataSQLiteStore):
             if updated.rowcount != 1:
                 raise KsefInvoiceDeliveryLeaseLostError()
 
-    def acknowledge_invoice_delivery(self, delivery: IncomingInvoiceDelivery) -> None:
+    def acknowledge_invoice_delivery(
+        self, delivery: IncomingInvoiceDelivery | InvoiceDeliveryReceipt
+    ) -> None:
         """Acknowledge after processing. Repeating a successful acknowledgement is safe."""
         self._update_invoice_delivery(delivery, delay_seconds=None)
 
     def retry_invoice_delivery(
-        self, delivery: IncomingInvoiceDelivery, *, delay_seconds: float = 0
+        self,
+        delivery: IncomingInvoiceDelivery | InvoiceDeliveryReceipt,
+        *,
+        delay_seconds: float = 0,
     ) -> None:
         """Release the active attempt and make it available again after an optional delay."""
         if type(delay_seconds) not in (int, float) or not 0 <= delay_seconds <= 86_400:
@@ -1258,11 +1267,16 @@ class AsyncSQLiteInvoiceSyncStore:
         xml = await storage.read(pending.key, pending.expected_hash, max_bytes=max_xml_bytes)
         return await self._call("_verified_invoice_delivery", pending, xml)
 
-    async def acknowledge_invoice_delivery(self, delivery: IncomingInvoiceDelivery) -> None:
+    async def acknowledge_invoice_delivery(
+        self, delivery: IncomingInvoiceDelivery | InvoiceDeliveryReceipt
+    ) -> None:
         await self._call("acknowledge_invoice_delivery", delivery)
 
     async def retry_invoice_delivery(
-        self, delivery: IncomingInvoiceDelivery, *, delay_seconds: float = 0
+        self,
+        delivery: IncomingInvoiceDelivery | InvoiceDeliveryReceipt,
+        *,
+        delay_seconds: float = 0,
     ) -> None:
         await self._call("retry_invoice_delivery", delivery, delay_seconds=delay_seconds)
 
