@@ -5,10 +5,6 @@ from rich.table import Table
 from rich.text import Text
 
 
-def _terminal_value(value: str) -> str:
-    return "".join(char if char.isprintable() else "?" for char in value)
-
-
 class HumanRenderer:
     def __init__(self, *, no_color: bool = False) -> None:
         self._console = Console(no_color=no_color)
@@ -118,3 +114,7 @@ class HumanRenderer:
             self._console.print("Owner permissions:")
             for scope in owners:
                 self._console.print(Text("  " + _terminal_value(scope)))
+
+
+def _terminal_value(value: str) -> str:
+    return "".join(char if char.isprintable() else "?" for char in value)
