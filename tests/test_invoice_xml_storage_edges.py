@@ -16,6 +16,7 @@ from ksef_client import (
     FileInvoiceXmlStore,
     InvoiceXmlKey,
     KsefXmlStorageError,
+    SQLiteInvoiceSyncStore,
 )
 from ksef_client import invoice_xml_storage as files
 from tests.test_invoice_xml_sync import HASH, NUMBER, XML, environment
@@ -247,14 +248,20 @@ def test_atomic_publication_loser_and_bounded_cleanup(tmp_path):
         files._safe_directory(tmp_path / "missing")
 
 
-def test_database_link_is_rejected_before_open(monkeypatch, tmp_path):
-    from pathlib import Path
+@pytest.mark.parametrize("suffix", ["", "-wal", "-shm", "-journal"])
+def test_database_link_is_rejected_before_open(tmp_path, suffix):
+    database = tmp_path / "archive.db"
+    link = tmp_path / (database.name + suffix)
+    destination = tmp_path / "missing.db"
+    try:
+        link.symlink_to(destination)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Creating symbolic links requires a Windows privilege")
+        raise
 
-    target = tmp_path / "unsafe.db"
-    original = Path.is_symlink
-    monkeypatch.setattr(Path, "is_symlink", lambda self: self == target or original(self))
-    from ksef_client import SQLiteInvoiceSyncStore
-
-    with pytest.raises(KsefXmlStorageError):
-        SQLiteInvoiceSyncStore.open(target)
-    assert not target.exists()
+    with pytest.raises(KsefXmlStorageError, match="unsafe_database_path"):
+        SQLiteInvoiceSyncStore.open(database)
+    assert link.is_symlink()
+    assert not destination.exists()
+    assert not database.exists()
