@@ -14,6 +14,7 @@ from . import models as m
 from .batch_outcomes import BatchInvoiceManifest, BatchInvoiceReport
 from .client import AsyncAuthenticatedClient, AsyncKsefClient
 from .config import KsefClientOptions
+from .exceptions import KsefPaginationError
 from .facade import (
     FA3,
     Credentials,
@@ -31,6 +32,7 @@ from .operations import (
     environment_key,
     validate_wait,
 )
+from .pagination import iter_page_offsets
 from .profiles import Profile, ProfileStore
 from .request_control import request_control
 from .services.crypto import build_encryption_data
@@ -649,6 +651,39 @@ class AsyncKsef:
 class AsyncPermissions:
     def __init__(self, owner: AsyncKsef) -> None:
         self.owner = owner
+
+    async def list_personal_grants(
+        self, *, max_pages: int | None = 100
+    ) -> m.QueryPersonalPermissionsResponse:
+        """Read all personal grants and reported owner scopes in this authentication context."""
+        request = m.PersonalPermissionsQueryRequest()
+        grants: dict[str, m.PersonalPermission] = {}
+        owner_scopes: dict[m.OwnerPermissionScope, None] | None = None
+        for offset in iter_page_offsets(max_pages=max_pages):
+            page = await self.owner.api.permissions.query_personal_grants(
+                request, page_offset=offset, page_size=100
+            )
+            for grant in page.permissions:
+                if grant.id in grants:
+                    raise KsefPaginationError("KSeF repeated a personal grant ID. Retry the query.")
+                grants[grant.id] = grant
+            if page.owner_permissions is not None:
+                if owner_scopes is None:
+                    owner_scopes = {}
+                owner_scopes.update(dict.fromkeys(page.owner_permissions))
+            if not page.has_more:
+                return m.QueryPersonalPermissionsResponse(
+                    has_more=False,
+                    permissions=list(grants.values()),
+                    owner_permissions=None if owner_scopes is None else list(owner_scopes),
+                )
+            if not page.permissions:
+                raise KsefPaginationError(
+                    "KSeF returned an empty page with hasMore=true. Retry the query."
+                )
+        raise KsefPaginationError(
+            "Personal permissions exceed the page limit. Increase max_pages and retry."
+        )
 
     def _operation(
         self, response: m.PermissionsOperationResponse

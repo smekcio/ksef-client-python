@@ -397,7 +397,7 @@ class KsefSyncRunError(KsefSyncError):
 
 
 class KsefPaginationError(KsefError):
-    """Base error for the opt-in resumable metadata search."""
+    """A paginated KSeF query could not produce a complete result."""
 
     code = ErrorCode.PAGINATION_ERROR
 

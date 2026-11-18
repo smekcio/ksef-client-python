@@ -24,6 +24,7 @@ sa renderowane z bogatszymi hintami, jesli KSeF zwroci `application/problem+json
   - `auth logout`
 - diagnostyka:
   - `health check`
+  - `health permissions`
 - latarnia:
   - `lighthouse status`
   - `lighthouse messages`
@@ -371,6 +372,32 @@ Uwagi:
   nie blokuje pracy.
 - `--check-auth` bez zapisanego tokenu daje `4` (`AUTH_ERROR`), `--check-certs` bez wymaganych
   certyfikatow — `5` (`API_ERROR`).
+
+## `ksef health permissions`
+
+Po zalogowaniu możesz odczytać uprawnienia, które KSeF zwraca dla Ciebie w kontekście wybranego profilu.
+
+```bash
+ksef --profile firma health permissions
+ksef --profile firma --json health permissions
+```
+
+Każdy wiersz to osobne nadanie. Przy nim zobaczysz kod uprawnienia (np. `InvoiceRead`),
+stan (`Active` lub `Inactive`), możliwość delegowania i identyfikatory zwrócone przez API.
+`Grantor` oznacza kontekst nadający uprawnienie, `Authorized` podmiot uprawniony, a
+`Target` podmiot docelowy. Dwa nadania o tym samym kodzie mogą dotyczyć różnych podmiotów.
+Wynik opisuje nadania. KSeF rozstrzyga dostęp do konkretnej faktury przy wykonywaniu operacji.
+
+Uprawnienia właścicielskie są pokazane osobno. W JSON-ie `data.ownerPermissions`
+zawiera unikalne kody ze wszystkich pobranych stron. Wartość `[]` oznacza, że KSeF zwrócił
+pustą listę, a `null`, że na żadnej stronie nie podał tej informacji.
+`data.permissions` zawiera nadania z ich technicznymi identyfikatorami.
+
+Polecenie pobiera po 100 nadań na stronę. Domyślny limit to 100 stron.
+Aby go zwiększyć, użyj np. `ksef --profile firma health permissions --max-pages 200`.
+Kompletna pusta lista kończy się kodem `0`. Odmowa dostępu daje kod `3`,
+limit zapytań KSeF kod `4`, a przerwana paginacja kod `5`. W razie błędu cały raport
+jest pomijany. [Opis metody SDK](../api/permissions.md#list_personal_grants)
 
 ## `ksef lighthouse status`
 

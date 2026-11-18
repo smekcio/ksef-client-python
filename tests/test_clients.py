@@ -599,9 +599,6 @@ class ClientsTests(unittest.TestCase):
             permissions.query_eu_entities_grants(
                 payload, page_offset=0, page_size=10, access_token="token"
             )
-            permissions.query_personal_grants(
-                payload, page_offset=0, page_size=10, access_token="token"
-            )
             permissions.query_persons_grants(
                 payload, page_offset=0, page_size=10, access_token="token"
             )
@@ -1166,9 +1163,6 @@ class AsyncClientsTests(unittest.IsolatedAsyncioTestCase):
                 payload, page_offset=0, page_size=10, access_token="token"
             )
             await permissions.query_eu_entities_grants(
-                payload, page_offset=0, page_size=10, access_token="token"
-            )
-            await permissions.query_personal_grants(
                 payload, page_offset=0, page_size=10, access_token="token"
             )
             await permissions.query_persons_grants(

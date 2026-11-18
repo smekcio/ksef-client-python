@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..exceptions import KsefPaginationError
 from ..models import (
     CheckAttachmentPermissionStatusResponse,
     EntityAuthorizationPermissionsGrantRequest,
@@ -39,6 +40,49 @@ def _page_params(page_offset: int | None, page_size: int | None) -> dict[str, An
     if page_size is not None:
         params["pageSize"] = page_size
     return params
+
+
+def _parse_personal_grants(data: Any) -> QueryPersonalPermissionsResponse:
+    # The generated decoder accepts arbitrary iterables for JSON arrays. An
+    # empty object, for example, would silently become an empty list of grants.
+    message = "KSeF returned an invalid personal permissions page."
+    if not isinstance(data, dict) or not isinstance(data.get("hasMore"), bool):
+        raise KsefPaginationError(message)
+    grants = data.get("permissions")
+    owners = data.get("ownerPermissions")
+    if not isinstance(grants, list) or not all(_valid_personal_grant(grant) for grant in grants):
+        raise KsefPaginationError(message)
+    if owners is not None and not (
+        isinstance(owners, list) and all(_nonempty_string(scope) for scope in owners)
+    ):
+        raise KsefPaginationError(message)
+    try:
+        return QueryPersonalPermissionsResponse.from_dict(data)
+    except (TypeError, ValueError):
+        raise KsefPaginationError(message) from None
+
+
+def _nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _valid_personal_grant(grant: Any) -> bool:
+    if not isinstance(grant, dict) or not all(
+        _nonempty_string(grant.get(key)) for key in ("id", "permissionScope", "permissionState")
+    ):
+        return False
+    for key in ("contextIdentifier", "authorizedIdentifier", "targetIdentifier"):
+        identifier = grant.get(key)
+        if identifier is None:
+            continue
+        if not isinstance(identifier, dict) or not _nonempty_string(identifier.get("type")):
+            return False
+        value = identifier.get("value")
+        if key == "targetIdentifier" and value is None:
+            continue
+        if not _nonempty_string(value):
+            return False
+    return isinstance(grant.get("canDelegate"), bool)
 
 
 class PermissionsClient(BaseApiClient):
@@ -253,14 +297,14 @@ class PermissionsClient(BaseApiClient):
         access_token: str | None = None,
     ) -> QueryPersonalPermissionsResponse:
         params = _page_params(page_offset, page_size)
-        return self._request_model(
+        payload = self._request_json(
             "POST",
             "/permissions/query/personal/grants",
-            response_model=QueryPersonalPermissionsResponse,
             params=params or None,
             json=request_payload,
             access_token=access_token,
         )
+        return _parse_personal_grants(payload)
 
     def query_persons_grants(
         self,
@@ -529,14 +573,14 @@ class AsyncPermissionsClient(AsyncBaseApiClient):
         access_token: str | None = None,
     ) -> QueryPersonalPermissionsResponse:
         params = _page_params(page_offset, page_size)
-        return await self._request_model(
+        payload = await self._request_json(
             "POST",
             "/permissions/query/personal/grants",
-            response_model=QueryPersonalPermissionsResponse,
             params=params or None,
             json=request_payload,
             access_token=access_token,
         )
+        return _parse_personal_grants(payload)
 
     async def query_persons_grants(
         self,

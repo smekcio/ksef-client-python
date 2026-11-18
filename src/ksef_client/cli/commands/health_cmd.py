@@ -4,7 +4,14 @@ import os
 
 import typer
 
-from ksef_client.exceptions import KsefApiError, KsefHttpError, KsefRateLimitError
+from ksef_client import models as m
+from ksef_client.exceptions import (
+    KsefApiError,
+    KsefHttpError,
+    KsefPaginationError,
+    KsefRateLimitError,
+)
+from ksef_client.facade import connection_options
 
 from ...diagnostics import redact_sensitive
 from ..auth.keyring_store import get_token_store_mode
@@ -15,6 +22,7 @@ from ..exit_codes import ExitCode
 from ..output import get_renderer
 from ..sdk.adapters import run_health_check
 from ._error_utils import build_api_error_hint, build_rate_limit_hint
+from ._workflow import workflow_client, workflow_errors
 
 app = typer.Typer(help="Run connectivity and diagnostics checks.")
 
@@ -155,3 +163,64 @@ def health_check(
     except Exception as exc:
         _render_error(ctx, "health.check", exc)
     renderer.success(command="health.check", profile=profile, data=redact_sensitive(result))
+
+
+def _grant_details(grant: m.PersonalPermission) -> dict[str, object]:
+    # Include the identifiers that qualify the grant, without personal details or free text.
+    fields: dict[str, object] = {
+        "id": grant.id,
+        "permissionScope": grant.permission_scope.value,
+        "permissionState": grant.permission_state.value,
+        "canDelegate": grant.can_delegate,
+    }
+    for key, identifier in (
+        ("contextIdentifier", grant.context_identifier),
+        ("authorizedIdentifier", grant.authorized_identifier),
+        ("targetIdentifier", grant.target_identifier),
+    ):
+        if identifier is not None:
+            fields[key] = identifier.to_dict()
+    return fields
+
+
+@app.command("permissions")
+def health_permissions(
+    ctx: typer.Context,
+    max_pages: int = typer.Option(100, "--max-pages", min=1, help="Maximum pages of 100 grants."),
+) -> None:
+    """List personal grants and owner permissions reported by KSeF for the selected profile."""
+    cli_ctx = require_context(ctx)
+    with workflow_errors(
+        ctx, "health.permissions", failure_message="Could not read permissions from KSeF."
+    ):
+        profile = require_profile(cli_ctx)
+        options, kind, context = connection_options(profile=profile)
+        with workflow_client(profile, options, kind, context) as client:
+            try:
+                report = client.permissions.list_personal_grants(max_pages=max_pages)
+            except KsefPaginationError as exc:
+                raise CliError(
+                    exc.message,
+                    ExitCode.API_ERROR,
+                    "Retry the query. Use --max-pages to change the page limit.",
+                ) from exc
+            except KsefHttpError as exc:
+                if exc.status_code in (401, 403):
+                    raise CliError(
+                        "KSeF refused access to the permissions list.",
+                        ExitCode.AUTH_ERROR,
+                        "Verify the selected profile and its login context.",
+                    ) from exc
+                raise
+        get_renderer(cli_ctx).success(
+            command="health.permissions",
+            profile=profile,
+            data={
+                "permissions": [_grant_details(grant) for grant in report.permissions],
+                "ownerPermissions": (
+                    None
+                    if report.owner_permissions is None
+                    else [scope.value for scope in report.owner_permissions]
+                ),
+            },
+        )
