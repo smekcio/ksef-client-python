@@ -36,7 +36,7 @@ def test_readme_and_complete_script_execute_with_real_sdk_adapters(tmp_path, mon
             assert server.downloads == 1
             readme = Path(__file__).resolve().parents[1] / "README.md"
             text = readme.read_text(encoding="utf-8")
-            section = text.split("### Synchronizacja metadanych i XML", 1)[1]
+            section = text.split("## Pobieraj faktury zakupowe", 1)[1]
             match = re.search(r"```python\n(.*?)\n```", section, re.S)
             assert match is not None
             code = match.group(1)

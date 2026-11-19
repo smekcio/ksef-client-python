@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -167,6 +168,15 @@ def _check_sdist_contents(sdist: Path) -> None:
 def _check_base_install(wheel: Path) -> None:
     python, _, ksef = _create_venv(BUILD_DIR / "venv-base")
     _run(_pip_command(python, "install", str(wheel)))
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    quickstart = re.search(r"^```python\n(.+?)\n```.*?^```text\n(.+?)\n```", readme, re.M | re.S)
+    if quickstart is None:
+        raise AssertionError("Brak przykładu startowego w Pythonie lub jego wyniku w README.")
+    result = _run([str(python), "-c", quickstart[1]], cwd=REPO_ROOT / "docs" / "examples")
+    if result.stdout.strip() != quickstart[2]:
+        raise AssertionError(
+            f"Wynik przykładu z README: {result.stdout!r}, oczekiwano {quickstart[2]!r}"
+        )
     _run([str(python), "-c", "import ksef_client.cli"])
     _run(
         [
