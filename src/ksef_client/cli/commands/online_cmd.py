@@ -238,6 +238,46 @@ def status(ctx: typer.Context, state_dir: StateDir, local_id: LocalId) -> None:
 
 
 @app.command()
+def bundle(
+    ctx: typer.Context,
+    local_id: LocalId,
+    state_dir: StateDir = Path("."),
+    out: Annotated[Path, typer.Option("--out", help="New ZIP file in an existing directory.")] = (
+        Path("invoice-bundle.zip")
+    ),
+) -> None:
+    """Export the saved XML, a local PDF, metadata and any verified UPO, even after logout."""
+    with (
+        workflow_errors(
+            ctx,
+            "online.bundle",
+            failure_message="Could not read the invoice bundle. Check the ID, profile and archive.",
+        ),
+        _local(ctx, state_dir) as (profile, queue),
+    ):
+        snapshot = queue.bundle(local_id)
+        try:
+            snapshot.save(out)
+        except ImportError:
+            raise CliError(
+                "PDF rendering is unavailable.",
+                ExitCode.CONFIG_ERROR,
+                'Install pip package "ksef-client[pdf]" and retry.',
+            ) from None
+        get_renderer(require_context(ctx)).success(
+            command="online.bundle",
+            profile=profile,
+            data={
+                "local_id": local_id,
+                "status": snapshot.invoice.status.value,
+                "ksef_number": snapshot.invoice.ksef_number,
+                "upo_status": snapshot.upo_status,
+                "bundle_path": str(out),
+            },
+        )
+
+
+@app.command()
 def upo(
     ctx: typer.Context,
     state_dir: StateDir,

@@ -36,6 +36,9 @@ Jeśli skrypt ma wznowić wysyłkę po utracie połączenia, może zapisać fakt
 identyfikatorem. Po restarcie odczyta pod nim numer KSeF i indywidualne UPO.
 [Przykład trwałej wysyłki online](docs/workflows/online-session.md#trwała-wysyłka-online).
 
+Polecenie `ksef online bundle` zapisuje oryginalny XML, lokalny podgląd PDF i dostępne
+indywidualne UPO w jednym pliku ZIP. [Eksport po własnym ID](docs/workflows/cli-operations.md#lokalny-pakiet-faktury-i-upo)
+
 Najważniejsze cechy:
 
 - **lokalne archiwum faktur i XML** — przyrostowe pobieranie, wznowienie po restarcie,

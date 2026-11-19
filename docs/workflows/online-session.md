@@ -156,6 +156,18 @@ with SQLiteOnlineInvoiceStore.open("private/online.db", key=archive_key) as stor
         print(current.ksef_number)
 ```
 
+Po instalacji `pip install "ksef-client[pdf]"` możesz zapisać pakiet dokumentów z tej samej kolejki.
+
+```python
+with SQLiteOnlineInvoiceStore.open("private/online.db", key=archive_key) as store:
+    invoices = client.invoices.online(store, namespace="company")
+    bundle = invoices.bundle("FV-123")
+    bundle.save("private/FV-123.zip")
+    print(bundle.invoice.ksef_number, bundle.upo_status)
+```
+
+`OnlineInvoiceQueue.bundle()` działa lokalnie, także bez zalogowanego klienta. W `AsyncKsef` pobierz migawkę przez `await invoices.bundle("FV-123")`. Zapis PDF i ZIP wykonaj przez `await asyncio.to_thread(bundle.save, path)`. Oryginalne bajty są w `bundle.xml` i opcjonalnym `bundle.upo`. Zapis używa nowej ścieżki w istniejącym katalogu. [Format pakietu i statusy UPO](cli-operations.md#lokalny-pakiet-faktury-i-upo)
+
 Ta sama kombinacja bazy, klucza, środowiska, kontekstu i namespace po restarcie
 odczytuje zapisany stan. Ponowne zgłoszenie tego samego ID z tymi samymi bajtami
 zwraca bieżący stan. Ten sam identyfikator z innym XML lub zgłoszenie identycznego

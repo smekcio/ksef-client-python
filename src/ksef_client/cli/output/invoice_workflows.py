@@ -11,6 +11,8 @@ _LABELS = {
     "session_ref": "Session reference",
     "revision": "Saved revision",
     "upo_path": "UPO file",
+    "upo_status": "UPO status",
+    "bundle_path": "Bundle ZIP",
     "saved": "UPO file",
     "event_id": "Event ID",
     "consumer": "Consumer",
@@ -84,7 +86,7 @@ def render_invoice_workflow(console: Console, command: str, data: dict) -> bool:
             console.print("Delivery acknowledged.")
         elif command == "archive.retry":
             console.print("Delivery released for another attempt.")
-        elif "local_id" in data and "upo_path" not in data:
+        elif "local_id" in data and "upo_path" not in data and command != "online.bundle":
             console.print(_ONLINE_ACTIONS[data["status"]])
     else:
         return False

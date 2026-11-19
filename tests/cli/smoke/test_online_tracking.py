@@ -1,7 +1,9 @@
 import base64
 import json
 import os
+import zipfile
 from contextlib import nullcontext
+from datetime import date
 from typing import cast
 
 import pytest
@@ -13,6 +15,7 @@ from ksef_client import Ksef, KsefClientOptions
 from ksef_client.cli import app
 from ksef_client.cli.commands import online_cmd
 from ksef_client.cli.exit_codes import ExitCode
+from ksef_client.documents.fa3 import FA3InvoiceBuilder, FA3Party
 from ksef_client.exceptions import KsefRateLimitError
 from ksef_client.facade import Invoices
 from ksef_client.operations import environment_key
@@ -207,6 +210,69 @@ def test_unsubmitted_retry_delegates_to_remote_evidence(online):
     server.successful_invoice_count = server.failed_invoice_count = 0
     assert invoke("online", "retry-unsubmitted", *item)["status"] == "queued"
     assert server.send_count == 1
+
+
+def test_export_pending_invoice_bundle_offline_from_real_fa3(online, tmp_path, monkeypatch):
+    _, invoke, state_dir, _ = online
+    monkeypatch.setattr(online_cmd, "workflow_client", lambda *args: pytest.fail("network used"))
+    seller = FA3Party(name="Łódź", tax_id="1234567890", address="ul. Jasna 1")
+    buyer = FA3Party(name="Kupujący", tax_id="1111111111", address="ul. Prosta 1")
+    xml = (
+        FA3InvoiceBuilder(
+            invoice_number="FV-42", issue_date=date(2026, 5, 1), seller=seller, buyer=buyer
+        )
+        .add_line("Usługa", quantity="1", unit_net_price="100", vat_rate="23")
+        .build()
+        .to_xml()
+    )
+    source = tmp_path / "original.xml"
+    source.write_bytes(xml)
+    args = ["--id", "FV-42", "--state-dir", state_dir]
+    invoke("online", "enqueue", *args, "--xml", str(source))
+    out = tmp_path / "document.zip"
+    summary = invoke("online", "bundle", *args, "--out", str(out))
+    assert summary == {
+        "local_id": "FV-42", "status": "queued", "ksef_number": None,
+        "upo_status": "pending", "bundle_path": str(out),
+    }
+    with zipfile.ZipFile(out) as archive:
+        assert archive.read("invoice.xml") == xml
+        assert archive.read("invoice.pdf").startswith(b"%PDF-")
+        assert "upo.xml" not in archive.namelist()
+        assert json.loads(archive.read("manifest.json"))["ksef_number"] is None
+    other = tmp_path / "another.zip"
+    text = invoke("online", "bundle", *args, "--out", str(other), human=True)
+    assert "UPO status: pending" in text
+    before = out.read_bytes()
+    invoke("online", "bundle", *args, "--out", str(out), code=ExitCode.IO_ERROR)
+    assert out.read_bytes() == before
+
+
+def test_failed_bundle_leaves_no_output(online, tmp_path, monkeypatch):
+    _, invoke, root, xml = online
+    item = ["--id", "A", "--state-dir", root]
+    invoke("online", "enqueue", *item, "--xml", xml)
+    out = tmp_path / "document.zip"
+    args = ["online", "bundle", *item, "--out", str(out)]
+
+    def missing(*args, **kwargs):
+        raise ImportError
+
+    monkeypatch.setattr("ksef_client.invoice_pdf.render_invoice_pdf", missing)
+    result = invoke(*args, code=ExitCode.CONFIG_ERROR)
+    assert "ksef-client[pdf]" in result["hint"]
+    assert not out.exists()
+    monkeypatch.setattr("ksef_client.invoice_pdf.render_invoice_pdf", lambda *a, **k: b"%PDF-data")
+    write_member = zipfile.ZipFile.writestr
+
+    def fail_after_xml(archive, name, content):
+        if name == "invoice.pdf":
+            raise OSError("disk full")
+        return write_member(archive, name, content)
+
+    monkeypatch.setattr(zipfile.ZipFile, "writestr", fail_after_xml)
+    invoke(*args, code=ExitCode.IO_ERROR)
+    assert not out.exists() and not list(tmp_path.glob(".ksef-*"))
 
 
 def test_status_rate_limit_preserves_retry_interval_and_does_not_resubmit(online, monkeypatch):

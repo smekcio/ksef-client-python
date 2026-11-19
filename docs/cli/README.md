@@ -36,7 +36,7 @@ sa renderowane z bogatszymi hintami, jesli KSeF zwroci `application/problem+json
   - `session online open/send/close`
   - `session batch open/upload/close/report`
   - `upo get`, `upo wait`
-  - [wysyłka po własnym ID](../workflows/cli-operations.md#wysyłka-online-po-własnym-id) przez `send online --local-id` i `online enqueue/run/status/upo/retry-unsubmitted/retry-cancelled`
+  - [wysyłka po własnym ID](../workflows/cli-operations.md#wysyłka-online-po-własnym-id) przez `send online --local-id` i `online enqueue/run/status/upo/bundle/retry-unsubmitted/retry-cancelled`
 - archiwum faktur zakupowych:
   - [`archive sync/status/next/ack/retry`](../workflows/cli-operations.md#odbiór-faktur-zakupowych)
 - eksport:
@@ -572,6 +572,7 @@ Uwagi:
   oraz odzyskania flow po przerwaniu lub bledzie po zapisaniu checkpointu.
 - `--save-upo-overwrite` pozwala nadpisac istniejacy plik UPO wskazany przez `--save-upo`.
 - `--local-id FV-123 --state-dir ./private` wiąże XML z własnym ID. Po restarcie odczytasz wynik przez `ksef online status`, wznowisz operację przez `ksef online run` i zapiszesz indywidualne UPO przez `ksef online upo`. [Przykłady i konfiguracja klucza](../workflows/cli-operations.md#wysyłka-online-po-własnym-id)
+- `ksef online bundle --id FV-123 --state-dir ./private --out FV-123.zip` zapisuje lokalny pakiet XML, PDF, metadanych i dostępnego UPO. Wymaga pakietu `ksef-client[cli,pdf]`. [Zawartość ZIP i status UPO](../workflows/cli-operations.md#lokalny-pakiet-faktury-i-upo)
 - Dla `FA_RR (1)` z `--schema-version 1-1E` uzyj `--form-value FA_RR`.
 
 ## `ksef send batch`
