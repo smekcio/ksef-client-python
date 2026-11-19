@@ -19,6 +19,7 @@ from ksef_client.clients import permissions
 from ksef_client.exceptions import KsefPaginationError, KsefResponseLimitError
 from ksef_client.http import HttpResponse
 from ksef_client.models import PermissionState, PersonalPermissionsQueryRequest
+from ksef_client.token_manager import TokenManagerError
 
 
 def grant(number: int, **fields: Any) -> dict[str, Any]:
@@ -141,6 +142,36 @@ def test_incomplete_report_raises(read_pages, pages, max_pages, message):
 def test_rejects_invalid_limit_before_http(read_pages):
     with pytest.raises(ValueError):
         read_pages([], max_pages=0)
+
+
+@pytest.mark.parametrize("use_async", [False, True])
+def test_operation_check_rejects_refresh_client_bound_to_another_transport(use_async, monkeypatch):
+    options = KsefClientOptions("https://permissions.example")
+    other = KsefClientOptions("https://other.example")
+    expired = "2000-01-01T00:00:00Z"
+
+    def unexpected_request(*args):
+        pytest.fail("Unexpected HTTP request with a mismatched token refresh client")
+
+    async def read_async():
+        monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", unexpected_request)
+        manager = AsyncTokenManager("access", "refresh", access_token_valid_until=expired)
+        async with (
+            AsyncAuthenticatedClient(options, manager) as api,
+            AsyncAuthenticatedClient(other, manager),
+        ):
+            sdk = AsyncKsef(api, options, context_type="Nip", context_value="1234567890")
+            await sdk.permissions.check_operation("download-purchases")
+
+    with pytest.raises(TokenManagerError, match="authentication transport changed"):
+        if use_async:
+            asyncio.run(read_async())
+        else:
+            monkeypatch.setattr(httpx.HTTPTransport, "handle_request", unexpected_request)
+            manager = TokenManager("access", "refresh", access_token_valid_until=expired)
+            with AuthenticatedClient(options, manager) as api, AuthenticatedClient(other, manager):
+                sdk = Ksef(api, options, context_type="Nip", context_value="1234567890")
+                sdk.permissions.check_operation("download-purchases")
 
 
 @pytest.mark.parametrize("last_scopes", [[], ["InvoiceWrite"]])

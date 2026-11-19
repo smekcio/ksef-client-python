@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Literal
@@ -9,6 +11,7 @@ from typing import TYPE_CHECKING, Literal
 from . import models as m
 from .operations import environment_key
 from .services.auth import _normalize_context_identifier_type
+from .token_manager import _bound_auth_requests
 
 if TYPE_CHECKING:
     from .async_facade import AsyncKsef
@@ -83,7 +86,8 @@ def _covers_context(grant: m.PersonalPermission, context_key: str) -> bool | Non
     return True
 
 
-def _operation_context(client: Ksef | AsyncKsef) -> str:
+@contextmanager
+def _operation_context(client: Ksef | AsyncKsef) -> Iterator[str]:
     transport = client.api.http_client
     if (
         client.api.permissions._http is not transport
@@ -97,7 +101,8 @@ def _operation_context(client: Ksef | AsyncKsef) -> str:
     ):
         raise ValueError("Permission evidence requires managed authentication and host.")
     kind, value = client.context_key.split(":", 1)
-    return f"{_normalize_context_identifier_type(kind).value}:{value}"
+    with _bound_auth_requests(transport):
+        yield f"{_normalize_context_identifier_type(kind).value}:{value}"
 
 
 def _evaluate_operation(

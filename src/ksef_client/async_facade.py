@@ -663,8 +663,8 @@ class AsyncPermissions:
     ) -> OperationPermissionReport:
         """Check grant evidence for ordinary online FA(3) sales or Subject2 purchases."""
         selected = InvoicePermissionOperation(operation)
-        context_key = _operation_context(self.owner)
-        grants = await self.list_personal_grants(max_pages=max_pages)
+        with _operation_context(self.owner) as context_key:
+            grants = await self.list_personal_grants(max_pages=max_pages)
         return _evaluate_operation(selected, context_key, grants)
 
     async def list_personal_grants(
