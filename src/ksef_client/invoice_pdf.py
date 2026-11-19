@@ -91,8 +91,13 @@ def _read_invoice(xml: bytes) -> ET.Element:
                 depth -= 1
     except (FA3ParseError, ET.ParseError, LookupError):
         raise ValueError("Invalid invoice XML for PDF.") from None
-    if root.tag != _NS + "Faktura" or root.find(_NS + "Fa") is None:
+    if root.tag != _NS + "Faktura" or len(root.findall(_NS + "Fa")) != 1:
         raise ValueError("Invoice PDF requires an FA(3) Faktura document.")
+    if any(
+        (len(node) and (node.text or "").strip()) or (node.tail or "").strip()
+        for node in root.iter()
+    ):
+        raise ValueError("Invoice PDF cannot represent mixed XML content.")
     return root
 
 
@@ -115,8 +120,17 @@ def _register_fonts() -> frozenset[int]:
 
 
 def _label(tag: str) -> str:
-    name = tag.removeprefix(_NS)
-    return _LABELS.get(name, name)
+    if tag.startswith(_NS):
+        name = tag.removeprefix(_NS)
+        return _LABELS.get(name, name)
+    return tag
+
+
+def _summary_value(root: ET.Element, path: str) -> str | None:
+    matches = root.findall("/".join(_NS + name for name in path.split("/")))
+    if len(matches) > 1:
+        raise ValueError("Invoice contains duplicate PDF summary fields.")
+    return matches[0].text if matches else None
 
 
 class _InvoicePage:
@@ -211,7 +225,7 @@ def render_invoice_pdf(xml: bytes, *, ksef_number: str | None = None) -> bytes:
         canvas = Canvas(buffer, pagesize=A4, invariant=True, pageCompression=1)
         canvas.setTitle("Wizualizacja faktury FA(3)")
         page = _InvoicePage(canvas, supported)
-        number = root.findtext(f"{_NS}Fa/{_NS}P_2")
+        number = _summary_value(root, "Fa/P_2")
         page.heading(number or "Faktura", size=20)
         for label, path in (
             ("Data wystawienia", "Fa/P_1"),
@@ -220,7 +234,7 @@ def render_invoice_pdf(xml: bytes, *, ksef_number: str | None = None) -> bytes:
             ("Kwota należności ogółem", "Fa/P_15"),
             ("Waluta", "Fa/KodWaluty"),
         ):
-            value = root.findtext("/".join(_NS + name for name in path.split("/")))
+            value = _summary_value(root, path)
             if value:
                 page.field(label, value)
         if ksef_number:

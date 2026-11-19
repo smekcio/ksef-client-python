@@ -98,3 +98,24 @@ def test_optional_dependency_hint(monkeypatch):
     monkeypatch.setitem(sys.modules, "reportlab.pdfgen.canvas", None)
     with pytest.raises(ImportError, match=r"ksef-client\[pdf\]"):
         invoice_pdf.render_invoice_pdf(invoice())
+
+
+@pytest.mark.parametrize(
+    "original,replacement,error",
+    [
+        (b"<Fa>", b"<Fa/><Fa>", "FA\\(3\\)"),
+        (b"<P_2>", b"<P_2>inny</P_2><P_2>", "duplicate"),
+        (b"<Fa>", b"<Fa>tekst", "mixed XML"),
+        (b"</P_7>", b"</P_7>tekst", "mixed XML"),
+    ],
+)
+def test_pdf_rejects_ambiguous_summary_and_mixed_content(original, replacement, error):
+    with pytest.raises(ValueError, match=error):
+        invoice_pdf.render_invoice_pdf(invoice().replace(original, replacement))
+
+
+def test_unqualified_extension_field_keeps_its_literal_name():
+    xml = invoice().replace(b"</Fa>", b'<P_15 xmlns="">opcja</P_15></Fa>')
+    text = pdf_text(invoice_pdf.render_invoice_pdf(xml))
+    assert "P_15" in text
+    assert "opcja" in text
