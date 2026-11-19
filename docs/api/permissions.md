@@ -136,6 +136,11 @@ uwierzytelnienia, stosując ten sam `max_pages` co `list_personal_grants`. Zwrac
   nadania podmiotu, więc `tokenScopeChecked` wynosi `false`. Akceptację faktury,
   zakres tokena oraz dostęp do konkretnego dokumentu sprawdza KSeF przy operacji.
   [Uprawnienia według MF](https://github.com/CIRFMF/ksef-api/blob/main/uprawnienia.md) · [Tokeny KSeF](https://github.com/CIRFMF/ksef-api/blob/main/tokeny-ksef.md)
+- Przy ręcznym tworzeniu `Ksef(api, ..., context_type=..., context_value=...)`
+  lub `AsyncKsef` podaj kontekst, dla którego wystawiono token. SDK sprawdza
+  zgodność transportu i środowiska oraz wymaga nagłówków `Host` i `Authorization`
+  zarządzanych przez klienta. Za powiązanie podanego kontekstu z tokenem odpowiada
+  aplikacja.
 
 ### `query_persons_grants(request_payload, ..., access_token)`
 Endpoint: `POST /permissions/query/persons/grants`

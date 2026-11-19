@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from . import models as m
+from .operations import environment_key
 from .services.auth import _normalize_context_identifier_type
+
+if TYPE_CHECKING:
+    from .async_facade import AsyncKsef
+    from .facade import Ksef
 
 
 class InvoicePermissionOperation(str, Enum):
@@ -78,14 +83,28 @@ def _covers_context(grant: m.PersonalPermission, context_key: str) -> bool | Non
     return True
 
 
+def _operation_context(client: Ksef | AsyncKsef) -> str:
+    transport = client.api.http_client
+    if (
+        client.api.permissions._http is not transport
+        or transport.api_base_url != client.options.normalized_base_url()
+        or environment_key(transport.api_base_url) != client.environment
+    ):
+        raise ValueError("Permission evidence requires the login context's API transport.")
+    if any(
+        name.lower() in {"authorization", "host"}
+        for name in transport._options.custom_headers or ()
+    ):
+        raise ValueError("Permission evidence requires managed authentication and host.")
+    kind, value = client.context_key.split(":", 1)
+    return f"{_normalize_context_identifier_type(kind).value}:{value}"
+
+
 def _evaluate_operation(
     operation: InvoicePermissionOperation,
     context_key: str,
     page: m.QueryPersonalPermissionsResponse,
 ) -> OperationPermissionReport:
-    # Directly constructed facades may retain the spelling supplied at login.
-    kind, value = context_key.split(":", 1)
-    context_key = f"{_normalize_context_identifier_type(kind).value}:{value}"
     sending = operation is InvoicePermissionOperation.SEND_ONLINE
     required = "InvoiceWrite" if sending else "InvoiceRead"
     owners = {item.value for item in page.owner_permissions or []}

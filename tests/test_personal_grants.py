@@ -37,8 +37,9 @@ def grant(number: int, **fields: Any) -> dict[str, Any]:
 def read_pages(request, monkeypatch):
     options = KsefClientOptions("https://permissions.example")
 
-    def read(pages, *, operation=None, context_type="Nip", **kwargs):
+    def read(pages, *, operation=None, context_type="Nip", transport_options=None, **kwargs):
         offsets: list[int] = []
+        actual = transport_options or options
 
         def respond(transport, req):
             assert req.method == "POST"
@@ -56,7 +57,7 @@ def read_pages(request, monkeypatch):
 
         async def read_async():
             monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", async_respond)
-            api = AsyncAuthenticatedClient(options, AsyncTokenManager("alias-access", "refresh"))
+            api = AsyncAuthenticatedClient(actual, AsyncTokenManager("alias-access", "refresh"))
             async with AsyncKsef(
                 api, options, context_type=context_type, context_value="1234567890"
             ) as sdk:
@@ -68,7 +69,7 @@ def read_pages(request, monkeypatch):
             if request.param == "async":
                 return asyncio.run(read_async())
             monkeypatch.setattr(httpx.HTTPTransport, "handle_request", respond)
-            api = AuthenticatedClient(options, TokenManager("alias-access", "refresh"))
+            api = AuthenticatedClient(actual, TokenManager("alias-access", "refresh"))
             with Ksef(api, options, context_type=context_type, context_value="1234567890") as sdk:
                 if operation is not None:
                     return sdk.permissions.check_operation(operation, **kwargs)
@@ -370,3 +371,16 @@ def test_matching_grant_on_later_page_takes_precedence_over_uncertain_evidence(r
 def test_operation_check_rejects_unknown_operation_before_http(read_pages):
     with pytest.raises(ValueError, match="InvoicePermissionOperation"):
         read_pages([], operation="typo")
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        KsefClientOptions("https://other-environment.example"),
+        KsefClientOptions("https://permissions.example", custom_headers={"aUtHoRiZaTiOn": "test"}),
+        KsefClientOptions("https://permissions.example", custom_headers={"Host": "other.example"}),
+    ],
+)
+def test_operation_check_rejects_mismatched_identity_before_http(read_pages, options):
+    with pytest.raises(ValueError, match="Permission evidence requires"):
+        read_pages([], operation="send-online", transport_options=options)

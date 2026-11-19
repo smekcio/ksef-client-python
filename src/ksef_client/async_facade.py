@@ -37,6 +37,7 @@ from .permission_checks import (
     InvoicePermissionOperation,
     OperationPermissionReport,
     _evaluate_operation,
+    _operation_context,
 )
 from .profiles import Profile, ProfileStore
 from .request_control import request_control
@@ -662,8 +663,9 @@ class AsyncPermissions:
     ) -> OperationPermissionReport:
         """Check grant evidence for ordinary online FA(3) sales or Subject2 purchases."""
         selected = InvoicePermissionOperation(operation)
+        context_key = _operation_context(self.owner)
         grants = await self.list_personal_grants(max_pages=max_pages)
-        return _evaluate_operation(selected, self.owner.context_key, grants)
+        return _evaluate_operation(selected, context_key, grants)
 
     async def list_personal_grants(
         self, *, max_pages: int | None = 100

@@ -251,6 +251,7 @@ from .permission_checks import (
     InvoicePermissionOperation,
     OperationPermissionReport,
     _evaluate_operation,
+    _operation_context,
 )
 from .profiles import Profile, ProfileStore
 from .request_control import request_control
