@@ -156,10 +156,8 @@ def test_operation_check_rejects_refresh_client_bound_to_another_transport(use_a
     async def read_async():
         monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", unexpected_request)
         manager = AsyncTokenManager("access", "refresh", access_token_valid_until=expired)
-        async with (
-            AsyncAuthenticatedClient(options, manager) as api,
-            AsyncAuthenticatedClient(other, manager),
-        ):
+        api = AsyncAuthenticatedClient(options, manager)
+        async with api, AsyncAuthenticatedClient(other, manager):
             sdk = AsyncKsef(api, options, context_type="Nip", context_value="1234567890")
             await sdk.permissions.check_operation("download-purchases")
 
@@ -169,7 +167,8 @@ def test_operation_check_rejects_refresh_client_bound_to_another_transport(use_a
         else:
             monkeypatch.setattr(httpx.HTTPTransport, "handle_request", unexpected_request)
             manager = TokenManager("access", "refresh", access_token_valid_until=expired)
-            with AuthenticatedClient(options, manager) as api, AuthenticatedClient(other, manager):
+            api = AuthenticatedClient(options, manager)
+            with api, AuthenticatedClient(other, manager):
                 sdk = Ksef(api, options, context_type="Nip", context_value="1234567890")
                 sdk.permissions.check_operation("download-purchases")
 
