@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import stat
 from enum import Enum
+from pathlib import Path
 
 import typer
 
@@ -15,7 +17,7 @@ from ..output import get_renderer
 from ..sdk.adapters import download_invoice, list_invoices
 from ._error_utils import build_api_error_hint, build_rate_limit_hint
 
-app = typer.Typer(help="List and download invoices.")
+app = typer.Typer(help="List, download and validate invoices.")
 
 
 class SortOrder(str, Enum):
@@ -167,3 +169,65 @@ def invoice_download(
         profile=profile,
         data=result,
     )
+
+
+@app.command("validate")
+def invoice_validate(ctx: typer.Context, file: Path) -> None:
+    """Validate a local FA(3) XML file. Requires the fa3 extra."""
+    from ksef_client.documents.fa3 import validate_invoice_xml
+    from ksef_client.documents.fa3.parse import MAX_XML_BYTES
+
+    cli_ctx = require_context(ctx)
+    profile = profile_label(cli_ctx)
+    renderer = get_renderer(cli_ctx)
+    command = "invoice.validate"
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(file, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError("Expected a regular file")
+            with os.fdopen(fd, "rb", closefd=False) as stream:
+                xml = stream.read(MAX_XML_BYTES + 1)
+        finally:
+            os.close(fd)
+        report = validate_invoice_xml(xml)
+    except OSError:
+        renderer.error(
+            command=command,
+            profile=profile,
+            code="IO_ERROR",
+            message="Nie można odczytać pliku XML.",
+            hint="Podaj dostępny do odczytu zwykły plik.",
+        )
+        raise typer.Exit(int(ExitCode.IO_ERROR)) from None
+    except ImportError:
+        renderer.error(
+            command=command,
+            profile=profile,
+            code="CONFIG_ERROR",
+            message="Brak biblioteki lxml do walidacji XSD.",
+            hint='Zainstaluj pip install "ksef-client[cli,fa3]".',
+        )
+        raise typer.Exit(int(ExitCode.CONFIG_ERROR)) from None
+
+    if report.valid:
+        renderer.success(command=command, profile=profile, data=report.to_dict())
+        return
+    hints = []
+    for issue in report.issues:
+        location = issue.field or "XML"
+        if issue.line:
+            location += f" (wiersz {issue.line})"
+        hints.append(f"{location}: {issue.message} {issue.hint}")
+    if report.truncated:
+        hints.append("Lista błędów została skrócona.")
+    renderer.error(
+        command=command,
+        profile=profile,
+        code="VALIDATION_ERROR",
+        message="Walidacja faktury FA(3) zakończona błędem.",
+        hint="\n".join(hints),
+        data=report.to_dict(),
+    )
+    raise typer.Exit(int(ExitCode.VALIDATION_ERROR))

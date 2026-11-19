@@ -68,6 +68,7 @@ from .models import (
     FA3ValidationIssue,
 )
 from .parse import FA3ParseError, parse_invoice_xml
+from .report import FA3XmlIssue, FA3XmlReport, validate_invoice_xml
 from .sections import (
     AdditionalDescription,
     AdvancePayment,
@@ -130,7 +131,10 @@ __all__ = [
     "FA3Party",
     "FA3ValidationIssue",
     "FA3ValidationResult",
+    "FA3XmlIssue",
+    "FA3XmlReport",
     "FA3XmlValidationError",
+    "validate_invoice_xml",
     "Footer",
     "GTUCode",
     "InvoiceLine",

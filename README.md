@@ -81,6 +81,7 @@ Najważniejsze cechy:
   oraz wznawialna wysyłka i pobieranie UPO;
   [przewodnik](docs/workflows/online-session.md#trwała-wysyłka-offline),
 - **FA(3)**: budowanie XML faktur, walidacja XSD, przygotowanie paczek ZIP/TarGz oraz **odczyt XML → model**,
+- **sprawdzenie gotowego XML przed wysyłką** — `ksef invoice validate faktura.xml` podaje pole, wiersz i podpowiedź bez logowania do KSeF; [komenda i raport JSON](docs/cli/README.md#ksef-invoice-validate),
 - narzędzia pomocnicze do szyfrowania, ZIP/TarGz, Base64Url i obsługi adresów pre-signed URL.
 
 ## 🧭 Spis treści

@@ -1604,7 +1604,11 @@ def _int_opt(node: ET.Element, name: str, path: str) -> int | None:
         raise FA3ParseError(f"{path}/{name}: '{_preview(value)}' nie jest liczbą.") from exc
 
 
-def _reject_dtd(data: bytes) -> None:
+class _XmlStructureLimit(FA3ParseError):
+    """The caller's XML node or nesting budget was exhausted."""
+
+
+def _reject_dtd(data: bytes, *, max_nodes: int | None = None, max_depth: int = 64) -> None:
     """Blokuje DTD niezależnie od kodowania dokumentu.
 
     Wcześniejsza wersja szukała ``<!DOCTYPE``/``<!ENTITY`` w bajtach, więc
@@ -1626,6 +1630,23 @@ def _reject_dtd(data: bytes) -> None:
     def _forbid(*_args: object) -> None:
         raise FA3ParseError(_DTD_ERROR)
 
+    if max_nodes is not None:
+        remaining = max_nodes
+        depth = 0
+
+        def count_element(_name: str, attrs: dict[str, str]) -> None:
+            nonlocal remaining, depth
+            depth += 1
+            remaining -= 1 + len(attrs)
+            if remaining < 0 or depth > max_depth:
+                raise _XmlStructureLimit("XML przekracza limit złożoności struktury.")
+
+        def end_element(_name: str) -> None:
+            nonlocal depth
+            depth -= 1
+
+        parser.StartElementHandler = count_element
+        parser.EndElementHandler = end_element
     parser.StartDoctypeDeclHandler = _forbid
     parser.EntityDeclHandler = _forbid
     try:

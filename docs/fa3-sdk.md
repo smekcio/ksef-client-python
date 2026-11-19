@@ -159,6 +159,35 @@ Metody specyficzne dla korekt i zaliczek:
 - `advance_payment(...)`, `order(...)`, `order_line(...)` – dane faktury zaliczkowej.
 - `settles_advance(...)`, `settles_advances(...)`, `remaining_to_pay(...)` – rozliczenie zaliczki.
 
+## Sprawdzenie gotowego pliku FA(3)
+
+`validate_invoice_xml` sprawdza oryginalny XML lokalnie, z użyciem schematu
+MF dostarczonego w pakiecie. Wymaga dodatku `ksef-client[fa3]`.
+
+```python
+from pathlib import Path
+from ksef_client.documents.fa3 import validate_invoice_xml
+
+report = validate_invoice_xml(Path("faktura.xml").read_bytes())
+for issue in report.issues:
+    print(issue.code, issue.field, issue.line, issue.hint)
+```
+
+`report.valid` oznacza przejście kontroli opisanych poniżej. Po walidacji XSD
+SDK sprawdza na źródłowych polach następujące zależności:
+
+- Obecność co najmniej jednego FaWiersz dla VAT, UPR i ROZ. Opis pola w schemacie MF przewiduje wyjątki dla zaliczek, korekt zaliczek i wskazanych korekt zbiorczych. Przy KOR i KOR_ROZ sama wartość RodzajFaktury nie wystarcza do rozpoznania korekty zbiorczej. [Opis FaWiersz w schemacie MF](../src/ksef_client/documents/fa3/schemas/schemat_FA%283%29_v1-0E.xsd#L3080)
+- Odwołanie do faktury korygowanej dla KOR, KOR_ZAL i KOR_ROZ oraz do zaliczki dla ROZ i KOR_ROZ.
+- Obecność Podmiot3 z rolą 8 dla JST lub 10 dla GV przy oznaczeniu nabywcy. Aby udostępnić fakturę właściwemu podmiotowi, każdy odbiorca w tej roli musi mieć własny NIP lub IDWew w DaneIdentyfikacyjne.
+- Zgodność podanej sumy obciążeń i odliczeń ze szczegółami, gdy plik zawiera oba zapisy.
+- Kwotę DoZaplaty względem P_15, obciążeń i odliczeń. Jeśli suma jest pominięta, SDK sumuje pozycje.
+
+Raport zawiera do 50 błędów schematu. Pole `truncated` sygnalizuje skrócenie listy.
+Pole `field` zawiera rozpoznaną nazwę pola schematu, a `line` dostępny numer wiersza.
+Sekwencje DTD są niedozwolone. Limit wejścia wynosi 20 MiB, 250 000 elementów
+i atrybutów łącznie oraz 64 poziomy zagnieżdżenia.
+Walidacja dokumentu oraz decyzja o jego przyjęciu przez KSeF to osobne etapy.
+
 ## Walidacja i serializacja
 `build()` i `to_xml(validate=True)` uruchamiają walidację biznesową SDK. Wynik walidacji możesz też
 sprawdzić jawnie:
