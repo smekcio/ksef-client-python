@@ -191,7 +191,7 @@ Najczęściej używane grupy komend:
 - uwierzytelnianie: `auth login-token`, `auth login-xades`, `auth status`, `auth refresh`, `auth revoke-self-token`, `auth logout`,
 - faktury i sesje: `invoice ...`, `send ...`, `upo ...`, `export ...`,
 - wznawialne archiwum XML i kolejka offline do UPO — [`archive` i `offline`](docs/workflows/cli-operations.md),
-- diagnostyka połączenia `health check` i [lista własnych uprawnień w KSeF](docs/cli/README.md#ksef-health-permissions) (`ksef health permissions`),
+- diagnostyka połączenia `health check` i [lista własnych uprawnień w KSeF](docs/cli/README.md#ksef-health-permissions) (`ksef health permissions`), w tym diagnoza nadania dla sprzedaży lub zakupów przez `--for`,
 - Latarnia KSeF: `lighthouse status`, `lighthouse messages`.
 
 Komendy Latarni są publiczne i działają bez logowania. Jeżeli nie masz aktywnego profilu, CLI używa domyślnie

@@ -48,6 +48,7 @@ class HumanRenderer:
         message: str,
         hint: str | None = None,
         retry_after_seconds: float | None = None,
+        data: dict | None = None,
     ) -> None:
         self._console.print(f"[red]{code}[/red] {message} ({command}, profile={profile})")
         if hint:
@@ -82,6 +83,17 @@ class HumanRenderer:
                 self._console.print(f"- {key}: {data[key]}")
 
     def _render_personal_permissions(self, data: dict) -> None:
+        if "operation" in data:
+            self._console.print(
+                Text(
+                    f"{data['operation']}: {data['requiredScope']} "
+                    f"({data['status']}). {data['explanation']}"
+                )
+            )
+            if data["grantId"] is not None:
+                self._console.print(Text("Grant ID: " + _terminal_value(data["grantId"])))
+            self._console.print("The current token may have a narrower scope.")
+            return
         grants = data["permissions"]
         if grants:
             table = Table(title="Personal grants")

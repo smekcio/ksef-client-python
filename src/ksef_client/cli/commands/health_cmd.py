@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import Annotated
 
 import typer
 
@@ -12,6 +13,7 @@ from ksef_client.exceptions import (
     KsefRateLimitError,
 )
 from ksef_client.facade import connection_options
+from ksef_client.permission_checks import InvoicePermissionOperation
 
 from ...diagnostics import redact_sensitive
 from ..auth.keyring_store import get_token_store_mode
@@ -186,6 +188,10 @@ def _grant_details(grant: m.PersonalPermission) -> dict[str, object]:
 @app.command("permissions")
 def health_permissions(
     ctx: typer.Context,
+    operation: Annotated[
+        InvoicePermissionOperation | None,
+        typer.Option("--for", help="Check grants for one operation in the current login context."),
+    ] = None,
     max_pages: int = typer.Option(100, "--max-pages", min=1, help="Maximum pages of 100 grants."),
 ) -> None:
     """List personal grants and owner permissions reported by KSeF for the selected profile."""
@@ -197,6 +203,24 @@ def health_permissions(
         options, kind, context = connection_options(profile=profile)
         with workflow_client(profile, options, kind, context) as client:
             try:
+                if operation is not None:
+                    check = client.permissions.check_operation(operation, max_pages=max_pages)
+                    renderer = get_renderer(cli_ctx)
+                    if check.status == "grant_found":
+                        renderer.success(
+                            command="health.permissions", profile=profile, data=check.to_dict()
+                        )
+                    else:
+                        renderer.error(
+                            command="health.permissions",
+                            profile=profile,
+                            code=ExitCode.AUTH_ERROR.name,
+                            message=f"{check.required_scope}: {check.status}. {check.explanation}",
+                            hint="Inspect health permissions in the same login context.",
+                            data=check.to_dict(),
+                        )
+                        raise typer.Exit(int(ExitCode.AUTH_ERROR))
+                    return
                 report = client.permissions.list_personal_grants(max_pages=max_pages)
             except KsefPaginationError as exc:
                 raise CliError(

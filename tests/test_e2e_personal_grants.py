@@ -25,6 +25,6 @@ def test_e2e_test_environment_personal_grants():
         context_value=config.context_value,
         timeout=360,
     ) as client:
-        # A complete empty list is valid. Keep the identity's grants out of test output.
-        has_more = client.permissions.list_personal_grants().has_more
-        assert has_more is False
+        # The check reads all pages once. The TEST identity can have any level of access.
+        status = client.permissions.check_operation("download-purchases").status
+        assert status in {"grant_found", "grant_not_found", "indeterminate"}

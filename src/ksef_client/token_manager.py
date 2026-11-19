@@ -53,13 +53,27 @@ logger = logging.getLogger(__name__)
 _DURABLE_ONLINE_TRANSPORT: contextvars.ContextVar[object | None] = contextvars.ContextVar(
     "ksef_durable_online_transport", default=None
 )
+_BOUND_AUTH_TRANSPORT: contextvars.ContextVar[object | None] = contextvars.ContextVar(
+    "ksef_bound_auth_transport", default=None
+)
+
+
+@contextmanager
+def _bound_auth_requests(transport: BaseHttpClient | AsyncBaseHttpClient) -> Iterator[None]:
+    """Keep the built-in token refresh on the same transport as the protected operation."""
+    marker = _BOUND_AUTH_TRANSPORT.set(transport)
+    try:
+        yield
+    finally:
+        _BOUND_AUTH_TRANSPORT.reset(marker)
 
 
 @contextmanager
 def _durable_online_requests(transport: BaseHttpClient | AsyncBaseHttpClient) -> Iterator[None]:
     marker = _DURABLE_ONLINE_TRANSPORT.set(transport)
     try:
-        yield
+        with _bound_auth_requests(transport):
+            yield
     finally:
         _DURABLE_ONLINE_TRANSPORT.reset(marker)
 
@@ -74,16 +88,16 @@ def _online_post_replay_disabled(
     )
 
 
-def _check_online_auth_binding(
+def _check_auth_binding(
     manager: TokenManager | AsyncTokenManager, auth_client: AuthClient | AsyncAuthClient | None
 ) -> None:
-    transport = _DURABLE_ONLINE_TRANSPORT.get()
+    transport = _BOUND_AUTH_TRANSPORT.get()
     if (
         auth_client is not None
         and getattr(transport, "token_manager", None) is manager
         and auth_client._http is not transport
     ):
-        raise TokenManagerError("Durable online submission authentication transport changed")
+        raise TokenManagerError("KSeF authentication transport changed")
 
 
 class _SyncNotificationState(threading.local):
@@ -339,7 +353,7 @@ class TokenManager:
     def get_access_token(self) -> str:
         """Zwraca ważny token dostępowy, odświeżając go proaktywnie, gdy trzeba."""
         with self._lock:
-            _check_online_auth_binding(self, self._default_auth_client)
+            _check_auth_binding(self, self._default_auth_client)
             info = self._refresh_if_needed_locked()
             token = self._access_token
         self._notify(info)
@@ -372,7 +386,7 @@ class TokenManager:
             TokenManagerError: Gdy manager nie ma czym odświeżyć tokena.
         """
         with self._lock:
-            _check_online_auth_binding(self, self._default_auth_client)
+            _check_auth_binding(self, self._default_auth_client)
             if stale_token is not None and stale_token != self._access_token:
                 return self._access_token
             info = self._refresh_locked()
@@ -550,7 +564,7 @@ class AsyncTokenManager:
     async def get_access_token(self) -> str:
         """Zwraca ważny token dostępowy, odświeżając go proaktywnie, gdy trzeba."""
         async with self._lock:
-            _check_online_auth_binding(self, self._default_auth_client)
+            _check_auth_binding(self, self._default_auth_client)
             info = await self._refresh_if_needed_locked()
             token = self._access_token
         await self._notify(info)
@@ -569,7 +583,7 @@ class AsyncTokenManager:
     async def force_refresh(self, *, stale_token: str | None = None) -> str:
         """Wymusza odświeżenie tokena po 401 (z deduplikacją po ``stale_token``)."""
         async with self._lock:
-            _check_online_auth_binding(self, self._default_auth_client)
+            _check_auth_binding(self, self._default_auth_client)
             if stale_token is not None and stale_token != self._access_token:
                 return self._access_token
             info = await self._refresh_locked()

@@ -404,6 +404,29 @@ Kompletna pusta lista kończy się kodem `0`. Odmowa dostępu daje kod `3`,
 limit zapytań KSeF kod `4`, a przerwana paginacja kod `5`. W razie błędu cały raport
 jest pomijany. [Opis metody SDK](../api/permissions.md#list_personal_grants)
 
+### Sprawdzenie uprawnienia do operacji
+
+```bash
+ksef --profile firma health permissions --for send-online
+ksef --profile firma --json health permissions --for download-purchases
+```
+
+`send-online` sprawdza nadanie `InvoiceWrite` dla zwykłej faktury sprzedażowej FA(3).
+`download-purchases` sprawdza `InvoiceRead` dla faktur zakupowych bieżącego podmiotu
+(`Subject2`). Obie diagnozy są tylko do odczytu.
+
+| `data.status` | Kod wyjścia | Znaczenie |
+| --- | --- | --- |
+| `grant_found` | 0 | KSeF wykazał właściwe nadanie właścicielskie albo aktywne nadanie osobiste dla tego kontekstu. |
+| `grant_not_found` | 3 | W pełnej odpowiedzi z informacją o uprawnieniach właścicielskich brak pasującego aktywnego nadania. |
+| `indeterminate` | 3 | Dane nie pozwalają ustalić wyniku. Przyczynę podaje `data.reason`. |
+
+W trybie `--for` każda ukończona diagnoza zawiera `data`. Dla dwóch ostatnich stanów
+`ok` ma wartość `false`. Błąd pobierania uprawnień zachowuje zwykłe mapowanie błędów
+i zwraca `data: null`. Przed nadaniem dodatkowych praw sprawdź profil, kontekst i zakres tokena.
+`tokenScopeChecked: false` oznacza, że wynik opisuje nadanie. KSeF rozstrzyga dostęp
+konkretnego tokena w chwili operacji. [Metoda SDK i zasady oceny](../api/permissions.md#check_operation)
+
 ## `ksef lighthouse status`
 
 ```text

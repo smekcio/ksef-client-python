@@ -96,6 +96,7 @@ from .operations import (
     Operation,
     OperationState,
 )
+from .permission_checks import InvoicePermissionOperation, OperationPermissionReport
 from .profiles import Profile, ProfileError, ProfileStore
 from .rate_limiting import (
     CancellationToken,
@@ -153,6 +154,8 @@ __all__ = [
     "Operation",
     "AsyncOperation",
     "OperationState",
+    "InvoicePermissionOperation",
+    "OperationPermissionReport",
     "KsefOperationError",
     "KsefOperationTimeout",
     "ExportFiles",

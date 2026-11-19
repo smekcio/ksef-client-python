@@ -19,6 +19,7 @@ from ksef_client.clients import permissions
 from ksef_client.exceptions import KsefPaginationError, KsefResponseLimitError
 from ksef_client.http import HttpResponse
 from ksef_client.models import PermissionState, PersonalPermissionsQueryRequest
+from ksef_client.token_manager import TokenManagerError
 
 
 def grant(number: int, **fields: Any) -> dict[str, Any]:
@@ -37,8 +38,9 @@ def grant(number: int, **fields: Any) -> dict[str, Any]:
 def read_pages(request, monkeypatch):
     options = KsefClientOptions("https://permissions.example")
 
-    def read(pages, **kwargs):
+    def read(pages, *, operation=None, context_type="Nip", transport_options=None, **kwargs):
         offsets: list[int] = []
+        actual = transport_options or options
 
         def respond(transport, req):
             assert req.method == "POST"
@@ -56,16 +58,22 @@ def read_pages(request, monkeypatch):
 
         async def read_async():
             monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", async_respond)
-            api = AsyncAuthenticatedClient(options, AsyncTokenManager("alias-access", "refresh"))
-            async with AsyncKsef(api, options, context_type="Nip", context_value="demo") as sdk:
+            api = AsyncAuthenticatedClient(actual, AsyncTokenManager("alias-access", "refresh"))
+            async with AsyncKsef(
+                api, options, context_type=context_type, context_value="1234567890"
+            ) as sdk:
+                if operation is not None:
+                    return await sdk.permissions.check_operation(operation, **kwargs)
                 return await sdk.permissions.list_personal_grants(**kwargs)
 
         try:
             if request.param == "async":
                 return asyncio.run(read_async())
             monkeypatch.setattr(httpx.HTTPTransport, "handle_request", respond)
-            api = AuthenticatedClient(options, TokenManager("alias-access", "refresh"))
-            with Ksef(api, options, context_type="Nip", context_value="demo") as sdk:
+            api = AuthenticatedClient(actual, TokenManager("alias-access", "refresh"))
+            with Ksef(api, options, context_type=context_type, context_value="1234567890") as sdk:
+                if operation is not None:
+                    return sdk.permissions.check_operation(operation, **kwargs)
                 return sdk.permissions.list_personal_grants(**kwargs)
         finally:
             assert offsets == list(range(len(pages)))
@@ -134,6 +142,35 @@ def test_incomplete_report_raises(read_pages, pages, max_pages, message):
 def test_rejects_invalid_limit_before_http(read_pages):
     with pytest.raises(ValueError):
         read_pages([], max_pages=0)
+
+
+@pytest.mark.parametrize("use_async", [False, True])
+def test_operation_check_rejects_refresh_client_bound_to_another_transport(use_async, monkeypatch):
+    options = KsefClientOptions("https://permissions.example")
+    other = KsefClientOptions("https://other.example")
+    expired = "2000-01-01T00:00:00Z"
+
+    def unexpected_request(*args):
+        pytest.fail("Unexpected HTTP request with a mismatched token refresh client")
+
+    async def read_async():
+        monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", unexpected_request)
+        manager = AsyncTokenManager("access", "refresh", access_token_valid_until=expired)
+        api = AsyncAuthenticatedClient(options, manager)
+        async with api, AsyncAuthenticatedClient(other, manager):
+            sdk = AsyncKsef(api, options, context_type="Nip", context_value="1234567890")
+            await sdk.permissions.check_operation("download-purchases")
+
+    with pytest.raises(TokenManagerError, match="authentication transport changed"):
+        if use_async:
+            asyncio.run(read_async())
+        else:
+            monkeypatch.setattr(httpx.HTTPTransport, "handle_request", unexpected_request)
+            manager = TokenManager("access", "refresh", access_token_valid_until=expired)
+            api = AuthenticatedClient(options, manager)
+            with api, AuthenticatedClient(other, manager):
+                sdk = Ksef(api, options, context_type="Nip", context_value="1234567890")
+                sdk.permissions.check_operation("download-purchases")
 
 
 @pytest.mark.parametrize("last_scopes", [[], ["InvoiceWrite"]])
@@ -263,3 +300,117 @@ def test_filtered_page_preserves_personal_details_and_explicit_credentials(use_a
         "test-token",
     )
     assert result.to_dict() == raw
+
+
+_CURRENT = {"type": "Nip", "value": "1234567890"}
+_OTHER = {"type": "Nip", "value": "9999999999"}
+
+
+@pytest.mark.parametrize("field", ["contextIdentifier", "targetIdentifier"])
+def test_direct_facade_accepts_login_context_spelling(read_pages, field):
+    page = {"permissions": [grant(1, **{field: _CURRENT})], "hasMore": False}
+    check = read_pages([page], operation="download-purchases", context_type=" nip ")
+    assert check.status == "grant_found"
+
+
+@pytest.mark.parametrize(
+    "overrides,owners,status,reason",
+    [
+        ({}, [], "grant_found", "personal_grant"),
+        ({"contextIdentifier": _CURRENT}, None, "grant_found", "personal_grant"),
+        (
+            {"targetIdentifier": _CURRENT, "contextIdentifier": _OTHER},
+            [],
+            "grant_found",
+            "personal_grant",
+        ),
+        ({"targetIdentifier": _OTHER}, [], "grant_not_found", "no_applicable_grant"),
+        (
+            {"targetIdentifier": {"type": "InternalId", "value": "1234567890-00001"}},
+            [],
+            "indeterminate",
+            "scope_uncertain",
+        ),
+        (
+            {"permissionState": "Inactive", "canDelegate": True},
+            [],
+            "grant_not_found",
+            "no_applicable_grant",
+        ),
+        ({"permissionState": "FutureState"}, [], "indeterminate", "scope_uncertain"),
+        (
+            {"permissionScope": "CredentialsManage"},
+            ["InvoiceWrite"],
+            "grant_not_found",
+            "no_applicable_grant",
+        ),
+        (
+            {"permissionScope": "EnforcementOperations"},
+            None,
+            "indeterminate",
+            "owner_scopes_unreported",
+        ),
+        ({"targetIdentifier": {"type": "AllPartners"}}, [], "indeterminate", "scope_uncertain"),
+        (
+            {"targetIdentifier": {"type": "FutureTarget", "value": "1234567890"}},
+            [],
+            "indeterminate",
+            "scope_uncertain",
+        ),
+        ({"contextIdentifier": _OTHER}, [], "indeterminate", "scope_uncertain"),
+        ({"authorizedIdentifier": _CURRENT}, [], "indeterminate", "scope_uncertain"),
+        ({"permissionState": "Inactive"}, ["InvoiceRead"], "grant_found", "owner_grant"),
+    ],
+)
+def test_purchase_scope_check_uses_login_context_and_complete_grants(
+    read_pages, overrides, owners, status, reason
+):
+    item = grant(1, **overrides)
+    page = {"permissions": [item], "ownerPermissions": owners, "hasMore": False}
+    report = read_pages([page], operation="download-purchases")
+    assert (report.status, report.reason, report.required_scope) == (status, reason, "InvoiceRead")
+    assert report.grant_id == (item["id"] if reason == "personal_grant" else None)
+
+
+@pytest.mark.parametrize(
+    "owners,personal",
+    [(["EnforcementOperations"], []), ([], [grant(1, permissionScope="PefInvoiceWrite")])],
+)
+def test_special_online_scopes_do_not_confirm_an_ordinary_sale(read_pages, owners, personal):
+    report = read_pages(
+        [{"permissions": personal, "ownerPermissions": owners, "hasMore": False}],
+        operation="send-online",
+    )
+    assert (report.status, report.reason) == ("indeterminate", "specialised_scope")
+
+
+def test_matching_grant_on_later_page_takes_precedence_over_uncertain_evidence(read_pages):
+    matching = grant(2, permissionScope="InvoiceWrite")
+    pages = [
+        {
+            "permissions": [grant(1, permissionScope="InvoiceWrite", authorizedIdentifier=_OTHER)],
+            "hasMore": True,
+        },
+        {"permissions": [matching], "hasMore": False},
+    ]
+    result = read_pages(pages, operation="send-online", max_pages=2)
+    assert result.to_dict()["grantId"] == matching["id"]
+    assert result.required_scope == "InvoiceWrite"
+
+
+def test_operation_check_rejects_unknown_operation_before_http(read_pages):
+    with pytest.raises(ValueError, match="InvoicePermissionOperation"):
+        read_pages([], operation="typo")
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        KsefClientOptions("https://other-environment.example"),
+        KsefClientOptions("https://permissions.example", custom_headers={"aUtHoRiZaTiOn": "test"}),
+        KsefClientOptions("https://permissions.example", custom_headers={"Host": "other.example"}),
+    ],
+)
+def test_operation_check_rejects_mismatched_identity_before_http(read_pages, options):
+    with pytest.raises(ValueError, match="Permission evidence requires"):
+        read_pages([], operation="send-online", transport_options=options)
