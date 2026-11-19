@@ -59,9 +59,9 @@ def test_traverse_only_ancestor_allows_publication(tmp_path):
 @pytest.mark.skipif(os.name == "nt", reason="Exercise the Windows handle protocol on POSIX")
 def test_windows_pins_all_components_and_uses_rename(tmp_path, monkeypatch):
     windows = SimpleNamespace(**vars(os))
-    windows.name = "nt"
     kernel = Mock()
     monkeypatch.setattr(files, "os", windows)
+    monkeypatch.setattr(files, "sys", SimpleNamespace(platform="win32"))
     monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: kernel, raising=False)
     held = []
 

@@ -1,6 +1,7 @@
 """Private local output shared by the SDK and CLI."""
 
 import os
+import sys
 import uuid
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager, suppress
@@ -20,7 +21,7 @@ def private_directory(path: Path) -> None:
 def _output_directory(parent: Path) -> Iterator[int | None]:
     """Pin the caller's directory until the output is published and staging cleaned up."""
     with ExitStack() as handles:
-        if os.name == "nt":
+        if sys.platform == "win32":
             import ctypes
             from ctypes import wintypes
 
