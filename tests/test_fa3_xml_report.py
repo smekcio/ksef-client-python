@@ -108,6 +108,33 @@ def test_settlement_uses_original_p15_and_declared_or_itemized_adjustments(xml):
     ]
 
 
+@pytest.mark.parametrize(("flag", "role"), [("JST", "8"), ("GV", "10")])
+def test_routing_requires_identity_on_each_matching_recipient(xml, flag, role):
+    ns = f"{{{FA3_NAMESPACE}}}"
+    root = ET.fromstring(xml)
+    marker = root.find(ns + "Podmiot2/" + ns + flag)
+    assert marker is not None
+    marker.text = "1"
+    fa = root.find(ns + "Fa")
+    assert fa is not None
+    index = list(root).index(fa)
+    for identity, value in (("NIP", "1234567890"), ("IDWew", "1234567890-12345")):
+        party = ET.Element(ns + "Podmiot3")
+        identifiers = ET.SubElement(party, ns + "DaneIdentyfikacyjne")
+        ET.SubElement(identifiers, ns + identity).text = value
+        ET.SubElement(party, ns + "Rola").text = role
+        root.insert(index, party)
+    assert validate_invoice_xml(ET.tostring(root)).valid
+    # An ID reported for another party cannot identify this recipient.
+    last_id = identifiers[0]
+    last_id.tag = ns + "BrakID"
+    last_id.text = "1"
+    issues = validate_invoice_xml(ET.tostring(root)).issues
+    assert [(i.code, i.field) for i in issues] == [("PARTY_ROLE_REQUIRED", flag)]
+    assert "IDWew" in issues[0].hint
+    assert value not in repr(issues)
+
+
 @pytest.mark.parametrize(
     "kind,requires_line",
     [

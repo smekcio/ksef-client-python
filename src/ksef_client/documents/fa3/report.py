@@ -108,18 +108,28 @@ def _business_issues(root: Any) -> list[FA3XmlIssue]:
                 )
             )
 
-    roles = {Decimal(node.text) for node in root.findall("f:Podmiot3/f:Rola", _NS)}
     for flag, role in (
         ("JST", ThirdPartyRole.JST_SUBUNIT),
         ("GV", ThirdPartyRole.VAT_GROUP_MEMBER),
     ):
         node = root.find(f"f:Podmiot2/f:{flag}", _NS)
-        if node is not None and Decimal(node.text) == 1 and int(role.value) not in roles:
+        if node is None or Decimal(node.text) != 1:
+            continue
+        parties = [
+            party
+            for party in root.findall("f:Podmiot3", _NS)
+            if Decimal(party.findtext("f:Rola", "0", _NS)) == int(role.value)
+        ]
+        if not parties or any(
+            party.find("f:DaneIdentyfikacyjne/f:NIP", _NS) is None
+            and party.find("f:DaneIdentyfikacyjne/f:IDWew", _NS) is None
+            for party in parties
+        ):
             issues.append(
                 FA3XmlIssue(
                     "PARTY_ROLE_REQUIRED",
-                    "Brak wymaganej roli Podmiot3.",
-                    f"Sprawdź Podmiot2/{flag} i dodaj Podmiot3 z rolą {role.value}, jeśli dotyczy.",
+                    "Brak kompletnych danych odbiorcy Podmiot3.",
+                    f"Sprawdź Podmiot2/{flag} i podaj NIP lub IDWew podmiotu z rolą {role.value}.",
                     flag,
                     node.sourceline,
                 )
