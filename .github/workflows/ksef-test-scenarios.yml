@@ -14,6 +14,7 @@ on:
       - 'tools/verify_e2e_results.py'
       - 'src/ksef_client/clients/auth.py'
       - 'src/ksef_client/clients/permissions.py'
+      - 'src/ksef_client/permission_checks.py'
       - 'src/ksef_client/clients/tokens.py'
       - 'src/ksef_client/certificate_rotation.py'
       - 'src/ksef_client/invoice_export_sync.py'

@@ -109,6 +109,34 @@ kolejne wyniki zgłasza `KsefPaginationError`. Błędy HTTP przechodzą do wywo�
 KSeF zwraca strony kolejno, więc nadanie lub cofnięcie uprawnienia w trakcie odczytu
 może wpłynąć na wynik. [Opis endpointu w dokumentacji MF](https://github.com/CIRFMF/ksef-api/blob/main/uprawnienia.md#pobranie-listy-w%C5%82asnych-uprawnie%C5%84)
 
+### `check_operation`
+
+```python
+report = client.permissions.check_operation("send-online")
+print(report.status, report.required_scope, report.reason)
+# async_report = await async_client.permissions.check_operation("download-purchases")
+```
+
+Metoda fasad `Ksef` i `AsyncKsef` pobiera pełną listę uprawnień w kontekście
+uwierzytelnienia, stosując ten sam `max_pages` co `list_personal_grants`. Zwraca
+`OperationPermissionReport`. Metoda `to_dict()` udostępnia te same dane co CLI.
+
+- Dla zwykłej sprzedaży FA(3) sprawdzane jest `InvoiceWrite`, a dla faktur
+  zakupowych (`Subject2`) sprawdzane jest `InvoiceRead`.
+- Uprawnienia właścicielskie są przypisane do kontekstu logowania. Dla uprawnienia
+  osobistego znaczenie mają stan, kontekst nadający, podmiot uprawniony i podmiot
+  docelowy. Potwierdzone nadanie osobiste można znaleźć na liście przez `grantId`.
+- `AllPartners` dotyczy partnerów określonego pośrednika. Do potwierdzenia
+  potrzebna jest relacja z partnerem. Osobny identyfikator uprawnionego, możliwość
+  dziedziczenia po jednostce nadrzędnej lub nieznany stan mogą dać `indeterminate`.
+  `canDelegate` opisuje możliwość dalszego nadania.
+- Sesje interaktywne przewidują także specjalne przypadki `PefInvoiceWrite` i
+  `EnforcementOperations`. Same te kody dają wynik `indeterminate` dla zwykłej sprzedaży.
+- KSeF ustala uprawnienia tokena KSeF przy jego wystawianiu. Źródłem diagnozy są
+  nadania podmiotu, więc `tokenScopeChecked` wynosi `false`. Akceptację faktury,
+  zakres tokena oraz dostęp do konkretnego dokumentu sprawdza KSeF przy operacji.
+  [Uprawnienia według MF](https://github.com/CIRFMF/ksef-api/blob/main/uprawnienia.md) · [Tokeny KSeF](https://github.com/CIRFMF/ksef-api/blob/main/tokeny-ksef.md)
+
 ### `query_persons_grants(request_payload, ..., access_token)`
 Endpoint: `POST /permissions/query/persons/grants`
 

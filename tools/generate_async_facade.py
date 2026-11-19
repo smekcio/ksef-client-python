@@ -54,6 +54,7 @@ ASYNC = {
     "query_certificates",
     "retrieve_certificate",
     "revoke_certificate",
+    "check_operation",
     "list_personal_grants",
     "grant_authorization",
     "grant_entity",
@@ -162,6 +163,7 @@ class Convert(ast.NodeTransformer):
                 "self.handle.close",
                 "self.owner._certificate",
                 "self._certificate",
+                "self.list_personal_grants",
                 "cls.begin_auth",
                 "operation.wait",
                 "self.close",
@@ -245,6 +247,11 @@ from .operations import (
     validate_wait,
 )
 from .pagination import iter_page_offsets
+from .permission_checks import (
+    InvoicePermissionOperation,
+    OperationPermissionReport,
+    _evaluate_operation,
+)
 from .profiles import Profile, ProfileStore
 from .request_control import request_control
 from .services.crypto import build_encryption_data

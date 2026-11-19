@@ -204,3 +204,72 @@ def test_targeted_grant_without_a_target_value_returns_no_report(runner, endpoin
     assert result.exit_code == ExitCode.API_ERROR
     assert json.loads(result.output)["data"] is None
     assert row["id"] not in result.output
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.parametrize("operation", ["send-online", "download-purchases"])
+@pytest.mark.parametrize("source", ["personal", "owner", "missing", "unknown"])
+def test_check_for_operation_returns_grant_evidence(runner, endpoint, operation, source, as_json):
+    scope = "InvoiceWrite" if operation == "send-online" else "InvoiceRead"
+    row = sample_grant()
+    direct = {
+        key: value
+        for key, value in row.items()
+        if key not in {"authorizedIdentifier", "targetIdentifier", "contextIdentifier"}
+    }
+    available = source in {"personal", "owner"}
+    data = {
+        "hasMore": False,
+        "permissions": [dict(direct, permissionState="Active", permissionScope=scope)]
+        if source == "personal"
+        else [],
+        "ownerPermissions": [scope] if source == "owner" else None if source == "unknown" else [],
+    }
+    calls = endpoint(httpx.Response(200, json=data))
+    args = [*(["--json"] if as_json else []), "health", "permissions", "--for", operation]
+    result = runner.invoke(app, args)
+    assert result.exit_code == (0 if available else ExitCode.AUTH_ERROR), result.output
+    assert calls == [0]
+    expected = (
+        "grant_found"
+        if available
+        else "grant_not_found"
+        if source == "missing"
+        else "indeterminate"
+    )
+    if as_json:
+        payload = json.loads(result.output)
+        assert payload["ok"] is available
+        report = payload["data"]
+        assert (report["status"], report["operation"], report["requiredScope"]) == (
+            expected,
+            operation,
+            scope,
+        )
+        assert report["tokenScopeChecked"] is False
+        assert report["grantId"] == (row["id"] if source == "personal" else None)
+    else:
+        assert expected in result.output and scope in result.output
+        if source == "personal":
+            assert row["id"] in result.output
+    for secret in ("private", "sample-access", "1111111111", "subjectPersonDetails"):
+        assert secret not in result.output
+
+
+def test_permission_check_discards_earlier_evidence_on_later_failure(runner, endpoint):
+    calls = endpoint(
+        httpx.Response(
+            200,
+            json={
+                "permissions": [sample_grant()],
+                "ownerPermissions": ["InvoiceWrite"],
+                "hasMore": True,
+            },
+        ),
+        httpx.Response(403, json={}),
+    )
+    result = runner.invoke(app, ["--json", "health", "permissions", "--for", "send-online"])
+    assert calls == [0, 1]
+    assert result.exit_code == ExitCode.AUTH_ERROR
+    assert json.loads(result.output)["data"] is None
+    assert "grant_found" not in result.output

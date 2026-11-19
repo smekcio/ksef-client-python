@@ -33,6 +33,11 @@ from .operations import (
     validate_wait,
 )
 from .pagination import iter_page_offsets
+from .permission_checks import (
+    InvoicePermissionOperation,
+    OperationPermissionReport,
+    _evaluate_operation,
+)
 from .profiles import Profile, ProfileStore
 from .request_control import request_control
 from .services.crypto import build_encryption_data
@@ -651,6 +656,14 @@ class AsyncKsef:
 class AsyncPermissions:
     def __init__(self, owner: AsyncKsef) -> None:
         self.owner = owner
+
+    async def check_operation(
+        self, operation: str, *, max_pages: int | None = 100
+    ) -> OperationPermissionReport:
+        """Check grant evidence for ordinary online FA(3) sales or Subject2 purchases."""
+        selected = InvoicePermissionOperation(operation)
+        grants = await self.list_personal_grants(max_pages=max_pages)
+        return _evaluate_operation(selected, self.owner.context_key, grants)
 
     async def list_personal_grants(
         self, *, max_pages: int | None = 100
