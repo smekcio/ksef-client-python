@@ -595,6 +595,25 @@
   enforces per pre-encryption part; `build_zip` sanitises entry names like `build_tar_gz`, and both
   readers reject duplicate entry names instead of silently dropping content
 
+## 0.26.0 (2026-11-19)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* feat: report per-invoice outcomes for resumable batches by @smekcio in https://github.com/smekcio/ksef-client-python/pull/129
+* feat: recover online invoice submissions and individual UPO by local ID by @smekcio in https://github.com/smekcio/ksef-client-python/pull/130
+* feat: deliver verified incoming invoices to application consumers by @smekcio in https://github.com/smekcio/ksef-client-python/pull/131
+* feat: list personal permissions for the current KSeF context by @smekcio in https://github.com/smekcio/ksef-client-python/pull/133
+* feat(cli): obsługa wysyłki po własnym ID, raportów paczek i odbioru faktur by @smekcio in https://github.com/smekcio/ksef-client-python/pull/134
+* feat(permissions): diagnoza uprawnień do sprzedaży i pobierania zakupów by @smekcio in https://github.com/smekcio/ksef-client-python/pull/135
+* feat(online): lokalny pakiet faktury z PDF i indywidualnym UPO by @smekcio in https://github.com/smekcio/ksef-client-python/pull/136
+* Walidacja pliku FA(3) przed wysyłką w SDK i CLI by @smekcio in https://github.com/smekcio/ksef-client-python/pull/137
+* docs: polski README z działającym przykładem FA(3) by @smekcio in https://github.com/smekcio/ksef-client-python/pull/138
+
+
+**Full Changelog**: https://github.com/smekcio/ksef-client-python/compare/v0.25.0...v0.26.0
+
 ## 0.25.0 (2026-11-16)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
