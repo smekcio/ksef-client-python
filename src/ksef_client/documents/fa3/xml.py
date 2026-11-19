@@ -280,11 +280,12 @@ def validate_fa3_xml_xsd(xml: bytes | str) -> None:
 
 
 def _fa3_schema(etree: Any) -> Any:
-    parser = etree.XMLParser()
+    parser = etree.XMLParser(no_network=True, resolve_entities=False, load_dtd=False)
     parser.resolvers.add(_schema_resolver(etree))
     schema_package = resources.files("ksef_client.documents.fa3.schemas")
-    with resources.as_file(schema_package / "schemat_FA(3)_v1-0E.xsd") as schema_path:
-        return etree.XMLSchema(etree.parse(str(schema_path), parser))
+    filename = "schemat_FA(3)_v1-0E.xsd"
+    root = etree.fromstring((schema_package / filename).read_bytes(), parser, base_url=filename)
+    return etree.XMLSchema(root)
 
 
 #: Pliki schematu FA(3) dostępne w pakiecie. Resolver przyjmuje wyłącznie te
@@ -320,8 +321,9 @@ def _schema_resolver(etree: Any) -> Any:
                     f"({', '.join(sorted(_BUNDLED_SCHEMAS))})."
                 )
             schema_package = resources.files("ksef_client.documents.fa3.schemas")
-            with resources.as_file(schema_package / file_name) as schema_path:
-                return self.resolve_filename(str(schema_path), context)
+            return self.resolve_string(
+                (schema_package / file_name).read_bytes(), context, base_url=file_name
+            )
 
     return PackageSchemaResolver()
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from decimal import localcontext
+from importlib import resources
 from xml.etree import ElementTree as ET
+from zipfile import Path as ZipPath
+from zipfile import ZipFile
 
 import pytest
 
@@ -64,6 +67,32 @@ def test_schema_reports_known_fields_line_and_safe_hint(xml):
     )
     issue = validate_invoice_xml(broken).issues[0]
     assert issue.field is None and "Naglowek" in issue.hint and "PrivateElement" not in repr(issue)
+
+
+def test_compressed_schema_resources_support_validation_and_safe_diagnostics(
+    xml, tmp_path, monkeypatch
+):
+    original = resources.files
+    package = "ksef_client.documents.fa3.schemas"
+    archive = tmp_path / "packaged-resources.zip"
+    with ZipFile(archive, "w") as target:
+        for schema in original(package).iterdir():
+            if schema.name.endswith(".xsd"):
+                target.writestr(schema.name, schema.read_bytes())
+
+    validation._field_names.cache_clear()
+    try:
+        with ZipFile(archive) as source:
+            monkeypatch.setattr(
+                resources,
+                "files",
+                lambda name: ZipPath(source) if name == package else original(name),
+            )
+            assert validate_invoice_xml(xml).valid
+            report = validate_invoice_xml(xml.replace(b"<NIP>", b"<NIP>private-"))
+            assert report.issues[0].field == "NIP" and "private" not in repr(report)
+    finally:
+        validation._field_names.cache_clear()
 
 
 def test_xsd_invalid_suppresses_business_diagnostics_and_caps_report(xml, monkeypatch):

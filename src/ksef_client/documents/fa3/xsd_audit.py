@@ -114,12 +114,15 @@ def parse_fa3_xsd_elements(path: str | Path | None = None) -> list[XsdElement]:
     ¼ schematu — w tym elementów wymaganych, takich jak `Naglowek/KodFormularza`,
     `Podmiot1/DaneIdentyfikacyjne/NIP` czy `Platnosc/RachunekBankowy/NrRB`.
     """
-    schema_path = _schema_path(path)
-    roots = [ET.parse(schema_path).getroot()]
+    directory = (
+        resources.files("ksef_client.documents.fa3.schemas") if path is None else Path(path).parent
+    )
+    primary = SCHEMA_FILES[0] if path is None else Path(path).name
+    roots = [ET.fromstring((directory / primary).read_bytes())]
     for name in SCHEMA_FILES[1:]:
-        sibling = schema_path.parent / name
-        if sibling.exists():
-            roots.append(ET.parse(sibling).getroot())
+        sibling = directory / name
+        if sibling.is_file():
+            roots.append(ET.fromstring(sibling.read_bytes()))
 
     simple_enums: dict[str, tuple[str, ...]] = {}
     named_types: dict[str, ET.Element] = {}
@@ -560,11 +563,3 @@ def _handler_name(path: str) -> str:
         shared = tuple(site for site in candidates if site in parent_sites)
         candidates = shared or candidates
     return (candidates or ("_domain_invoice",))[0]
-
-
-def _schema_path(path: str | Path | None) -> Path:
-    if path is not None:
-        return Path(path)
-    schema_package = resources.files("ksef_client.documents.fa3.schemas")
-    with resources.as_file(schema_package / "schemat_FA(3)_v1-0E.xsd") as resolved:
-        return Path(resolved)
