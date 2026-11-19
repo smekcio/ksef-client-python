@@ -28,7 +28,7 @@ FA3_SMOKE_TEST = textwrap.dedent(
     """
     from datetime import date
 
-    from ksef_client.documents.fa3 import FA3InvoiceBuilder, FA3Party
+    from ksef_client.documents.fa3 import FA3InvoiceBuilder, FA3Party, validate_invoice_xml
 
     draft = (
         FA3InvoiceBuilder(
@@ -48,6 +48,10 @@ FA3_SMOKE_TEST = textwrap.dedent(
     xml = draft.to_xml(xsd_validate=True)
     if b"<Faktura" not in xml or b"<P_15>1230.00</P_15>" not in xml:
         raise AssertionError(f"nieoczekiwany XML z walidacją XSD: {xml[:400]!r}")
+    assert validate_invoice_xml(xml).valid
+    bad = validate_invoice_xml(xml.replace(b"<NIP>", b"<NIP>private-"))
+    assert bad.issues and all(issue.field == "NIP" for issue in bad.issues)
+    assert "private-" not in repr(bad)
     print(f"fa3 xsd smoke OK: {len(xml)} B")
     """
 ).strip()
@@ -200,6 +204,9 @@ def _check_fa3_validation_from_wheel(wheel: Path) -> None:
     _run(_pip_command(python, "install", requirement))
     result = _run([str(python), "-c", FA3_SMOKE_TEST])
     _assert_contains(f"{result.stdout}{result.stderr}", "fa3 xsd smoke OK")
+    # Exercising the wheel as an importable archive also checks package-resource discovery.
+    prefix = "import sys; sys.path.insert(0, sys.argv[1])\n"
+    _run([str(python), "-c", prefix + FA3_SMOKE_TEST, str(wheel.resolve())])
 
 
 def _check_cli_extra_install(wheel: Path) -> None:
