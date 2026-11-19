@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from functools import lru_cache
-from importlib.metadata import distribution
+from importlib.resources import files
 from io import BytesIO
 from itertools import zip_longest
 from threading import Lock
@@ -118,11 +118,11 @@ def _register_fonts() -> frozenset[int]:
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
-    fonts = distribution("font-roboto")
+    fonts = files("font_roboto").joinpath("files")
     supported: set[int] = set()
     for name, style in ((_BODY, "Regular"), (_BOLD, "Bold")):
-        asset = fonts.locate_file(f"font_roboto/files/Roboto-{style}.ttf")
-        font = TTFont(name, str(asset))
+        asset = fonts.joinpath(f"Roboto-{style}.ttf")
+        font = TTFont(name, BytesIO(asset.read_bytes()))
         pdfmetrics.registerFont(font)
         if not supported:
             supported.update(font.face.charWidths)

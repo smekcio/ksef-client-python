@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from importlib.resources import files
 from io import BytesIO
+from zipfile import ZipFile
 
 import pytest
 from pypdf import PdfReader
@@ -133,3 +135,20 @@ def test_pdf_structure_budget_includes_attributes(monkeypatch):
     xml = f'<Faktura xmlns="{FA3_NAMESPACE}"><Fa kind="one" other="two"/></Faktura>'
     with pytest.raises(ValueError, match="structure limit"):
         invoice_pdf.render_invoice_pdf(xml.encode())
+
+
+def test_fonts_are_readable_from_a_zipped_python_distribution(tmp_path, monkeypatch):
+    installed = files("font_roboto").joinpath("files")
+    path = tmp_path / "fonts.zip"
+    with ZipFile(path, "w") as archive:
+        archive.writestr("font_roboto/__init__.py", "")
+        for style in ("Regular", "Bold"):
+            name = f"font_roboto/files/Roboto-{style}.ttf"
+            archive.writestr(name, installed.joinpath(f"Roboto-{style}.ttf").read_bytes())
+    monkeypatch.syspath_prepend(str(path))
+    monkeypatch.delitem(sys.modules, "font_roboto")
+    invoice_pdf._register_fonts.cache_clear()
+    try:
+        assert "Żółć i Łęgi" in pdf_text(invoice_pdf.render_invoice_pdf(invoice()))
+    finally:
+        invoice_pdf._register_fonts.cache_clear()
