@@ -96,6 +96,25 @@ ksef --profile firma-a online upo --id FV-123 --state-dir ./private --out ./FV-1
 - W stanie `submission_unknown` wykonaj `online run`, aby uzgodnić wynik z KSeF. `online retry-unsubmitted` może dopuścić nową wysyłkę po potwierdzeniu pustej, zamkniętej sesji. `online retry-cancelled` przywraca do kolejki dokument po potwierdzonym anulowaniu z kodem 550. Oba polecenia przyjmują `--id` i `--state-dir`.
 - Tryb śledzony obsługuje FA (3), adres wybranego profilu i indywidualne UPO z ustawień sesji SDK. `--wait-status` czeka na rozstrzygnięcie, a `--wait-upo` także na UPO. Po odrzuceniu faktury, wykryciu duplikatu lub anulowaniu przez KSeF obie opcje zwracają kod wyjścia 5, również przy odczycie zapisanego wyniku. Po przekroczeniu `--max-attempts` CLI zwraca kod 4 i zachowuje postęp. `online upo` zapisuje do nowego pliku.
 
+### Lokalny pakiet faktury i UPO
+
+```sh
+pip install "ksef-client[cli,pdf]"
+ksef --profile firma-a --json online bundle --id FV-123 --state-dir ./private --out FV-123.zip
+```
+
+Użyj tego samego profilu, kontekstu, katalogu stanu i klucza co przy wysyłce. Pakiet powstaje lokalnie, także po wylogowaniu. Polecenie odczytuje zapisaną wersję faktury. Postęp wysyłki zmienia się przez `online run`. Domyślne wartości `--state-dir` oraz `--out` to bieżący katalog i `invoice-bundle.zip`. Wybierz nowy plik w istniejącym prywatnym katalogu. ZIP zawiera odszyfrowaną treść.
+
+Paczka zawiera oryginalne bajty w `invoice.xml`, wizualizację FA(3) w `invoice.pdf` oraz `manifest.json` z wersją formatu, lokalnym ID, rewizją, statusem wysyłki, kodem statusu KSeF, przydzielonym numerem KSeF i skrótami SHA-256 plików. Do czasu przydzielenia numeru manifest zwraca `ksef_number: null`.
+
+| `upo_status` | Znaczenie |
+| --- | --- |
+| `available` | Pakiet zawiera `upo.xml`. SDK porównał numer sesji, numer KSeF oraz skrót faktury z indywidualnym UPO zapisanym w kolejce. Strony UPO zbiorczego są odrzucane także wtedy, gdy dana strona wymienia tylko jedną fakturę. |
+| `pending` | Wysyłka lub odbiór UPO jest w toku. Po zapisaniu nowszej rewizji możesz wyeksportować kolejny plik ZIP. |
+| `unavailable` | KSeF odrzucił bieżącą próbę, zgłosił duplikat lub potwierdził anulowanie. Kod KSeF jest w manifeście. |
+
+Kod wyjścia 0 oznacza zapis kompletnej paczki dla podanej rewizji. Obecność UPO sprawdzisz w polu `upo_status`. [Zakres wizualizacji PDF](../invoice-bundle-pdf.md)
+
 ## Raport faktur z paczki
 
 Zapisz sesję przy wysyłce paczki. Później sprawdzisz, jaki wynik KSeF przypisał każdemu plikowi.

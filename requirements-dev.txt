@@ -10,6 +10,9 @@ ruff>=0.6.0
 mypy>=1.10.0
 pytest-mock>=3.14.0
 lxml>=5.0.0
+reportlab>=4.4.0
+font-roboto>=0.0.1
+pypdf>=5.0.0
 # Testy `tests/test_services_qr.py` pokrywają `services/qr.py`, który wchodzi do
 # bramki `--cov-fail-under=100`. Bez tych zależności (extras `qr`) część testów
 # była pomijana, a jeden failował — czyli CI nie mogło zmierzyć pokrycia tego modułu.
