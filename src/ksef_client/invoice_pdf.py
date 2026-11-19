@@ -11,7 +11,7 @@ from threading import Lock
 from typing import TYPE_CHECKING
 from xml.etree import ElementTree as ET
 
-from .documents.fa3.parse import MAX_XML_BYTES, FA3ParseError, _reject_dtd
+from .documents.fa3.parse import MAX_XML_BYTES
 from .documents.fa3.xml import FA3_NAMESPACE
 
 if TYPE_CHECKING:
@@ -73,23 +73,35 @@ _LABELS = {
 }
 
 
+class _InvoiceTree(ET.TreeBuilder):
+    """Apply the document budget before adding each element to the PDF's XML tree."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.count = 0
+        self.depth = 0
+
+    def start(self, tag: str, attrs: dict[str, str]) -> ET.Element:
+        self.count += 1 + len(attrs)
+        self.depth += 1
+        if self.depth > 64 or self.count > _MAX_NODES:
+            raise ValueError("Invoice XML exceeds the PDF structure limit.")
+        return super().start(tag, attrs)
+
+    def end(self, tag: str) -> ET.Element:
+        self.depth -= 1
+        return super().end(tag)
+
+    def doctype(self, name: str, pubid: str | None, system: str | None) -> None:
+        raise ValueError("Invoice PDF does not accept a document type declaration.")
+
+
 def _read_invoice(xml: bytes) -> ET.Element:
     if not isinstance(xml, bytes) or len(xml) > MAX_XML_BYTES:
         raise ValueError("Invoice PDF requires FA(3) XML bytes within the SDK size limit.")
     try:
-        _reject_dtd(xml)
-        parser = ET.iterparse(BytesIO(xml), events=("start", "end"))
-        _, root = next(parser)  # The checked document has a root start event.
-        depth = count = 1
-        for event, _ in parser:
-            if event == "start":
-                count += 1
-                depth += 1
-                if depth > 64 or count > _MAX_NODES:
-                    raise ValueError("Invoice XML exceeds the PDF structure limit.")
-            else:
-                depth -= 1
-    except (FA3ParseError, ET.ParseError, LookupError):
+        root = ET.fromstring(xml, parser=ET.XMLParser(target=_InvoiceTree()))
+    except (ET.ParseError, LookupError):
         raise ValueError("Invalid invoice XML for PDF.") from None
     if root.tag != _NS + "Faktura" or len(root.findall(_NS + "Fa")) != 1:
         raise ValueError("Invoice PDF requires an FA(3) Faktura document.")
@@ -212,8 +224,8 @@ class _InvoicePage:
 
 def render_invoice_pdf(xml: bytes, *, ksef_number: str | None = None) -> bytes:
     """Render the original FA(3) document locally, with an optional assigned KSeF number."""
-    root = _read_invoice(xml)
     with _FONT_LOCK:  # ReportLab shares its TrueType font registry across canvases.
+        root = _read_invoice(xml)
         try:
             from reportlab.lib.pagesizes import A4
             from reportlab.pdfgen.canvas import Canvas

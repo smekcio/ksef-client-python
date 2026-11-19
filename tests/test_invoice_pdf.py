@@ -119,3 +119,17 @@ def test_unqualified_extension_field_keeps_its_literal_name():
     text = pdf_text(invoice_pdf.render_invoice_pdf(xml))
     assert "P_15" in text
     assert "opcja" in text
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16"])
+def test_pdf_refuses_document_type_declarations_in_supported_encodings(encoding):
+    document = ("<!DOCTYPE Faktura>" + invoice().decode()).encode(encoding)
+    with pytest.raises(ValueError, match="document type"):
+        invoice_pdf.render_invoice_pdf(document)
+
+
+def test_pdf_structure_budget_includes_attributes(monkeypatch):
+    monkeypatch.setattr(invoice_pdf, "_MAX_NODES", 3)
+    xml = f'<Faktura xmlns="{FA3_NAMESPACE}"><Fa kind="one" other="two"/></Faktura>'
+    with pytest.raises(ValueError, match="structure limit"):
+        invoice_pdf.render_invoice_pdf(xml.encode())
