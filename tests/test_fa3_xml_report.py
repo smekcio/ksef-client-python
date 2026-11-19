@@ -106,3 +106,32 @@ def test_settlement_uses_original_p15_and_declared_or_itemized_adjustments(xml):
     assert [issue.code for issue in validate_invoice_xml(ET.tostring(root)).issues] == [
         "ADJUSTMENT_SUM"
     ]
+
+
+@pytest.mark.parametrize(
+    "kind,requires_line",
+    [
+        ("VAT", True),
+        ("UPR", True),
+        ("ROZ", True),
+        ("ZAL", False),
+        ("KOR", False),
+        ("KOR_ZAL", False),
+        ("KOR_ROZ", False),
+    ],
+)
+def test_missing_line_is_reported_only_for_unambiguous_invoice_kinds(xml, kind, requires_line):
+    root = ET.fromstring(xml)
+    fa = root.find(f"{{{FA3_NAMESPACE}}}Fa")
+    assert fa is not None
+    row = fa.find(f"{{{FA3_NAMESPACE}}}FaWiersz")
+    kind_node = fa.find(f"{{{FA3_NAMESPACE}}}RodzajFaktury")
+    assert row is not None and kind_node is not None
+    fa.remove(row)
+    kind_node.text = kind
+    issues = validate_invoice_xml(ET.tostring(root)).issues
+    assert not any(issue.code.startswith("SCHEMAV_") for issue in issues)
+    assert (
+        any(issue.field == "FaWiersz" and issue.code == "LINE_REQUIRED" for issue in issues)
+        == requires_line
+    )

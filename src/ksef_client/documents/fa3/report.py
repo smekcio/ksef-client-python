@@ -8,7 +8,8 @@ from decimal import Context, Decimal, localcontext
 from functools import lru_cache
 from typing import Any
 
-from .domain import ThirdPartyRole
+from .domain import _CORRECTION_KINDS, _KINDS_REQUIRING_LINES, ThirdPartyRole
+from .models import FA3InvoiceKind
 from .parse import MAX_XML_BYTES, _as_bytes, _reject_dtd, _XmlElementLimit
 from .validation.facets import facet_for
 from .xml import FA3_NAMESPACE, _fa3_schema
@@ -73,15 +74,25 @@ def _business_issues(root: Any) -> list[FA3XmlIssue]:
     """Inspect only conditions derivable from the original, XSD-valid document."""
     issues: list[FA3XmlIssue] = []
     kind_node = root.find("f:Fa/f:RodzajFaktury", _NS)
-    kind = kind_node.text.strip()
+    kind = FA3InvoiceKind.parse(kind_node.text)
+    if kind in _KINDS_REQUIRING_LINES and root.find("f:Fa/f:FaWiersz", _NS) is None:
+        issues.append(
+            FA3XmlIssue(
+                "LINE_REQUIRED",
+                "Brak pozycji faktury.",
+                "Dodaj co najmniej jeden Fa/FaWiersz dla faktury VAT, UPR lub ROZ.",
+                "FaWiersz",
+                kind_node.sourceline,
+            )
+        )
     for applies, field, hint in (
         (
-            kind in {"KOR", "KOR_ZAL", "KOR_ROZ"},
+            kind in _CORRECTION_KINDS,
             "DaneFaKorygowanej",
             "Wskaż fakturę korygowaną w Fa/DaneFaKorygowanej.",
         ),
         (
-            kind in {"ROZ", "KOR_ROZ"},
+            kind in {FA3InvoiceKind.SETTLEMENT, FA3InvoiceKind.SETTLEMENT_CORRECTION},
             "FakturaZaliczkowa",
             "Podaj odwołanie do faktury zaliczkowej w Fa/FakturaZaliczkowa.",
         ),

@@ -48,6 +48,12 @@ if TYPE_CHECKING:
     )
 
 
+_KINDS_REQUIRING_LINES = {
+    FA3InvoiceKind.BASIC,
+    FA3InvoiceKind.SIMPLIFIED,
+    FA3InvoiceKind.SETTLEMENT,
+}
+
 _CORRECTION_KINDS = {
     FA3InvoiceKind.CORRECTION,
     FA3InvoiceKind.ADVANCE_CORRECTION,
@@ -1267,13 +1273,7 @@ class FA3Invoice:
         # zaliczkę ORAZ korekty zbiorczej z art. 106j ust. 3 (podręcznik KSeF:
         # taka faktura „nie zawiera żadnych danych w części FaWiersz”; oficjalny
         # `FA_3_Przykład_6.xml` ma zero wierszy przy P_13_1=-40650.41 i P_15=-50000).
-        line_optional_kinds = {
-            FA3InvoiceKind.ADVANCE,
-            FA3InvoiceKind.ADVANCE_CORRECTION,
-            FA3InvoiceKind.CORRECTION,
-            FA3InvoiceKind.SETTLEMENT_CORRECTION,
-        }
-        if not self.lines and self.kind not in line_optional_kinds:
+        if not self.lines and self.kind in _KINDS_REQUIRING_LINES:
             errors.append(
                 FA3ValidationIssue("invoice.lines: faktura wymaga co najmniej jednej pozycji.")
             )

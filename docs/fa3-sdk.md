@@ -176,6 +176,7 @@ for issue in report.issues:
 `report.valid` oznacza przejście kontroli opisanych poniżej. Po walidacji XSD
 SDK sprawdza na źródłowych polach następujące zależności:
 
+- Obecność co najmniej jednego FaWiersz dla VAT, UPR i ROZ. Opis pola w schemacie MF przewiduje wyjątki dla zaliczek, korekt zaliczek i wskazanych korekt zbiorczych. Przy KOR i KOR_ROZ sama wartość RodzajFaktury nie wystarcza do rozpoznania korekty zbiorczej. [Opis FaWiersz w schemacie MF](../src/ksef_client/documents/fa3/schemas/schemat_FA%283%29_v1-0E.xsd#L3080)
 - Odwołanie do faktury korygowanej dla KOR, KOR_ZAL i KOR_ROZ oraz do zaliczki dla ROZ i KOR_ROZ.
 - Obecność Podmiot3 z odpowiednią rolą przy oznaczeniu nabywcy JST lub GV.
 - Zgodność podanej sumy obciążeń i odliczeń ze szczegółami, gdy plik zawiera oba zapisy.
