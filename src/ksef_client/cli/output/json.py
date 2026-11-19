@@ -55,6 +55,7 @@ class JsonRenderer:
         message: str,
         hint: str | None = None,
         retry_after_seconds: float | None = None,
+        data: dict[str, Any] | None = None,
     ) -> None:
         error: dict[str, Any] = {"code": code, "message": message}
         if hint:
@@ -65,7 +66,7 @@ class JsonRenderer:
             "ok": False,
             "command": command,
             "profile": profile,
-            "data": None,
+            "data": data,
             "errors": [error],
             "meta": self._meta(),
         }

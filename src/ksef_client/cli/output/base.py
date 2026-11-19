@@ -24,4 +24,5 @@ class Renderer(Protocol):
         message: str,
         hint: str | None = None,
         retry_after_seconds: float | None = None,
+        data: dict[str, Any] | None = None,
     ) -> None: ...

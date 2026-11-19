@@ -159,6 +159,33 @@ Metody specyficzne dla korekt i zaliczek:
 - `advance_payment(...)`, `order(...)`, `order_line(...)` – dane faktury zaliczkowej.
 - `settles_advance(...)`, `settles_advances(...)`, `remaining_to_pay(...)` – rozliczenie zaliczki.
 
+## Sprawdzenie gotowego pliku FA(3)
+
+`validate_invoice_xml` sprawdza oryginalny XML lokalnie, z użyciem schematu
+MF dostarczonego w pakiecie. Wymaga dodatku `ksef-client[fa3]`.
+
+```python
+from pathlib import Path
+from ksef_client.documents.fa3 import validate_invoice_xml
+
+report = validate_invoice_xml(Path("faktura.xml").read_bytes())
+for issue in report.issues:
+    print(issue.code, issue.field, issue.line, issue.hint)
+```
+
+`report.valid` oznacza przejście kontroli opisanych poniżej. Po walidacji XSD
+SDK sprawdza na źródłowych polach następujące zależności:
+
+- Odwołanie do faktury korygowanej dla KOR, KOR_ZAL i KOR_ROZ oraz do zaliczki dla ROZ i KOR_ROZ.
+- Obecność Podmiot3 z odpowiednią rolą przy oznaczeniu nabywcy JST lub GV.
+- Zgodność podanej sumy obciążeń i odliczeń ze szczegółami, gdy plik zawiera oba zapisy.
+- Kwotę DoZaplaty względem P_15, obciążeń i odliczeń. Jeśli suma jest pominięta, SDK sumuje pozycje.
+
+Raport zawiera do 50 błędów schematu. Pole `truncated` sygnalizuje skrócenie listy.
+Pole `field` zawiera rozpoznaną nazwę pola schematu, a `line` dostępny numer wiersza.
+Sekwencje DTD są niedozwolone. Limit wejścia wynosi 20 MiB i 250 000 elementów.
+Walidacja dokumentu oraz decyzja o jego przyjęciu przez KSeF to osobne etapy.
+
 ## Walidacja i serializacja
 `build()` i `to_xml(validate=True)` uruchamiają walidację biznesową SDK. Wynik walidacji możesz też
 sprawdzić jawnie:

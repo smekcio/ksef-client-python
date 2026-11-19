@@ -122,6 +122,7 @@ ksef
   invoice
     list
     download
+    validate
   send
     online
     batch
@@ -491,6 +492,22 @@ Options:
   --continuation-token TEXT  Resume from a previous response token.
   --base-url TEXT
 ```
+
+## `ksef invoice validate`
+
+Sprawdź gotowy plik XML przed wysyłką. Polecenie działa lokalnie bez konta i profilu.
+
+```sh
+pip install "ksef-client[cli,fa3]"
+ksef invoice validate faktura.xml
+ksef --json invoice validate faktura.xml
+```
+
+Raport wskazuje pole, dostępny numer wiersza, kod problemu i podpowiedź.
+W JSON obiekt `data` odpowiada dokładnie `validate_invoice_xml(...).to_dict()`,
+także gdy faktura ma błędy. Kod wyjścia 0 oznacza poprawny dokument, 2 błąd walidacji,
+6 brak zależności, a 8 problem z odczytem pliku.
+[Zakres walidacji SDK](../fa3-sdk.md#sprawdzenie-gotowego-pliku-fa3).
 
 ## `ksef invoice list`
 
