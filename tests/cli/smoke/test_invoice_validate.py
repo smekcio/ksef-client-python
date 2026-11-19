@@ -58,3 +58,23 @@ def test_install_hint_for_missing_extra(runner, monkeypatch, tmp_path):
 def test_non_regular_input(runner):
     result = runner.invoke(app, ["--json", "invoice", "validate", os.devnull])
     assert result.exit_code == 8
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX can open directory descriptors")
+def test_directory_input_closes_every_descriptor(runner, tmp_path, monkeypatch):
+    original = os.open
+    observed = []
+
+    def track_open(path, flags, *args, **kwargs):
+        fd = original(path, flags, *args, **kwargs)
+        if path == tmp_path:
+            observed.append(fd)
+        return fd
+
+    monkeypatch.setattr(os, "open", track_open)
+    for _ in range(4):
+        result = runner.invoke(app, ["--json", "invoice", "validate", str(tmp_path)])
+        assert result.exit_code == 8
+        with pytest.raises(OSError):
+            os.fstat(observed[-1])
+    assert len(observed) == 4

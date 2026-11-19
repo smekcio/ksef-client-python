@@ -183,10 +183,15 @@ def invoice_validate(ctx: typer.Context, file: Path) -> None:
     command = "invoice.validate"
     try:
         flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-        with os.fdopen(os.open(file, flags), "rb") as stream:
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+        fd = os.open(file, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise OSError("Expected a regular file")
-            report = validate_invoice_xml(stream.read(MAX_XML_BYTES + 1))
+            with os.fdopen(fd, "rb", closefd=False) as stream:
+                xml = stream.read(MAX_XML_BYTES + 1)
+        finally:
+            os.close(fd)
+        report = validate_invoice_xml(xml)
     except OSError:
         renderer.error(
             command=command,
