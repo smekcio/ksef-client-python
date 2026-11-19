@@ -62,6 +62,25 @@ class OnlineInvoiceBundle:
     invoice: OnlineInvoice
     xml: bytes = field(repr=False)
     upo: bytes | None = field(repr=False)
+    invoice_hash: str = field(repr=False, kw_only=True)
+
+    def __post_init__(self) -> None:
+        if offline_invoice_hash(self.xml) != self.invoice_hash:
+            raise KsefDocumentValidationError("Stored XML does not match the tracked invoice hash")
+        progress = OfflineInvoiceProgress(
+            invoice_hash=self.invoice_hash,
+            status=self.invoice.status,
+            session_reference=self.invoice.session_reference,
+            invoice_reference=self.invoice.invoice_reference,
+            ksef_number=self.invoice.ksef_number,
+            ksef_status=self.invoice.ksef_status,
+        )
+        if (self.upo is not None) != (progress.status is OnlineInvoiceStatus.COMPLETE):
+            raise KsefDocumentValidationError("UPO availability conflicts with the invoice status")
+        if self.upo is not None:
+            if type(self.upo) is not bytes:
+                raise KsefDocumentValidationError("Individual UPO must be immutable XML bytes")
+            _checked_upo(progress, self.upo)
 
     @property
     def upo_status(self) -> Literal["available", "pending", "unavailable"]:
@@ -178,6 +197,7 @@ def _checked_upo(progress: OfflineInvoiceProgress, upo: bytes) -> bytes:
             documents = root.findall(namespace + "Dokument")
             if (
                 len(documents) == 1
+                and root.find(namespace + "OpisPotwierdzenia") is None
                 and _text(root, namespace + "NumerReferencyjnySesji") == progress.session_reference
                 and _matches_ksef_number(
                     documents[0], namespace + "NumerKSeFDokumentu", progress.ksef_number
@@ -191,10 +211,8 @@ def _checked_upo(progress: OfflineInvoiceProgress, upo: bytes) -> bytes:
 def _bundle_snapshot(
     local_id: str, row: StoredOfflineInvoice, xml: bytes, upo: bytes | None
 ) -> OnlineInvoiceBundle:
-    if offline_invoice_hash(xml) != row.progress.invoice_hash:
-        raise KsefDocumentValidationError("Stored XML does not match the tracked invoice hash")
     return OnlineInvoiceBundle(
-        _result(local_id, row), xml, None if upo is None else _checked_upo(row.progress, upo)
+        _result(local_id, row), xml, upo, invoice_hash=row.progress.invoice_hash
     )
 
 
@@ -250,7 +268,8 @@ class OnlineInvoiceQueue:
 
     def read_upo(self, local_id: str) -> bytes:
         row = _required(self._store._load_online(self._scope, local_id))
-        return self._store.read_upo(self._scope, row.progress.invoice_hash)
+        upo = self._store.read_upo(self._scope, row.progress.invoice_hash)
+        return _checked_upo(row.progress, upo)
 
     def bundle(self, local_id: str) -> OnlineInvoiceBundle:
         """Read original XML, its saved submission state and any verified individual UPO locally."""
@@ -362,7 +381,8 @@ class AsyncOnlineInvoices:
 
     async def read_upo(self, local_id: str) -> bytes:
         row = _required(await self._store._call("_load_online", self._worker.scope, local_id))
-        return await self._worker.read_upo(row.progress.invoice_hash)
+        upo = await self._worker.read_upo(row.progress.invoice_hash)
+        return await asyncio.to_thread(_checked_upo, row.progress, upo)
 
     async def bundle(self, local_id: str) -> OnlineInvoiceBundle:
         """Read a local bundle snapshot without advancing the submission."""

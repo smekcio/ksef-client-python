@@ -408,6 +408,17 @@ def test_invalid_receipts_do_not_complete_the_invoice(tmp_path, use_async, versi
                 (individual_upo(number="wrong"), "does not identify"),
                 (individual_upo(digest="wrong"), "does not identify"),
                 (
+                    individual_upo().replace(
+                        b"<Dokument>",
+                        b"<OpisPotwierdzenia><Strona>2</Strona><LiczbaStron>2</LiczbaStron>"
+                        b"<ZakresDokumentowOd>2</ZakresDokumentowOd>"
+                        b"<ZakresDokumentowDo>3</ZakresDokumentowDo>"
+                        b"<CalkowitaLiczbaDokumentow>2</CalkowitaLiczbaDokumentow>"
+                        b"</OpisPotwierdzenia><Dokument>",
+                    ),
+                    "does not identify",
+                ),
+                (
                     individual_upo()
                     .replace(b"<SkrotDokumentu>", b"<Ignorowany><SkrotDokumentu>")
                     .replace(b"</SkrotDokumentu>", b"</SkrotDokumentu></Ignorowany>"),

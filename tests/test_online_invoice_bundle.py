@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import zipfile
+from dataclasses import replace
 
 import pytest
 
@@ -116,6 +117,11 @@ def test_bundle_checks_content_before_exporting(tmp_path, monkeypatch):
             store, namespace="test", environment=server.environment, context_key=server.context_key
         )
         queue.enqueue(LOCAL_ID, XML)
+        queued = queue.bundle(LOCAL_ID)
+        with pytest.raises(KsefDocumentValidationError, match="does not match"):
+            replace(queued, xml=b"<different/>")
+        with pytest.raises(KsefDocumentValidationError, match="availability"):
+            replace(queued, upo=individual_upo())
         with monkeypatch.context() as patch:
             patch.setattr(store, "read_xml", lambda *_: b"<other/>")
             with pytest.raises(KsefDocumentValidationError, match="XML"):
@@ -133,3 +139,29 @@ def test_bundle_checks_content_before_exporting(tmp_path, monkeypatch):
         )
         with pytest.raises(KsefDocumentValidationError, match="does not identify"):
             queue.bundle(LOCAL_ID)
+        with pytest.raises(KsefDocumentValidationError, match="does not identify"):
+            queue.read_upo(LOCAL_ID)
+
+
+def test_completed_snapshot_requires_matching_immutable_receipt(tmp_path):
+    async def run():
+        server = Server()
+        server.lose_send = False
+        async with online(server, tmp_path / "db", True) as worker:
+            await call(worker.enqueue, LOCAL_ID, XML)
+            await call(worker.advance, LOCAL_ID)
+            await call(worker.advance, LOCAL_ID)
+            server.result = remote_invoice(200, number=NUMBER)
+            await call(worker.advance, LOCAL_ID)
+            server.session_code = 200
+            await call(worker.advance, LOCAL_ID)
+            snapshot = await call(worker.bundle, LOCAL_ID)
+            assert snapshot.upo == individual_upo()
+            with pytest.raises(KsefDocumentValidationError, match="availability"):
+                replace(snapshot, upo=None)
+            with pytest.raises(KsefDocumentValidationError, match="immutable"):
+                replace(snapshot, upo=bytearray(individual_upo()))
+            with pytest.raises(KsefDocumentValidationError, match="does not identify"):
+                replace(snapshot, upo=individual_upo(number="incorrect"))
+
+    asyncio.run(run())

@@ -109,7 +109,7 @@ Paczka zawiera oryginalne bajty w `invoice.xml`, wizualizację FA(3) w `invoice.
 
 | `upo_status` | Znaczenie |
 | --- | --- |
-| `available` | Pakiet zawiera `upo.xml`. SDK porównał numer sesji, numer KSeF oraz skrót faktury z indywidualnym UPO zapisanym w kolejce. |
+| `available` | Pakiet zawiera `upo.xml`. SDK porównał numer sesji, numer KSeF oraz skrót faktury z indywidualnym UPO zapisanym w kolejce. Strony UPO zbiorczego są odrzucane także wtedy, gdy dana strona wymienia tylko jedną fakturę. |
 | `pending` | Wysyłka lub odbiór UPO jest w toku. Po zapisaniu nowszej rewizji możesz wyeksportować kolejny plik ZIP. |
 | `unavailable` | KSeF odrzucił bieżącą próbę, zgłosił duplikat lub potwierdził anulowanie. Kod KSeF jest w manifeście. |
 
