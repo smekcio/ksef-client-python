@@ -37,7 +37,7 @@ def grant(number: int, **fields: Any) -> dict[str, Any]:
 def read_pages(request, monkeypatch):
     options = KsefClientOptions("https://permissions.example")
 
-    def read(pages, *, operation=None, **kwargs):
+    def read(pages, *, operation=None, context_type="Nip", **kwargs):
         offsets: list[int] = []
 
         def respond(transport, req):
@@ -58,7 +58,7 @@ def read_pages(request, monkeypatch):
             monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", async_respond)
             api = AsyncAuthenticatedClient(options, AsyncTokenManager("alias-access", "refresh"))
             async with AsyncKsef(
-                api, options, context_type="Nip", context_value="1234567890"
+                api, options, context_type=context_type, context_value="1234567890"
             ) as sdk:
                 if operation is not None:
                     return await sdk.permissions.check_operation(operation, **kwargs)
@@ -69,7 +69,7 @@ def read_pages(request, monkeypatch):
                 return asyncio.run(read_async())
             monkeypatch.setattr(httpx.HTTPTransport, "handle_request", respond)
             api = AuthenticatedClient(options, TokenManager("alias-access", "refresh"))
-            with Ksef(api, options, context_type="Nip", context_value="1234567890") as sdk:
+            with Ksef(api, options, context_type=context_type, context_value="1234567890") as sdk:
                 if operation is not None:
                     return sdk.permissions.check_operation(operation, **kwargs)
                 return sdk.permissions.list_personal_grants(**kwargs)
@@ -273,6 +273,13 @@ def test_filtered_page_preserves_personal_details_and_explicit_credentials(use_a
 
 _CURRENT = {"type": "Nip", "value": "1234567890"}
 _OTHER = {"type": "Nip", "value": "9999999999"}
+
+
+@pytest.mark.parametrize("field", ["contextIdentifier", "targetIdentifier"])
+def test_direct_facade_accepts_login_context_spelling(read_pages, field):
+    page = {"permissions": [grant(1, **{field: _CURRENT})], "hasMore": False}
+    check = read_pages([page], operation="download-purchases", context_type=" nip ")
+    assert check.status == "grant_found"
 
 
 @pytest.mark.parametrize(

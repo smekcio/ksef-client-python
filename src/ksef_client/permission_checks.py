@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Literal
 
 from . import models as m
+from .services.auth import _normalize_context_identifier_type
 
 
 class InvoicePermissionOperation(str, Enum):
@@ -82,6 +83,9 @@ def _evaluate_operation(
     context_key: str,
     page: m.QueryPersonalPermissionsResponse,
 ) -> OperationPermissionReport:
+    # Directly constructed facades may retain the spelling supplied at login.
+    kind, value = context_key.split(":", 1)
+    context_key = f"{_normalize_context_identifier_type(kind).value}:{value}"
     sending = operation is InvoicePermissionOperation.SEND_ONLINE
     required = "InvoiceWrite" if sending else "InvoiceRead"
     owners = {item.value for item in page.owner_permissions or []}
