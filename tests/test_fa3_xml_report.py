@@ -33,11 +33,20 @@ def test_malformed_wrong_schema_and_limits(xml, monkeypatch):
     assert validate_invoice_xml("<!DOCTYPE Faktura><Faktura/>".encode("utf-16")).issues[0].code == (
         "INVALID_XML"
     )
-    monkeypatch.setattr(validation, "_MAX_ELEMENTS", 5)
+    monkeypatch.setattr(validation, "_MAX_XML_NODES", 5)
     assert validate_invoice_xml(xml).issues[0].code == "XML_LIMIT"
     monkeypatch.setattr(validation, "MAX_XML_BYTES", 5)
     assert validate_invoice_xml(b"123456").issues[0].code == "XML_LIMIT"
     assert validate_invoice_xml("ąąą").issues[0].code == "XML_LIMIT"
+
+
+def test_structure_budget_counts_attributes_and_nesting_before_building_a_tree(monkeypatch):
+    monkeypatch.setattr(validation, "_MAX_XML_NODES", 3)
+    monkeypatch.setattr(validation, "_MAX_XML_DEPTH", 2)
+    # A root and two siblings fit both limits. Validation reaches the schema check.
+    assert validate_invoice_xml(b"<a><b/><c/></a>").issues[0].code == "NOT_FA3"
+    for source in (b"<a><b><c/></b></a>", b'<a x="1" y="2"><b/></a>'):
+        assert validate_invoice_xml(source).issues[0].code == "XML_LIMIT"
 
 
 def test_schema_reports_known_fields_line_and_safe_hint(xml):

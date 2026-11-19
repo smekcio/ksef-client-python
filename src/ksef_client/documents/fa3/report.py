@@ -10,12 +10,13 @@ from typing import Any
 
 from .domain import _CORRECTION_KINDS, _KINDS_REQUIRING_LINES, ThirdPartyRole
 from .models import FA3InvoiceKind
-from .parse import MAX_XML_BYTES, _as_bytes, _reject_dtd, _XmlElementLimit
+from .parse import MAX_XML_BYTES, _as_bytes, _reject_dtd, _XmlStructureLimit
 from .validation.facets import facet_for
 from .xml import FA3_NAMESPACE, _fa3_schema
 from .xsd_audit import parse_fa3_xsd_elements
 
-_MAX_ELEMENTS = 250_000
+_MAX_XML_NODES = 250_000
+_MAX_XML_DEPTH = 64
 _MAX_ISSUES = 50
 _NS = {"f": FA3_NAMESPACE}
 _ELEMENT = re.compile(r"Element '\{" + re.escape(FA3_NAMESPACE) + r"\}([A-Za-z_0-9]+)'")
@@ -184,7 +185,8 @@ def validate_invoice_xml(xml: bytes | bytearray | str) -> FA3XmlReport:
     limit = FA3XmlIssue(
         "XML_LIMIT",
         "Przekroczono limit walidatora.",
-        f"Limit to {MAX_XML_BYTES} bajtów i {_MAX_ELEMENTS} elementów.",
+        f"Limit to {MAX_XML_BYTES} bajtów, {_MAX_XML_NODES} elementów i atrybutów "
+        f"łącznie oraz {_MAX_XML_DEPTH} poziomy.",
     )
     if len(xml) > MAX_XML_BYTES:
         return FA3XmlReport((limit,))
@@ -192,7 +194,7 @@ def validate_invoice_xml(xml: bytes | bytearray | str) -> FA3XmlReport:
         data = _as_bytes(xml)
         if len(data) > MAX_XML_BYTES:
             return FA3XmlReport((limit,))
-        _reject_dtd(data, max_elements=_MAX_ELEMENTS)
+        _reject_dtd(data, max_nodes=_MAX_XML_NODES, max_depth=_MAX_XML_DEPTH)
         parser = etree.XMLParser(
             no_network=True,
             load_dtd=False,
@@ -201,7 +203,7 @@ def validate_invoice_xml(xml: bytes | bytearray | str) -> FA3XmlReport:
             remove_pis=True,
         )
         root = etree.fromstring(data, parser)
-    except _XmlElementLimit:
+    except _XmlStructureLimit:
         return FA3XmlReport((limit,))
     except (etree.XMLSyntaxError, LookupError, ValueError) as exc:
         source = exc.__cause__ or exc

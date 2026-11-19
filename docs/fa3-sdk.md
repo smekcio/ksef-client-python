@@ -184,7 +184,8 @@ SDK sprawdza na źródłowych polach następujące zależności:
 
 Raport zawiera do 50 błędów schematu. Pole `truncated` sygnalizuje skrócenie listy.
 Pole `field` zawiera rozpoznaną nazwę pola schematu, a `line` dostępny numer wiersza.
-Sekwencje DTD są niedozwolone. Limit wejścia wynosi 20 MiB i 250 000 elementów.
+Sekwencje DTD są niedozwolone. Limit wejścia wynosi 20 MiB, 250 000 elementów
+i atrybutów łącznie oraz 64 poziomy zagnieżdżenia.
 Walidacja dokumentu oraz decyzja o jego przyjęciu przez KSeF to osobne etapy.
 
 ## Walidacja i serializacja
