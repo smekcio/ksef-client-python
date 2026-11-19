@@ -56,6 +56,10 @@ xml = [
 fa3 = [
   "lxml>=5.0.0",
 ]
+pdf = [
+  "reportlab>=4.4.0",
+  "font-roboto>=0.0.1",
+]
 qr = [
   "qrcode[pil]>=7.4.2",
   "pillow>=10.0.0",
@@ -107,4 +111,8 @@ check_untyped_defs = true
 
 [[tool.mypy.overrides]]
 module = ["qrcode", "qrcode.*", "PIL", "PIL.*", "xmlsec", "lxml", "lxml.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["reportlab.*"]
 ignore_missing_imports = true
