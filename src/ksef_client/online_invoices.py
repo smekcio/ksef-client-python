@@ -19,6 +19,7 @@ from ._offline_invoice_store import (
 from ._offline_invoice_store import SQLiteOfflineInvoiceStore as SQLiteOnlineInvoiceStore
 from ._offline_invoice_store import StoredOfflineInvoice
 from ._private_files import private_output
+from .config import KsefClientOptions
 from .exceptions import KsefDocumentValidationError
 from .invoice_sync_state import InvoiceSyncScope
 from .offline_invoices import AsyncOfflineInvoices, OfflineInvoices
@@ -64,6 +65,8 @@ class OnlineInvoiceBundle:
     upo: bytes | None = field(repr=False)
     invoice_hash: str = field(repr=False, kw_only=True)
 
+    options: KsefClientOptions | None = field(default=None, repr=False, kw_only=True)
+
     def __post_init__(self) -> None:
         if offline_invoice_hash(self.xml) != self.invoice_hash:
             raise KsefDocumentValidationError("Stored XML does not match the tracked invoice hash")
@@ -94,14 +97,29 @@ class OnlineInvoiceBundle:
             return "unavailable"
         return "pending"
 
-    def save(self, path: str | Path) -> None:
+    def save(self, path: str | Path, *, pdf_renderer: Literal["local", "mf"] = "local") -> None:
         """Write a new private ZIP in an existing directory. PDF requires the pdf extra."""
         from .invoice_pdf import render_invoice_pdf
+        from .mf_pdf import InvoicePdfContext, generator_info, render_upo_pdf
 
-        pdf = render_invoice_pdf(self.xml, ksef_number=self.invoice.ksef_number)
+        if pdf_renderer == "mf":
+            context = None
+            if self.invoice.ksef_number:
+                if self.options is None:
+                    raise KsefDocumentValidationError("MF bundle requires matching KSeF options")
+                context = InvoicePdfContext.accepted(self.options, self.invoice.ksef_number)
+            pdf = render_invoice_pdf(
+                self.xml, ksef_number=self.invoice.ksef_number, renderer="mf", context=context
+            )
+        else:
+            if pdf_renderer != "local":
+                raise ValueError("Unknown PDF renderer")
+            pdf = render_invoice_pdf(self.xml, ksef_number=self.invoice.ksef_number)
         documents = {"invoice.xml": self.xml, "invoice.pdf": pdf}
         if self.upo is not None:
             documents["upo.xml"] = self.upo
+            if pdf_renderer == "mf":
+                documents["upo.pdf"] = render_upo_pdf(self.upo)
         manifest = {
             "version": 1,
             "local_id": self.invoice.local_id,
@@ -112,6 +130,14 @@ class OnlineInvoiceBundle:
             "upo_status": self.upo_status,
             "sha256": {name: hashlib.sha256(data).hexdigest() for name, data in documents.items()},
         }
+        if pdf_renderer == "mf":
+            info = generator_info()
+            manifest["version"] = 2
+            manifest["generator"] = {
+                "version": info["version"],
+                "commit": info["commit"],
+                "name": info["repository"],
+            }
         with (
             private_output(Path(path)) as output,
             zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive,
@@ -209,10 +235,14 @@ def _checked_upo(progress: OfflineInvoiceProgress, upo: bytes) -> bytes:
 
 
 def _bundle_snapshot(
-    local_id: str, row: StoredOfflineInvoice, xml: bytes, upo: bytes | None
+    local_id: str,
+    row: StoredOfflineInvoice,
+    xml: bytes,
+    upo: bytes | None,
+    options: KsefClientOptions | None = None,
 ) -> OnlineInvoiceBundle:
     return OnlineInvoiceBundle(
-        _result(local_id, row), xml, upo, invoice_hash=row.progress.invoice_hash
+        _result(local_id, row), xml, upo, invoice_hash=row.progress.invoice_hash, options=options
     )
 
 
@@ -246,8 +276,17 @@ class OnlineInvoiceQueue:
     """Local operations by application ID, including access to an already verified UPO."""
 
     def __init__(
-        self, store: SQLiteOnlineInvoiceStore, *, namespace: str, environment: str, context_key: str
+        self,
+        store: SQLiteOnlineInvoiceStore,
+        *,
+        namespace: str,
+        environment: str,
+        context_key: str,
+        options: KsefClientOptions | None = None,
     ) -> None:
+        if options is not None and environment_key(options.normalized_base_url()) != environment:
+            raise ValueError("PDF options do not match the queue environment")
+        self._options = options
         self._store = store
         self._scope = InvoiceSyncScope(
             namespace, environment, context_key, *_ONLINE_SUBMISSION_KIND
@@ -279,7 +318,7 @@ class OnlineInvoiceQueue:
         upo = None
         if row.progress.status is OnlineInvoiceStatus.COMPLETE:
             upo = self._store.read_upo(self._scope, digest)
-        return _bundle_snapshot(local_id, row, xml, upo)
+        return _bundle_snapshot(local_id, row, xml, upo, self._options)
 
 
 class OnlineInvoices(OnlineInvoiceQueue):
@@ -290,6 +329,7 @@ class OnlineInvoices(OnlineInvoiceQueue):
             store,
             namespace=namespace,
             environment=client.environment,
+            options=client.options,
             context_key=client.context_key,
         )
         self._worker = _OnlineWorker(client, store, namespace=namespace)
@@ -392,7 +432,9 @@ class AsyncOnlineInvoices:
         upo = None
         if row.progress.status is OnlineInvoiceStatus.COMPLETE:
             upo = await self._worker.read_upo(digest)
-        return await asyncio.to_thread(_bundle_snapshot, local_id, row, xml, upo)
+        return await asyncio.to_thread(
+            _bundle_snapshot, local_id, row, xml, upo, self._client.options
+        )
 
 
 __all__ = [

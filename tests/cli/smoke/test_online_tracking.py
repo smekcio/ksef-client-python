@@ -308,3 +308,22 @@ def test_invalid_tracking_options_fail_before_writes(runner, tmp_path, flags):
         app, ["--json", "send", "online", "--invoice", str(tmp_path / "absent.xml"), *flags]
     )
     assert result.exit_code == ExitCode.VALIDATION_ERROR, result.output
+
+
+def test_export_mf_bundle_and_missing_runtime(online, tmp_path, monkeypatch):
+    from ksef_client.exceptions import KsefRenderingError
+    _, invoke, root, xml = online
+    item = ["--id", "MF", "--state-dir", root]
+    invoke("online", "enqueue", *item, "--xml", xml)
+    out = tmp_path / "mf.zip"
+    args = ["online", "bundle", *item, "--pdf-renderer", "mf", "--out", str(out)]
+    def missing(*a, **kw):
+        raise KsefRenderingError("Install Node.js")
+    monkeypatch.setattr("ksef_client.invoice_pdf.render_invoice_pdf", missing)
+    result = invoke(*args, code=ExitCode.CONFIG_ERROR)
+    assert "Node.js" in result["hint"]
+    assert not out.exists()
+    monkeypatch.setattr("ksef_client.invoice_pdf.render_invoice_pdf", lambda *a, **kw: b"%PDF-mf")
+    invoke(*args)
+    with zipfile.ZipFile(out) as archive:
+        assert json.loads(archive.read("manifest.json"))["version"] == 2

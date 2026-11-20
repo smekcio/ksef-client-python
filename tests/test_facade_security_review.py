@@ -36,7 +36,9 @@ from ksef_client.streaming_export import (
 )
 from tests.test_operations_facade import owner, state
 from tests.test_streaming_export import IV, KEY, make_package, operation, sha
-from tests.test_streaming_export import storage as storage
+from tests.test_streaming_export import storage as _storage_fixture
+
+storage = _storage_fixture
 
 
 def test_state_rejects_path_injection_and_missing_invoice_parent():

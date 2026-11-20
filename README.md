@@ -126,6 +126,21 @@ ksef invoice validate docs/examples/faktura-demo.xml
 | Sprawdzić uprawnienia do sprzedaży lub zakupów | `ksef health permissions` pobiera nadania dla bieżącego kontekstu logowania. Opcja `--for` pozwala sprawdzić wybraną operację. [Diagnostyka uprawnień](https://github.com/smekcio/ksef-client-python/blob/main/docs/cli/README.md#ksef-health-permissions) |
 | Przetworzyć pobrane faktury zakupowe | Polecenie `ksef archive next` pobiera dokument z lokalnego archiwum. Po zapisaniu wyniku w swojej aplikacji potwierdź przetworzenie przez `ksef archive ack`. [Odbiór faktur krok po kroku](https://github.com/smekcio/ksef-client-python/blob/main/docs/incoming-invoice-delivery.md) |
 
+## Podgląd PDF faktur i UPO
+
+Wersja rozwojowa zawiera oficjalny generator CIRFMF 1.1.48 dla FA(3) i UPO 4.2/4.3.
+Po instalacji z repozytorium przez `python -m pip install -e ".[cli]"` i zapewnieniu Node.js 22 lub nowszego
+możesz wyrenderować zapisane XML-e lokalnie.
+
+```sh
+ksef invoice render faktura.xml --out faktura.pdf
+ksef upo render upo.xml --out upo.pdf
+ksef online bundle --id FV-123 --state-dir ./private --pdf-renderer mf --out FV-123-mf.zip
+```
+
+API Pythona udostępnia także konteksty do QR online i offline. Pakiet MF zawiera XML faktury,
+jej PDF i dostępne indywidualne UPO w obu formatach. [Wizualizacja i przykłady integracji](https://github.com/smekcio/ksef-client-python/blob/main/docs/invoice-bundle-pdf.md)
+
 ## Dalsza integracja
 
 - **Duża liczba faktur.** Wysyłaj faktury w [sesji wsadowej](https://github.com/smekcio/ksef-client-python/blob/main/docs/workflows/batch-session.md) lub pobieraj je przez [wznawialny eksport na dysk](https://github.com/smekcio/ksef-client-python/blob/main/docs/workflows/export.md).

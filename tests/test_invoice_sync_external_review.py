@@ -165,8 +165,9 @@ def test_receipt_type_and_pure_transition_identity_are_fail_closed():
         with pytest.raises(KsefSyncStoreError) as caught:
             batch.confirm(replace(batch.receipt, revision=2))
         assert caught.value.commit_outcome == "unknown"
+        invalid_json: Any = bytearray(b"{}")
         with pytest.raises(KsefInvalidSyncCheckpointError) as invalid:
-            InvoiceSyncCheckpoint.from_json(bytearray(b"{}"))  # type: ignore[arg-type]
+            InvoiceSyncCheckpoint.from_json(invalid_json)
         assert invalid.value.reason_code == "invalid_checkpoint"
         data = cp.to_dict()
         data["scope"]["namespace"] = "another-tenant"

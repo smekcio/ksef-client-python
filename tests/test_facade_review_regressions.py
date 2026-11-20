@@ -22,7 +22,9 @@ from ksef_client.services.crypto import EncryptionData
 from ksef_client.services.sessions import AsyncBatchSessionHandle
 from ksef_client.streaming_export import KsefExportTransferError, extract_archive
 from tests.test_streaming_export import IV, KEY, make_package, operation, sha
-from tests.test_streaming_export import storage as storage
+from tests.test_streaming_export import storage as _storage_fixture
+
+storage = _storage_fixture
 
 
 @pytest.mark.parametrize("parallelism", [1, 3])

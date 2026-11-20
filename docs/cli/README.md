@@ -123,6 +123,7 @@ ksef
     list
     download
     validate
+    render
   send
     online
     batch
@@ -143,6 +144,7 @@ ksef
       upload
       close
   upo
+    render
     get
     wait
   export
@@ -532,6 +534,44 @@ także gdy faktura ma błędy. Kod wyjścia 0 oznacza poprawny dokument, 2 błą
 6 brak zależności, a 8 problem z odczytem pliku.
 [Zakres walidacji SDK](../fa3-sdk.md#sprawdzenie-gotowego-pliku-fa3).
 
+## `ksef invoice render`
+
+Renderuje lokalny XML FA(3) do nowego pliku PDF w istniejącym katalogu. Domyślny renderer `mf`
+wymaga Node.js 22 lub nowszego. `--renderer local` korzysta z dodatku `ksef-client[pdf]`.
+
+```bash
+ksef invoice render faktura.xml --out podglad.pdf
+ksef invoice render faktura.xml --ksef-number NUMER --env TEST --out faktura.pdf
+ksef --profile firma invoice render faktura.xml --offline --cert-pem cert.pem --key-pem key.pem --out offline.pdf
+```
+
+| Opcja | Znaczenie |
+| --- | --- |
+| `--out` | Wymagana ścieżka nowego pliku PDF. |
+| `--renderer` | `mf` lub `local`, domyślnie `mf`. |
+| `--ksef-number` | Przydzielony numer KSeF, z którym MF umieszcza jeden QR. |
+| `--env` | `TEST`, `DEMO` lub `PROD`. Bez tej opcji QR korzysta ze środowiska profilu. |
+| `--offline` | Dwa QR przed nadaniem numeru, z kontekstem wybranego profilu. |
+| `--cert-pem`, `--key-pem` | Para certyfikatu KSeF i klucza do wariantu offline. |
+| `--pkcs12-path` | Certyfikat i klucz offline w PKCS#12. |
+| `--key-password` | Hasło PEM lub PKCS#12, również przez `KSEF_PDF_KEY_PASSWORD`. |
+
+`--ksef-number` i `--offline` wymagają renderera MF i są wzajemnie wykluczające.
+Podgląd bez QR działa bez profilu i logowania. QR online wymaga `--env` albo profilu.
+QR offline wymaga profilu z kontekstem oraz jednego źródła certyfikatu.
+Hasło należy przekazać jawnie lub przez zmienną środowiskową. Komenda nie wyświetla promptu hasła.
+
+## `ksef upo render`
+
+```bash
+ksef upo render upo.xml --out upo.pdf
+```
+
+Renderuje indywidualne lub zbiorcze UPO 4.2/4.3 z lokalnego pliku. Node.js 22 lub nowszy jest
+wymagany. Polecenie działa bez profilu i logowania i zapisuje nowy plik w istniejącym katalogu.
+Źródłowy XML możesz wcześniej pobrać poleceniem `upo get` lub odczytać z kolejki `online upo`.
+[API Pythona, limity i błędy renderowania](../invoice-bundle-pdf.md)
+
 ## `ksef invoice list`
 
 ```text
@@ -612,7 +652,7 @@ Uwagi:
   oraz odzyskania flow po przerwaniu lub bledzie po zapisaniu checkpointu.
 - `--save-upo-overwrite` pozwala nadpisac istniejacy plik UPO wskazany przez `--save-upo`.
 - `--local-id FV-123 --state-dir ./private` wiąże XML z własnym ID. Po restarcie odczytasz wynik przez `ksef online status`, wznowisz operację przez `ksef online run` i zapiszesz indywidualne UPO przez `ksef online upo`. [Przykłady i konfiguracja klucza](../workflows/cli-operations.md#wysyłka-online-po-własnym-id)
-- `ksef online bundle --id FV-123 --state-dir ./private --out FV-123.zip` zapisuje lokalny pakiet XML, PDF, metadanych i dostępnego UPO. Wymaga pakietu `ksef-client[cli,pdf]`. [Zawartość ZIP i status UPO](../workflows/cli-operations.md#lokalny-pakiet-faktury-i-upo)
+- `ksef online bundle --id FV-123 --state-dir ./private --out FV-123.zip` zapisuje lokalny pakiet XML, PDF, metadanych i dostępnego UPO. Domyślny renderer wymaga `ksef-client[cli,pdf]`. Opcja `--pdf-renderer mf` wymaga Node.js i tworzy manifest v2 oraz dostępne `upo.pdf`. [Zawartość ZIP i status UPO](../workflows/cli-operations.md#lokalny-pakiet-faktury-i-upo)
 - Dla `FA_RR (1)` z `--schema-version 1-1E` uzyj `--form-value FA_RR`.
 
 ## `ksef send batch`

@@ -26,5 +26,6 @@ pip-wheel-metadata/
 .env
 .env.*
 .build/
+build/
 dist/
 *.egg-info/

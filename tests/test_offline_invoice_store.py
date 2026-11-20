@@ -2,6 +2,7 @@ import asyncio
 import sqlite3
 from contextlib import closing
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -172,8 +173,9 @@ def test_validates_storage_boundaries_before_effects(tmp_path):
     with SQLiteOfflineInvoiceStore.open(tmp_path / "db", key=KEY) as store:
         created = store.enqueue(SCOPE, XML, due_at=DUE)
         digest = created.progress.invoice_hash
+        invalid_xml: Any = bytearray(XML)
         with pytest.raises(ValueError, match="size|storage policy"):
-            store.enqueue(SCOPE, bytearray(XML), due_at=DUE)  # type: ignore[arg-type]
+            store.enqueue(SCOPE, invalid_xml, due_at=DUE)
         with pytest.raises(ValueError, match="mode"):
             store.enqueue(SCOPE, XML, due_at=DUE, mode="offline24")  # type: ignore[arg-type]
         with pytest.raises(KsefSyncConflictError):

@@ -34,3 +34,10 @@ Data weryfikacji źródeł:
 ## Uwagi
 
 Projekt nie rości sobie praw autorskich do powyższych schem.
+
+## Generator PDF CIRFMF
+
+Pakiet zawiera generator MF 1.1.48, commit d766b7b79486ed401cd40fac27402ffecd672bd7.
+Źródło https://github.com/CIRFMF/ksef-pdf-generator. Licencja pliku LICENSE to MIT.
+Pełne teksty licencji generatora, zależności i fontów są dołączone do dystrybucji
+w `_mf_pdf/LICENSE-MF.txt`, `_mf_pdf/LICENSE-Roboto.txt` i `_mf_pdf/THIRD-PARTY-LICENSES.txt`.

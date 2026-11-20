@@ -6,13 +6,13 @@ import math
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 import typer
 
 from ksef_client._offline_invoice_store import MAX_OFFLINE_XML_BYTES
 from ksef_client.config import KsefClientOptions
-from ksef_client.exceptions import KsefSyncConflictError
+from ksef_client.exceptions import KsefRenderingError, KsefSyncConflictError
 from ksef_client.online_invoices import (
     OnlineInvoice,
     OnlineInvoiceQueue,
@@ -74,6 +74,7 @@ def _queue(
         store,
         namespace=profile,
         environment=environment_key(options.normalized_base_url()),
+        options=options,
         context_key=f"{kind}:{context}",
     )
 
@@ -241,6 +242,7 @@ def status(ctx: typer.Context, state_dir: StateDir, local_id: LocalId) -> None:
 def bundle(
     ctx: typer.Context,
     local_id: LocalId,
+    pdf_renderer: str = typer.Option("local", "--pdf-renderer"),
     state_dir: StateDir = Path("."),
     out: Annotated[Path, typer.Option("--out", help="New ZIP file in an existing directory.")] = (
         Path("invoice-bundle.zip")
@@ -257,7 +259,14 @@ def bundle(
     ):
         snapshot = queue.bundle(local_id)
         try:
-            snapshot.save(out)
+            if pdf_renderer == "local":
+                snapshot.save(out)
+            else:
+                snapshot.save(out, pdf_renderer=cast(Literal["local", "mf"], pdf_renderer))
+        except KsefRenderingError as exc:
+            raise CliError(
+                str(exc), ExitCode.CONFIG_ERROR, "Install Node.js 22 or newer and retry."
+            ) from None
         except ImportError:
             raise CliError(
                 "PDF rendering is unavailable.",

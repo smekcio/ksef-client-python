@@ -87,7 +87,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-ksef_client = ["py.typed", "*.pyi", "documents/fa3/schemas/*.xsd", "documents/fa3/schemas/*.md"]
+ksef_client = ["py.typed", "*.pyi", "documents/fa3/schemas/*.xsd", "documents/fa3/schemas/*.md", "_mf_pdf/*.mjs", "_mf_pdf/*.json", "_mf_pdf/*.txt"]
 
 [tool.ruff]
 target-version = "py310"

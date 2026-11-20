@@ -70,6 +70,10 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.9.0
+
       - run: python -m pip install -r requirements-dev.txt build twine
       - name: Unit and contract tests
         if: matrix.python != '3.12'
@@ -134,8 +138,47 @@ jobs:
       ref: ${{ needs.resolve.outputs.sha }}
       artifact-name: release-dist
 
+  pdf-artifacts:
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.9.0
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: release-dist
+          path: dist
+      - name: Render from the exact wheel and source distribution
+        shell: bash
+        run: |
+          python - <<'PYTHON'
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+          source = Path.cwd()
+          smoke = (
+              "from pathlib import Path; from ksef_client.invoice_pdf import render_invoice_pdf, render_upo_pdf; "
+              "root=Path(" + repr(str(source / 'tests/fixtures/pdf')) + "); "
+              "assert render_invoice_pdf((root/'invoice.xml').read_bytes(), renderer='mf').startswith(b'%PDF-'); "
+              "assert render_upo_pdf((root/'upo-sesja-43.xml').read_bytes()).startswith(b'%PDF-')"
+          )
+          for pattern in ('*.whl', '*.tar.gz'):
+              artifact, = (source / 'dist').glob(pattern)
+              subprocess.run([sys.executable, '-m', 'pip', 'install', '--force-reinstall', str(artifact)], check=True)
+              subprocess.run([sys.executable, '-c', smoke], cwd=os.environ['RUNNER_TEMP'], check=True)
+          PYTHON
+
   prepare:
-    needs: [resolve, checks, build, e2e]
+    needs: [resolve, checks, build, e2e, pdf-artifacts]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -163,7 +206,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [resolve, checks, build, e2e, prepare]
+    needs: [resolve, checks, build, e2e, pdf-artifacts, prepare]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

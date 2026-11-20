@@ -8,11 +8,12 @@ from importlib.resources import files
 from io import BytesIO
 from itertools import zip_longest
 from threading import Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from xml.etree import ElementTree as ET
 
 from .documents.fa3.parse import MAX_XML_BYTES
 from .documents.fa3.xml import FA3_NAMESPACE
+from .mf_pdf import InvoicePdfContext, render_mf_invoice, render_upo_pdf  # noqa: F401
 
 if TYPE_CHECKING:
     from reportlab.pdfgen.canvas import Canvas
@@ -222,8 +223,18 @@ class _InvoicePage:
             self.element(child, depth + 1)
 
 
-def render_invoice_pdf(xml: bytes, *, ksef_number: str | None = None) -> bytes:
+def render_invoice_pdf(
+    xml: bytes,
+    *,
+    ksef_number: str | None = None,
+    renderer: Literal["local", "mf"] = "local",
+    context: InvoicePdfContext | None = None,
+) -> bytes:
     """Render the original FA(3) document locally, with an optional assigned KSeF number."""
+    if renderer == "mf":
+        return render_mf_invoice(xml, ksef_number, context)
+    if renderer != "local" or context is not None:
+        raise ValueError("Verification context requires the MF renderer")
     with _FONT_LOCK:  # ReportLab shares its TrueType font registry across canvases.
         root = _read_invoice(xml)
         try:

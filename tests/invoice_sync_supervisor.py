@@ -62,7 +62,6 @@ def run_phases(
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError(f"Invoice sync process watchdog expired before phase {phase}")
-        options = {"start_new_session": True} if os.name == "posix" else {"creationflags": 0x200}
         process = subprocess.Popen(
             command,
             cwd=cwd,
@@ -70,7 +69,8 @@ def run_phases(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            **options,
+            start_new_session=os.name == "posix",
+            creationflags=0 if os.name == "posix" else 0x200,
         )
         try:
             process.wait(timeout=max(0, deadline - time.monotonic()))

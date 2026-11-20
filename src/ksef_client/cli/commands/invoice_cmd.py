@@ -231,3 +231,35 @@ def invoice_validate(ctx: typer.Context, file: Path) -> None:
         data=report.to_dict(),
     )
     raise typer.Exit(int(ExitCode.VALIDATION_ERROR))
+
+
+@app.command("render")
+def invoice_render(
+    ctx: typer.Context,
+    file: Path,
+    out: Path = typer.Option(..., "--out"),  # noqa: B008
+    renderer: str = typer.Option("mf", "--renderer"),
+    ksef_number: str | None = typer.Option(None, "--ksef-number"),
+    env: str | None = typer.Option(None, "--env"),
+    offline: bool = typer.Option(False, "--offline"),
+    cert_pem: Path | None = typer.Option(None, "--cert-pem"),  # noqa: B008
+    key_pem: Path | None = typer.Option(None, "--key-pem"),  # noqa: B008
+    pkcs12_path: Path | None = typer.Option(None, "--pkcs12-path"),  # noqa: B008
+    key_password: str | None = typer.Option(None, "--key-password", envvar="KSEF_PDF_KEY_PASSWORD"),
+) -> None:
+    """Render a local FA(3) XML, optionally with online or offline verification QR."""
+    from ._pdf import render_file
+
+    render_file(
+        ctx,
+        file,
+        out,
+        renderer=renderer,
+        number=ksef_number,
+        env=env,
+        offline=offline,
+        cert=cert_pem,
+        key=key_pem,
+        pkcs12=pkcs12_path,
+        password=key_password,
+    )
