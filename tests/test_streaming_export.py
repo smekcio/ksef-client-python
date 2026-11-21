@@ -290,8 +290,13 @@ def test_archive_paths_are_rejected_without_external_writes(tmp_path, name):
 def test_bad_padding_hash_and_part_descriptors(tmp_path):
     _, archive, encrypted, package = make_package(size=100)
     path = tmp_path / "part"
-    path.write_bytes(encrypted[:-1] + bytes([encrypted[-1] ^ 1]))
-    with pytest.raises(KsefExportTransferError):
+    padding_length = 16 - len(archive) % 16
+    damaged = bytearray(encrypted)
+    # CBC XORs the previous ciphertext block into the final plaintext block.
+    # Force its last padding byte to zero, which is always invalid PKCS7.
+    damaged[-17] ^= padding_length
+    path.write_bytes(damaged)
+    with pytest.raises(KsefExportTransferError, match="PKCS7 padding"):
         decrypt_part(path, io.BytesIO(), package.parts[0], KEY, IV)
     from dataclasses import replace
 
