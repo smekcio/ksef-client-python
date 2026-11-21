@@ -58,7 +58,12 @@ def main() -> int:
         missing.append("ruff")
 
     if importlib.util.find_spec("mypy") is not None:
-        rc |= _run([sys.executable, "-m", "mypy", "src", "tests"])
+        cache = (
+            REPO_ROOT
+            / ".mypy_cache"
+            / (f"{sys.platform}-{sys.version_info.major}.{sys.version_info.minor}")
+        )
+        rc |= _run([sys.executable, "-m", "mypy", "--cache-dir", str(cache), "src", "tests"])
     else:
         missing.append("mypy")
 

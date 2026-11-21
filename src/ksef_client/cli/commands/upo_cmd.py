@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import typer
 
@@ -160,3 +161,15 @@ def upo_wait(
         profile=profile,
         data=result,
     )
+
+
+@app.command("render")
+def upo_render(
+    ctx: typer.Context,
+    file: Path,
+    out: Path = typer.Option(..., "--out"),  # noqa: B008
+) -> None:
+    """Render a local individual or collective UPO XML (4.2 or 4.3)."""
+    from ._pdf import render_file
+
+    render_file(ctx, file, out, upo=True)

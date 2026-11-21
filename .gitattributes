@@ -5,3 +5,11 @@
 *.toml text eol=lf
 *.ini text eol=lf
 *.txt text eol=lf
+
+*.png binary
+
+# Preserve upstream-generated code, license text and XML reference bytes.
+src/ksef_client/_mf_pdf/generator.mjs -whitespace
+src/ksef_client/_mf_pdf/THIRD-PARTY-LICENSES.txt -whitespace
+tests/fixtures/pdf/*.xml -text -whitespace
+src/ksef_client/_mf_pdf/LICENSE-*.txt -whitespace

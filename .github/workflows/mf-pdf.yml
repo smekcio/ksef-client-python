@@ -1,0 +1,44 @@
+name: MF PDF integration
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  render:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.9.0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt build
+      - run: python -m pytest tests/test_mf_pdf.py tests/test_online_invoice_bundle.py
+      - run: node tests/pdf_release_watch.cjs
+      - run: python -m build
+      - name: Smoke test installed wheel
+        shell: bash
+        run: |
+          python -m pip install --force-reinstall --no-deps dist/*.whl
+          cd "$RUNNER_TEMP"
+          python -c "from pathlib import Path; from ksef_client.invoice_pdf import render_invoice_pdf; x=(Path(__import__('os').environ['GITHUB_WORKSPACE'])/'tests/fixtures/pdf/invoice.xml').read_bytes(); assert render_invoice_pdf(x, renderer='mf').startswith(b'%PDF-')"
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.9.0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: npm install --global npm@11.10.0
+      - run: python tools/build_mf_pdf.py --check

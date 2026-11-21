@@ -40,6 +40,7 @@ pip install -e .[cli,xml,fa3,qr]
 - `cli` – komenda `ksef` i zależności CLI (`typer`, `rich`, `keyring`)
 - `xml` – podpis XAdES (`lxml`, `xmlsec`)
 - `fa3` – walidacja XSD dla XML FA(3) (`lxml`)
+- `pdf` – lokalny podgląd faktury w ReportLab (`reportlab`, `font-roboto`)
 - `qr` – generowanie PNG z kodami QR (`qrcode`, `pillow`)
 
 Jeżeli pracujesz tylko z API Pythona, `pip install -e .` wystarcza. Do pracy z CLI użyj `pip install -e .[cli]`
@@ -55,6 +56,9 @@ Wybierz sposób pracy:
 - **Dokumenty FA(3)** – moduł `ksef_client.documents.fa3` buduje faktury, serializuje XML i opcjonalnie waliduje XSD przed wysyłką online/batch.
 
 Synchronizacja metadanych i XML: [trwała kolejka i gotowość dokumentów](invoice-xml-sync.md).
+
+Renderowanie oficjalnym generatorem MF wymaga Node.js 22 lub nowszego.
+[Podgląd PDF faktur i UPO](invoice-bundle-pdf.md) opisuje instalację, API Pythona, CLI i oba tryby QR.
 
 ## Nawigacja
 
@@ -103,6 +107,7 @@ Synchronizacja metadanych i XML: [trwała kolejka i gotowość dokumentów](invo
 
 - [FA(3) SDK: klasy, metody i XSD](fa3-sdk.md)
 - [Odczyt FA(3): XML → model](fa3-parsing.md)
+- [Podgląd PDF faktur i UPO oraz aktualizacja generatora MF](invoice-bundle-pdf.md)
 - [Schematy XSD i dokumentacja MF (broszura FA(3), przykładowe pliki)](../src/ksef_client/documents/fa3/schemas/README.md)
 
 **CLI:**

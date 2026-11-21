@@ -1,0 +1,9 @@
+{
+  "repository": "CIRFMF/ksef-pdf-generator",
+  "version": "1.1.48",
+  "tag": "1.1.48",
+  "commit": "d766b7b79486ed401cd40fac27402ffecd672bd7",
+  "node": "v24.9.0",
+  "npm": "11.10.0",
+  "sha256": "296eae717f6977924c5073812a97e141e9377068f261903146575080965f3ba2"
+}

@@ -1,0 +1,33 @@
+name: Watch MF PDF generator releases
+
+on:
+  schedule:
+    - cron: "15 6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Report new versions without creating issues
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ksef-pdf-generator-release-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/github-script@v8
+        env:
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        with:
+          script: |
+            await require('./tools/watch_pdf_releases.cjs')({
+              github, context, core, dryRun: process.env.DRY_RUN === 'true'
+            });

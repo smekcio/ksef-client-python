@@ -113,6 +113,18 @@ Paczka zawiera oryginalne bajty w `invoice.xml`, wizualizację FA(3) w `invoice.
 | `pending` | Wysyłka lub odbiór UPO jest w toku. Po zapisaniu nowszej rewizji możesz wyeksportować kolejny plik ZIP. |
 | `unavailable` | KSeF odrzucił bieżącą próbę, zgłosił duplikat lub potwierdził anulowanie. Kod KSeF jest w manifeście. |
 
+Oficjalny generator MF wybierzesz przez `--pdf-renderer mf`. Wymaga `ksef-client[cli]` i Node.js 22 lub nowszego.
+
+```bash
+ksef --profile firma-a online bundle --id FV-123 --state-dir ./private --pdf-renderer mf --out FV-123-mf.zip
+```
+
+Wariant MF zapisuje manifest v2. Zachowuje pola manifestu v1 i dodaje `generator.name`,
+`generator.version` i `generator.commit`. Gdy `upo_status` wynosi `available`, ZIP zawiera
+`upo.xml` i `upo.pdf`. Słownik `sha256` obejmuje wszystkie pliki dokumentów.
+Błąd dowolnego renderowania przerywa publikację całego ZIP. Dla faktury z nadanym numerem
+PDF zawiera QR z numerem KSeF, z adresem dla środowiska profilu. Wcześniejsza migawka tworzy podgląd.
+
 Kod wyjścia 0 oznacza zapis kompletnej paczki dla podanej rewizji. Obecność UPO sprawdzisz w polu `upo_status`. [Zakres wizualizacji PDF](../invoice-bundle-pdf.md)
 
 ## Raport faktur z paczki

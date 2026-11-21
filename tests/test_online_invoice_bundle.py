@@ -165,3 +165,64 @@ def test_completed_snapshot_requires_matching_immutable_receipt(tmp_path):
                 replace(snapshot, upo=individual_upo(number="incorrect"))
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("use_async", [False, True])
+def test_mf_bundle_contains_receipt_and_provenance(tmp_path, monkeypatch, use_async):
+    monkeypatch.setattr(
+        "ksef_client.invoice_pdf.render_invoice_pdf", lambda *a, **kw: b"%PDF-invoice"
+    )
+    monkeypatch.setattr("ksef_client.mf_pdf.render_upo_pdf", lambda *a: b"%PDF-upo")
+
+    async def run():
+        server = Server()
+        server.lose_send = False
+        async with online(server, tmp_path / "db", use_async) as worker:
+            await call(worker.enqueue, LOCAL_ID, XML)
+            await call(worker.advance, LOCAL_ID)
+            await call(worker.advance, LOCAL_ID)
+            server.result = remote_invoice(200, number=NUMBER)
+            await call(worker.advance, LOCAL_ID)
+            server.session_code = 200
+            await call(worker.advance, LOCAL_ID)
+            snapshot = await call(worker.bundle, LOCAL_ID)
+        target = tmp_path / "mf.zip"
+        snapshot.save(target, pdf_renderer="mf")
+        with zipfile.ZipFile(target) as archive:
+            assert archive.read("upo.pdf") == b"%PDF-upo"
+            manifest = json.loads(archive.read("manifest.json"))
+            assert manifest["version"] == 2
+            assert manifest["generator"]["version"] == "1.1.48"
+            for name, digest in manifest["sha256"].items():
+                assert hashlib.sha256(archive.read(name)).hexdigest() == digest
+        with pytest.raises(KsefDocumentValidationError, match="options"):
+            replace(snapshot, options=None).save(tmp_path / "missing.zip", pdf_renderer="mf")
+        with pytest.raises(ValueError):
+            snapshot.save(tmp_path / "invalid.zip", pdf_renderer="unknown")
+
+        def broken(xml):
+            raise RuntimeError("render failure")
+
+        monkeypatch.setattr("ksef_client.mf_pdf.render_upo_pdf", broken)
+        with pytest.raises(RuntimeError):
+            snapshot.save(tmp_path / "broken.zip", pdf_renderer="mf")
+        assert not (tmp_path / "broken.zip").exists()
+
+    asyncio.run(run())
+
+
+def test_mf_queue_rejects_other_environment(tmp_path):
+    from ksef_client import KsefClientOptions
+
+    server = Server()
+    with (
+        SQLiteOnlineInvoiceStore.open(tmp_path / "db", key=KEY) as store,
+        pytest.raises(ValueError, match="environment"),
+    ):
+        OnlineInvoiceQueue(
+            store,
+            namespace="test",
+            environment=server.environment,
+            context_key=server.context_key,
+            options=KsefClientOptions(base_url="https://other.invalid"),
+        )

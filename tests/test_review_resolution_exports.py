@@ -25,7 +25,9 @@ from ksef_client.streaming_export import (
     safe_path,
 )
 from tests.test_streaming_export import IV, KEY, make_package, operation, sha
-from tests.test_streaming_export import storage as storage
+from tests.test_streaming_export import storage as _storage_fixture
+
+storage = _storage_fixture
 
 
 @pytest.mark.parametrize("fail", [False, True])

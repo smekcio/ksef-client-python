@@ -195,7 +195,7 @@ def test_workflow_gate_dependencies():
     publish = (root / ".github/workflows/publish-pypi.yml").read_text(encoding="utf-8")
     reusable = (root / ".github/workflows/required-test-e2e.yml").read_text(encoding="utf-8")
     daily = (root / ".github/workflows/python-e2e.yml").read_text(encoding="utf-8")
-    assert "needs: [resolve, checks, build, e2e]" in publish
+    assert "needs: [resolve, checks, build, e2e, pdf-artifacts]" in publish
     assert "artifact-name: release-dist" in publish
     assert "packages-dir: publish-dist/" in publish
     assert "tools.release_artifacts verify" in publish
